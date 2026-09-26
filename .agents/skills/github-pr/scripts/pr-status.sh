@@ -61,7 +61,12 @@ run_status() {
   # 3. Direct output of standard gh commands
   gh pr view "$PR_NUMBER" --repo "$REPO"
   echo ""
-  gh pr checks "$PR_NUMBER" --repo "$REPO"
+  RC=0
+  gh pr checks "$PR_NUMBER" --repo "$REPO" || RC=$?
+  if [ "$RC" -eq 8 ]; then
+    RC=0
+  fi
+  return "$RC"
 }
 
 # Output shunting when exceeding 8KB per canon
