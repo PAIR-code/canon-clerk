@@ -23,7 +23,25 @@ sign a new one.
 This project follows [Google's Open Source Community
 Guidelines](https://opensource.google/conduct/).
 
+### Development Setup
+
+Before picking up an issue or submitting changes, review our
+[Development Setup Guide](development-setup.md) to set up your local fork,
+triangular Git worktrees, and GitHub CLI tooling.
+
 ## Contribution process
+
+For our complete day-to-day workflow—including issue claiming, worktree management, commit conventions, and pull request etiquette—see the [Development Workflow Guide](development-workflow.md).
+
+### Branching Convention
+
+All feature branches and worktrees must follow the naming standard:
+
+```text
+<issue-number>-<slug>
+```
+
+For example, `1-development-setup` or `7-monorepo-scaffolding`.
 
 ### Code Reviews
 
