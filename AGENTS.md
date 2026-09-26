@@ -4,7 +4,7 @@ Welcome! This document provides orientation, architectural anchors, and operatio
 
 ## 1. Project Overview
 
-**Canon Clerk** is an automated review gate that evaluates project-specific _canons_ authored as Markdown files with YAML frontmatter.
+**Canon Clerk** is an automated review gate that enforces project-specific _canons_ authored as Markdown files (with optional YAML frontmatter). See [SPEC.md](SPEC.md) for the formal canon specification.
 
 **Primary Repository:** `PAIR-code/canon-clerk`
 
