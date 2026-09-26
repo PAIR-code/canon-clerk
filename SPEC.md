@@ -193,7 +193,7 @@ Synthesize a 3-step manual Test Script covering each modified visual state.
    * Canons should be named with descriptive, kebab-case slugs that convey their invariant at a glance:
      * `no-new-features-without-documentation.md`
      * `manual-test-plan-required.md`
-     * `bounded-context-api-isolation.md`
+     * `services-must-maintain-bounded-contexts.md`
 2. **Sequential Numbering (Optional):**
    * Teams that prefer numeric prefixing (e.g., `canon-0001-falsifiable-canons.md`) may use it. Sequential numbering is strictly an organizational preference and is **never required by the engine**.
 3. **No File Collisions:**
