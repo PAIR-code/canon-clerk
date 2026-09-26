@@ -1,17 +1,19 @@
 # Canon Clerk
 
-**Problem:** AI tools have accelerated and automated code generation, making project maintainers and custodians acute bottlenecks. Maintainers bear an asymmetric cognitive tax, reverse-engineering unsolicited but plausible AI-assisted PRs that pass existing tests but quietly violate unwritten architectural rules and project tenets.
+**Problem:** AI tools have accelerated and automated code generation, making project maintainers and custodians acute bottlenecks. Maintainers bear an asymmetric cognitive tax, reverse-engineering unsolicited but plausible AI-assisted PRs that pass existing tests but quietly violate unwritten or scattered architectural rules and project tenets.
 
-**Solution:** Canon Clerk prescribes a natural language Markdown+YAML schema for _project canons_ which live in `.canons/` directories. Through its CLI or GitHub Action, Canon Clerk checks proposed changes against canons for applicability and conformance. By gating CI on canon adherence, Canon Clerk preserves maintainer attention for truly novel situations.
+**Solution:** Canon Clerk introduces a zero-friction Markdown format for _project canons_ which live in `.canons/` directories. Through its CLI or GitHub Action, Canon Clerk checks proposed changes against canons for applicability and conformance. By gating CI on canon adherence, Canon Clerk preserves maintainer attention for truly novel situations.
 
 ---
 
 ## Overview
 
 Traditional AST-based linters excel at syntax and static analysis, but fail on semantic guidelines that require contextual comprehension:
-- *"Did this UI change include a reproducible manual test plan in the description?"*
+- *"Did this UI change include a reproducible manual test script in the description?"*
 - *"Does this new service violate our bounded context isolation boundaries?"*
 - *"Are customer-facing API error messages conforming to our voice-and-tone standards?"*
+
+Canon Clerk automates targeted, gating, semantic review using your project's rules written in plain Markdown.
 
 ---
 
@@ -28,74 +30,39 @@ flowchart LR
 ```
 
 1. **Stage 0: Path Filter (Deterministic)**  
-   Instantly discards canons whose location or file globs don't match the PR's modified files (zero cost, zero latency).
-2. **Stage 1: Screener (Fast LLM)**  
-   Batches remaining candidate canons using only PR metadata and diff statistics to filter for possible applicability. Possibly applicable canons become POST'ed Check Runs in progress.
+   Instantly discards canons whose file globs don't match the PR's modified files (zero cost, zero latency).
+2. **Stage 1: Screener (Fast LLM or System One Model)**  
+   Batches remaining candidate canons using only PR metadata and diff statistics to filter for possible applicability. Applicable canons become in-progress GitHub Check Runs.
 3. **Stage 2: Deep Auditor (Reasoning LLM)**  
-   Audits the actual git diff and context against only the screened-in canons, returning a structured verdict (`pass`, `fail`, `action_required`, `advisory`, or `skipped`). Finished canon analyses PATCH Check Runs with results.
+   Audits the git diff and context against only screened-in canons, returning a structured verdict (`pass`, `fail`, `action_required`, `warn`, or `skipped`).
+
+For full architectural details on the cascade, see **[Architecture & Evaluation Cascade](docs/architecture.md)**.
 
 ---
 
-## Defining a Canon
+## Quickstart
 
-Store canons as Markdown files with YAML frontmatter in `.canons/` at the project root or within scoped subdirectories.
+### 1. Write a Canon (Zero Friction)
 
-Example:
+Create a Markdown file inside `.canons/` with a single sentence invariant—no frontmatter or headers required:
 
 ```markdown
----
-id: canon-0001-ui-manual-test-plan
-title: Manual Test Plan Required for UI Changes
-paths:
-  - "src/ui/**"
-  - "frontend/**"
-inspect:
-  - pr_body
-  - diff
----
-
-## Rule
-Any pull request modifying user-facing UI components must include a numbered `### Manual Test Plan` in the PR description.
-
-## Evaluation Criteria
-- **Inapplicable**: Pure refactors or internal types with zero visual/behavioral impact.
-- **Pass**: Description contains reproducible manual verification steps.
-- **Fail**: UI components changed, but no manual test steps are present, or are poorly worded or ambiguous.
-
-## Remediation (Optional)
-When failing, analyze the modified UI components and synthesize a candidate manual test plan if feasible. Append the draft to the Check Run summary.
-
-Do not generate a candidate manual test plan if the changes are purely non-visual styling tokens or build assets.
+<!-- .canons/no-undocumented-features.md -->
+PRs that introduce new user-facing features must have accompanying documentation in `docs/`.
 ```
 
-> **Note on Remediation**: The `## Remediation` section is entirely optional. When present, the Deep Auditor uses its instructions and templates to offer actionable suggestions in the Check Run report. When omitted, the auditor strictly reports the verdict and failure rationale without offering unsolicited guidance.
+You can optionally tell the clerk how to provide (**Guidance**) or to synthesize (**Supplement**) material inline:
 
-### Frontmatter Fields
+```markdown
+<!-- .canons/manual-test-plan-required.md -->
+PRs modifying UI components MUST include an industry standard, manual Test Script in the PR description.
 
-Frontmatter fields serve as deterministic routing and cost-optimization hints:
+**Supplement:** If a manual Test Script is missing, but is feasibly inferred, synthesize a candidate Test Script from the diff and PR description.
+```
 
-| Field | Required? | Default | Description |
-| :--- | :--- | :--- | :--- |
-| **`id`** | **Yes** | — | Unique machine identifier used in Check Runs and file naming. |
-| **`title`** | **Yes** | — | Human-readable title displayed in GitHub Check Run headers. |
-| **`paths`** | No | `["**/*"]` | **Stage 0 Optimization.** File globs used to filter applicability at zero token cost. If omitted, the canon passes to Stage 1 for all PRs. |
-| **`inspect`** | No | `["diff", "pr_body"]` | **Stage 2 Optimization.** Limits context sent to the Deep Auditor (`diff`, `pr_body`, `commit_messages`). |
+### 2. Add to GitHub Actions
 
-> **Design Philosophy**: *Canon Clerk is designed to enforce your project's opinions, not impose its own.* Optional fields degrade gracefully, potentially increasing token usage rather than failing with rigid schema errors.
-
-### Naming & ID Conventions (Recommended)
-
-While Canon Clerk treats the relative file path as the authoritative unique identifier, we recommend the following conventions:
-- **File Name & ID Symmetry:** Name files `<id>.md`, matching the `id` declared in the frontmatter.
-- **Kebab-Case with Slug:** Use `canon-<number>-<slug>` (e.g., `canon-0001-ui-manual-test-plan.md`).
-
-Including a descriptive slug disambiguates rules in GitHub Check Run titles and avoids ID collisions when scoped `.canons/` directories exist across monorepo subprojects.
-
----
-
-## Quickstart (GitHub Actions)
-
-Add the following workflow to `.github/workflows/canon-clerk.yml`:
+Add `.github/workflows/canon-clerk.yml`:
 
 ```yaml
 name: Canon Clerk
@@ -128,6 +95,27 @@ jobs:
 
 ---
 
+## Defining Canons: Progressive Disclosure
+
+Canon Clerk is designed to enforce your project's opinions, not to impose its own. Canons scale across progressive tiers:
+
+* **Tier 1 (Minimal):** Plain Markdown assertions with no frontmatter or headers.
+* **Tier 2 (Keywords):** Adding inline `**Guidance:**` or `**Supplement:**` directives expands the range of possible clerk outputs.
+* **Tier 3 (Cost-Optimized):** Add YAML frontmatter (`paths:`) purely to enable Stage 0 deterministic path filtering at 0 token cost.
+* **Tier 4 (Structured):** Multi-section canons with explicit `## Rule`, `## Guidance`, `## Supplement`, or `## Evaluation Criteria` for complex policies with structured rubrics.
+
+### Directives: `Guidance` vs. `Supplement`
+
+Canon Clerk distinguishes between contributor action items and automated AI synthesis:
+
+* **`Guidance` (Contributor Directive $\rightarrow$ Blocking `fail`):** Explains what the _author must do_ to unblock the PR (e.g. pointers to documentation or required templates).
+* **`Supplement` (Clerk Synthesis $\rightarrow$ Non-blocking `warn`):** Instructs the Clerk to synthesize missing material directly into the review report. If synthesis is infeasible, it gracefully falls back to a blocking `fail`.
+
+> 📖 **Formal Specification:**  
+> For the complete canon grammar, metadata derivation fallbacks (`id`, `title`, `paths`, `inspect`), directive semantics, and monorepo scoping rules, see **[SPEC.md](SPEC.md)**.
+
+---
+
 ## Verdicts & Feedback
 
 Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one of five conclusions:
@@ -135,16 +123,16 @@ Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one
 | Verdict | GitHub Conclusion | Blocks Merge? | Scope | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **`pass`** | `success` 🟢 | No | Both | Canon applies and the PR is compliant. |
-| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code is non-compliant (e.g. boundary violations, forbidden dependencies). Check Run body *may* contain Remediation guidance. |
-| **`action_required`** | `action_required` 🟡 | **Yes** | **Metadata & Process** | Canon applies, but PR metadata/process is non-compliant (e.g. missing manual test plan, required tags, commit format). Check Run body *should* contain Remediation guidance. |
-| **`advisory`** | `neutral` ⚪ | No | Both | Canon applies and PR is marginally compliant. Non-blocking; Check Run body *should* contain Remediation guidance. |
-| **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. *(Expected to be rare; acts as a safety valve when optimistic Stage 1 screening flags a canon that proves inapplicable on diff inspection).* |
+| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code is non-compliant. Includes `Guidance` or infeasible `Supplement` attempts. |
+| **`action_required`** | `action_required` 🟡 | **Yes** | **Metadata & Process** | Canon applies, but PR metadata/process is non-compliant (e.g. missing test plan, invalid PR description). |
+| **`warn`** | `neutral` ⚪ | No | Both | Non-blocking advisory or synthesized `Supplement` (curing the defect). |
+| **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. |
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](docs/contributing.md) for details on how to get started.
+Contributions are welcome! Please see [CONTRIBUTING.md](docs/contributing.md) and [Development Workflow](docs/development-workflow.md) for details on how to get started.
 
 ## License
 
