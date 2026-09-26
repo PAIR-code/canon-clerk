@@ -167,6 +167,28 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
 
 * **Automated CI Validation:** Our CI runs a PR title linter ([`.github/workflows/pr-title-lint.yml`](../.github/workflows/pr-title-lint.yml)) on every opened, edited, or synchronized PR. If the check fails, edit your PR title in GitHub to immediately clear the check.
 
+### Monitoring CI & Diagnosing Failures
+
+Once your PR is open, continuous integration checks will run automatically.
+
+#### Directing Your AI Assistant (Recommended)
+Prompt your assistant:
+> *"Check PR status"* or *"Why did CI fail on my PR?"*
+
+**What happens:** Your assistant activates the `github-pr` skill:
+1. Runs `pr-status.sh` to summarize check status, elapsed times, and check run URLs.
+2. If checks failed, runs `pr-failed-logs.sh` to fetch diagnostic logs directly via the GitHub Actions REST endpoint (avoiding 404 errors on organization-injected security scans like Zizmor or Google GitHub Admin) and extracts high-signal error slices while shunting large logs (>8KB) to disk.
+
+#### Under the Hood & Manual Fallback
+Under the hood, the assistant runs the companion scripts in `.agents/skills/github-pr/scripts/`:
+
+```bash
+# Check status of the active branch's PR (or pass an explicit PR number)
+./.agents/skills/github-pr/scripts/pr-status.sh [pr-number]
+
+# Inspect failing check logs and extract diagnostic error slices
+./.agents/skills/github-pr/scripts/pr-failed-logs.sh [pr-number]
+```
 
 ---
 
