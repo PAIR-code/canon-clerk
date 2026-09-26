@@ -2,6 +2,8 @@
 
 This guide covers day-to-day development practices for contributing to **Canon Clerk**, assuming you have completed the one-time machine setup in [Development Setup](development-setup.md).
 
+Canon Clerk is designed for **AI-assisted pair programming**. As a contributor, you primarily steer project intent, review diffs, and guide architecture decisions, while your AI coding assistant (such as Antigravity, Claude Code, Cursor, or Copilot) executes the underlying operational workflows guided by [`AGENTS.md`](../AGENTS.md) and repository skills in [`.agents/skills/`](../.agents/skills/).
+
 ---
 
 ## 1. Picking Up Work
@@ -15,11 +17,11 @@ Before starting on code changes:
 
 ## 2. Feature Worktrees & Branch Lifecycle
 
-Canon Clerk uses Git worktrees to keep your working directories clean and isolated.
+Canon Clerk uses Git worktrees in a triangular layout (`.bare`, super-root container, `main/`, and isolated feature worktrees) to keep workspaces clean and isolate development tasks.
 
 ### Branch & Worktree Naming Convention
 
-All branches and worktree directories must follow the convention:
+All branches and worktree directories follow the convention:
 
 ```text
 <issue-number>-<slug>
@@ -28,30 +30,56 @@ All branches and worktree directories must follow the convention:
 **Examples:**
 - `1-development-setup`
 - `4-conventional-commits`
-- `7-monorepo-scaffolding`
+- `13-git-worktree-skill`
+
+---
 
 ### Starting a New Task
 
-Prefer to branch off the latest `upstream/main`:
+#### Directing Your AI Assistant (Recommended)
+Prompt your assistant:
+> *"Start working on issue #18"* or *"Scaffold a worktree for issue #18 github-pr"*
 
+**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper, and sets its working directory context to the newly created worktree.
+
+#### Under the Hood & Manual Fallback
+Under the hood, the assistant runs the companion script:
 ```bash
-# From your workspace root
-git fetch upstream
+./.agents/skills/git-worktree/scripts/worktree-start.sh <issue-number> <slug>
+```
 
-# Create the worktree and branch
+If you are working without an AI assistant, you can run the script above directly, or execute the raw Git commands from your workspace container super-root:
+```bash
+git fetch upstream --prune
 git worktree add -b <issue-number>-<slug> <issue-number>-<slug> upstream/main
-
-# Navigate into the new worktree
 cd <issue-number>-<slug>
 ```
 
-You now have an isolated directory containing the full repository checkout, ready for development.
-
-Alternatively, you may branch off of other feature branches if you're actively working on a chain of interdependent PRs.
+---
 
 ### Syncing with Upstream
 
-Before creating a branch or opening a PR, ensure your local `main` is current.
+Because `main` is checked out in its own dedicated worktree directory, running `git checkout main` from inside a feature worktree will fail with a Git branch-lock collision error.
+
+#### Directing Your AI Assistant (Recommended)
+Prompt your assistant:
+> *"Sync main with upstream"* or *"Update local main before I rebase"*
+
+**What happens:** The assistant invokes `worktree-sync.sh`, safely updating `<container>/main` via `git -C` and pushing to your personal fork (`origin/main`) without switching branches or altering your current worktree.
+
+#### Under the Hood & Manual Fallback
+Under the hood, the assistant runs:
+```bash
+./.agents/skills/git-worktree/scripts/worktree-sync.sh
+```
+
+Or perform the operations manually from anywhere:
+```bash
+git fetch upstream --prune
+git -C main merge --ff-only upstream/main
+git -C main push origin main
+```
+
 
 ---
 
@@ -144,8 +172,36 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
 
 ## 5. Cleaning Up Post-Merge
 
-Once your pull request has been merged into upstream:
+Because Canon Clerk uses squash-merging, tearing down a completed task requires four distinct operations across three surfaces (removing the directory, force-deleting the local branch with `-D`, deleting the remote tracking branch on your fork, and pruning worktree metadata).
 
+### Directing Your AI Assistant (Recommended)
+
+#### 1. Auditing Active Worktrees
+Prompt your assistant:
+> *"Audit active worktrees and check which branches are ready to clean up"*
+
+**What happens:** The assistant runs `worktree-doctor.sh` to inspect all active worktrees, verify working copy status, and correlate branches against merged GitHub PRs.
+
+#### 2. Tearing Down Merged Worktrees
+Prompt your assistant:
+> *"Clean up merged worktree for issue #18"* or *"Teardown completed branches"*
+
+**What happens:** The assistant runs `worktree-finish.sh <branch>`, which safely escapes the directory, removes the worktree, force-deletes the local branch, deletes the fork tracking branch, and prunes metadata.
+
+---
+
+### Under the Hood & Manual Fallback
+
+Under the hood, the assistant runs the companion scripts:
+```bash
+# Audit active worktrees and merged PRs
+./.agents/skills/git-worktree/scripts/worktree-doctor.sh
+
+# Teardown completed worktree
+./.agents/skills/git-worktree/scripts/worktree-finish.sh <issue-number>-<slug>
+```
+
+If performing cleanup manually without the skill:
 ```bash
 # Return to the workspace container root
 cd ..
@@ -153,9 +209,14 @@ cd ..
 # Remove the worktree directory
 git worktree remove <issue-number>-<slug>
 
-# Delete the local branch
-git branch -d <issue-number>-<slug>
+# Delete the local branch (using -D to handle squash merges)
+git branch -D <issue-number>-<slug>
 
-# (Optional) Delete the branch on your remote fork
+# Delete the branch on your remote fork (if not deleted by GitHub)
 git push origin --delete <issue-number>-<slug>
+
+# Prune stale worktree references
+git worktree prune
 ```
+
+

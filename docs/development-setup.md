@@ -32,6 +32,8 @@ With a **bare clone + worktrees**, your directory structure looks like this:
 canon-clerk/                      # Workspace root (container folder)
 ├── .bare/                        # Bare Git repository (database, objects, refs)
 ├── .git                          # Pointer file: "gitdir: ./.bare"
+├── AGENTS.md                     # Symlink: ./main/AGENTS.md
+├── .agents/                      # Symlink: ./main/.agents
 ├── main/                         # Worktree tracking upstream/main
 └── <issue-number>-<slug>/        # Dedicated worktrees for feature branches
 ```
@@ -129,14 +131,16 @@ Recommended solution: Open a **remote desktop session** in which to run your `gh
 If you use AI coding assistants (such as Antigravity, Cursor, Claude Code, or Copilot):
 
 - **Opening the Workspace:** You can open your AI editor either at the **workspace container root** (`canon-clerk/`, strongly recommended) or directly inside a **specific worktree** (`canon-clerk/<issue-number>-<slug>/`).
-- **Super-Root Symlink:** If opening at the workspace container root, create a symlink to [`AGENTS.md`](../AGENTS.md) so assistants automatically discover it upon launch:
+- **Super-Root Symlinks:** If opening at the workspace container root, create symlinks to [`AGENTS.md`](../AGENTS.md) and [`.agents/`](../.agents/) so assistants automatically discover orientation rules and skills upon launch:
   ```bash
   # From the workspace container root
   ln -s ./main/AGENTS.md AGENTS.md
+  ln -s ./main/.agents .agents
   ```
 
 ---
 
 ## Next Steps
+
 
 Now that your local machine and repository are configured, see the [Development Workflow Guide](development-workflow.md) for day-to-day practices on picking up issues, managing worktrees, and submitting pull requests.
