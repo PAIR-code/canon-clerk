@@ -41,10 +41,37 @@ All feature branches and worktrees must follow the naming standard:
 <issue-number>-<slug>
 ```
 
-For example, `1-development-setup` or `7-monorepo-scaffolding`.
+For example, `1-development-setup` or `4-conventional-commits`.
 
-### Code Reviews
+### Commit Standards & Conventional Commits
 
-All submissions, including submissions by project members, require review. We
-use [GitHub pull requests](https://docs.github.com/articles/about-pull-requests)
-for this purpose.
+Canon Clerk enforces the [Conventional Commits](https://www.conventionalcommits.org/) specification for commit messages and PR titles:
+
+```text
+type(scope): description
+```
+
+To support Spec-Driven Development (SDD) alongside standard engineering, we adopt an orthogonal matrix:
+* **The Scope is ALWAYS the Surface / Component:** `(cli)`, `(action)`, `(core)`, `(canon)`, `(agents)`, `(spec)`.
+* **The Type is ALWAYS the Intent:** `spec`, `feat`, `fix`, `test`, `docs`, `chore`, `build`, `ci`.
+
+See the [Development Workflow Guide](development-workflow.md#3-making-changes--committing) for the complete surface-to-prefix mapping table.
+
+### Pull Requests & Squash-and-Merge Policy
+
+All submissions, including submissions by project members, require review via [GitHub pull requests](https://docs.github.com/articles/about-pull-requests).
+
+* **Squash Merging as Repository Standard:** To support automated versioning and changelog generation via Google's `release-please`, all pull requests are squash-merged into `main` as a single atomic commit.
+* **PR Title Becomes the Commit Message:** Under the squash-and-merge workflow, the **Pull Request Title** directly becomes the final commit message on `main`. Every PR title must adhere to our Conventional Commit standard (e.g. `feat(cli): add quiet flag (#20)`).
+* **Iterative Branch Commits Welcome:** Granular, exploratory, or WIP commits on your personal feature branches are completely acceptable during development and review, as they will be cleanly squashed upon merge.
+* **Automated PR Title Linting:** Every pull request is automatically validated by our CI title linter (`.github/workflows/pr-title-lint.yml`) to ensure compliance prior to merging.
+
+> [!NOTE]
+> **Repository Settings for Maintainers:**
+> Under repository **Settings > General > Pull Requests** on `PAIR-code/canon-clerk`:
+> - **Allow squash merging:** Enabled
+> - **Default commit message for squash merges:** Select *"Pull request title"*
+> - **Allow merge commits:** Disabled
+> - **Allow rebase merging:** Disabled
+> - **Automatically delete head branches:** Enabled
+
