@@ -36,6 +36,8 @@ flowchart LR
 3. **Stage 2: Deep Auditor (Reasoning LLM)**  
    Audits the git diff and context against only screened-in canons, returning a structured verdict (`pass`, `fail`, `action_required`, `warn`, or `skipped`).
 
+For full architectural details on the cascade, see **[Architecture & Evaluation Cascade](docs/architecture.md)**.
+
 ---
 
 ## Quickstart

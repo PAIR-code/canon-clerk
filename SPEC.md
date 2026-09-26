@@ -202,32 +202,8 @@ Synthesize a 3-step manual Test Script covering each modified visual state.
 
 ---
 
-## 7. Evaluation Cascade & Verdict Matrix
+## 7. Execution & Architecture
 
-Canon Clerk evaluates applicable canons through a three-stage cascade:
+While this specification defines the formal grammar, progressive disclosure tiers, and metadata derivation rules for authoring canons, Canon Clerk evaluates canons via a three-stage cascade (Deterministic Path Filter $\rightarrow$ Screener LLM $\rightarrow$ Deep Auditor LLM).
 
-```mermaid
-flowchart LR
-    PR[Pull Request] --> S0[Stage 0: Path Filter\n(Deterministic Globs)]
-    S0 -- "Matched Canons\n(0 tokens)" --> S1[Stage 1: Screener\n(Fast LLM)]
-    S1 -- "Applicable Canons" --> S2[Stage 2: Deep Auditor\n(Reasoning LLM)]
-    S2 --> Verdict[PR Verdict & Annotations]
-```
-
-### 7.1 Cascade Stages
-1. **Stage 0 (Path Filter - Deterministic):**  
-   Evaluates `paths:` globs against the PR's modified file list. If none match, the canon is discarded with zero token cost and zero latency.
-2. **Stage 1 (Screener - Fast LLM or System One Model):**  
-   Evaluates PR title, description, and diff statistics (file list, additions/deletions) against candidate canons to determine potential applicability.
-3. **Stage 2 (Deep Auditor - Reasoning LLM):**  
-   Evaluates the actual git diff and scoped context against the screened-in canons, returning a structured verdict, possibly with Guidance or Supplement.
-
-### 7.2 Verdict Matrix
-
-| Engine Verdict | GitHub Check Run Conclusion | Blocks Merge? | Scope & Conditions |
-| :--- | :--- | :--- | :--- |
-| **`pass`** | `success` 🟢 | No | Canon applies and the PR fully conforms to the invariant. |
-| **`fail`** | `failure` 🔴 | **Yes** | PR violates the invariant. Includes cases where a `Guidance` directive was provided, or a `Supplement` attempt was infeasible. |
-| **`action_required`** | `action_required` 🟡 | **Yes** | PR violates process/metadata invariants (e.g., missing PR description section, invalid PR title). Includes human `Guidance`. |
-| **`warn`** | `neutral` ⚪ | No | PR is compliant or advisory. Applied when the Clerk successfully synthesizes a `Supplement` (curing the defect). |
-| **`skipped`** | `skipped` ⚪ | No | Canon was flagged as potentially applicable in Stage 1, but determined to be inapplicable upon inspecting full diff context in Stage 2. |
+For the evaluation cascade architecture, directive execution mechanics, and the CI verdict matrix, see **[Architecture & Evaluation Cascade](docs/architecture.md)**.
