@@ -129,7 +129,11 @@ Recommended solution: Open a **remote desktop session** in which to run your `gh
 If you use AI coding assistants (such as Antigravity, Cursor, Claude Code, or Copilot):
 
 - **Opening the Workspace:** You can open your AI editor either at the **workspace container root** (`canon-clerk/`, strongly recommended) or directly inside a **specific worktree** (`canon-clerk/<issue-number>-<slug>/`).
-- See `AGENTS.md` (coming in [#2](https://github.com/PAIR-code/canon-clerk/issues/2)) for dedicated agent instructions.
+- **Super-Root Symlink:** If opening at the workspace container root, create a symlink to [`AGENTS.md`](../AGENTS.md) so assistants automatically discover it upon launch:
+  ```bash
+  # From the workspace container root
+  ln -s ./main/AGENTS.md AGENTS.md
+  ```
 
 ---
 
