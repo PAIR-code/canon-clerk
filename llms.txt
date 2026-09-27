@@ -11,7 +11,7 @@ Key architectural concepts:
 
 ## The Canon Standard
 
-- [Canon Format Specification](SPEC.md): Complete normative grammar, metadata derivation rules (id, title, paths, inspect, tags), directive contracts (Guidance, Supplement, Rationale), and progressive disclosure tiers.
+- [Canon Format Specification](SPEC.md): Complete normative grammar, metadata derivation rules (id, title, paths, inspect, tags, references), directive contracts (Guidance, Supplement, Rationale), and progressive disclosure tiers.
 - [Dogfood Canons](.canons/): Internal project canons stored in the repository root illustrating real-world semantic rules enforced on this repository.
 - [Canon Names Must State Invariants](.canons/canon-names-must-state-invariants.md): Canon invariant requiring canon filenames to state testable invariants rather than passive categories.
 - [Canons Must Be Atomic](.canons/canons-must-be-atomic.md): Canon invariant requiring each canon file to address a single cohesive concept to prevent review flakiness.
