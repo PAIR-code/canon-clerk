@@ -1,0 +1,93 @@
+# GitHub Label Configuration for PAIR-code/canon-clerk
+# Enforces the Conventional Commit matrix across issues, PRs, and changelogs.
+
+# 1. type:* Labels (Intent & SemVer Drivers)
+- name: "type: feat"
+  color: "0E8A16"
+  description: "New user-facing functionality (triggers SemVer minor release)."
+
+- name: "type: fix"
+  color: "D93F0B"
+  description: "Bug fix (triggers SemVer patch release)."
+
+- name: "type: spec"
+  color: "D4C5F9"
+  description: "Architecture contracts, OpenSpec, and canon specifications (non-releasing)."
+
+- name: "type: chore"
+  color: "CFD3D7"
+  description: "Repository housekeeping, maintenance, and internal tooling."
+
+- name: "type: docs"
+  color: "0075CA"
+  description: "Documentation guides, onboarding, and tutorials."
+
+- name: "type: ci"
+  color: "5319E7"
+  description: "GitHub Actions workflows and CI automation."
+
+- name: "type: build"
+  color: "F9D0C4"
+  description: "Local build tooling, package configuration, and linters."
+
+- name: "type: test"
+  color: "FEF2C0"
+  description: "Test suite, Vitest fixtures, and test infrastructure."
+
+- name: "type: refactor"
+  color: "BFD4F2"
+  description: "Code refactoring without behavior or API changes."
+
+# 2. scope:* Labels (Surface / Component)
+- name: "scope: core"
+  color: "1D76DB"
+  description: "Core Auditor Engine, prompt assembly, and screening logic."
+
+- name: "scope: cli"
+  color: "006B75"
+  description: "CLI binary and command-line execution."
+
+- name: "scope: action"
+  color: "0E8A16"
+  description: "GitHub Action entrypoint and Check Run posting."
+
+- name: "scope: canons"
+  color: "FBCA04"
+  description: "Canon specification (SPEC.md) and dogfood canons (.canons/)."
+
+- name: "scope: agents"
+  color: "C2E0C6"
+  description: "AI coding assistant orientation, skills, and tools (.agents/)."
+
+- name: "scope: spec"
+  color: "B60205"
+  description: "Formal system specifications and architecture contracts."
+
+- name: "scope: deps"
+  color: "0366D6"
+  description: "External dependency updates and version bumps."
+
+- name: "scope: readme"
+  color: "D4C5F9"
+  description: "Top-level project README.md and repository landing documentation."
+
+# 3. Community & Triage Labels (Retained)
+- name: "good first issue"
+  color: "7057FF"
+  description: "Good for newcomers."
+
+- name: "help wanted"
+  color: "008672"
+  description: "Extra attention is needed from maintainers."
+
+- name: "blocked"
+  color: "E99695"
+  description: "Blocked by an upstream dependency or open design decision."
+
+- name: "duplicate"
+  color: "CFD3D7"
+  description: "This issue or pull request already exists."
+
+- name: "wontfix"
+  color: "FFFFFF"
+  description: "This will not be worked on."
