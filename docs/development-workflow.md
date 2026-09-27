@@ -204,8 +204,8 @@ Prompt your assistant:
 Under the hood, the assistant runs the companion scripts in `.agents/skills/github-pr/scripts/`:
 
 ```bash
-# Check status of the active branch's PR (or pass an explicit PR number)
-./.agents/skills/github-pr/scripts/pr-status.sh [pr-number]
+# Check status of the active branch's PR (or pass --watch to stream checks until completion)
+./.agents/skills/github-pr/scripts/pr-status.sh [--watch] [pr-number]
 
 # Inspect failing check logs and extract diagnostic error slices
 ./.agents/skills/github-pr/scripts/pr-failed-logs.sh [pr-number]

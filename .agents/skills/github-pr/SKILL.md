@@ -18,16 +18,20 @@ Inspects pull request status, triages continuous integration (CI) failures, and 
 
 All scripts reside in `.agents/skills/github-pr/scripts/` (executable from any directory within the workspace):
 
-### 1. `pr-status.sh [pr-number]`
+### 1. `pr-status.sh [--watch] [pr-number]`
 
-Resolves the PR, executes `gh pr view` and `gh pr checks` without synthetic reformatting, and auto-shunts output exceeding 8KB:
+Resolves the PR, executes `gh pr view` and `gh pr checks` without synthetic reformatting, and auto-shunts output exceeding 8KB. If checks are pending, offers in situ guidance to watch with `--watch`:
 
 ```bash
 # Auto-detects PR for current feature branch:
 ./.agents/skills/github-pr/scripts/pr-status.sh
 
+# Watch CI checks until completion:
+./.agents/skills/github-pr/scripts/pr-status.sh --watch
+
 # Or inspect a specific PR number:
 ./.agents/skills/github-pr/scripts/pr-status.sh 18
+./.agents/skills/github-pr/scripts/pr-status.sh --watch 18
 ```
 
 ### 2. `pr-failed-logs.sh [pr-number | --job <id>]`
