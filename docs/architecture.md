@@ -47,7 +47,7 @@ By cascading from deterministic filters to lightweight screening and finally to 
 * **Model Class:** Frontier reasoning models (e.g., Gemini Pro with reasoning/thinking enabled).
 * **Inputs:**
   * Unified git diff of modified files.
-  * Scoped context specified by the canon's `inspect:` frontmatter (`diff`, `pr_title`, `pr_body`, `commit_messages`).
+  * Scoped context specified by the canon's `inspect:` frontmatter (`diff`, `pr_title`, `pr_body`, `commit_messages`, `linked_issues`).
   * Full canon text (rule, evaluation criteria, guidance/supplement directives).
 * **Outputs:** Structured verdict, failure rationale, line-level code annotations, and synthesized material (if requested).
 
