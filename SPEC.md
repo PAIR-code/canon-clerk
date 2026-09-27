@@ -96,9 +96,16 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * `pr_title`: Pull request title text.
      * `pr_body`: Pull request description / body markdown.
      * `commit_messages`: Commit messages associated with the pull request.
+     * `linked_issues`: Titles, bodies, and metadata of issues linked to or referenced by the pull request.
    * **Runtime Resolution Semantics for `pr_title`:**
      * In GitHub Actions and CI webhook environments, `pr_title` evaluates to the active pull request title.
      * In local CLI environments (e.g. evaluating uncommitted changes or a local branch prior to opening a PR), `pr_title` gracefully evaluates to the commit subject of the current `HEAD` commit (or an empty string if no commits exist).
+   * **Discovery & Boundary Semantics for `linked_issues`:**
+     * **Discovery:** Implementations MUST discover linked issues via:
+       1. Explicit pull request closing references via GitHub's API (`closingIssuesReferences`).
+       2. Standard closing keywords in the pull request body matching the case-insensitive pattern `(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#(\d+)`.
+     * **Payload Boundary:** For each discovered issue, the injected payload MUST include the issue number, title, author, labels, and issue body Markdown.
+     * **Token Preservation Boundary:** To preserve context window hygiene, issue comments and reaction trails MUST be excluded by default.
 
 5. **`tags` Derivation:**
    * If omitted, defaults to an empty list: `[]`.
