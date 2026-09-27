@@ -29,13 +29,18 @@ run_audit() {
   fi
 
   if [ -n "$REPO" ] && command -v gh >/dev/null 2>&1; then
-    gh pr list --repo "$REPO" --state merged --limit 20
+    if ! gh pr list --repo "$REPO" --state merged --limit 20; then
+      echo "Warning: Unable to query merged pull requests from GitHub (offline or network restricted)." >&2
+    fi
   fi
 }
 
 # If output exceeds 8KB, shunt to temporary file per canon
 TMP_OUT="$(mktemp /tmp/worktree-doctor-out.XXXXXX)"
-run_audit > "$TMP_OUT" 2>&1
+set +e
+( run_audit ) > "$TMP_OUT" 2>&1
+EXIT_CODE=$?
+set -e
 
 SIZE="$(wc -c < "$TMP_OUT" | tr -d ' ')"
 MAX_BYTES=8192
@@ -51,3 +56,5 @@ else
   cat "$TMP_OUT"
   rm -f "$TMP_OUT"
 fi
+
+exit "$EXIT_CODE"
