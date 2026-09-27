@@ -4,7 +4,7 @@ paths:
 inspect:
   - diff
 tags:
-  - reference
+  - universal
   - canon-authoring
 ---
 A canon MUST NOT declare both `Guidance` and `Supplement` directives. An invariant violation either mandates author remediation (`Guidance`, resolving to `fail`) or triggers automated clerk synthesis (`Supplement`, resolving to `warn`), but never both.

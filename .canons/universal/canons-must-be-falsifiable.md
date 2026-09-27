@@ -4,7 +4,7 @@ paths:
 inspect:
   - diff
 tags:
-  - reference
+  - universal
   - canon-authoring
 ---
 Each canon MUST codify a falsifiable invariant.

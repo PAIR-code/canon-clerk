@@ -110,7 +110,7 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
 
 5. **`tags` Derivation:**
    * If omitted, defaults to an empty list: `[]`.
-   * **Scalar Coercion:** If specified in frontmatter as a single scalar string (e.g. `tags: reference`), implementations MUST coerce it to a single-element list (`["reference"]`).
+   * **Scalar Coercion:** If specified in frontmatter as a single scalar string (e.g. `tags: universal`), implementations MUST coerce it to a single-element list (`["universal"]`).
    * **Normalization:** Each tag MUST be normalized to lower kebab-case:
      * Convert characters to lowercase.
      * Replace whitespace and underscore characters (`_`) with hyphens (`-`).

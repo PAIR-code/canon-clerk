@@ -4,7 +4,7 @@ paths:
 inspect:
   - diff
 tags:
-  - reference
+  - universal
   - canon-authoring
 ---
 The engineering rationale for each canon invariant MUST either be self-evident from the rule statement or explicitly articulated via a `Rationale` directive.

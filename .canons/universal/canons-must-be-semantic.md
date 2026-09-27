@@ -4,7 +4,7 @@ paths:
 inspect:
   - diff
 tags:
-  - reference
+  - universal
   - canon-authoring
 ---
 Each canon MUST enforce a semantic invariant that cannot be verified deterministically with static analysis, AST linters, or regular expressions.
