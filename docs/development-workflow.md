@@ -133,6 +133,15 @@ type(scope): description
 
 Feel free to make granular, WIP, or exploratory commits on your feature branch while developing and addressing review feedback. Because all PRs are squash-merged upon completion, your branch commit history will be squashed into a single clean commit on `main`.
 
+### Scope Discipline: Shunt vs. Upstream Chase
+
+To preserve atomic commits, full historical provenance, and clean squash-merge changelogs, pull requests must strictly adhere to their motivating issue mandate (enforced via [`.canons/universal/out-of-band-changes-must-be-shunted-or-sanctioned.md`](../.canons/universal/out-of-band-changes-must-be-shunted-or-sanctioned.md)).
+
+When you or your AI assistant encounter an unrelated bug, missing configuration, or cleanup opportunity mid-task, avoid folding the drive-by fix into the in-flight PR. Instead, employ one of two disciplined escape hatches:
+
+1. **Shunt it (Recommended):** Immediately file a new tracking issue documenting the problem, discovery context, and proposed fix. Keep your current branch and PR strictly focused on its original mandate.
+2. **Upstream Chase (Deliberate Expansion):** If the out-of-band change is genuinely coupled or strictly necessary for the current task to land, deliberately expand the mandate by updating the motivating Issue text and PR description *before* committing the change.
+
 ---
 
 ## 4. Submitting a Pull Request
