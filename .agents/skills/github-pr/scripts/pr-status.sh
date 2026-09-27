@@ -24,25 +24,41 @@ run_status() {
     REPO="PAIR-code/canon-clerk"
   fi
 
-  # 2. Resolve PR number
+  # 2. Parse flags and PR number
+  WATCH=false
   PR_NUMBER=""
-  if [ "$#" -ge 1 ]; then
-    PR_ARG="${1#\#}"
-    case "$PR_ARG" in
-      ''|*[!0-9]*)
-        echo "Error: PR argument must be a valid PR number (got: '$1')." >&2
-        echo "Usage: $0 [pr-number]" >&2
-        exit 1
+
+  for arg in "$@"; do
+    case "$arg" in
+      -w|--watch)
+        WATCH=true
         ;;
       *)
-        PR_NUMBER="$PR_ARG"
+        PR_ARG="${arg#\#}"
+        case "$PR_ARG" in
+          ''|*[!0-9]*)
+            echo "Error: Unexpected or invalid argument '$arg'." >&2
+            echo "Usage: $0 [--watch] [pr-number]" >&2
+            exit 1
+            ;;
+          *)
+            if [ -n "$PR_NUMBER" ]; then
+              echo "Error: Unexpected additional argument '$arg'." >&2
+              echo "Usage: $0 [--watch] [pr-number]" >&2
+              exit 1
+            fi
+            PR_NUMBER="$PR_ARG"
+            ;;
+        esac
         ;;
     esac
-  else
+  done
+
+  if [ -z "$PR_NUMBER" ]; then
     BRANCH="$(git branch --show-current 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
     if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ] || [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
       echo "Error: Cannot auto-detect PR for branch '$BRANCH'. Please specify a PR number." >&2
-      echo "Usage: $0 [pr-number]" >&2
+      echo "Usage: $0 [--watch] [pr-number]" >&2
       exit 1
     fi
 
@@ -53,7 +69,7 @@ run_status() {
 
     if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
       echo "Error: No pull request found for branch '$BRANCH' in repository '$REPO'." >&2
-      echo "Usage: $0 [pr-number]" >&2
+      echo "Usage: $0 [--watch] [pr-number]" >&2
       exit 1
     fi
   fi
@@ -62,9 +78,17 @@ run_status() {
   gh pr view "$PR_NUMBER" --repo "$REPO"
   echo ""
   RC=0
-  gh pr checks "$PR_NUMBER" --repo "$REPO" || RC=$?
-  if [ "$RC" -eq 8 ]; then
-    RC=0
+  if [ "$WATCH" = true ]; then
+    gh pr checks "$PR_NUMBER" --repo "$REPO" --watch || RC=$?
+  else
+    gh pr checks "$PR_NUMBER" --repo "$REPO" || RC=$?
+    if [ "$RC" -eq 8 ]; then
+      echo ""
+      echo "Notice: Checks are still in progress."
+      echo "To watch until all checks complete, run:"
+      echo "  ./.agents/skills/github-pr/scripts/pr-status.sh --watch $PR_NUMBER"
+      RC=0
+    fi
   fi
   return "$RC"
 }
@@ -82,7 +106,7 @@ MAX_BYTES=8192
 if [ "$SIZE" -gt "$MAX_BYTES" ]; then
   SHUNTED_LOG="/tmp/pr-status-$(date +%s).log"
   mv "$TMP_OUT" "$SHUNTED_LOG"
-  head -n 60 "$SHUNTED_LOG"
+  tail -n 60 "$SHUNTED_LOG"
   echo ""
   echo "[OUTPUT TRUNCATED: Output size (${SIZE} bytes) exceeds 8KB limit]"
   echo "Complete status report written to: ${SHUNTED_LOG}"
