@@ -3,6 +3,8 @@ paths:
   - "**/*.{sh,ts}"
 inspect:
   - diff
+tags:
+  - agent-scripts
 ---
 Agent skill scripts that invoke commands with potentially unbounded or high-volume output MUST redirect output to a temporary file when exceeding 8KB.
 

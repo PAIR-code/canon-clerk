@@ -4,6 +4,9 @@ paths:
 inspect:
   - diff
   - pr_body
+tags:
+  - internal
+  - agent-scripts
 ---
 Companion scripts intended for AI agent execution MUST be implemented exclusively in POSIX Bourne Shell (`*.sh`) or TypeScript/Node (`*.ts`). Operational scripts requiring external interpreters (such as Python, Ruby, or Perl) are forbidden.
 

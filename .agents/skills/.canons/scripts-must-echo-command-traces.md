@@ -3,6 +3,8 @@ paths:
   - "**/*.{sh,ts}"
 inspect:
   - diff
+tags:
+  - agent-scripts
 ---
 Agent skill scripts MUST echo their external commands when executed.
 

@@ -4,6 +4,8 @@ paths:
 inspect:
   - diff
   - pr_body
+tags:
+  - agent-skills
 ---
 `SKILL.md` body markdown MUST NOT duplicate trigger conditions or prompt keywords declared in frontmatter `description:`.
 

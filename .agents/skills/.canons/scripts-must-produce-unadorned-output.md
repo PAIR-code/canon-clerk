@@ -3,6 +3,8 @@ paths:
   - "**/*.{sh,ts}"
 inspect:
   - diff
+tags:
+  - agent-scripts
 ---
 Agent skill scripts MUST NOT emit superfluous visual formatting, ASCII art, decorative borders, progress spinners, or ANSI escape codes.
 

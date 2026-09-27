@@ -4,6 +4,8 @@ paths:
 inspect:
   - diff
   - pr_body
+tags:
+  - agent-skills
 ---
 `SKILL.md` MUST be authored strictly as an operational runbook for the executing AI assistant, omitting background narratives, design rationale, and script authoring standards.
 
