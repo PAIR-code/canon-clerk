@@ -114,7 +114,7 @@ Canon Clerk distinguishes between contributor action items and automated AI synt
 * **`Supplement` (Clerk Synthesis $\rightarrow$ Non-blocking `warn`):** Instructs the Clerk to synthesize missing material directly into the review report. If synthesis is infeasible, it gracefully falls back to a blocking `fail`.
 
 > 📖 **Formal Specification:**  
-> For the complete canon grammar, metadata derivation fallbacks (`id`, `title`, `paths`, `inspect`), directive semantics, and monorepo scoping rules, see **[SPEC.md](SPEC.md)**.
+> For the complete canon grammar, metadata derivation fallbacks (`id`, `title`, `paths`, `inspect`, `tags`), directive semantics, and monorepo scoping rules, see **[SPEC.md](SPEC.md)**.
 
 ---
 

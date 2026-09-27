@@ -67,6 +67,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
 | **`paths`** | `string[]` | No | 1. Frontmatter `paths:`<br>2. `["**/*"]` (all files) | Path globs used for deterministic file filtering. |
 | **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_body"]` | Context elements supplied to the Deep Auditor. |
+| **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 
 ### 4.2 Deterministic Derivation Rules
 
@@ -94,6 +95,18 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * `diff`: Unified git diff of changed files.
      * `pr_body`: Pull request description / body markdown.
      * `commit_messages`: Commit messages associated with the pull request.
+
+5. **`tags` Derivation:**
+   * If omitted, defaults to an empty list: `[]`.
+   * **Scalar Coercion:** If specified in frontmatter as a single scalar string (e.g. `tags: reference`), implementations MUST coerce it to a single-element list (`["reference"]`).
+   * **Normalization:** Each tag MUST be normalized to lower kebab-case:
+     * Convert characters to lowercase.
+     * Replace whitespace and underscore characters (`_`) with hyphens (`-`).
+     * Strip invalid characters (retaining only lowercase letters, digits, and hyphens).
+     * Collapse consecutive hyphens into a single hyphen, and trim leading and trailing hyphens.
+     * Empty or whitespace-only tags MUST be discarded.
+     * *Example:* `tags: [Architecture, "API Design", core_module]` $\rightarrow$ `["architecture", "api-design", "core-module"]`.
+   * **Deduplication:** Implementations MUST deduplicate tags while preserving declaration order.
 
 ---
 
@@ -201,6 +214,9 @@ title: Manual Test Script Required for UI Changes
 paths:
   - "src/ui/**"
   - "frontend/**"
+tags:
+  - testing
+  - ui
 inspect:
   - pr_body
   - diff
