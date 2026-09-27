@@ -68,6 +68,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | **`paths`** | `string[]` | No | 1. Frontmatter `paths:`<br>2. `["**/*"]` (all files) | Path globs used for deterministic file filtering. |
 | **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to the Deep Auditor. |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
+| **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files supplied to the Deep Auditor as grounding context. |
 
 ### 4.2 Deterministic Derivation Rules
 
@@ -118,6 +119,17 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * Empty or whitespace-only tags MUST be discarded.
      * *Example:* `tags: [Architecture, "API Design", core_module]` $\rightarrow$ `["architecture", "api-design", "core-module"]`.
    * **Deduplication:** Implementations MUST deduplicate tags while preserving declaration order.
+
+6. **`references` Derivation:**
+   * If omitted, defaults to an empty list: `[]`.
+   * **Scalar Coercion:** If specified in frontmatter as a single scalar string (e.g. `references: "docs/architecture.md"`), implementations MUST coerce it to a single-element list (`["docs/architecture.md"]`).
+   * **Resolution Target:** Path globs in `references` MUST be resolved against the repository checkout at the pull request's `HEAD` commit.
+   * **Scoped Canons:** For scoped canons in `<scope>/.canons/`, relative glob patterns MUST be automatically scoped to `<scope>/**` unless explicitly anchored with a leading `/` (e.g. `/docs/**` or `/package.json`).
+   * **Auditor Context Injection:** Resolved reference files MUST be read from disk and provided to the Deep Auditor prompt within dedicated semantic context blocks (e.g. `<reference_documents>`), separate from the active pull request `<diff>`.
+   * **Safety Caps & Token Hygiene:**
+     * **Text Files Only:** Non-text or binary files (e.g. images, compiled artifacts, archives) MUST be excluded.
+     * **File Count Limit:** Implementations MUST NOT load more than **5 files** per canon by default.
+     * **Byte Size Limit:** Total reference content per canon MUST NOT exceed **32KB** by default; content exceeding this cap MUST be truncated with a visible diagnostic notice.
 
 ---
 
@@ -228,6 +240,8 @@ paths:
 tags:
   - testing
   - ui
+references:
+  - "docs/testing-standards.md"
 inspect:
   - pr_body
   - diff

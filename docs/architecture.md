@@ -48,6 +48,7 @@ By cascading from deterministic filters to lightweight screening and finally to 
 * **Inputs:**
   * Unified git diff of modified files.
   * Scoped context specified by the canon's `inspect:` frontmatter (`diff`, `pr_title`, `pr_body`, `commit_messages`, `linked_issues`).
+  * Persistent repository grounding files resolved via the canon's `references:` frontmatter.
   * Full canon text (rule, evaluation criteria, guidance/supplement directives).
 * **Outputs:** Structured verdict, failure rationale, line-level code annotations, and synthesized material (if requested).
 
