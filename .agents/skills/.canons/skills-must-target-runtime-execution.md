@@ -5,8 +5,8 @@ inspect:
   - diff
   - pr_body
 ---
-`SKILL.md` documentation MUST be authored strictly as an operational runbook for the executing AI assistant. `SKILL.md` MUST NOT contain historical problem narratives, PR justifications, design rationale, or authoring standards that the executing agent does not need at runtime.
+`SKILL.md` MUST be authored strictly as an operational runbook for the executing AI assistant, omitting background narratives, design rationale, and script authoring standards.
 
-Rationale: Skills are ingested directly into an AI assistant's active context window at the exact moment of execution. Background narratives, motivation essays, and script authoring guidelines dilute attention on the operational task and waste context tokens on dead weight. Motivation belongs in commit and PR descriptions; persistent background documentation belongs in `docs/`.
+Rationale: Skills load directly into the assistant's active context during execution; narrative background dilutes attention and wastes tokens.
 
-**Guidance:** Keep `SKILL.md` focused strictly on executable invocation syntax, flags, and operational invariants. Omit "Motivation", "Architectural Model", "Problem Statement", and "Script Design Standards" sections.
+**Guidance:** Move architectural background or design rationale to `docs/` or PR descriptions.
