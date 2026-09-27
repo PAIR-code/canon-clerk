@@ -7,7 +7,7 @@ tags:
   - reference
   - canon-authoring
 ---
-Canon content MUST be succinct, stating each invariant rule, engineering rationale, and remediation instruction with maximal information density and zero repetition.
+Each canon MUST be succinct, stating each invariant rule, engineering rationale, and remediation instruction with maximal information density and zero repetition.
 
 Rationale: Extraneous prose, conversational filler, and repeated assertions consume evaluator prompt tokens and dilute model reasoning without conveying additional semantic signal.
 
