@@ -17,7 +17,7 @@ run_view() {
 
   ISSUE_NUMBER=""
   INCLUDE_COMMENTS=false
-  FORMAT="markdown"
+  FORMAT="default"
   REPO=""
 
   while [ "$#" -gt 0 ]; do
@@ -38,7 +38,7 @@ run_view() {
         echo "Usage: $0 <issue-number> [options]"
         echo "Options:"
         echo "  -c, --comments            Include issue comments"
-        echo "  --json                    Output raw JSON"
+        echo "  --json                    Output raw JSON (entire payload)"
         echo "  -R, --repo <owner/repo>   Override repository target"
         echo "  -h, --help                Show this help message"
         exit 0
@@ -85,50 +85,29 @@ run_view() {
   fi
 
   # 2. Output
+  FIELDS="number,title,state,author,labels,milestone,assignees,createdAt,updatedAt,url,closedByPullRequestsReferences,body"
+  if [ "$INCLUDE_COMMENTS" = true ]; then
+    FIELDS="${FIELDS},comments"
+  fi
+
   if [ "$FORMAT" = "json" ]; then
-    if [ "$INCLUDE_COMMENTS" = true ]; then
-      gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,state,author,labels,assignees,milestone,createdAt,updatedAt,url,body,comments,closedByPullRequestsReferences
-    else
-      gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,state,author,labels,assignees,milestone,createdAt,updatedAt,url,body,closedByPullRequestsReferences
-    fi
+    gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json "$FIELDS"
+  elif [ "$INCLUDE_COMMENTS" = true ]; then
+    gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json "$FIELDS" --jq '
+      del(.body, .comments),
+      "---",
+      .body,
+      (if (.comments | length) > 0 then
+        "\n--- comments ---",
+        (.comments[] | "\n[" + .author.login + " @ " + .createdAt + "]\n" + .body)
+      else empty end)
+    '
   else
-    if [ "$INCLUDE_COMMENTS" = true ]; then
-      gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,state,author,labels,assignees,milestone,createdAt,updatedAt,url,body,closedByPullRequestsReferences,comments --template 'number:	#{{.number}}
-title:	{{.title}}
-state:	{{.state}}
-author:	{{.author.login}}
-url:	{{.url}}
-labels:	{{range $i, $l := .labels}}{{if $i}}, {{end}}{{$l.name}}{{end}}
-assignees:	{{range $i, $a := .assignees}}{{if $i}}, {{end}}{{$a.login}}{{end}}
-milestone:	{{if .milestone}}{{.milestone.title}}{{else}}none{{end}}
-created:	{{.createdAt}}
-updated:	{{.updatedAt}}
-{{if .closedByPullRequestsReferences}}closed_by_pr:	{{range $i, $pr := .closedByPullRequestsReferences}}{{if $i}}, {{end}}#{{$pr.number}} ({{$pr.url}}){{end}}
-{{end}}
--- body --
-{{.body}}
-{{if .comments}}
--- comments --
-{{range .comments}}
-[{{.author.login}} @ {{.createdAt}}]
-{{.body}}
-{{end}}{{end}}'
-    else
-      gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,state,author,labels,assignees,milestone,createdAt,updatedAt,url,body,closedByPullRequestsReferences --template 'number:	#{{.number}}
-title:	{{.title}}
-state:	{{.state}}
-author:	{{.author.login}}
-url:	{{.url}}
-labels:	{{range $i, $l := .labels}}{{if $i}}, {{end}}{{$l.name}}{{end}}
-assignees:	{{range $i, $a := .assignees}}{{if $i}}, {{end}}{{$a.login}}{{end}}
-milestone:	{{if .milestone}}{{.milestone.title}}{{else}}none{{end}}
-created:	{{.createdAt}}
-updated:	{{.updatedAt}}
-{{if .closedByPullRequestsReferences}}closed_by_pr:	{{range $i, $pr := .closedByPullRequestsReferences}}{{if $i}}, {{end}}#{{$pr.number}} ({{$pr.url}}){{end}}
-{{end}}
--- body --
-{{.body}}'
-    fi
+    gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json "$FIELDS" --jq '
+      del(.body),
+      "---",
+      .body
+    '
   fi
 }
 

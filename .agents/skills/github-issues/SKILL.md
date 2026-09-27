@@ -41,7 +41,7 @@ Outputs an unadorned TSV table (`NUMBER\tSTATE\tLABELS\tUPDATED\tTITLE`). Shunts
 
 ### 2. `issue-view.sh <number> [options]`
 
-Outputs structured metadata headers followed by authentic Markdown body. Shunts to `/tmp/issue-<number>.md` if >8KB.
+Outputs JSON metadata followed by authentic Markdown body (`del(.body), "---", .body`). Shunts to `/tmp/issue-<number>.md` if >8KB.
 
 ```bash
 # View issue metadata & body:
