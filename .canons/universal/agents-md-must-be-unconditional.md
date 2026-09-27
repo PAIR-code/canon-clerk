@@ -1,9 +1,6 @@
 ---
 paths:
-  - "AGENTS.md"
   - "**/AGENTS.md"
-references:
-  - "AGENTS.md"
 inspect:
   - diff
 tags:
