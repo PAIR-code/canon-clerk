@@ -38,7 +38,6 @@ jobs:
             cli
             action
             core
-            canon
             canons
             agents
             spec

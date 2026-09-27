@@ -111,37 +111,23 @@ git -C main push origin main
 Canon Clerk strictly enforces the [Conventional Commits](https://www.conventionalcommits.org/) specification for all commit messages and PR titles.
 
 To maintain clarity across a growing monorepo while supporting **Spec-Driven Development (SDD)**, our convention follows a strict orthogonal matrix:
-* **The Scope is ALWAYS the Surface / Component:** `(cli)`, `(action)`, `(core)`, `(canon)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`.
+* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(readme)`.
 * **The Type is ALWAYS the Intent:** `spec`, `feat`, `fix`, `test`, `docs`, `chore`, `build`, `ci`, `refactor`, `perf`, `revert`.
 
 ```text
 type(scope): description
 ```
 
-### Surface-to-Prefix Mapping
+**Common Examples:**
+- `feat(cli): add list subcommand` (user-facing functionality)
+- `chore(canons): add canons governing cli design` (internal repository rule)
+- `chore(agents): update worktree lifecycle skill` (internal assistant tooling)
+- `docs: add development workflow guide` (documentation)
+- `ci: add PR title linting workflow` (CI automation)
 
-| Surface | Recommended Type & Scope | SemVer Impact | Description & Example |
-| :--- | :--- | :--- | :--- |
-| **Specifications (OpenSpec / RFCs)** | `spec(<surface>):` | None (Non-releasing) | Architectural contracts and OpenSpec files.<br>`spec(cli): define plugin hooks interface`<br>`spec(canon): draft Guidance vs Supplement semantics` |
-| **Core Auditor Engine** | `feat(core):`, `fix(core):` | Minor / Patch | Core analysis, prompt assembly, and screening logic.<br>`feat(core): support inline **Supplement:** markers` |
-| **CLI Package** | `feat(cli):`, `fix(cli):` | Minor / Patch | CLI binary, arguments, flags, and local execution.<br>`feat(cli): add --quiet flag and json output` |
-| **GitHub Action Package** | `feat(action):`, `fix(action):` | Minor / Patch | Action entrypoint, inputs, and Check Run posting.<br>`fix(action): handle empty diffs gracefully` |
-| **Dogfood Canons (`.canons/`)** | `chore(canons):` | None | Internal project rules governing this repository.<br>`chore(canons): require manual test plan for ui` |
-| **AI Agent Guidelines (`AGENTS.md`, `.agents/`)** | `chore(agents):` | None | Instructions, skills, and tools for AI coding assistants.<br>`chore(agents): add worktree navigation instructions` |
-| **Local Tooling & Config** | `build:` / `test:` | None | `tsconfig`, `package.json`, `vitest`, linters.<br>`build: configure vitest and strict typescript` |
-| **Remote CI/CD (`.github/workflows/`)** | `ci:` / `ci(action):` | None | GitHub Actions workflows and release automation.<br>`ci: add PR title linting workflow` |
-| **Public Documentation (`docs/`)** | `docs:` / `docs(<surface>):` | None | User guides, onboarding, and tutorials.<br>`docs: add development-setup guide` |
-
-### OpenSpec & Spec-Driven Development (SDD) Lifecycle
-
-Introducing `spec` as a first-class Conventional Commit type affords a structured SDD progression:
-1. **Spec Proposal (Design Phase):**
-   - Author or revise architecture contracts under `specs/` or `openspec/` using `spec(<surface>):`.
-   - These commits document architectural decisions and appear under a dedicated **"Specifications"** section in changelogs, but do not bump package SemVer versions.
-2. **Implementation (Code Phase):**
-   - Write tests and code fulfilling the specification using `test(<surface>):`, `feat(<surface>):`, or `fix(<surface>):`, referencing the spec in the commit description.
-3. **PR Squash-Merge to `main`:**
-   - When the PR squash-merges, the PR title triggers the appropriate SemVer bump (e.g. `feat(cli): support streaming output (#50)` triggers a minor bump) while the baselined spec lands atomically with the fulfilling code.
+> [!TIP]
+> **Complete Reference Specification:**
+> For the complete surface-to-prefix mapping, SemVer release rules, GitHub label taxonomy, and Spec-Driven Development (SDD) progression, see the **[Conventional Commit & Label Taxonomy Reference](conventional-commits.md)**.
 
 ### Iterative Branch Commits
 
@@ -182,7 +168,7 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
   ```
   *Examples:*
   - `feat(cli): add streaming json output (#7)`
-  - `spec(canon): define Guidance vs Supplement semantics (#3)`
+  - `spec(canons): define Guidance vs Supplement semantics (#3)`
   - `ci: add PR title linting workflow (#9)`
   - `docs: add development setup guide (#1)`
 
