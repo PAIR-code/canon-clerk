@@ -21,6 +21,7 @@ Key architectural concepts:
 - [Canon Directives Must Provide Distinct Signals](.canons/canon-directives-must-provide-distinct-signals.md): Reference canon requiring canon directives to supply distinct, non-redundant signal tailored to their target role.
 - [Canon Content Must Be Succinct](.canons/canon-content-must-be-succinct.md): Reference canon requiring canon content to be dense, non-repetitive, and free from conversational filler.
 - [Canon Rationales Must Be Self-Evident Or Explicit](.canons/canon-rationales-must-be-self-evident-or-explicit.md): Reference canon requiring invariant rationales to be self-evident or explicitly articulated via a Rationale directive.
+- [Canon Guidance And Supplement Must Be Mutually Exclusive](.canons/canon-guidance-and-supplement-must-be-mutually-exclusive.md): Reference canon requiring canons to specify either manual author remediation or automated synthesis, never both.
 
 ## The Clerk Runner
 
