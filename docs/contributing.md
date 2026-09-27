@@ -55,7 +55,7 @@ To support Spec-Driven Development (SDD) alongside standard engineering, we adop
 * **The Scope is ALWAYS the Surface / Component:** `(core)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(readme)`.
 * **The Type is ALWAYS the Intent:** `spec`, `feat`, `fix`, `test`, `docs`, `chore`, `build`, `ci`, `refactor`, `perf`, `revert`.
 
-See the [Development Workflow Guide](development-workflow.md#3-making-changes--committing) for the complete surface-to-prefix mapping table.
+See the [Conventional Commit & Label Taxonomy Reference](conventional-commits.md) for the complete surface-to-prefix mapping table and label taxonomy.
 
 ### Pull Requests & Squash-and-Merge Policy
 
