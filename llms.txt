@@ -1,0 +1,36 @@
+# Canon Clerk
+
+> Canon Clerk combines an open specification for authored project rules (*canons*) with an automated, LLM-powered review gate (*clerk*) that audits pull requests against architectural invariants in CI.
+
+Canon Clerk addresses the asymmetric cognitive tax placed on maintainers by AI code generators: generative coding tools accelerate code production, generating pull requests that pass static tests but quietly violate unwritten architectural tenets and project conventions. Canon Clerk formalizes these rules into zero-friction Markdown files stored in `.canons/` and audits changes using an efficient three-stage evaluation cascade.
+
+Key architectural concepts:
+- **Dual Pillars:** The project encompasses both the **Canon Standard** (an open specification for declarative, natural-language architectural invariants) and the **Clerk Runner** (the CI review gate and CLI engine that executes multi-stage LLM evaluation).
+- **Core Platform:** Canon Clerk is an automated review engine and specification platform, not a shell utility or script collection; helper scripts in `.agents/skills/` are auxiliary automation tools for AI coding assistants.
+- **Evaluation Cascade:** Audits execute across three stages—Stage 0 Deterministic Path Filter (0 tokens), Stage 1 Fast Screener (lightweight model), and Stage 2 Deep Auditor (frontier reasoning model).
+
+## The Canon Standard
+
+- [Canon Format Specification](SPEC.md): Complete normative grammar, metadata derivation rules (id, title, paths, inspect), directive contracts (Guidance, Supplement, Rationale), and progressive disclosure tiers.
+- [Dogfood Canons](.canons/): Internal project canons stored in the repository root illustrating real-world semantic rules enforced on this repository.
+- [Canon Names Must State Invariants](.canons/canon-names-must-state-invariants.md): Canon invariant requiring canon filenames to state testable invariants rather than passive categories.
+- [Canons Must Be Atomic](.canons/canons-must-be-atomic.md): Canon invariant requiring each canon file to address a single cohesive concept to prevent review flakiness.
+- [Canons Must Be Falsifiable](.canons/canons-must-be-falsifiable.md): Canon invariant requiring rules to codify objectively falsifiable criteria.
+- [Canons Must Be Semantic](.canons/canons-must-be-semantic.md): Canon invariant reserving canons for semantic invariants that cannot be validated deterministically with static linters.
+
+## The Clerk Runner
+
+- [Architecture & Evaluation Cascade](docs/architecture.md): Architectural specification of the three-stage evaluation cascade (Stage 0 Path Filter, Stage 1 Fast Screener, Stage 2 Deep Auditor) and the five-verdict matrix.
+- [Clerk GitHub Action Configuration](README.md#2-add-to-github-actions): Example CI workflow configuration using pair-code/canon-clerk@v1 with screener and auditor models.
+- [Clerk Quickstart & CLI Usage](README.md#quickstart): Setup guide, quickstart instructions, and GitHub Actions integration overview.
+
+## Agent & Contributor Orientation
+
+- [Agent Guidelines](AGENTS.md): Operational orientation, architectural anchors, and workspace navigation instructions for AI coding assistants.
+- [Development Workflow](docs/development-workflow.md): Complete development guide covering issue claiming, triangular Git worktrees, Conventional Commit matrices, and pull request lifecycles.
+
+## Optional
+
+- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, and GitHub CLI configuration.
+- [Contributing Guide](docs/contributing.md): Contribution policies, Google Contributor License Agreement (CLA), and squash-merge expectations.
+- [Project Readme](README.md): Human-oriented project homepage, architectural problem statement, progressive disclosure tiers, and overview.
