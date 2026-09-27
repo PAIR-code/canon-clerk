@@ -3,6 +3,9 @@ paths:
   - "**/.canons/**/*.md"
 inspect:
   - diff
+tags:
+  - reference
+  - canon-authoring
 ---
 Each canon MUST codify a falsifiable invariant.
 

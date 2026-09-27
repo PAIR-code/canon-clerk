@@ -3,6 +3,9 @@ paths:
   - "**/.canons/**/*.md"
 inspect:
   - diff
+tags:
+  - reference
+  - canon-authoring
 ---
 Each canon file name MUST state a testable invariant or policy rather than a passive topic or category.
 
