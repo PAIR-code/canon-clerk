@@ -66,7 +66,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | **`id`** | `string` | No | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
 | **`paths`** | `string[]` | No | 1. Frontmatter `paths:`<br>2. `["**/*"]` (all files) | Path globs used for deterministic file filtering. |
-| **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_body"]` | Context elements supplied to the Deep Auditor. |
+| **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to the Deep Auditor. |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 
 ### 4.2 Deterministic Derivation Rules
@@ -90,11 +90,15 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * For scoped canons in `<scope>/.canons/`, patterns MUST be automatically scoped to `<scope>/**`.
 
 4. **`inspect` Derivation:**
-   * If omitted, defaults to `["diff", "pr_body"]`.
+   * If omitted, defaults to `["diff", "pr_title", "pr_body"]`.
    * Supported tokens include:
      * `diff`: Unified git diff of changed files.
+     * `pr_title`: Pull request title text.
      * `pr_body`: Pull request description / body markdown.
      * `commit_messages`: Commit messages associated with the pull request.
+   * **Runtime Resolution Semantics for `pr_title`:**
+     * In GitHub Actions and CI webhook environments, `pr_title` evaluates to the active pull request title.
+     * In local CLI environments (e.g. evaluating uncommitted changes or a local branch prior to opening a PR), `pr_title` gracefully evaluates to the commit subject of the current `HEAD` commit (or an empty string if no commits exist).
 
 5. **`tags` Derivation:**
    * If omitted, defaults to an empty list: `[]`.
