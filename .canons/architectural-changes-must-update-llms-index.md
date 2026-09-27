@@ -7,6 +7,9 @@ paths:
 inspect:
   - diff
   - pr_body
+tags:
+  - internal
+  - repo-governance
 ---
 Pull requests introducing or fundamentally altering architectural surfaces, core monorepo packages, or formal specifications MUST update `llms.txt` to reflect the new entry point.
 

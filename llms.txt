@@ -13,11 +13,10 @@ Key architectural concepts:
 
 - [Canon Format Specification](SPEC.md): Complete normative grammar, metadata derivation rules (id, title, paths, inspect, tags, references), directive contracts (Guidance, Supplement, Rationale), and progressive disclosure tiers.
 - [Dogfood Canons](.canons/): Internal project canons stored in the repository root illustrating real-world semantic rules enforced on this repository.
-- [Canon Names Must State Invariants](.canons/canon-names-must-state-invariants.md): Canon invariant requiring canon filenames to state testable invariants rather than passive categories.
-- [Canons Must Be Atomic](.canons/canons-must-be-atomic.md): Canon invariant requiring each canon file to address a single cohesive concept to prevent review flakiness.
-- [Canons Must Be Falsifiable](.canons/canons-must-be-falsifiable.md): Canon invariant requiring rules to codify objectively falsifiable criteria.
-- [Canons Must Be Semantic](.canons/canons-must-be-semantic.md): Canon invariant reserving canons for semantic invariants that cannot be validated deterministically with static linters.
-- [Architectural Changes Must Update LLMs Index](.canons/architectural-changes-must-update-llms-index.md): Canon invariant requiring pull requests modifying architectural surfaces or specifications to update the llms.txt index.
+- [Canon Names Must State Invariants](.canons/canon-names-must-state-invariants.md): Reference canon requiring canon filenames to state testable invariants rather than passive categories.
+- [Canons Must Be Atomic](.canons/canons-must-be-atomic.md): Reference canon requiring each canon file to address a single cohesive concept to prevent review flakiness.
+- [Canons Must Be Falsifiable](.canons/canons-must-be-falsifiable.md): Reference canon requiring rules to codify objectively falsifiable criteria.
+- [Canons Must Be Semantic](.canons/canons-must-be-semantic.md): Reference canon reserving canons for semantic invariants that cannot be validated deterministically with static linters.
 
 ## The Clerk Runner
 
