@@ -99,16 +99,22 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
 
 ## 5. Directives & Reserved Keywords
 
-Canon text may include reserved semantic directives to govern auditor behavior and distinguish PR contributor/author obligations from automated clerk synthesis:
+Canon text may include reserved semantic directives to govern auditor behavior, convey author intent, and distinguish PR contributor/author obligations from automated clerk synthesis:
 
-| Directive | Target Actor | CI Verdict | Normative Contract |
+| Directive | Target Actor | CI Role / Verdict | Normative Contract |
 | :--- | :--- | :--- | :--- |
 | **None** (Default) | Contributor | **`fail`** (Blocking) | PR violates the invariant. Auditor reports the violation and failure rationale with no further advice. |
 | **`Guidance`** | Contributor | **`fail`** (Blocking) | **Contributor action required.** Auditor instructs the contributor on actions needed to unblock the PR (e.g., pointing to required templates or documentation). |
 | **`Supplement`** | Clerk AI | **`warn`** (Non-blocking)* | **Automated synthesis.** Auditor fulfills the invariant by synthesizing the missing material directly into the review report. |
+| **`Rationale`** | Evaluator (Clerk AI) & Explainer (AI Assistant) | Informative (Explanatory context) | **Chesterton's Fence.** Explains *why* the canon exists if not self-evident. Evaluator AI uses it to disambiguate edge cases against author intent; auditor quotes or synthesizes it in check runs and reports to explain why the invariant is in place. |
 
 > **\*Graceful Fallback Requirement:**  
 > If a canon specifies a `Supplement` directive, but the Deep Auditor cannot reliably infer or synthesize the material (e.g., excessive diff complexity or ambiguous context), the implementation **MUST gracefully fall back to a blocking `fail`**, stating that automated synthesis was infeasible and that manual author action is required.
+
+> **Rationale Normative Constraints:**
+> To preserve clarity and prevent prompt dilution:
+> * **Conciseness Limit:** A `Rationale` SHOULD be a single sentence (or <= 30 words). Lengthy essays MUST be deferred to external documentation files or pull request descriptions.
+> * **Non-Duplication:** A `Rationale` MUST NOT merely restate the negative invariant rule (e.g., "Files must not be empty because empty files are disallowed"). It MUST articulate the underlying engineering rationale, architectural trade-off, or failure mode being prevented (Chesterton's Fence).
 
 ### 5.1 Syntax Forms
 
@@ -122,6 +128,12 @@ PRs introducing user-facing features must update documentation. **Guidance:** Su
 ```markdown
 PRs modifying UI components must include manual test scripts. **Supplement:** If feasible, synthesize a 3-step manual test script from the diff.
 ```
+```markdown
+Each canon MUST only address a single, cohesive concept for its invariant. Rationale: Multi-rule canon files increase the likelihood of flakiness, since subsequent AI evaluations may focus on different parts of the rule set.
+```
+```markdown
+Each canon file name MUST state a testable invariant rather than a passive topic. **Rationale:** Canon Clerk derives check run titles from file stems; invariant names ensure CI reports immediately communicate expectations.
+```
 
 #### B. Section Header Syntax
 Suitable for Tier 4 structured canons:
@@ -133,16 +145,24 @@ Direct the author to `docs/contributing.md#test-plans` and enumerate the missing
 ## Supplement
 Synthesize a 3-step manual Test Script covering each modified visual state.
 ```
+```markdown
+## Rationale
+Manual verification instructions ensure reviewers can reproduce visual flow and interactive state transitions that automated unit tests may miss.
+```
 
 ### 5.2 Auditor Interpretation & Prompt Contract
 
 Unlike static linters, canon evaluators do not employ a deterministic pre-parser or regex tokenizer to extract directive text blocks. Instead, the canon's raw Markdown body is passed directly into the evaluator's prompt context:
 
-1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Guidance` and `Supplement` (e.g., `**Guidance:**`, `## Guidance`, `Supplement:`) to clearly signal intentional directive semantics to the frontier model.
-2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Guidance` and `Supplement`, instructing the reasoning model to map them directly to its structured output payload:
+1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Guidance`, `Supplement`, and `Rationale` (e.g., `**Guidance:**`, `## Guidance`, `Supplement:`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
+2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Guidance`, `Supplement`, and `Rationale`, instructing the reasoning model to map them directly to its structured output payload and evaluation process:
    * **`Guidance`** $\rightarrow$ Formulate actionable author instructions in the response `guidance` field, resulting in a blocking `fail` (or `action_required`).
    * **`Supplement`** $\rightarrow$ Synthesize the requested material into the response `supplement` field, resulting in a non-blocking `warn`.
-3. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Guidance for author:**` or `### Guidance`) remain fully functional.
+   * **`Rationale`** $\rightarrow$ Ground evaluation in author intent, and formulate explanatory context in the response `rationale` field (or synthesized review feedback) explaining why the invariant exists.
+3. **Exegesis & Edge-Case Disambiguation:** The evaluator AI and downstream AI assistants MUST use `Rationale` as an interpretive lens during semantic exegesis:
+   * **Edge-case disambiguation:** When diffs present borderline, ambiguous, or technically complex compliance scenarios, the evaluator AI disambiguates author intent against the stated `Rationale` rather than applying naive or superficial literalism.
+   * **Explanatory check runs:** In check run reports and review comments, the auditor quotes or synthesizes the `Rationale` to explain to the PR author *why* the invariant is in place, grounding any violation or advisory in architectural context.
+4. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Guidance for author:**`, `### Guidance`, `Rationale:`, `**Rationale:**`, or `### Why this rule exists`) remain fully functional.
 
 ---
 
@@ -157,7 +177,7 @@ PRs that introduce new user-facing features must have accompanying documentation
 ```
 
 ### Tier 2: Keyword Directives
-A plain Markdown assertion augmented with inline `**Guidance:**` or `**Supplement:**` directives:
+A plain Markdown assertion augmented with inline `**Guidance:**`, `**Supplement:**`, or `**Rationale:**` / `Rationale:` directives:
 ```markdown
 PRs modifying user-facing UI components MUST include a manual Test Script in the PR description. **Supplement:** If feasible, synthesize a candidate manual Test Script from the PR diff and description.
 ```
