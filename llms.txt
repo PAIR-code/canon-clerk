@@ -17,6 +17,7 @@ Key architectural concepts:
 - [Canons Must Be Atomic](.canons/canons-must-be-atomic.md): Canon invariant requiring each canon file to address a single cohesive concept to prevent review flakiness.
 - [Canons Must Be Falsifiable](.canons/canons-must-be-falsifiable.md): Canon invariant requiring rules to codify objectively falsifiable criteria.
 - [Canons Must Be Semantic](.canons/canons-must-be-semantic.md): Canon invariant reserving canons for semantic invariants that cannot be validated deterministically with static linters.
+- [Architectural Changes Must Update LLMs Index](.canons/architectural-changes-must-update-llms-index.md): Canon invariant requiring pull requests modifying architectural surfaces or specifications to update the llms.txt index.
 
 ## The Clerk Runner
 
