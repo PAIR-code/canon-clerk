@@ -12,11 +12,8 @@ Key architectural concepts:
 ## The Canon Standard
 
 - [Canon Format Specification](SPEC.md): Complete normative grammar, metadata derivation rules (id, title, paths, inspect, tags, references), directive contracts (Guidance, Supplement, Rationale), and progressive disclosure tiers.
-- [Dogfood Canons](.canons/): Internal project canons stored in the repository root illustrating real-world semantic rules enforced on this repository.
-- [Canon Names Must State Invariants](.canons/canon-names-must-state-invariants.md): Reference canon requiring canon filenames to state testable invariants rather than passive categories.
-- [Canons Must Be Atomic](.canons/canons-must-be-atomic.md): Reference canon requiring each canon file to address a single cohesive concept to prevent review flakiness.
-- [Canons Must Be Falsifiable](.canons/canons-must-be-falsifiable.md): Reference canon requiring rules to codify objectively falsifiable criteria.
-- [Canons Must Be Semantic](.canons/canons-must-be-semantic.md): Reference canon reserving canons for semantic invariants that cannot be validated deterministically with static linters.
+- [Universal Canons](.canons/universal/): Canonical, project-agnostic exemplars tagged `universal` codifying universal canon-authoring invariants (naming, atomicity, falsifiability, semantic scope, succinctness, and directive contracts).
+- [Dogfood Canons](.canons/internal/): Internal project governance policies tagged `internal` enforced in CI on this repository.
 
 ## The Clerk Runner
 
