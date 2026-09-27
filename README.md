@@ -1,5 +1,7 @@
 # Canon Clerk
 
+**Canon Clerk** combines an open specification for authored project rules (*canons*) with an automated, LLM-powered review gate (*clerk*) that audits pull requests against architectural invariants in CI.
+
 **Problem:** AI tools have accelerated and automated code generation, making project maintainers and custodians acute bottlenecks. Maintainers bear an asymmetric cognitive tax, reverse-engineering unsolicited but plausible AI-assisted PRs that pass existing tests but quietly violate unwritten or scattered architectural rules and project tenets.
 
 **Solution:** Canon Clerk introduces a zero-friction Markdown format for _project canons_ which live in `.canons/` directories. Through its CLI or GitHub Action, Canon Clerk checks proposed changes against canons for applicability and conformance. By gating CI on canon adherence, Canon Clerk preserves maintainer attention for truly novel situations.
