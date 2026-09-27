@@ -13,6 +13,27 @@ Before starting on code changes:
 1. **Find or open an issue:** Check the [open issues](https://github.com/PAIR-code/canon-clerk/issues) on `PAIR-code/canon-clerk`. If you have a new idea or bug to report, open an issue first to discuss the design with maintainers.
 2. **Claim the issue:** Leave a comment indicating you would like to work on it so effort isn't duplicated.
 
+### Triaging & Inspecting Issues with Your AI Assistant
+
+Your AI assistant can query and inspect issues directly using the `github-issues` skill:
+
+#### Directing Your AI Assistant (Recommended)
+Prompt your assistant:
+> *"List open issues"* or *"Find issues related to worktrees"*  
+> *"Inspect issue #41"* or *"Show me acceptance criteria for issue #18"*
+
+**What happens:** Your assistant activates the `github-issues` skill, querying the canonical repository without remote ambiguity, streaming unadorned TSV tables, and safely shunting large issue bodies.
+
+#### Under the Hood & Manual Fallback
+Under the hood, the assistant runs the companion scripts:
+```bash
+# List open issues in an unadorned TSV table:
+./.agents/skills/github-issues/scripts/issue-list.sh [options] [query]
+
+# Inspect a specific issue's metadata, markdown body, and acceptance criteria:
+./.agents/skills/github-issues/scripts/issue-view.sh <issue-number>
+```
+
 ---
 
 ## 2. Feature Worktrees & Branch Lifecycle
