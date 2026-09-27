@@ -12,9 +12,9 @@ To balance token economics, latency, and audit rigor, Canon Clerk executes audit
 
 ```mermaid
 flowchart LR
-    PR[Pull Request] --> S0[Stage 0: Path Filter\n(Deterministic Globs)]
-    S0 -- "Matched Canons\n(0 tokens)" --> S1[Stage 1: Screener\n(Fast LLM)]
-    S1 -- "Applicable Canons" --> S2[Stage 2: Deep Auditor\n(Reasoning LLM)]
+    PR[Pull Request] --> S0["Stage 0: Path Filter<br/>(Deterministic Globs)"]
+    S0 -- "Matched Canons<br/>(0 tokens)" --> S1["Stage 1: Screener<br/>(Fast LLM)"]
+    S1 -- "Applicable Canons" --> S2["Stage 2: Deep Auditor<br/>(Reasoning LLM)"]
     S2 --> Verdict[PR Verdict & Annotations]
 ```
 
