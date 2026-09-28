@@ -70,7 +70,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | :--- | :--- | :--- | :--- | :--- |
 | **`id`** | `string` | No | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
-| **`governs`**<br>*(alias: `paths`)* | `string[]` | No | 1. Frontmatter `governs:`<br>2. Frontmatter `paths:`<br>3. `["**/*"]` (all files) | Path globs defining the canon's jurisdiction, used for deterministic file filtering (Stage 0). |
+| **`governs`** | `string[]` | No | 1. Frontmatter `governs:`<br>2. `["**/*"]` (all files) | Path globs defining the canon's jurisdiction, used for deterministic file filtering (Stage 0). |
 | **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to the Deep Auditor. |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 | **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files supplied to the Deep Auditor as grounding context. |
@@ -92,12 +92,8 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * Strips leading numeric prefixes if present (e.g. `canon-0001-prs-must-include-tests` $\rightarrow$ `"Prs Must Include Tests"`).
 
 3. **`governs` Derivation (Deterministic Path Filtering):**
-   * **Canonical Field:** `governs` is the normative field specifying the repository path globs subject to the canon's jurisdiction.
-   * **Normative Alias:** For backward compatibility, `paths` MUST be recognized as an exact alias for `governs`. If `governs` is omitted, implementations MUST resolve `paths` if present.
-   * **Resolution Order:**
-     1. Frontmatter `governs:`
-     2. Frontmatter `paths:`
-     3. Default: `["**/*"]` (matching all repository files).
+   * If `governs` is specified in frontmatter, resolve globs as path patterns subject to the canon's jurisdiction.
+   * If omitted, defaults to matching all repository files: `["**/*"]`.
    * **Scoped Canons:** For scoped canons in `<scope>/.canons/`, patterns MUST be automatically scoped to `<scope>/**`.
 
 4. **`inspect` Derivation:**
