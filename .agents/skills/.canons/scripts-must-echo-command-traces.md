@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - "**/*.{sh,ts}"
 inspect:
   - diff

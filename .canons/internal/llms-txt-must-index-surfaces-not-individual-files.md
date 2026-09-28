@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - "llms.txt"
 references:
   - "llms.txt"

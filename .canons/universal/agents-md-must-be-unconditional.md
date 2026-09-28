@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - "**/AGENTS.md"
 inspect:
   - diff

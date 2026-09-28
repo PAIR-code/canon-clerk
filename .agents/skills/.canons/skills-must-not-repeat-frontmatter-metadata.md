@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - ".agents/skills/**/SKILL.md"
 inspect:
   - diff
