@@ -115,12 +115,15 @@ if [ -z "$BRANCH" ] && [ -n "$WORKTREE_PATH" ]; then
 fi
 
 CURRENT_PWD="$(pwd -P)"
-# If currently inside the worktree being deleted, cd to container root first
+# If currently inside the worktree being deleted, fail fast to avoid orphaned cwd
 if [ -n "$WORKTREE_PATH" ]; then
   case "$CURRENT_PWD" in
     "$WORKTREE_PATH"|"$WORKTREE_PATH"/*)
-      echo "Notice: Current working directory is inside the worktree to be removed. Moving to $CONTAINER_ROOT."
-      cd "$CONTAINER_ROOT"
+      echo "Error: Cannot tear down worktree from inside its own directory." >&2
+      echo "Please switch to the 'main' worktree first:" >&2
+      echo "  cd ../main" >&2
+      echo "Then re-run worktree-finish.sh." >&2
+      exit 1
       ;;
   esac
 fi
@@ -149,9 +152,7 @@ fi
 # 4. Prune worktrees
 git -C "$CONTAINER_ROOT" worktree prune
 
-echo ""
-echo "=== Worktree Teardown Complete ==="
-echo "Removed branch:   ${BRANCH}"
+echo "Removed branch: ${BRANCH}"
 if [ -n "$WORKTREE_PATH" ]; then
   echo "Removed worktree: ${WORKTREE_PATH}"
 fi

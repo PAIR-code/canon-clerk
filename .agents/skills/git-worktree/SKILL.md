@@ -39,11 +39,8 @@ Safely updates the local `main` worktree without branch collision errors:
 Executes the complete 4-step teardown (removes worktree, deletes local branch, deletes remote tracking branch, and prunes metadata):
 
 ```bash
-# Target specific worktree / branch:
+# Target specific worktree / branch (from main):
 ./.agents/skills/git-worktree/scripts/worktree-finish.sh 18-github-pr
-
-# Auto-detect from within a feature worktree:
-./.agents/skills/git-worktree/scripts/worktree-finish.sh
 ```
 
 ### 4. `worktree-doctor.sh`
@@ -62,4 +59,4 @@ Transparently audits active worktrees, uncommitted modifications, and merged PRs
    - **Super-root (Level A):** Contains `.bare/` and worktree directories. Only use for managing worktrees; never run builds, tests, or code edits here.
    - **Worktree checkout (Level B):** Active branch directory (`main/` or `<issue>-<slug>/`). Run all edits, tests, and commits here.
 2. **Never Check Out `main` Directly:** Running `git checkout main` inside a feature worktree causes `fatal: 'main' is already checked out`. Use `worktree-sync.sh` instead.
-3. **Safe Teardown Context:** When finishing a branch, run `worktree-finish.sh` either inside the feature worktree (which navigates out automatically) or from `main/`.
+3. **Safe Teardown Context:** When finishing a branch, always navigate to `main/` first (e.g. `cd ../main`) before invoking `worktree-finish.sh <branch-or-worktree>`. Attempting teardown from inside the target worktree will fail with an error to prevent an orphaned working directory.
