@@ -91,6 +91,12 @@ fi
 # Create the worktree and branch
 git -C "$CONTAINER_ROOT" worktree add -b "$BRANCH" "$BRANCH" "${REMOTE}/main"
 
+# Install dependencies and activate git hooks if package.json exists
+if [ -f "${TARGET_DIR}/package.json" ]; then
+  echo "Installing dependencies and configuring git hooks in worktree..."
+  (cd "$TARGET_DIR" && npm install --prefer-offline --no-audit --no-fund)
+fi
+
 echo ""
 echo "=== Worktree Created Successfully ==="
 echo "Branch:    ${BRANCH}"

@@ -61,7 +61,7 @@ All branches and worktree directories follow the convention:
 Prompt your assistant:
 > *"Start working on issue #18"* or *"Scaffold a worktree for issue #18 github-pr"*
 
-**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper, and sets its working directory context to the newly created worktree.
+**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch, installs dependencies, and activates repository git hooks), and sets its working directory context to the newly created worktree.
 
 #### Under the Hood & Manual Fallback
 Under the hood, the assistant runs the companion script:
@@ -69,11 +69,12 @@ Under the hood, the assistant runs the companion script:
 ./.agents/skills/git-worktree/scripts/worktree-start.sh <issue-number> <slug>
 ```
 
-If you are working without an AI assistant, you can run the script above directly, or execute the raw Git commands from your workspace container super-root:
+If you are working without an AI assistant, you can run the script above directly, or execute the raw commands from your workspace container super-root:
 ```bash
 git fetch upstream --prune
 git worktree add -b <issue-number>-<slug> <issue-number>-<slug> upstream/main
 cd <issue-number>-<slug>
+npm install
 ```
 
 ---
