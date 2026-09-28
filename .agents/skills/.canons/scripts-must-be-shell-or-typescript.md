@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - ".agents/skills/**"
 inspect:
   - diff

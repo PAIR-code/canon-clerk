@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - "packages/**"
   - "specs/**"
   - "docs/architecture.md"

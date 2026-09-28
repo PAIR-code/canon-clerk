@@ -15,8 +15,13 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### 1.3 Core Principles
 1. **Zero Barrier to Entry:** A single sentence in a plain text Markdown file MUST be treated as a fully valid, enforceable canon.
-2. **Progressive Disclosure:** Advanced optimizations (deterministic path filtering, custom inspection scopes, and structured rubrics) are strictly OPTIONAL.
-3. **Clarity of Action:** The specification cleanly partitions contributor-directed guidance (blocking violations) from engine-directed synthesis (non-blocking enhancements).
+2. **Progressive Disclosure:** Advanced optimizations (deterministic path filtering via `governs:`, custom inspection scopes, and structured rubrics) are strictly OPTIONAL.
+3. **The What / Why / How Triad:** Canons scale along an intuitive cognitive architecture:
+   * **What (The Invariant):** The boundary condition that MUST be true (formulated using RFC 2119 keywords).
+   * **Why (The Rationale):** The underlying engineering rationale or Chesterton's Fence explaining why the invariant exists.
+   * **How (Guidance / Supplement):** Actionable contributor remediation instructions or automated clerk synthesis directives.
+   While Tier 1 canons require only the "What", mature canons naturally synthesize this triad.
+4. **Clarity of Action:** The specification cleanly partitions contributor-directed guidance (blocking violations) from engine-directed synthesis (non-blocking enhancements).
 
 ---
 
@@ -65,7 +70,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | :--- | :--- | :--- | :--- | :--- |
 | **`id`** | `string` | No | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
-| **`paths`** | `string[]` | No | 1. Frontmatter `paths:`<br>2. `["**/*"]` (all files) | Path globs used for deterministic file filtering. |
+| **`governs`** | `string[]` | No | 1. Frontmatter `governs:`<br>2. `["**/*"]` (all files) | Path globs defining the canon's jurisdiction, used for deterministic file filtering (Stage 0). |
 | **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to the Deep Auditor. |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 | **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files supplied to the Deep Auditor as grounding context. |
@@ -86,9 +91,10 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * If no heading exists, convert the derived `id` into Title Case:
      * Strips leading numeric prefixes if present (e.g. `canon-0001-prs-must-include-tests` $\rightarrow$ `"Prs Must Include Tests"`).
 
-3. **`paths` Derivation:**
+3. **`governs` Derivation (Deterministic Path Filtering):**
+   * If `governs` is specified in frontmatter, resolve globs as path patterns subject to the canon's jurisdiction.
    * If omitted, defaults to matching all repository files: `["**/*"]`.
-   * For scoped canons in `<scope>/.canons/`, patterns MUST be automatically scoped to `<scope>/**`.
+   * **Scoped Canons:** For scoped canons in `<scope>/.canons/`, patterns MUST be automatically scoped to `<scope>/**`.
 
 4. **`inspect` Derivation:**
    * If omitted, defaults to `["diff", "pr_title", "pr_body"]`.
@@ -135,22 +141,29 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
 
 ## 5. Directives & Reserved Keywords
 
+Canons scale across an intuitive **What / Why / How** cognitive triad:
+* **What (The Invariant):** The normative boundary condition specifying what MUST or MUST NOT be true (formulated with RFC 2119 keywords).
+* **Why (The Rationale):** The `Rationale` directive articulating *why* the invariant exists (Chesterton's Fence).
+* **How (Remediation / Synthesis):** The `Guidance` directive (contributor action required) or `Supplement` directive (automated clerk synthesis) detailing *how* to achieve compliance.
+
 Canon text may include reserved semantic directives to govern auditor behavior, convey author intent, and distinguish PR contributor/author obligations from automated clerk synthesis:
 
-| Directive | Target Actor | CI Role / Verdict | Normative Contract |
-| :--- | :--- | :--- | :--- |
-| **None** (Default) | Contributor | **`fail`** (Blocking) | PR violates the invariant. Auditor reports the violation and failure rationale with no further advice. |
-| **`Guidance`** | Contributor | **`fail`** (Blocking) | **Contributor action required.** Auditor instructs the contributor on actions needed to unblock the PR (e.g., pointing to required templates or documentation). |
-| **`Supplement`** | Clerk AI | **`warn`** (Non-blocking)* | **Automated synthesis.** Auditor fulfills the invariant by synthesizing the missing material directly into the review report. |
-| **`Rationale`** | Evaluator (Clerk AI) & Explainer (AI Assistant) | Informative (Explanatory context) | **Chesterton's Fence.** Explains *why* the canon exists if not self-evident. Evaluator AI uses it to disambiguate edge cases against author intent; auditor quotes or synthesizes it in check runs and reports to explain why the invariant is in place. |
+| Directive | Triad Role | Target Actor | CI Role / Verdict | Normative Contract |
+| :--- | :--- | :--- | :--- | :--- |
+| **None** (Default) | **What** | Contributor | **`fail`** (Blocking) | PR violates the invariant. Auditor reports the violation and failure rationale with no further advice. |
+| **`Rationale`** | **Why** | Evaluator (Clerk AI) & Explainer (AI Assistant) | Informative (Explanatory context) | **Chesterton's Fence.** Explains *why* the canon exists if not self-evident. Evaluator AI uses it to disambiguate edge cases against author intent; auditor quotes or synthesizes it in check runs and reports to explain why the invariant is in place. |
+| **`Guidance`** | **How** | Contributor | **`fail`** (Blocking) | **Contributor action required.** Auditor instructs the contributor on actions needed to unblock the PR (e.g., pointing to required templates or documentation). |
+| **`Supplement`** | **How** | Clerk AI | **`warn`** (Non-blocking)* | **Automated synthesis.** Auditor fulfills the invariant by synthesizing the missing material directly into the review report. |
 
 > **\*Graceful Fallback Requirement:**  
 > If a canon specifies a `Supplement` directive, but the Deep Auditor cannot reliably infer or synthesize the material (e.g., excessive diff complexity or ambiguous context), the implementation **MUST gracefully fall back to a blocking `fail`**, stating that automated synthesis was infeasible and that manual author action is required.
 
-> **Rationale Normative Constraints:**
+> **Rationale Normative Constraints & Advisory Guidance:**
 > To preserve clarity and prevent prompt dilution:
 > * **Conciseness Limit:** A `Rationale` SHOULD be a single sentence (or <= 30 words). Lengthy essays MUST be deferred to external documentation files or pull request descriptions.
 > * **Non-Duplication:** A `Rationale` MUST NOT merely restate the negative invariant rule (e.g., "Files must not be empty because empty files are disallowed"). It MUST articulate the underlying engineering rationale, architectural trade-off, or failure mode being prevented (Chesterton's Fence).
+> * **Citing Governing Standards & Precedents (ADVISORY):** When a canon invariant codifies an established domain practice, formal specification, or industry consensus, authors SHOULD explicitly cite the governing standard or precedent (e.g. RFC 2119, POSIX.1-2017, W3C WCAG, IEEE 754, SemVer 2.0.0, The Twelve-Factor App, or clig.dev) directly within the invariant or `Rationale:` directive.  
+>   *AI Evaluator Latent Anchoring:* Explicit standard citations act as high-affinity latent anchors for frontier reasoning models, activating pre-trained clusters of architectural intent, edge-case nuances, and industry consensus without verbose prompt overhead.
 
 ### 5.1 Syntax Forms
 
@@ -197,6 +210,7 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
    * **`Rationale`** $\rightarrow$ Ground evaluation in author intent, and formulate explanatory context in the response `rationale` field (or synthesized review feedback) explaining why the invariant exists.
 3. **Exegesis & Edge-Case Disambiguation:** The evaluator AI and downstream AI assistants MUST use `Rationale` as an interpretive lens during semantic exegesis:
    * **Edge-case disambiguation:** When diffs present borderline, ambiguous, or technically complex compliance scenarios, the evaluator AI disambiguates author intent against the stated `Rationale` rather than applying naive or superficial literalism.
+   * **Latent standard anchoring:** Citations to authoritative standards (e.g. POSIX, RFCs, SemVer, clig.dev) ground the model in established industry definitions, eliminating hallucinations or arbitrary stylistic debates during compliance screening.
    * **Explanatory check runs:** In check run reports and review comments, the auditor quotes or synthesizes the `Rationale` to explain to the PR author *why* the invariant is in place, grounding any violation or advisory in architectural context.
 4. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Guidance for author:**`, `### Guidance`, `Rationale:`, `**Rationale:**`, or `### Why this rule exists`) remain fully functional.
 
@@ -219,10 +233,10 @@ PRs modifying user-facing UI components MUST include a manual Test Script in the
 ```
 
 ### Tier 3: Cost-Optimized Canon
-A canon adding YAML frontmatter (`paths:`) purely to enable deterministic Stage 0 path filtering at zero token cost:
+A canon adding YAML frontmatter (`governs:`) purely to enable deterministic Stage 0 path filtering at zero token cost:
 ```markdown
 ---
-paths:
+governs:
   - "src/components/**"
   - "public/**"
 ---
@@ -234,7 +248,7 @@ A fully structured canon containing explicit sections (`## Rule`, `## Rationale`
 ```markdown
 ---
 title: Manual Test Script Required for UI Changes
-paths:
+governs:
   - "src/ui/**"
   - "frontend/**"
 tags:

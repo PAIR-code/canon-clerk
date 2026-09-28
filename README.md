@@ -103,7 +103,7 @@ Canon Clerk is designed to enforce your project's opinions, not to impose its ow
 
 * **Tier 1 (Minimal):** Plain Markdown assertions with no frontmatter or headers.
 * **Tier 2 (Keywords):** Adding inline `**Guidance:**` or `**Supplement:**` directives expands the range of possible clerk outputs.
-* **Tier 3 (Cost-Optimized):** Add YAML frontmatter (`paths:`) purely to enable Stage 0 deterministic path filtering at 0 token cost.
+* **Tier 3 (Cost-Optimized):** Add YAML frontmatter (`governs:`) purely to enable Stage 0 deterministic path filtering at 0 token cost.
 * **Tier 4 (Structured):** Multi-section canons with explicit `## Rule`, `## Guidance`, `## Supplement`, or `## Evaluation Criteria` for complex policies with structured rubrics.
 
 ### Directives: `Guidance` vs. `Supplement`
@@ -114,7 +114,7 @@ Canon Clerk distinguishes between contributor action items and automated AI synt
 * **`Supplement` (Clerk Synthesis $\rightarrow$ Non-blocking `warn`):** Instructs the Clerk to synthesize missing material directly into the review report. If synthesis is infeasible, it gracefully falls back to a blocking `fail`.
 
 > 📖 **Formal Specification:**  
-> For the complete canon grammar, metadata derivation fallbacks (`id`, `title`, `paths`, `inspect`, `tags`, `references`), directive semantics, and monorepo scoping rules, see **[SPEC.md](SPEC.md)**.
+> For the complete canon grammar, metadata derivation fallbacks (`id`, `title`, `governs`, `inspect`, `tags`, `references`), directive semantics, and monorepo scoping rules, see **[SPEC.md](SPEC.md)**.
 
 ---
 

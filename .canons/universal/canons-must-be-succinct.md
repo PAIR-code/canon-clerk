@@ -1,5 +1,5 @@
 ---
-paths:
+governs:
   - "**/.canons/**/*.md"
 inspect:
   - diff
