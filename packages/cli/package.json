@@ -1,0 +1,21 @@
+{
+  "name": "canon-clerk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Automated review gate enforcing project canons in CI and local workflows",
+  "bin": {
+    "canon-clerk": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/cli.ts src/index.ts --format esm --clean",
+    "dev": "tsup src/cli.ts src/index.ts --format esm --watch"
+  },
+  "dependencies": {
+    "@canon-clerk/schema": "*"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@canon-clerk/action",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GitHub Action runner and Check Run reporting for Canon Clerk",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "@canon-clerk/schema": "*"
+  },
+  "license": "Apache-2.0"
+}
