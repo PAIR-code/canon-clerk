@@ -28,9 +28,9 @@ By cascading from deterministic filters to lightweight screening and finally to 
 * **Goal:** Instantly discard canons whose file boundaries do not intersect with the changes in the pull request.
 * **Cost & Latency:** 0 tokens, near-instantaneous execution.
 * **Mechanism:**
-  * Compares the list of modified files against each canon's `paths:` globs.
+  * Compares the list of modified files against each canon's `governs:` (or legacy `paths:`) globs.
   * Honors monorepo package boundaries: a canon residing in `<scope>/.canons/` automatically inherits an implicit `<scope>/**` path filter.
-  * If a canon specifies no `paths:` filter and is located at root, it defaults to `["**/*"]` and always passes Stage 0.
+  * If a canon specifies no `governs:` or `paths:` filter and is located at root, it defaults to `["**/*"]` and always passes Stage 0.
 
 ### Stage 1: Screener (Fast LLM or System One Model)
 * **Goal:** Rapidly determine which remaining candidate canons are plausibly applicable based on high-level PR context.
