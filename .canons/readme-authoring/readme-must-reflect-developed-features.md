@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "**/*"
 references:
   - "README.md"

@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "**"
 inspect:
   - diff

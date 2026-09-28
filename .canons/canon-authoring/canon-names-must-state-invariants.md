@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "**/.canons/**/*.md"
 inspect:
   - diff

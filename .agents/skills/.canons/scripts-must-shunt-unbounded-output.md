@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "**/*.{sh,ts}"
 inspect:
   - diff

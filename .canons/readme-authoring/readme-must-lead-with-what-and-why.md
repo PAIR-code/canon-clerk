@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "README.md"
 inspect:
   - diff

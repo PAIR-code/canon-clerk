@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - ".agents/skills/**"
 inspect:
   - diff
