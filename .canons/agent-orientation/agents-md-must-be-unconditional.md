@@ -10,4 +10,4 @@ tags:
 
 Rationale: `AGENTS.md` is ingested unconditionally into every AI assistant interaction; inlining situational instructions dilutes prompt attention and duplicates on-demand skills.
 
-**Guidance:** Keep `AGENTS.md` strictly focused on global workspace orientation, layout constraints, and universal behavioral rules. If adding step-by-step procedures, tool arguments, or situational workflows, encapsulate them in dedicated on-demand skills or referenced documentation.
+**Guidance:** Keep `AGENTS.md` strictly focused on global workspace orientation, layout constraints, and unconditional behavioral rules. If adding step-by-step procedures, tool arguments, or situational workflows, encapsulate them in dedicated on-demand skills or referenced documentation.

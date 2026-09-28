@@ -4,7 +4,6 @@ governs:
 inspect:
   - diff
 tags:
-  - universal
   - canon-authoring
 ---
 When a canon invariant codifies an established domain practice, formal specification, or industry consensus, the canon MUST explicitly cite the governing standard or precedent.

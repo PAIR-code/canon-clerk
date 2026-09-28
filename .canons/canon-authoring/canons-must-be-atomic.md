@@ -4,7 +4,6 @@ governs:
 inspect:
   - diff
 tags:
-  - universal
   - canon-authoring
 ---
 Each canon MUST only address a single, cohesive concept for its invariant.

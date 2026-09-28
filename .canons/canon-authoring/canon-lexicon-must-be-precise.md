@@ -4,7 +4,6 @@ governs:
 inspect:
   - diff
 tags:
-  - universal
   - canon-authoring
 ---
 Canons MUST employ precise domain, architectural, and systems terminology where established concepts exist, avoiding colloquial or imprecise approximations.
