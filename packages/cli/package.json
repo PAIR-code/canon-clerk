@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Automated review gate enforcing project canons in CI and local workflows",
+  "engines": {
+    "node": "^24.0.0"
+  },
   "bin": {
     "canon-clerk": "./dist/cli.js"
   },
