@@ -11,7 +11,8 @@
     "test": "vitest run",
     "dev": "vitest",
     "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules",
-    "bump": "npm version --workspaces --include-workspace-root"
+    "bump": "npm version --workspaces --include-workspace-root",
+    "typecheck": "npm run typecheck --workspaces"
   },
   "license": "Apache-2.0",
   "devDependencies": {

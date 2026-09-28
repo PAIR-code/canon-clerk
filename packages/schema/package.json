@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
-    "dev": "tsup src/index.ts --format esm --dts --watch"
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "typecheck": "tsc --noEmit"
   },
   "license": "Apache-2.0"
 }
