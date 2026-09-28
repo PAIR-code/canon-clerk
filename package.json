@@ -17,8 +17,10 @@
     "bump": "npm version --workspaces --include-workspace-root",
     "typecheck": "npm run typecheck --workspaces",
     "lint:lockfile": "lockfile-lint --path package-lock.json --validate-https --allowed-hosts npm",
+    "check": "npm run lint:lockfile && npm run typecheck && npm run build && npm test",
     "precli": "npm run build -w packages/cli",
-    "cli": "canon-clerk"
+    "cli": "canon-clerk",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "license": "Apache-2.0",
   "devDependencies": {
