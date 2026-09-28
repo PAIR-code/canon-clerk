@@ -224,7 +224,7 @@ Prompt your assistant:
 Prompt your assistant:
 > *"Clean up merged worktree for issue #18"* or *"Teardown completed branches"*
 
-**What happens:** The assistant runs `worktree-finish.sh <branch>`, which safely escapes the directory, removes the worktree, force-deletes the local branch, deletes the fork tracking branch, and prunes metadata.
+**What happens:** The assistant navigates to the `main` worktree and runs `worktree-finish.sh <branch>`, which removes the worktree, force-deletes the local branch, deletes the fork tracking branch, and prunes metadata.
 
 ---
 
@@ -235,14 +235,14 @@ Under the hood, the assistant runs the companion scripts:
 # Audit active worktrees and merged PRs
 ./.agents/skills/git-worktree/scripts/worktree-doctor.sh
 
-# Teardown completed worktree
+# Teardown completed worktree (run from main)
 ./.agents/skills/git-worktree/scripts/worktree-finish.sh <issue-number>-<slug>
 ```
 
 If performing cleanup manually without the skill:
 ```bash
-# Return to the workspace container root
-cd ..
+# Switch to the main worktree
+cd ../main
 
 # Remove the worktree directory
 git worktree remove <issue-number>-<slug>
