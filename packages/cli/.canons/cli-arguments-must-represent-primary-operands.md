@@ -6,6 +6,6 @@ tags:
 ---
 CLI commands MUST accept their primary operational targets (such as file paths, canon directories, or commit references) as positional arguments rather than requiring named flags.
 
-Rationale: Forcing named flags for primary targets adds unnecessary typing overhead, violates POSIX utility conventions, and breaks standard shell workflow ergonomics like filename glob expansion.
+Rationale: Formulated in POSIX Utility Syntax Guidelines 4 & 5 and clig.dev ("Arguments for what, flags for how"), positional operands optimize shell expansion and eliminate redundant flag boilerplate.
 
 **Guidance:** Redesign the command signature so primary subjects are declared as positional arguments (e.g. `canon-clerk check <path>` instead of `canon-clerk check --path <path>`), reserving named flags for optional modifiers.

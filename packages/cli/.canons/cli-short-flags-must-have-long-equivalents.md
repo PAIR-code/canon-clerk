@@ -6,6 +6,6 @@ tags:
 ---
 Every single-character short flag supported by a CLI command MUST serve as an alias for a self-descriptive long-form flag; standalone short flags lacking long equivalents are forbidden.
 
-Rationale: Short flags optimize for interactive human typing speed, but automated scripts, CI pipelines, and documentation require self-documenting long-form flags for long-term maintainability.
+Rationale: Codified in POSIX Utility Syntax Guideline 3 and GNU getopt_long standards, long-form flags ensure automated scripts and CI workflows remain self-documenting, while short aliases preserve human typing speed.
 
 **Guidance:** Define the long-form flag (e.g. `--output`) as the primary option in the CLI definition, attaching the single-character flag (e.g. `-o`) purely as an alias.
