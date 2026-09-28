@@ -20,7 +20,6 @@ Key architectural concepts:
 
 - [Architecture & Evaluation Cascade](docs/architecture.md): Architectural specification of the three-stage evaluation cascade (Stage 0 Path Filter, Stage 1 Fast Screener, Stage 2 Deep Auditor) and the five-verdict matrix.
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
-- [Project Status & Roadmap](README.md#project-status--roadmap): Phased development roadmap, reference runner milestones, and tracking issues.
 
 ## Agent & Contributor Orientation
 

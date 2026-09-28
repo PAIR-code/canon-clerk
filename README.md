@@ -62,32 +62,6 @@ You do not need to wait for the automated CI runner to benefit from the canon co
 
 ---
 
-## Project Status & Roadmap
-
-Canon Clerk is evolving through a phased implementation roadmap:
-
-```mermaid
-flowchart LR
-    P1["Phase 1: Foundation<br/>(Complete)"] --> P2["Phase 2: Reference Engine<br/>(In Active Development)"] --> P3["Phase 3: Turnkey Ecosystem<br/>(Roadmap)"]
-```
-
-### Phase 1: Specification & Core Corpus *(Complete)*
-- [x] **Normative Specification:** Formal canon grammar, metadata derivation fallbacks, directive semantics, and progressive tiers codified in [`SPEC.md`](SPEC.md).
-- [x] **Dogfood Canon Corpus:** 48 production-grade canons across 5 domain packs governing CLI ergonomics, canon authoring, AI agent skills, Conventional Commits, and repo governance.
-- [x] **Agent Orientation:** Curated machine-readable entry points in [`llms.txt`](llms.txt) and [`AGENTS.md`](AGENTS.md).
-
-### Phase 2: Reference Engine & CLI Runner *(In Active Development)*
-- [ ] **TypeScript Monorepo Foundation:** Scaffold `@canon-clerk/schema`, `canon-clerk` CLI, and `@canon-clerk/action` workspaces with Vitest and tsup ([#7](https://github.com/PAIR-code/canon-clerk/issues/7)).
-- [ ] **Discovery & Inspection CLI:** Fast, zero-token deterministic query suite (`canon-clerk list`) supporting path filtering, reverse lookups, and graph health diagnostics ([#38](https://github.com/PAIR-code/canon-clerk/issues/38)).
-- [ ] **Multi-Stage Evaluation Runner:** Reference implementation of Stage 0 (path filtering), Stage 1 (screening), and Stage 2 (deep reasoning audit) ([docs/architecture.md](docs/architecture.md)).
-
-### Phase 3: Turnkey Distribution & Ecosystem *(Roadmap)*
-- [ ] **Zero-Friction Preset Adoption:** Declarative `.canons.yaml` configuration and ephemeral CLI `--preset` execution without repository pollution ([#75](https://github.com/PAIR-code/canon-clerk/issues/75)).
-- [ ] **Official GitHub Action:** Turnkey `pair-code/canon-clerk@v1` distribution for native GitHub Actions CI integration and Check Run reporting.
-- [ ] **Pack Registry & Community Presets:** Centralized distribution for reusable domain packs.
-
----
-
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](docs/contributing.md) and [Development Workflow](docs/development-workflow.md) for details on how to get started.
