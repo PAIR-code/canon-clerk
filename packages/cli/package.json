@@ -21,6 +21,7 @@
     "start": "node ./dist/cli.js"
   },
   "dependencies": {
+    "@canon-clerk/core": "*",
     "@canon-clerk/schema": "*"
   },
   "license": "Apache-2.0"
