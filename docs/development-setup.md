@@ -93,7 +93,53 @@ git worktree add -B main main upstream/main
 
 ---
 
-## 3. Setting Up GitHub CLI (`gh`)
+## 3. Node.js & Toolchain Setup
+
+Canon Clerk is built as a TypeScript monorepo using npm workspaces, `tsup`, and `vitest`.
+
+### Prerequisites: Node.js 24
+
+The repository strictly requires **Node.js 24 (`^24.0.0`)** and npm (enforced via `.npmrc` with `engine-strict=true` and `package.json` engines).
+
+If you use a Node version manager such as `nvm`:
+
+```bash
+nvm install 24
+nvm use 24
+```
+
+Verify your active version:
+
+```bash
+node -v   # Should output v24.x.x
+npm -v
+```
+
+### Monorepo Installation & Git Hook Activation
+
+Always run `npm install` inside a worktree directory (e.g. `main/` or a feature worktree), **never** in the workspace container super-root:
+
+```bash
+cd main
+npm install
+```
+
+Running `npm install`:
+1. **Links workspaces:** Resolves and cross-links monorepo workspace packages (`@canon-clerk/schema`, `@canon-clerk/cli`, `@canon-clerk/action`).
+2. **Installs development dependencies:** Installs the compiler, bundler (`tsup`), test runner (`vitest`), and static analysis tools.
+3. **Activates Git hooks:** Automatically executes the `prepare` lifecycle script, configuring Git's `core.hooksPath` to `.githooks` so that the local `pre-push` verification hook runs automatically before every `git push`.
+
+### Validating Your Setup
+
+Verify that the toolchain is working and all tests pass:
+
+```bash
+npm run check
+```
+
+---
+
+## 4. Setting Up GitHub CLI (`gh`)
 
 The [GitHub CLI](https://cli.github.com/) (`gh`) is recommended for managing issues, pull requests, and reviews directly from your terminal.
 
@@ -126,7 +172,7 @@ Recommended solution: Open a **remote desktop session** in which to run your `gh
 
 ---
 
-## 4. Working with AI Coding Assistants
+## 5. Working with AI Coding Assistants
 
 If you use AI coding assistants (such as Antigravity, Cursor, Claude Code, or Copilot):
 

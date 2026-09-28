@@ -142,6 +142,38 @@ When you or your AI assistant encounter an unrelated bug, missing configuration,
 1. **Shunt it (Recommended):** Immediately file a new tracking issue documenting the problem, discovery context, and proposed fix. Keep your current branch and PR strictly focused on its original mandate.
 2. **Upstream Chase (Deliberate Expansion):** If the out-of-band change is genuinely coupled or strictly necessary for the current task to land, deliberately expand the mandate by updating the motivating Issue text and PR description *before* committing the change.
 
+### Fast Iteration & Development
+
+To test the CLI binary while iterating on code without running a manual build step:
+
+```bash
+npm run cli -- <args>
+```
+
+The `npm run cli` script leverages `precli` to automatically rebuild `@canon-clerk/cli` incrementally before invoking `./packages/cli/dist/cli.js`.
+
+For focused testing and development of individual packages:
+- `npm run dev`: Run `tsup` build in watch mode
+- `npm test`: Run the Vitest test suite
+- `npm run typecheck`: Run TypeScript typechecking across workspaces
+
+### Pre-Push Verification (`npm run check`)
+
+Before pushing branches or opening PRs, run the comprehensive shift-left validation suite:
+
+```bash
+npm run check
+```
+
+This single command deterministically executes the local equivalent of the CI pipeline across all monorepo workspaces:
+- `npm run lint:lockfile`: Audits `package-lock.json` against untrusted registry URLs.
+- `npm run typecheck`: Runs static typechecking across all workspaces (`tsc --noEmit`).
+- `npm run build`: Bundles distribution packages with `tsup`.
+- `npm test`: Runs all unit and integration tests via `vitest`.
+
+> [!NOTE]
+> The repository includes a Git `pre-push` hook configured in `.githooks/pre-push` (installed automatically during `npm install`). If you attempt to `git push`, the hook will execute `npm run check` automatically, catching any failures locally before continuous integration runs.
+
 ---
 
 ## 4. Submitting a Pull Request

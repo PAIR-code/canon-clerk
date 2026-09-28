@@ -31,6 +31,6 @@ Key architectural concepts:
 
 ## Optional
 
-- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, and GitHub CLI configuration.
+- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, Node.js toolchain, and GitHub CLI configuration.
 - [Contributing Guide](docs/contributing.md): Contribution policies, Google Contributor License Agreement (CLA), and squash-merge expectations.
 - [Project Readme](README.md): Human-oriented project homepage, architectural problem statement, progressive disclosure tiers, and overview.
