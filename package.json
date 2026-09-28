@@ -1,0 +1,33 @@
+{
+  "name": "canon-clerk-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^24.0.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/schema && npm run build -w packages/core && npm run build -w packages/cli && npm run build -w packages/action",
+    "test": "vitest run",
+    "dev": "vitest",
+    "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules",
+    "bump": "npm version --workspaces --include-workspace-root",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint:lockfile": "lockfile-lint --path package-lock.json --validate-https --allowed-hosts npm",
+    "check": "npm run lint:lockfile && npm run typecheck && npm run build && npm test",
+    "precli": "npm run build -w packages/cli",
+    "cli": "canon-clerk",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^24.0.9",
+    "lockfile-lint": "^4.14.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

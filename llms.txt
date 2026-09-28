@@ -21,6 +21,7 @@ Key architectural concepts:
 
 - [Architecture & Evaluation Cascade](docs/architecture.md): Architectural specification of the three-stage evaluation cascade (Stage 0 Path Filter, Stage 1 Fast Screener, Stage 2 Deep Auditor) and the five-verdict matrix.
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
+- [Workspace Packages](packages/): TypeScript monorepo packages comprising schema definitions, core evaluation engine, CLI tooling, and GitHub Action runner.
 
 ## Agent & Contributor Orientation
 
@@ -30,6 +31,6 @@ Key architectural concepts:
 
 ## Optional
 
-- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, and GitHub CLI configuration.
+- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, Node.js toolchain, and GitHub CLI configuration.
 - [Contributing Guide](docs/contributing.md): Contribution policies, Google Contributor License Agreement (CLA), and squash-merge expectations.
 - [Project Readme](README.md): Human-oriented project homepage, architectural problem statement, progressive disclosure tiers, and overview.

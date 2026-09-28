@@ -20,7 +20,7 @@ All scripts reside in `.agents/skills/git-worktree/scripts/` (executable from an
 
 ### 1. `worktree-start.sh <issue-number> <slug>`
 
-Scaffolds a new feature worktree branched off `upstream/main`:
+Scaffolds a new feature worktree branched off `upstream/main`, installs dependencies, and activates repository git hooks:
 
 ```bash
 ./.agents/skills/git-worktree/scripts/worktree-start.sh 18 github-pr

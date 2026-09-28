@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Environment variables & local credentials
+.env
+.env.*
+!.env.example
+
+# IDE and OS metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
