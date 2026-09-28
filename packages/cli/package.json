@@ -16,7 +16,9 @@
   "scripts": {
     "build": "tsup src/cli.ts src/index.ts --format esm --clean",
     "dev": "tsup src/cli.ts src/index.ts --format esm --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prestart": "npm run build",
+    "start": "node ./dist/cli.js"
   },
   "dependencies": {
     "@canon-clerk/schema": "*"

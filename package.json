@@ -16,7 +16,9 @@
     "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules",
     "bump": "npm version --workspaces --include-workspace-root",
     "typecheck": "npm run typecheck --workspaces",
-    "lint:lockfile": "lockfile-lint --path package-lock.json --validate-https --allowed-hosts npm"
+    "lint:lockfile": "lockfile-lint --path package-lock.json --validate-https --allowed-hosts npm",
+    "precli": "npm run build -w packages/cli",
+    "cli": "canon-clerk"
   },
   "license": "Apache-2.0",
   "devDependencies": {
