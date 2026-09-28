@@ -8,4 +8,4 @@ CLI flags configuring provider- or service-specific operational options (such as
 
 Rationale: Adhering to multi-provider SDK conventions (e.g. OpenTelemetry, AWS CLI) and clig.dev §Arguments and flags, generic names like `--api-key` presume a single vendor, forcing breaking deprecations when additional integrations arrive.
 
-**Guidance:** Prefix provider-specific flags and environment variable fallbacks with the service slug (e.g. `--gemini-api-key` / `GEMINI_API_KEY`, `--github-token` / `GITHUB_TOKEN`), reserving generic flags strictly for universal, vendor-agnostic abstractions.
+**Guidance:** Prefix provider-specific flags and environment variable fallbacks with the service slug (e.g. `--gemini-api-key` / `GEMINI_API_KEY`, `--github-token` / `GITHUB_TOKEN`), reserving generic flags strictly for common, vendor-agnostic abstractions.

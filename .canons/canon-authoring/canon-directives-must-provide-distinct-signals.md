@@ -4,7 +4,6 @@ governs:
 inspect:
   - diff
 tags:
-  - universal
   - canon-authoring
 ---
 Each directive in a canon (`Rationale`, `Guidance`, `Supplement`) MUST provide distinct, non-redundant signal tailored to its target consumer rather than paraphrasing the invariant rule.

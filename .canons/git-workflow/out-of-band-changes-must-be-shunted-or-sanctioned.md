@@ -5,6 +5,8 @@ inspect:
   - diff
   - pr_body
   - linked_issues
+tags:
+  - git-workflow
 ---
 A pull request MUST only implement changes sanctioned by its motivating issue and PR description. Out-of-band changes, drive-by refactorings, or unrelated improvements MUST be shunted to separate follow-up issues OR folded into the current workstream by deliberate expansion of the mandate via upstream chase to the motivating issue text.
 

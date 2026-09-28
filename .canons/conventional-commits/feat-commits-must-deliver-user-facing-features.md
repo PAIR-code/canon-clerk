@@ -5,6 +5,8 @@ inspect:
   - diff
   - pr_title
   - commit_messages
+tags:
+  - conventional-commits
 ---
 Pull request titles and commit messages using the `feat` Conventional Commit type MUST describe changes that introduce new user-facing functionality. Pull requests and commits that introduce internal changes (such as developer tooling, agent skills, CI automation, test harnesses, or refactors) MUST NOT use the `feat` type.
 

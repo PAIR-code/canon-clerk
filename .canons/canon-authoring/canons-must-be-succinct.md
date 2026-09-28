@@ -4,7 +4,6 @@ governs:
 inspect:
   - diff
 tags:
-  - universal
   - canon-authoring
 ---
 Each canon MUST be succinct, stating each invariant rule, engineering rationale, and remediation instruction with maximal information density and zero repetition.

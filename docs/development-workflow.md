@@ -135,7 +135,7 @@ Feel free to make granular, WIP, or exploratory commits on your feature branch w
 
 ### Scope Discipline: Shunt vs. Upstream Chase
 
-To preserve atomic commits, full historical provenance, and clean squash-merge changelogs, pull requests must strictly adhere to their motivating issue mandate (enforced via [`.canons/universal/out-of-band-changes-must-be-shunted-or-sanctioned.md`](../.canons/universal/out-of-band-changes-must-be-shunted-or-sanctioned.md)).
+To preserve atomic commits, full historical provenance, and clean squash-merge changelogs, pull requests must strictly adhere to their motivating issue mandate (enforced via [`.canons/git-workflow/out-of-band-changes-must-be-shunted-or-sanctioned.md`](../.canons/git-workflow/out-of-band-changes-must-be-shunted-or-sanctioned.md)).
 
 When you or your AI assistant encounter an unrelated bug, missing configuration, or cleanup opportunity mid-task, avoid folding the drive-by fix into the in-flight PR. Instead, employ one of two disciplined escape hatches:
 
