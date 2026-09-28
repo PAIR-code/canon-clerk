@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "**/AGENTS.md"
 inspect:
   - diff

@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "packages/**"
   - "specs/**"
   - "docs/architecture.md"

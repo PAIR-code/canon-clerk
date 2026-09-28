@@ -1,5 +1,5 @@
 ---
-governs:
+triggers:
   - "llms.txt"
 references:
   - "llms.txt"

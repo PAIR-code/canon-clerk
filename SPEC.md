@@ -15,7 +15,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### 1.3 Core Principles
 1. **Zero Barrier to Entry:** A single sentence in a plain text Markdown file MUST be treated as a fully valid, enforceable canon.
-2. **Progressive Disclosure:** Advanced optimizations (deterministic path filtering via `governs:`, custom inspection scopes, and structured rubrics) are strictly OPTIONAL.
+2. **Progressive Disclosure:** Advanced optimizations (deterministic path filtering via `triggers:`, custom inspection scopes, and structured rubrics) are strictly OPTIONAL.
 3. **The What / Why / How Triad:** Canons scale along an intuitive cognitive architecture:
    * **What (The Invariant):** The boundary condition that MUST be true (formulated using RFC 2119 keywords).
    * **Why (The Rationale):** The underlying engineering rationale or Chesterton's Fence explaining why the invariant exists.
@@ -70,7 +70,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | :--- | :--- | :--- | :--- | :--- |
 | **`id`** | `string` | No | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
-| **`governs`** | `string[]` | No | 1. Frontmatter `governs:`<br>2. `["**/*"]` (all files) | Path globs defining the canon's jurisdiction, used for deterministic file filtering (Stage 0). |
+| **`triggers`** | `string[]` | No | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs defining the pull request file modifications that activate this canon for evaluation (Stage 0). |
 | **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to the Deep Auditor. |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 | **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files supplied to the Deep Auditor as grounding context. |
@@ -91,8 +91,8 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * If no heading exists, convert the derived `id` into Title Case:
      * Strips leading numeric prefixes if present (e.g. `canon-0001-prs-must-include-tests` $\rightarrow$ `"Prs Must Include Tests"`).
 
-3. **`governs` Derivation (Deterministic Path Filtering):**
-   * If `governs` is specified in frontmatter, resolve globs as path patterns subject to the canon's jurisdiction.
+3. **`triggers` Derivation (Deterministic Path Filtering):**
+   * If `triggers` is specified in frontmatter, resolve globs as path patterns that activate the canon when matched by any modified file in the pull request.
    * If omitted, defaults to matching all repository files: `["**/*"]`.
    * **Scoped Canons:** For scoped canons in `<scope>/.canons/`, patterns MUST be automatically scoped to `<scope>/**`.
 
@@ -233,10 +233,10 @@ PRs modifying user-facing UI components MUST include a manual Test Script in the
 ```
 
 ### Tier 3: Cost-Optimized Canon
-A canon adding YAML frontmatter (`governs:`) purely to enable deterministic Stage 0 path filtering at zero token cost:
+A canon adding YAML frontmatter (`triggers:`) purely to enable deterministic Stage 0 path filtering at zero token cost:
 ```markdown
 ---
-governs:
+triggers:
   - "src/components/**"
   - "public/**"
 ---
@@ -248,7 +248,7 @@ A fully structured canon containing explicit sections (`## Rule`, `## Rationale`
 ```markdown
 ---
 title: Manual Test Script Required for UI Changes
-governs:
+triggers:
   - "src/ui/**"
   - "frontend/**"
 tags:
