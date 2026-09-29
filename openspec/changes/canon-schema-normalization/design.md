@@ -7,10 +7,10 @@
 ## Goals / Non-Goals
 
 **Goals:**
-- Provide complete TypeScript types for frontmatter, derived metadata, cognitive sections (What, When, Why, How), and the unified `Canon` entity.
+- Provide complete TypeScript types for metadata, cognitive directives (What, When, Why, How), and the unified flat `Canon` entity.
 - Implement pure normalization functions (`parseCanon(content, options)`) that take in-memory markdown strings and optional path context to derive fully resolved `Canon` domain entities.
 - Implement Section 4.2 derivation rules for `id`, `title`, `triggers`, `inspect`, `tags`, and `references`.
-- Parse cognitive directives (`Exception`, `Rationale`, `Remediation`) into structured AST nodes.
+- Parse cognitive directives (`Exception`, `Rationale`, `Remediation`) into structured properties directly on `Canon`.
 
 **Non-Goals:**
 - Filesystem scanning (`node:fs`), directory walking, or glob resolution against files on disk (managed by `@canon-clerk/core`).
@@ -28,13 +28,12 @@
 * **Rationale:** Robust handling of YAML mappings, scalar coercion, comments, and syntax diagnostics without native bindings or I/O.
 * **Alternatives Considered:** Custom regex frontmatter parsing. Rejected because hand-rolled regex easily breaks on multi-line lists, nested objects, and comments.
 
-### 3. Progressive AST Decomposition for Cognitive Tetrad
-* **Decision:** Parse the markdown body into structured sections:
-  * `invariant`: The primary invariant statement (What).
-  * `exceptions`: An array of zero or more discrete permissible deviation conditions (`exceptions: string[]`, evaluated as independent logical ORs).
-  * `rationale`: Precedent reasoning (`Rationale: ...`).
-  * `remediation`: Actionable instructions for contributors (`Remediation: ...` or `**Remediation:** ...`).
-* **Rationale:** Reflects the living `SPEC.md` What/When/Why/How tetrad. Enables downstream Deep Auditor and CLI formatters to selectively access directives without ad-hoc string searching. Discrete exceptions are collected into an array for independent logical OR evaluation per SPEC.md Section 5.
+### 3. Unified Flat Canon Domain Entity
+* **Decision:** Represent the parsed canon as a unified flat `Canon` domain entity without arbitrary enclosures:
+  * Identity & Metadata: `id`, `title`, `triggers`, `inspect`, `tags`, `references`.
+  * Cognitive Tetrad: `invariant` (What), `exceptions: string[]` (When), `rationale` (Why), `remediation` (How).
+  * Raw Text & Provenance: `rawBody`, `rawFrontmatter` (`Record<string, unknown> | undefined`), `rawContent`, `filePath`, `scope`.
+* **Rationale:** Eliminates arbitrary stratification between metadata and body directives. Enables downstream consumers (CLI, Check Runs, Deep Auditor prompt builders) to access attributes directly (`canon.id`, `canon.invariant`, `canon.triggers`) without nested indirection. Discrete exceptions are collected into an array for independent logical OR evaluation per SPEC.md Section 5.
 
 ### 4. Metadata Derivation Precedence Matrix
 * **Decision:** Implement exact resolution hierarchy matching `SPEC.md` Section 4.2:
