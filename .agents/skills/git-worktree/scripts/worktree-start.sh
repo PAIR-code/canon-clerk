@@ -101,9 +101,6 @@ if [ -z "$MAIN_WORKTREE" ] || [ ! -d "$MAIN_WORKTREE" ]; then
   MAIN_WORKTREE="${CONTAINER_ROOT}/main"
 fi
 
-# Configure git hooks explicitly in the new worktree
-git -C "$TARGET_DIR" config core.hooksPath .githooks
-
 # Set up dependencies, build workspace packages, and run smoke tests if package.json exists
 if [ -f "${TARGET_DIR}/package.json" ]; then
   if [ -d "${MAIN_WORKTREE}/node_modules" ]; then

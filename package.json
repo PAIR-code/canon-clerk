@@ -20,8 +20,7 @@
     "lint:specs": "openspec validate --all --strict",
     "check": "npm run lint:lockfile && npm run lint:specs && npm run typecheck && npm run build && npm test",
     "precli": "npm run build -w packages/cli",
-    "cli": "canon-clerk",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "cli": "canon-clerk"
   },
   "license": "Apache-2.0",
   "devDependencies": {

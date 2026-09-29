@@ -115,7 +115,7 @@ node -v   # Should output v24.x.x
 npm -v
 ```
 
-### Monorepo Installation & Git Hook Activation
+### Monorepo Installation
 
 Always run `npm install` inside a worktree directory (e.g. `main/` or a feature worktree), **never** in the workspace container super-root:
 
@@ -127,7 +127,6 @@ npm install
 Running `npm install`:
 1. **Links workspaces:** Resolves and cross-links monorepo workspace packages (`@canon-clerk/schema`, `@canon-clerk/cli`, `@canon-clerk/action`).
 2. **Installs development dependencies:** Installs the compiler, bundler (`tsup`), test runner (`vitest`), and static analysis tools.
-3. **Activates Git hooks:** Automatically executes the `prepare` lifecycle script, configuring Git's `core.hooksPath` to `.githooks` so that the local `pre-push` verification hook runs automatically before every `git push`.
 
 ### Validating Your Setup
 

@@ -61,7 +61,7 @@ All branches and worktree directories follow the convention:
 Prompt your assistant:
 > *"Start working on issue #18"* or *"Scaffold a worktree for issue #18 github-pr"*
 
-**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch, installs dependencies, and activates repository git hooks), and sets its working directory context to the newly created worktree.
+**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch, seeds dependencies, builds packages, and runs smoke tests), and sets its working directory context to the newly created worktree.
 
 #### Under the Hood & Manual Fallback
 Under the hood, the assistant runs the companion script:
@@ -172,9 +172,6 @@ This single command deterministically executes the local equivalent of the CI pi
 - `npm run typecheck`: Runs static typechecking across all workspaces (`tsc --noEmit`).
 - `npm run build`: Bundles distribution packages with `tsup`.
 - `npm test`: Runs all unit and integration tests via `vitest`.
-
-> [!NOTE]
-> The repository includes a Git `pre-push` hook configured in `.githooks/pre-push` (installed automatically during `npm install`). If you attempt to `git push`, the hook will execute `npm run check` automatically, catching any failures locally before continuous integration runs.
 
 ### Spec-Driven Development (SDD) with OpenSpec
 
