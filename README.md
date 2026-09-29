@@ -57,18 +57,18 @@ Canon Clerk addresses the friction points where static code analysis ends and se
 
 ### 4. Open-Source Project Leads
 * **The Challenge:** Onboarding external contributors is exhausting when review feedback feels subjective, unwritten, or gatekeep-y ("we don't do it that way here"), burning maintainer goodwill and frustrating new contributors.
-* **With Canon Clerk:** Transparent, objective, self-service guardrails committed right in the repository. Contributors see expectations upfront, and CI provides actionable remediation (`Guidance`) or automated defect repairs (`Supplement`).
+* **With Canon Clerk:** Transparent, objective, self-service guardrails committed right in the repository. Contributors see expectations upfront, and CI provides actionable remediation (`Guidance`) when invariants are violated.
 
 ---
 
 ## The Canon Corpus
 
-While the automated reference runner is in active development, Canon Clerk already provides a production-grade corpus of **56 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)). These rule packs are ready to explore, adapt, and use today:
+While the automated reference runner is in active development, Canon Clerk already provides a production-grade corpus of **55 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)). These rule packs are ready to explore, adapt, and use today:
 
 | Domain Pack | Path | Count | Governed Conventions |
 | :--- | :--- | :--- | :--- |
 | 🛠️ **CLI Ergonomics** | [`packages/cli/.canons/`](packages/cli/.canons/) | 20 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
-| 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 12 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
+| 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 11 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
 | 🤖 **Agent Skills** | [`.agents/skills/.canons/`](.agents/skills/.canons/) | 9 | Runtime script standards for AI agent skills: execution targets, command echo traces, unbounded output shunting, and POSIX compliance. |
 | 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 5 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps/vaporware, synchronization with user-facing features, responsive dark/light hero banners, and shunting architecture to `docs/`. |
 | 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |

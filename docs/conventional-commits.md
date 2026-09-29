@@ -22,8 +22,8 @@ GitHub labels in `PAIR-code/canon-clerk` directly mirror this matrix, enabling s
 
 | Surface | Recommended Type & Scope | SemVer Impact | Description & Example |
 | :--- | :--- | :--- | :--- |
-| **Specifications (OpenSpec / RFCs)** | `spec(<surface>):` | None (Non-releasing) | Architectural contracts and OpenSpec files.<br>`spec(cli): define plugin hooks interface`<br>`spec(canons): draft Guidance vs Supplement semantics` |
-| **Core Auditor Engine** | `feat(core):`, `fix(core):` | Minor / Patch | Core analysis, prompt assembly, and screening logic.<br>`feat(core): support inline **Supplement:** markers` |
+| **Specifications (OpenSpec / RFCs)** | `spec(<surface>):` | None (Non-releasing) | Architectural contracts and OpenSpec files.<br>`spec(cli): define plugin hooks interface`<br>`spec(canons): define Exception and Guidance semantics` |
+| **Core Auditor Engine** | `feat(core):`, `fix(core):` | Minor / Patch | Core analysis, prompt assembly, and screening logic.<br>`feat(core): support inline **Guidance:** markers` |
 | **CLI Package** | `feat(cli):`, `fix(cli):` | Minor / Patch | CLI binary, arguments, flags, and local execution.<br>`feat(cli): add --quiet flag and json output` |
 | **GitHub Action Package** | `feat(action):`, `fix(action):` | Minor / Patch | Action entrypoint, inputs, and Check Run posting.<br>`fix(action): handle empty diffs gracefully` |
 | **Dogfood Canons & Canon Spec** | `chore(canons):`, `spec(canons):` | None | Canon specification ([`SPEC.md`](../SPEC.md)) and dogfood canons ([`.canons/`](../.canons/)).<br>`chore(canons): require manual test plan for ui` |

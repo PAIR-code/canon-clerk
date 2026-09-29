@@ -11,8 +11,8 @@ Key architectural concepts:
 
 ## The Canon Standard
 
-- [The Canon Corpus](README.md#the-canon-corpus): Index and overview of 56 production-grade domain-scoped canons governing CLI ergonomics, canon authoring, visual identity, AI skills, and commit standards.
-- [Canon Format Specification](SPEC.md): Complete normative grammar, What/When/Why/How tetrad, metadata derivation rules (id, title, triggers, inspect, tags, references), directive contracts (Exception, Guidance, Supplement, Rationale), and progressive disclosure tiers.
+- [The Canon Corpus](README.md#the-canon-corpus): Index and overview of 55 production-grade domain-scoped canons governing CLI ergonomics, canon authoring, visual identity, AI skills, and commit standards.
+- [Canon Format Specification](SPEC.md): Complete normative grammar, What/When/Why/How tetrad, metadata derivation rules (id, title, triggers, inspect, tags, references), directive contracts (Exception, Guidance, Rationale), and progressive disclosure tiers.
 - [Canon Authoring Canons](.canons/canon-authoring/): Reusable, project-agnostic exemplars tagged `canon-authoring` codifying canon-authoring invariants (naming, atomicity, falsifiability, semantic scope, succinctness, and directive contracts).
 - [README Authoring Canons](.canons/readme-authoring/): Reusable, project-agnostic exemplars tagged `readme-authoring` codifying landing documentation invariants (orientation, feature parity, roadmap omission, responsive hero banners, and architecture shunting).
 - [Visual Identity Canons](.canons/visual-identity/): Reusable exemplars tagged `visual-identity` codifying brand iconography isolation and alpha transparency.
@@ -21,7 +21,7 @@ Key architectural concepts:
 
 ## The Clerk Runner
 
-- [Architecture & Evaluation Cascade](docs/architecture.md): Architectural specification of the three-stage evaluation cascade (Stage 0 Path Filter, Stage 1 Fast Screener, Stage 2 Deep Auditor) and the five-verdict matrix.
+- [Architecture & Evaluation Cascade](docs/architecture.md): Architectural specification of the three-stage evaluation cascade (Stage 0 Path Filter, Stage 1 Fast Screener, Stage 2 Deep Auditor) and the four-verdict matrix.
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
 - [Workspace Packages](packages/): TypeScript monorepo packages comprising schema definitions, core evaluation engine, CLI tooling, and GitHub Action runner.
 - [Living Specifications](openspec/specs/): Formal architectural specifications and interface contracts for the evaluation engine, CLI, and GitHub Action.
