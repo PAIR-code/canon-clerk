@@ -67,6 +67,10 @@
   color: "0366D6"
   description: "External dependency updates and version bumps."
 
+- name: "scope: deps-dev"
+  color: "0366D6"
+  description: "External development dependency updates and version bumps."
+
 - name: "scope: readme"
   color: "D4C5F9"
   description: "Top-level project README.md and repository landing documentation."

@@ -112,7 +112,7 @@ git -C main push origin main
 Canon Clerk strictly enforces the [Conventional Commits](https://www.conventionalcommits.org/) specification for all commit messages and PR titles.
 
 To maintain clarity across a growing monorepo while supporting **Spec-Driven Development (SDD)**, our convention follows a strict orthogonal matrix:
-* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(readme)`.
+* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(deps-dev)`, `(readme)`.
 * **The Type is ALWAYS the Intent:** `spec`, `feat`, `fix`, `test`, `docs`, `chore`, `build`, `ci`, `refactor`, `perf`, `revert`.
 
 ```text

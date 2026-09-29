@@ -42,6 +42,7 @@ jobs:
             agents
             spec
             deps
+            deps-dev
             readme
           requireScope: false
           # Conventional Commits regex pattern supporting optional scopes and breaking change indicator (!)
