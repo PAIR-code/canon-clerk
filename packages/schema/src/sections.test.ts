@@ -18,9 +18,9 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
     expect(sections.invariant).toBe(
       'Brand icon artwork MUST isolate the subject on an explicit white background (#ffffff) rather than rendering transparent negative space.'
     );
-    expect(sections.exception).toBe(
-      'Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.'
-    );
+    expect(sections.exceptions).toEqual([
+      'Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.',
+    ]);
     expect(sections.rationale).toBe(
       "In GitHub's theme engine, transparent SVGs render against dynamic canvas tones."
     );
@@ -45,9 +45,28 @@ Split into multiple canons.`;
     const sections = parseSections(raw);
 
     expect(sections.invariant).toBe('Each canon MUST be atomic.');
-    expect(sections.exception).toBe('Only when bundling closely coupled sub-rules.');
+    expect(sections.exceptions).toEqual(['Only when bundling closely coupled sub-rules.']);
     expect(sections.rationale).toBe('Simplifies reasoning for models.');
     expect(sections.remediation).toBe('Split into multiple canons.');
+  });
+
+  it('parses multiple discrete Exception clauses into separate array elements', () => {
+    const raw = `All functions MUST have 100% test coverage.
+
+Exception: Legacy modules in \`legacy/\` MAY have 80% coverage.
+
+Exception: Prototype files in \`scratch/\` MAY omit tests IFF approved by tech lead.
+
+Rationale: Preserves quality without blocking rapid prototyping.`;
+
+    const sections = parseSections(raw);
+
+    expect(sections.invariant).toBe('All functions MUST have 100% test coverage.');
+    expect(sections.exceptions).toEqual([
+      'Legacy modules in `legacy/` MAY have 80% coverage.',
+      'Prototype files in `scratch/` MAY omit tests IFF approved by tech lead.',
+    ]);
+    expect(sections.rationale).toBe('Preserves quality without blocking rapid prototyping.');
   });
 
   it('handles Tier 1 canons containing only the invariant statement', () => {
@@ -55,7 +74,7 @@ Split into multiple canons.`;
     const sections = parseSections(raw);
 
     expect(sections.invariant).toBe('All PRs MUST include automated tests.');
-    expect(sections.exception).toBeUndefined();
+    expect(sections.exceptions).toEqual([]);
     expect(sections.rationale).toBeUndefined();
     expect(sections.remediation).toBeUndefined();
   });
@@ -70,7 +89,7 @@ Rationale: Preserves portability across Node and browsers.
     const sections = parseSections(raw);
 
     expect(sections.invariant).toBe('Code in schema package MUST be pure.');
-    expect(sections.exception).toBeUndefined();
+    expect(sections.exceptions).toEqual([]);
     expect(sections.rationale).toBe('Preserves portability across Node and browsers.');
     expect(sections.remediation).toBe('Move I/O to core package.');
   });
@@ -87,7 +106,7 @@ Rationale: This is the real rationale.`;
     const sections = parseSections(raw);
 
     expect(sections.invariant).toContain('Exception: This is inside code');
-    expect(sections.exception).toBeUndefined();
+    expect(sections.exceptions).toEqual([]);
     expect(sections.rationale).toBe('This is the real rationale.');
   });
 
@@ -110,7 +129,7 @@ Rationale: This is the real rationale.`;
   it('handles completely empty input gracefully', () => {
     const sections = parseSections('');
     expect(sections.invariant).toBe('');
-    expect(sections.exception).toBeUndefined();
+    expect(sections.exceptions).toEqual([]);
     expect(sections.rationale).toBeUndefined();
     expect(sections.remediation).toBeUndefined();
     expect(sections.rawBody).toBe('');

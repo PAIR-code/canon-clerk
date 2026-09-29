@@ -22,7 +22,7 @@ function matchDirective(line: string): DirectiveMatch | null {
 /**
  * Parses a canon's Markdown body into structured cognitive sections per SPEC.md Section 1.3:
  * - What (The Invariant)
- * - When (Exception)
+ * - When (exceptions: discrete permissible deviation clauses as string[])
  * - Why (Rationale)
  * - How (Remediation)
  * - rawBody (Complete unparsed body)
@@ -34,14 +34,16 @@ export function parseSections(rawBody: string): CanonSections {
   let inCodeBlock = false;
   let skippedHeading = false;
 
-  type SectionKey = 'invariant' | DirectiveType;
-  let currentSection: SectionKey = 'invariant';
+  type SectionKey = 'invariant' | 'rationale' | 'remediation';
+  let currentSection: SectionKey | 'exception' = 'invariant';
   const sectionLines: Record<SectionKey, string[]> = {
     invariant: [],
-    exception: [],
     rationale: [],
     remediation: [],
   };
+
+  const exceptionBuckets: string[][] = [];
+  let currentExceptionBucket: string[] | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
@@ -49,12 +51,20 @@ export function parseSections(rawBody: string): CanonSections {
     // Track code fences
     if (line.trim().startsWith('```')) {
       inCodeBlock = !inCodeBlock;
-      sectionLines[currentSection].push(line);
+      if (currentSection === 'exception') {
+        currentExceptionBucket?.push(line);
+      } else {
+        sectionLines[currentSection].push(line);
+      }
       continue;
     }
 
     if (inCodeBlock) {
-      sectionLines[currentSection].push(line);
+      if (currentSection === 'exception') {
+        currentExceptionBucket?.push(line);
+      } else {
+        sectionLines[currentSection].push(line);
+      }
       continue;
     }
 
@@ -70,14 +80,28 @@ export function parseSections(rawBody: string): CanonSections {
     // Check if line begins with a cognitive directive
     const match = matchDirective(line);
     if (match) {
-      currentSection = match.directive;
-      if (match.rest.length > 0) {
-        sectionLines[match.directive].push(match.rest);
+      if (match.directive === 'exception') {
+        currentSection = 'exception';
+        currentExceptionBucket = [];
+        exceptionBuckets.push(currentExceptionBucket);
+        if (match.rest.length > 0) {
+          currentExceptionBucket.push(match.rest);
+        }
+      } else {
+        currentSection = match.directive;
+        currentExceptionBucket = null;
+        if (match.rest.length > 0) {
+          sectionLines[match.directive].push(match.rest);
+        }
       }
       continue;
     }
 
-    sectionLines[currentSection].push(line);
+    if (currentSection === 'exception') {
+      currentExceptionBucket?.push(line);
+    } else {
+      sectionLines[currentSection].push(line);
+    }
   }
 
   const clean = (arr: string[]): string | undefined => {
@@ -86,13 +110,15 @@ export function parseSections(rawBody: string): CanonSections {
   };
 
   const invariant = clean(sectionLines.invariant) ?? '';
-  const exception = clean(sectionLines.exception);
+  const exceptions = exceptionBuckets
+    .map((bucket) => clean(bucket))
+    .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
   const rationale = clean(sectionLines.rationale);
   const remediation = clean(sectionLines.remediation);
 
   return {
     invariant,
-    exception,
+    exceptions,
     rationale,
     remediation,
     rawBody: normalized,

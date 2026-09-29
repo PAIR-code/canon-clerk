@@ -47,9 +47,9 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
       expect(canon.sections.invariant).toBe(
         'Brand icon artwork MUST isolate the subject on an explicit white background (#ffffff) rather than rendering transparent negative space.'
       );
-      expect(canon.sections.exception).toBe(
-        'Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.'
-      );
+      expect(canon.sections.exceptions).toEqual([
+        'Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.',
+      ]);
       expect(canon.sections.rationale).toBe(
         "In GitHub's theme engine, transparent SVGs render against dynamic canvas tones."
       );
@@ -75,7 +75,7 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
       expect(canon.tags).toEqual([]);
       expect(canon.references).toEqual([]);
       expect(canon.sections.invariant).toBe('All pull requests MUST include automated unit tests.');
-      expect(canon.sections.exception).toBeUndefined();
+      expect(canon.sections.exceptions).toEqual([]);
       expect(canon.sections.rationale).toBeUndefined();
       expect(canon.sections.remediation).toBeUndefined();
     });
@@ -104,7 +104,7 @@ Tags must be normalized.`;
       expect(canon.id).toBe('all-caps-spec-must-refer-to-spec-md');
       expect(canon.title).toBe('All Caps Spec Must Refer To Spec Md');
       expect(canon.sections.invariant).toBe('All Caps Spec Must Refer To Spec Md');
-      expect(canon.sections.exception).toBeUndefined();
+      expect(canon.sections.exceptions).toEqual([]);
       expect(canon.sections.rationale).toBeUndefined();
       expect(canon.sections.remediation).toBeUndefined();
     });

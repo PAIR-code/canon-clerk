@@ -46,8 +46,8 @@ export interface CanonMetadata {
 export interface CanonSections {
   /** The primary invariant statement (What) */
   invariant: string;
-  /** Permissible deviation conditions (When / Exception) */
-  exception?: string | undefined;
+  /** Discrete permissible deviation clauses evaluated as logical ORs (When / Exception) */
+  exceptions: string[];
   /** Precedent engineering rationale (Why / Rationale) */
   rationale?: string | undefined;
   /** Actionable contributor remediation instructions (How / Remediation) */
