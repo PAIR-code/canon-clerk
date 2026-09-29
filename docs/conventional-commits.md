@@ -7,7 +7,7 @@ This document provides the complete reference specification for commit messages,
 ## 1. Orthogonal Matrix Principles
 
 To maintain clarity across a growing monorepo while supporting **Spec-Driven Development (SDD)**, our convention enforces an orthogonal matrix:
-* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(readme)`.
+* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(deps-dev)`, `(readme)`.
 * **The Type is ALWAYS the Intent:** `spec`, `feat`, `fix`, `test`, `docs`, `chore`, `build`, `ci`, `refactor`, `perf`, `revert`.
 
 ```text
@@ -29,7 +29,7 @@ GitHub labels in `PAIR-code/canon-clerk` directly mirror this matrix, enabling s
 | **Dogfood Canons & Canon Spec** | `chore(canons):`, `spec(canons):` | None | Canon specification ([`SPEC.md`](../SPEC.md)) and dogfood canons ([`.canons/`](../.canons/)).<br>`chore(canons): require manual test plan for ui` |
 | **AI Agent Guidelines (`AGENTS.md`, `.agents/`)** | `chore(agents):` | None | Instructions, skills, and tools for AI coding assistants.<br>`chore(agents): add worktree navigation instructions` |
 | **Formal Specifications (`specs/`)** | `spec(spec):`, `chore(spec):` | None | Formal system specifications and architecture contracts.<br>`spec(spec): introduce OpenSpec workflow` |
-| **External Dependencies** | `chore(deps):`, `build(deps):` | None | External dependency updates and version bumps.<br>`chore(deps): bump actions/checkout from v4 to v5` |
+| **External Dependencies** | `chore(deps):`, `build(deps):`, `build(deps-dev):` | None | External runtime and development dependency updates and version bumps.<br>`build(deps-dev): bump vite from 7.0.6 to 7.3.6` |
 | **Landing & Root Documentation** | `docs(readme):` | None | Top-level project `README.md` and repository landing documentation.<br>`docs(readme): introduce dual-pillar declarative lead` |
 | **Local Tooling & Config** | `build:` / `test:` | None | `tsconfig`, `package.json`, `vitest`, linters.<br>`build: configure vitest and strict typescript` |
 | **Remote CI/CD (`.github/workflows/`)** | `ci:` / `ci(action):` | None | GitHub Actions workflows and release automation.<br>`ci: add PR title linting workflow` |
@@ -72,6 +72,7 @@ Standardized strictly on **`scope: canons`** (collapsing the deprecated `canon` 
 | `scope: agents` | `#C2E0C6` (Mint) | AI coding assistant orientation, skills, and tools ([`.agents/`](../.agents/)). |
 | `scope: spec` | `#B60205` (Crimson) | Formal system specifications and architecture contracts. |
 | `scope: deps` | `#0366D6` (Slate) | External dependency updates and version bumps. |
+| `scope: deps-dev` | `#0366D6` (Slate) | External development dependency updates and version bumps. |
 | `scope: readme` | `#D4C5F9` (Lavender) | Top-level project `README.md` and repository landing documentation. |
 
 ### 3. Community & Triage Labels
