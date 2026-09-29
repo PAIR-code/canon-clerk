@@ -186,6 +186,74 @@ Remediation: Step 2: Apply the patch.`;
     expect(body.remediation).toBe('Step 1: Open the file.\n\nStep 2: Apply the patch.');
   });
 
+  it('handles empty or whitespace-only Rationale directives gracefully', () => {
+    const raw = `Invariant text.
+
+Rationale:    
+
+Remediation: Some remediation text.`;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.rationale).toBeUndefined();
+    expect(body.remediation).toBe('Some remediation text.');
+    expect(body.exceptions).toEqual([]);
+  });
+
+  it('handles empty or whitespace-only Exception directives gracefully', () => {
+    const raw = `Invariant text.
+
+Exception:    
+
+Rationale: Valid rationale.`;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.exceptions).toEqual([]);
+    expect(body.rationale).toBe('Valid rationale.');
+  });
+
+  it('filters out empty Exception clauses while retaining non-empty ones', () => {
+    const raw = `Invariant text.
+
+Exception:    
+
+Exception: Valid exception clause.
+
+Exception:   \t  `;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.exceptions).toEqual(['Valid exception clause.']);
+  });
+
+  it('handles empty or whitespace-only Remediation directives gracefully', () => {
+    const raw = `Invariant text.
+
+Rationale: Valid rationale.
+
+Remediation:   \t   `;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.rationale).toBe('Valid rationale.');
+    expect(body.remediation).toBeUndefined();
+  });
+
+  it('handles body where all directives are empty or whitespace-only', () => {
+    const raw = `Invariant text.
+
+Exception:  
+Rationale:  
+Remediation:  `;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.exceptions).toEqual([]);
+    expect(body.rationale).toBeUndefined();
+    expect(body.remediation).toBeUndefined();
+  });
+
   it('handles completely empty input gracefully', () => {
     const body = parseBody('');
     expect(body.invariant).toBe('');
