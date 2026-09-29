@@ -8,7 +8,7 @@
 
 # 📜 Canon Clerk
 
-[![CI Status](https://img.shields.io/github/actions/workflow/status/PAIR-code/canon-clerk/build-test.yml?branch=main&label=CI&style=flat-square)](https://github.com/PAIR-code/canon-clerk/actions/workflows/build-test.yml)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/PAIR-code/canon-clerk/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/PAIR-code/canon-clerk/actions/workflows/ci.yml)
 [![Canons](https://img.shields.io/badge/canons-52_active-e3b341?style=flat-square)](.canons/)
 [![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
