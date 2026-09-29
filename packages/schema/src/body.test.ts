@@ -129,6 +129,63 @@ Rationale: This is the real rationale.`;
     expect(body.remediation).toBe('Remove production mock.');
   });
 
+  it('parses multi-paragraph Rationale where only the first paragraph is denoted', () => {
+    const raw = `Invariant text.
+
+Rationale: First paragraph of rationale.
+
+Unexpected second paragraph of rationale.`;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.rationale).toBe('First paragraph of rationale.\n\nUnexpected second paragraph of rationale.');
+  });
+
+  it('concatenates multiple denoted Rationale directives into a unified text block', () => {
+    const raw = `Invariant text.
+
+Rationale: First paragraph of rationale.
+
+Rationale: Second paragraph of rationale.`;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.rationale).toBe('First paragraph of rationale.\n\nSecond paragraph of rationale.');
+  });
+
+  it('parses multi-paragraph Remediation containing lists and code blocks', () => {
+    const raw = `Invariant text.
+
+Remediation: Follow these steps to resolve:
+
+1. Update config.
+2. Run command:
+
+\`\`\`bash
+npm run fix
+\`\`\`
+
+Verify changes pass.`;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.remediation).toBe(
+      'Follow these steps to resolve:\n\n1. Update config.\n2. Run command:\n\n```bash\nnpm run fix\n```\n\nVerify changes pass.'
+    );
+  });
+
+  it('concatenates multiple denoted Remediation directives into a unified text block', () => {
+    const raw = `Invariant text.
+
+Remediation: Step 1: Open the file.
+
+Remediation: Step 2: Apply the patch.`;
+
+    const body = parseBody(raw);
+    expect(body.invariant).toBe('Invariant text.');
+    expect(body.remediation).toBe('Step 1: Open the file.\n\nStep 2: Apply the patch.');
+  });
+
   it('handles completely empty input gracefully', () => {
     const body = parseBody('');
     expect(body.invariant).toBe('');
