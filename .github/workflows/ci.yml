@@ -36,6 +36,9 @@ jobs:
       - name: Validate lockfile integrity
         run: npm run lint:lockfile
 
+      - name: Validate specifications
+        run: npm run lint:specs
+
       - name: Typecheck all workspaces
         run: npm run typecheck
 
