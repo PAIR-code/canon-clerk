@@ -209,20 +209,26 @@ Prompt your assistant:
 
 #### Under the Hood & Manual Fallback
 
-You can run the OpenSpec CLI directly:
+You can run the OpenSpec CLI via npm scripts (`npm run opsx -- ...` or `npm run openspec -- ...`):
 ```bash
 # Validate all specs and active changes:
-npx openspec validate --all --strict
+npm run opsx -- validate --all --strict
+# (or via the dedicated linter script:)
+npm run lint:specs
 
 # Create a new change proposal:
-npx openspec new change <change-name>
+npm run opsx -- new change <change-name>
 
 # Check status of an in-flight change:
-npx openspec status --change <change-name>
+npm run opsx -- status --change <change-name>
 
 # Archive a completed change into living specs:
-npx openspec archive <change-name>
+npm run opsx -- archive <change-name>
 ```
+
+> [!NOTE]
+> Always invoke OpenSpec through `npm run opsx -- <command>` or `npm run openspec -- <command>`. Running `npx openspec` fails because the package is scoped as `@fission-ai/openspec`, and bare `openspec` is not guaranteed to be present in `$PATH`.
+
 
 ---
 

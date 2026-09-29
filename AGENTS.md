@@ -21,4 +21,6 @@ Canon Clerk uses a **triangular Git worktree layout**. Depending on how the work
 
 ### Level B: A Worktree Checkout (Repo Root)
 - **Characteristics:** Contains `.canons/`, `docs/`, `openspec/`, `package.json`, `README.md`, and project files directly in `.`.
-- **DIRECTIVE FOR AGENTS:** You are inside an active working branch. Proceed normally with code editing, testing, and Git operations.
+- **DIRECTIVES FOR AGENTS:**
+  - You are inside an active working branch. Proceed normally with code editing, testing, and Git operations.
+  - **OpenSpec Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run openspec -- <command>` or `npm run opsx -- <command>`). Never invoke `npx openspec` (the package is scoped as `@fission-ai/openspec`) or assume bare `openspec` exists in `$PATH`.
