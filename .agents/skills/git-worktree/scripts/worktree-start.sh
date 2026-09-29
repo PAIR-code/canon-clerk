@@ -91,10 +91,37 @@ fi
 # Create the worktree and branch
 git -C "$CONTAINER_ROOT" worktree add -b "$BRANCH" "$BRANCH" "${REMOTE}/main"
 
-# Install dependencies and activate git hooks if package.json exists
+# Locate main worktree to seed dependencies if available
+MAIN_WORKTREE="$(git -C "$CONTAINER_ROOT" worktree list --porcelain | awk '
+  /^worktree / { wt = substr($0, 10) }
+  /^branch refs\/heads\/main$/ { print wt }
+')"
+
+if [ -z "$MAIN_WORKTREE" ] || [ ! -d "$MAIN_WORKTREE" ]; then
+  MAIN_WORKTREE="${CONTAINER_ROOT}/main"
+fi
+
+# Configure git hooks explicitly in the new worktree
+git -C "$TARGET_DIR" config core.hooksPath .githooks
+
+# Set up dependencies, build workspace packages, and run smoke tests if package.json exists
 if [ -f "${TARGET_DIR}/package.json" ]; then
-  echo "Installing dependencies and configuring git hooks in worktree..."
-  (cd "$TARGET_DIR" && npm install --prefer-offline --no-audit --no-fund)
+  if [ -d "${MAIN_WORKTREE}/node_modules" ]; then
+    echo "Seeding node_modules from main worktree..."
+    cp -a "${MAIN_WORKTREE}/node_modules" "${TARGET_DIR}/node_modules"
+  elif [ -d "${CONTAINER_ROOT}/main/node_modules" ]; then
+    echo "Seeding node_modules from main worktree..."
+    cp -a "${CONTAINER_ROOT}/main/node_modules" "${TARGET_DIR}/node_modules"
+  else
+    echo "Installing dependencies via npm ci..."
+    (cd "$TARGET_DIR" && npm ci)
+  fi
+
+  echo "Building workspace packages..."
+  (cd "$TARGET_DIR" && npm run build)
+
+  echo "Running smoke tests..."
+  (cd "$TARGET_DIR" && npm test)
 fi
 
 echo ""
