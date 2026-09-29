@@ -184,9 +184,9 @@ Directives MAY be expressed via inline keywords or explicit Markdown section hea
 Suitable for Tiers 1–3 canons:
 ```markdown
 Standard platform APIs MUST be used rather than introducing bespoke implementations.
-**Exception:** A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result.
-**Exception:** A bespoke implementation MAY be introduced IFF isolating a documented security vulnerability or CVE.
-**Rationale:** Custom utility functions increase maintenance drag and duplicate vetted runtime capabilities.
+Exception: A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result.
+Exception: A bespoke implementation MAY be introduced IFF isolating a documented security vulnerability or CVE.
+Rationale: Custom utility functions increase maintenance drag and duplicate vetted runtime capabilities.
 **Guidance:** Replace custom utilities with platform equivalents, or supply the required benchmark/CVE documentation.
 ```
 ```markdown
@@ -199,8 +199,11 @@ PRs modifying UI components must include manual test scripts. **Supplement:** If
 Each canon MUST only address a single, cohesive concept for its invariant. Rationale: Multi-rule canon files increase the likelihood of flakiness, since subsequent AI evaluations may focus on different parts of the rule set.
 ```
 ```markdown
-Each canon file name MUST state a testable invariant rather than a passive topic. **Rationale:** Canon Clerk derives check run titles from file stems; invariant names ensure CI reports immediately communicate expectations.
+Each canon file name MUST state a testable invariant rather than a passive topic. Rationale: Canon Clerk derives check run titles from file stems; invariant names ensure CI reports immediately communicate expectations.
 ```
+
+> **Typographic Styling & Visual Affordances (Informative):**  
+> Directives in raw Markdown are recognized with or without bold asterisks (e.g. `Exception:`, `**Exception:**`, `Rationale:`, `**Rationale:**`, `Guidance:`, `**Guidance:**`). In reference exemplars, bolding `**Guidance:**` while leaving `Exception:` and `Rationale:` unbolded is recommended as an ergonomic convention: `**Guidance:**` acts as a high-contrast visual call-to-action for human and agent contributors remediating failures, while `Exception:` and `Rationale:` serve as unbolded explanatory context for the evaluator model.
 
 #### B. Section Header Syntax
 Suitable for Tier 4 structured canons:
@@ -238,7 +241,7 @@ Manual verification instructions ensure reviewers can reproduce visual flow and 
 
 Unlike static linters, canon evaluators do not employ a deterministic pre-parser or regex tokenizer to extract directive text blocks. Instead, the canon's raw Markdown body is passed directly into the evaluator's prompt context:
 
-1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Exception`, `Guidance`, `Supplement`, and `Rationale` (e.g., `**Exception:**`, `## Exceptions`, `## Exception`, `**Guidance:**`, `## Guidance`, `Supplement:`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
+1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Exception`, `Guidance`, `Supplement`, and `Rationale` (e.g., `Exception:`, `**Exception:**`, `## Exceptions`, `## Exception`, `**Guidance:**`, `## Guidance`, `Supplement:`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
 2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Exception`, `Guidance`, `Supplement`, and `Rationale`, instructing the reasoning model to map them directly to its structured output payload and evaluation process:
    * **`Exception`** $\rightarrow$ Screen diff and pull request context against declared exception criteria; if semantically satisfied, short-circuit verdict to conditional `pass`, recording the matched exception clause and justification in the audit report.
    * **`Guidance`** $\rightarrow$ Formulate actionable author instructions in the response `guidance` field, resulting in a blocking `fail` (or `action_required`).
@@ -263,12 +266,12 @@ PRs that introduce new user-facing features must have accompanying documentation
 ```
 
 ### Tier 2: Keyword Directives
-A plain Markdown assertion augmented with inline `**Exception:**`, `**Guidance:**`, `**Supplement:**`, or `**Rationale:**` / `Rationale:` directives:
+A plain Markdown assertion augmented with inline `Exception:`, `**Guidance:**`, `**Supplement:**`, or `Rationale:` directives:
 ```markdown
 PRs modifying user-facing UI components MUST include a manual Test Script in the PR description. **Supplement:** If feasible, synthesize a candidate manual Test Script from the PR diff and description.
 ```
 ```markdown
-Standard platform APIs MUST be used rather than introducing bespoke implementations. **Exception:** A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result. **Rationale:** Bespoke utilities duplicate runtime capabilities and increase maintenance drag. **Guidance:** Replace custom utilities with platform equivalents or provide the required benchmark documentation.
+Standard platform APIs MUST be used rather than introducing bespoke implementations. Exception: A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result. Rationale: Bespoke utilities duplicate runtime capabilities and increase maintenance drag. **Guidance:** Replace custom utilities with platform equivalents or provide the required benchmark documentation.
 ```
 
 ### Tier 3: Cost-Optimized Canon

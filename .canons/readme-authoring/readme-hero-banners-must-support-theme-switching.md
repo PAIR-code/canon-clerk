@@ -8,7 +8,7 @@ tags:
 ---
 The primary brand logo or hero banner in `README.md` MUST provide adaptive light and dark display modes using an HTML `<picture>` element.
 
-**Exception:** Content screenshots and inline diagrams MAY omit adaptive light and dark `<picture>` wrappers IFF the visual asset depicts an immutable raster frame or single-theme captured interface state.
+Exception: Content screenshots and inline diagrams MAY omit adaptive light and dark `<picture>` wrappers IFF the visual asset depicts an immutable raster frame or single-theme captured interface state.
 
 Rationale: Per W3C Media Queries Level 5 (`prefers-color-scheme`) and GitHub standards for theme context, fixed-theme banners violate WCAG 2.1 Non-text Contrast (SC 1.4.11) or render jarring, high-contrast letterboxes against opposing themes.
 

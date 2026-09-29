@@ -11,7 +11,7 @@ tags:
 ---
 Primary brand logos, icons, and glyph assets MUST isolate the subject on a transparent background, free of baked backdrop fills or perimeter fringing halos.
 
-**Exception:** Full-bleed illustrations, wallpaper variants, and UI screenshots MAY retain opaque canvas backgrounds IFF suffixed with `-solid` (e.g. `logo-dark-solid.png`) or documenting an unmodified software interface.
+Exception: Full-bleed illustrations, wallpaper variants, and UI screenshots MAY retain opaque canvas backgrounds IFF suffixed with `-solid` (e.g. `logo-dark-solid.png`) or documenting an unmodified software interface.
 
 Rationale: Per Porter-Duff compositing standards and platform design guidelines (Google Material Design, Apple HIG), unisolated assets cause visual clipping across diverse surfaces, while extraction halos erode edge fidelity.
 
