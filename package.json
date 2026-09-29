@@ -17,13 +17,15 @@
     "bump": "npm version --workspaces --include-workspace-root",
     "typecheck": "npm run typecheck --workspaces",
     "lint:lockfile": "lockfile-lint --path package-lock.json --validate-https --allowed-hosts npm",
-    "check": "npm run lint:lockfile && npm run typecheck && npm run build && npm test",
+    "lint:specs": "openspec validate --all --strict",
+    "check": "npm run lint:lockfile && npm run lint:specs && npm run typecheck && npm run build && npm test",
     "precli": "npm run build -w packages/cli",
     "cli": "canon-clerk",
     "prepare": "git config core.hooksPath .githooks || true"
   },
   "license": "Apache-2.0",
   "devDependencies": {
+    "@fission-ai/openspec": "^1.13.2",
     "@types/node": "^24.0.9",
     "lockfile-lint": "^4.14.1",
     "tsup": "^8.5.0",

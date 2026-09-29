@@ -85,9 +85,9 @@ Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one
 
 ---
 
-## 5. Future Evolution: Spec-Driven Development
+## 5. Spec-Driven Development
 
-As outlined in [Issue #8](https://github.com/PAIR-code/canon-clerk/issues/8), these architectural contracts will graduate into formal, machine-verifiable specifications using OpenSpec:
-* `specs/core/cascade-contracts.md`: Formal schemas and caching boundaries for Stages 0, 1, and 2.
-* `specs/cli/interface.md`: CLI commands, flags, stdin/stdout protocols, and exit codes.
-* `specs/action/interface.md`: GitHub Action inputs, outputs, and Check Run API contracts.
+As outlined in [Issue #8](https://github.com/PAIR-code/canon-clerk/issues/8), architectural contracts are codified into formal, machine-verifiable specifications using OpenSpec under [`openspec/specs/`](../openspec/specs/):
+* [`openspec/specs/core/spec.md`](../openspec/specs/core/spec.md): Formal contracts and staged filtering boundaries for Stages 0, 1, and 2.
+* [`openspec/specs/cli/spec.md`](../openspec/specs/cli/spec.md): CLI commands, flags, output formats, and exit code conventions.
+* [`openspec/specs/action/spec.md`](../openspec/specs/action/spec.md): GitHub Action inputs, outputs, and Check Run API contracts.
