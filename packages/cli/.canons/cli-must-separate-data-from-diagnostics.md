@@ -8,4 +8,4 @@ CLI commands MUST emit primary payload data exclusively to `stdout`, and MUST di
 
 Rationale: Per the Unix Rule of Composition (McIlroy) and Command Line Interface Guidelines (clig.dev), downstream pipelines consume `stdout` as uncorrupted data; mixing diagnostics into `stdout` breaks machine parsers.
 
-**Guidance:** Redirect informational logs, banners, and progress spinners to `stderr` (e.g. via `console.error` or `process.stderr.write`), reserving `stdout` strictly for user-requested command output or data payloads.
+**Remediation:** Redirect informational logs, banners, and progress spinners to `stderr` (e.g. via `console.error` or `process.stderr.write`), reserving `stdout` strictly for user-requested command output or data payloads.

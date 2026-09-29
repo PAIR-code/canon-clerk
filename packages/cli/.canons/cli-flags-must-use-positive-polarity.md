@@ -8,4 +8,4 @@ Boolean CLI flags MUST be declared with positive polarity (e.g. `--color`, `--ca
 
 Rationale: Emphasized in clig.dev §Arguments and flags and GNU conventions, inherently negative flags create confusing double-negatives when passed boolean arguments in scripts or configuration files (e.g. `--no-validation=false`).
 
-**Guidance:** Rename negative flags to their positive capability name (e.g. change `--skip-checks` to `--checks`), and configure the CLI framework to generate automatic `--no-<flag>` inversion flags.
+**Remediation:** Rename negative flags to their positive capability name (e.g. change `--skip-checks` to `--checks`), and configure the CLI framework to generate automatic `--no-<flag>` inversion flags.

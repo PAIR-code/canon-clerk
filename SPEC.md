@@ -20,9 +20,9 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
    * **What (The Invariant):** The boundary condition that MUST be true (formulated using RFC 2119 keywords).
    * **When (Permissible Deviations — `Exception`):** Strict, verifiable conditions under which an invariant violation is waived.
    * **Why (Precedent Reasoning — `Rationale`):** The underlying engineering rationale or Chesterton's Fence explaining why the invariant exists.
-   * **How (Remediation — `Guidance`):** Actionable contributor remediation instructions detailing how to achieve compliance upon failure.
+   * **How (Remediation):** Actionable contributor remediation instructions detailing how to achieve compliance upon failure.
    While Tier 1 canons require only the "What", mature canons naturally synthesize this tetrad.
-4. **Clarity of Action:** The specification strictly defines an enforcement boundary: Canon Clerk evaluates invariants and emits actionable `Guidance` for remediation, leaving artifact synthesis to the contributor or their client-side coding agent.
+4. **Clarity of Action:** The specification strictly defines an enforcement boundary: Canon Clerk evaluates invariants and emits actionable `Remediation` instructions, leaving artifact synthesis to the contributor or their client-side coding agent.
 
 ---
 
@@ -146,7 +146,7 @@ Canons scale across an intuitive **What / When / Why / How** cognitive tetrad:
 * **What (The Invariant):** The normative boundary condition specifying what MUST or MUST NOT be true (formulated with RFC 2119 keywords).
 * **When (Permissible Deviations):** The `Exception` directive defining strict conditions under which an invariant violation is waived.
 * **Why (The Rationale):** The `Rationale` directive articulating *why* the invariant exists (Chesterton's Fence).
-* **How (Remediation):** The `Guidance` directive instructing the contributor on actionable steps required to achieve compliance upon failure.
+* **How (Remediation):** The `Remediation` directive instructing the contributor on actionable steps required to achieve compliance upon failure.
 
 Canon text may include reserved semantic directives to govern auditor behavior, convey author intent, and direct contributor remediation:
 
@@ -155,7 +155,7 @@ Canon text may include reserved semantic directives to govern auditor behavior, 
 | **None** (Default) | **What** | Contributor | **`fail`** (Blocking) | PR violates the invariant. Auditor reports the violation and failure rationale with no further advice. |
 | **`Exception`** | **When** (Permissible Deviations) | Evaluator (Clerk AI) | Conditional **`pass`** | Defines strict conditions under which an invariant violation is waived. If conditions are met semantically, verdict transitions from `fail` $\rightarrow$ `pass`. |
 | **`Rationale`** | **Why** | Evaluator (Clerk AI) & Explainer (AI Assistant) | Informative (Explanatory context) | **Chesterton's Fence.** Explains *why* the canon exists if not self-evident. Evaluator AI uses it to disambiguate edge cases against author intent; auditor quotes or synthesizes it in check runs and reports to explain why the invariant is in place. |
-| **`Guidance`** | **How** | Contributor | **`fail`** (Blocking) | **Contributor action required.** Auditor instructs the contributor on actions needed to unblock the PR (e.g., pointing to required templates or documentation). |
+| **`Remediation`** | **How** | Contributor | **`fail`** (Blocking) | **Contributor action required.** Auditor instructs the contributor on actions needed to unblock the PR (e.g., pointing to required templates or documentation). |
 
 > **Exception Normative Constraints & Auditor Behavioral Contracts:**
 > Real-world engineering invariants frequently admit legitimate escape hatches (e.g. performance hot-paths, transitional shims, or vendor workarounds). To ensure escape hatches preserve architectural integrity:
@@ -163,7 +163,7 @@ Canon text may include reserved semantic directives to govern auditor behavior, 
 > * **Semantic Sufficiency Over Syntactic Presence:** Unlike deterministic linters that only verify comment flags (such as `// eslint-disable-next-line` or `// canon-ignore`), the Deep Auditor MUST evaluate the *substantive content*, factual grounding, and truthfulness of the justification against the diff and PR context. A hand-wavy or tautological comment (e.g., `// bespoke: this is faster`) MUST fail an exception demanding specific, measurable performance benchmarks or CVE isolation.
 > * **Plurality & Independent Evaluation (Logical OR):** Multiple discrete `Exception` clauses evaluate independently as logical ORs. If any single exception clause is fully satisfied, the invariant violation is waived.
 > * **Biconditional Formulation (ADVISORY):** Authors SHOULD formulate `Exception` clauses using RFC 2119 keywords specifying permissible deviation (e.g. `MAY be introduced IFF accompanied by...`). The keyword `IFF` (if and only if) establishes a rigorous, testable biconditional boundary.
-> * **Orthogonality & Antecedent Gating:** `Exception` is orthogonal to `Rationale` and `Guidance`. It acts as an antecedent gate before contributor remediation: if an exception is met, the check passes without triggering `Guidance`. If all exception clauses fail, the violation stands, executing `Guidance` (`fail`) or default blocking `fail`.
+> * **Orthogonality & Antecedent Gating:** `Exception` is orthogonal to `Rationale` and `Remediation`. It acts as an antecedent gate before contributor remediation: if an exception is met, the check passes without triggering `Remediation`. If all exception clauses fail, the violation stands, executing `Remediation` (`fail`) or default blocking `fail`.
 
 > **Rationale Normative Constraints & Advisory Guidance:**
 > To preserve clarity and prevent prompt dilution:
@@ -183,13 +183,13 @@ Standard platform APIs MUST be used rather than introducing bespoke implementati
 Exception: A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result.
 Exception: A bespoke implementation MAY be introduced IFF isolating a documented security vulnerability or CVE.
 Rationale: Custom utility functions increase maintenance drag and duplicate vetted runtime capabilities.
-**Guidance:** Replace custom utilities with platform equivalents, or supply the required benchmark/CVE documentation.
+**Remediation:** Replace custom utilities with platform equivalents, or supply the required benchmark/CVE documentation.
 ```
 ```markdown
-PRs introducing user-facing features must update documentation. **Guidance:** Suggest which section under `docs/` should be updated.
+PRs introducing user-facing features must update documentation. **Remediation:** Suggest which section under `docs/` should be updated.
 ```
 ```markdown
-PRs modifying UI components must include manual test scripts. **Guidance:** Document a 3-step manual test script in the PR description verifying user interaction.
+PRs modifying UI components must include manual test scripts. **Remediation:** Document a 3-step manual test script in the PR description verifying user interaction.
 ```
 ```markdown
 Each canon MUST only address a single, cohesive concept for its invariant. Rationale: Multi-rule canon files increase the likelihood of flakiness, since subsequent AI evaluations may focus on different parts of the rule set.
@@ -199,7 +199,7 @@ Each canon file name MUST state a testable invariant rather than a passive topic
 ```
 
 > **Typographic Styling & Visual Affordances (Informative):**  
-> Directives in raw Markdown are recognized with or without bold asterisks (e.g. `Exception:`, `**Exception:**`, `Rationale:`, `**Rationale:**`, `Guidance:`, `**Guidance:**`). In reference exemplars, bolding `**Guidance:**` while leaving `Exception:` and `Rationale:` unbolded is recommended as an ergonomic convention: `**Guidance:**` acts as a high-contrast visual call-to-action for human and agent contributors remediating failures, while `Exception:` and `Rationale:` serve as unbolded explanatory context for the evaluator model.
+> Directives in raw Markdown are recognized with or without bold asterisks (e.g. `Exception:`, `**Exception:**`, `Rationale:`, `**Rationale:**`, `Remediation:`, `**Remediation:**`). In reference exemplars, bolding `**Remediation:**` while leaving `Exception:` and `Rationale:` unbolded is recommended as an ergonomic convention: `**Remediation:**` acts as a high-contrast visual call-to-action for human and agent contributors remediating failures, while `Exception:` and `Rationale:` serve as unbolded explanatory context for the evaluator model.
 
 #### B. Section Header Syntax
 Suitable for Tier 4 structured canons:
@@ -214,11 +214,11 @@ Standard, built-in platform functions MUST be used rather than introducing bespo
 ## Rationale
 Custom utility functions increase maintenance drag and duplicate vetted runtime capabilities.
 
-## Guidance
+## Remediation
 Replace custom utilities with platform equivalents, or supply the required benchmark/CVE documentation.
 ```
 ```markdown
-## Guidance
+## Remediation
 Direct the author to `docs/contributing.md#test-plans` and enumerate the missing verification criteria.
 ```
 ```markdown
@@ -233,16 +233,16 @@ Manual verification instructions ensure reviewers can reproduce visual flow and 
 
 Unlike static linters, canon evaluators do not employ a deterministic pre-parser or regex tokenizer to extract directive text blocks. Instead, the canon's raw Markdown body is passed directly into the evaluator's prompt context:
 
-1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Exception`, `Guidance`, and `Rationale` (e.g., `Exception:`, `**Exception:**`, `## Exceptions`, `## Exception`, `**Guidance:**`, `## Guidance`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
-2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Exception`, `Guidance`, and `Rationale`, instructing the reasoning model to map them directly to its structured output payload and evaluation process:
+1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Exception`, `Remediation`, and `Rationale` (e.g., `Exception:`, `**Exception:**`, `## Exceptions`, `## Exception`, `**Remediation:**`, `## Remediation`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
+2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Exception`, `Remediation`, and `Rationale`, instructing the reasoning model to map them directly to its structured output payload and evaluation process:
    * **`Exception`** $\rightarrow$ Screen diff and pull request context against declared exception criteria; if semantically satisfied, short-circuit verdict to conditional `pass`, recording the matched exception clause and justification in the audit report.
-   * **`Guidance`** $\rightarrow$ Formulate actionable author instructions in the response `guidance` field, resulting in a blocking `fail` (or `action_required`).
+   * **`Remediation`** $\rightarrow$ Formulate actionable author instructions in the response `remediation` field, resulting in a blocking `fail` (or `action_required`). Evaluator implementations SHOULD accept legacy `Guidance` as an alias during semantic exegesis.
    * **`Rationale`** $\rightarrow$ Ground evaluation in author intent, and formulate explanatory context in the response `rationale` field (or synthesized review feedback) explaining why the invariant exists.
 3. **Exegesis & Edge-Case Disambiguation:** The evaluator AI and downstream AI assistants MUST use `Rationale` as an interpretive lens during semantic exegesis:
    * **Edge-case disambiguation:** When diffs present borderline, ambiguous, or technically complex compliance scenarios, the evaluator AI disambiguates author intent against the stated `Rationale` rather than applying naive or superficial literalism.
    * **Latent standard anchoring:** Citations to authoritative standards (e.g. POSIX, RFCs, SemVer, clig.dev) ground the model in established industry definitions, eliminating hallucinations or arbitrary stylistic debates during compliance screening.
    * **Explanatory check runs:** In check run reports and review comments, the auditor quotes or synthesizes the `Rationale` to explain to the PR author *why* the invariant is in place, grounding any violation or advisory in architectural context.
-4. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Guidance for author:**`, `### Guidance`, `Rationale:`, `**Rationale:**`, or `### Why this rule exists`) remain fully functional.
+4. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Remediation for author:**`, `### Remediation`, `**Guidance:**`, `Rationale:`, `**Rationale:**`, or `### Why this rule exists`) remain fully functional.
 
 ---
 
@@ -257,12 +257,12 @@ PRs that introduce new user-facing features must have accompanying documentation
 ```
 
 ### Tier 2: Keyword Directives
-A plain Markdown assertion augmented with inline `Exception:`, `**Guidance:**`, or `Rationale:` directives:
+A plain Markdown assertion augmented with inline `Exception:`, `**Remediation:**`, or `Rationale:` directives:
 ```markdown
-PRs modifying user-facing UI components MUST include a manual Test Script in the PR description. **Guidance:** Document a 3-step manual test script in the PR description verifying user interaction.
+PRs modifying user-facing UI components MUST include a manual Test Script in the PR description. **Remediation:** Document a 3-step manual test script in the PR description verifying user interaction.
 ```
 ```markdown
-Standard platform APIs MUST be used rather than introducing bespoke implementations. Exception: A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result. Rationale: Bespoke utilities duplicate runtime capabilities and increase maintenance drag. **Guidance:** Replace custom utilities with platform equivalents or provide the required benchmark documentation.
+Standard platform APIs MUST be used rather than introducing bespoke implementations. Exception: A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result. Rationale: Bespoke utilities duplicate runtime capabilities and increase maintenance drag. **Remediation:** Replace custom utilities with platform equivalents or provide the required benchmark documentation.
 ```
 
 ### Tier 3: Cost-Optimized Canon
@@ -273,11 +273,11 @@ triggers:
   - "src/components/**"
   - "public/**"
 ---
-PRs modifying user-facing UI components MUST include a manual Test Script in the PR description. **Guidance:** Document a 3-step manual test script in the PR description verifying user interaction.
+PRs modifying user-facing UI components MUST include a manual Test Script in the PR description. **Remediation:** Document a 3-step manual test script in the PR description verifying user interaction.
 ```
 
 ### Tier 4: Structured / Multi-Section Canon
-A fully structured canon containing explicit sections (`## Rule`, `## Exceptions`, `## Rationale`, `## Evaluation Criteria`, `## Guidance`) for complex policies requiring detailed rubrics:
+A fully structured canon containing explicit sections (`## Rule`, `## Exceptions`, `## Rationale`, `## Evaluation Criteria`, `## Remediation`) for complex policies requiring detailed rubrics:
 ```markdown
 ---
 title: Manual Test Script Required for UI Changes
@@ -308,7 +308,7 @@ Manual verification instructions ensure reviewers can reproduce visual flow and 
 - **Pass**: Description contains clear, reproducible manual verification steps, or satisfies an Exception clause.
 - **Fail**: UI components changed, but no manual test steps are present, or steps are ambiguous.
 
-## Guidance
+## Remediation
 Add a numbered `### Manual Test Script` section to the PR description outlining step-by-step verification instructions, or supply visual regression test artifacts if eligible for an exception.
 ```
 

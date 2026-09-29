@@ -8,4 +8,4 @@ CLI query and filtering commands MUST terminate with exit code `0` and emit an e
 
 Rationale: In line with standard query conventions (e.g. find, SQL), empty search results represent valid operational evaluations; exiting non-zero breaks downstream scripting pipelines executing under `set -e`.
 
-**Guidance:** Return an empty JSON array `[]` or 0-byte stream with exit code `0` when filters yield no matches, directing informational notices to `stderr` only if interactive.
+**Remediation:** Return an empty JSON array `[]` or 0-byte stream with exit code `0` when filters yield no matches, directing informational notices to `stderr` only if interactive.

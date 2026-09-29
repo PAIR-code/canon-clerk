@@ -10,4 +10,4 @@ Exception: A non-interactive stream MAY emit alternate representations (such as 
 
 Rationale: In accordance with POSIX stream processing and clig.dev §Output, unadorned single-line records ensure list outputs compose directly with standard Unix utilities (`xargs`, `wc`, `grep`) without requiring custom regex post-processing.
 
-**Guidance:** Wrap formatting decorators (column headers, borders, and ANSI styles) behind TTY checks or explicit layout flags, streaming raw delimiter-separated records when piped to `stdout`.
+**Remediation:** Wrap formatting decorators (column headers, borders, and ANSI styles) behind TTY checks or explicit layout flags, streaming raw delimiter-separated records when piped to `stdout`.

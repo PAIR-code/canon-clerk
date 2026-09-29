@@ -10,4 +10,4 @@ Exception: Structured entity output MAY emit sparse or unparsed file representat
 
 Rationale: In accordance with standard API and resource projection conventions (e.g. Kubernetes, OpenAPI), downstream automation requires complete, predictable schemas without having to reconstruct defaulted or derived fields.
 
-**Guidance:** Pipe entity models through schema normalizers to hydrate default values and compute derived metadata before passing them to the JSON serialization formatter.
+**Remediation:** Pipe entity models through schema normalizers to hydrate default values and compute derived metadata before passing them to the JSON serialization formatter.

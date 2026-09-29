@@ -13,4 +13,4 @@ Pull requests introducing new user-facing functionality (`type: feat`) MUST upda
 
 Rationale: Features merged into default branches without landing documentation updates remain invisible to adopters and create discrepancies between software capabilities and documentation.
 
-**Guidance:** Update `README.md` to reflect the newly introduced feature or API in the appropriate section.
+**Remediation:** Update `README.md` to reflect the newly introduced feature or API in the appropriate section.

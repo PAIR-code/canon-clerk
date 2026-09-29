@@ -10,4 +10,4 @@ When declared, a `Rationale` directive MUST articulate an underlying engineering
 
 Rationale: As codified in the Canon Format Specification (SPEC.md §5), reasoning models use rationales for semantic exegesis; restating the rule consumes tokens without supplying new latent signal.
 
-**Guidance:** Articulate the underlying failure mode, performance trade-off, or historical context being addressed, or omit the directive if the rationale is already self-evident.
+**Remediation:** Articulate the underlying failure mode, performance trade-off, or historical context being addressed, or omit the directive if the rationale is already self-evident.

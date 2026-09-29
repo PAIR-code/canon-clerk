@@ -10,4 +10,4 @@ The repository `README.md` MUST shunt detailed architectural execution mechanics
 
 Rationale: The repository landing page is the storefront for adopters and contributors; inlining complex architectural specifications increases cognitive load and duplicates authoritative system documentation maintained under `docs/` or `specs/` (per the Diátaxis documentation framework).
 
-**Guidance:** Move detailed architecture diagrams, pipeline cascades, or execution mechanics to a dedicated document under `docs/` or `specs/`, leaving only a concise summary and link in `README.md`.
+**Remediation:** Move detailed architecture diagrams, pipeline cascades, or execution mechanics to a dedicated document under `docs/` or `specs/`, leaving only a concise summary and link in `README.md`.

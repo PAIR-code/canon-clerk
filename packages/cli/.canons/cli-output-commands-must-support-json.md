@@ -8,4 +8,4 @@ CLI commands that report inspection results, audit verdicts, status summaries, o
 
 Rationale: In accordance with modern CLI standards (clig.dev §Output), automated CI systems and AI agents require deterministic machine-readable JSON payloads rather than fragile scraping of human-oriented terminal text.
 
-**Guidance:** Implement a `--json` flag that serializes command results directly via `JSON.stringify()` to `stdout`, ensuring all accompanying decorative formatting and status banners are omitted.
+**Remediation:** Implement a `--json` flag that serializes command results directly via `JSON.stringify()` to `stdout`, ensuring all accompanying decorative formatting and status banners are omitted.

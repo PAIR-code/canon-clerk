@@ -11,4 +11,4 @@ tags:
 
 Rationale: Skill activation is driven by frontmatter metadata; repeating triggers in the body consumes tokens without aiding runtime execution.
 
-**Guidance:** Remove redundant activation prompts, keyword triggers, or slash command invocations from the body markdown, retaining them exclusively in frontmatter `description:`.
+**Remediation:** Remove redundant activation prompts, keyword triggers, or slash command invocations from the body markdown, retaining them exclusively in frontmatter `description:`.

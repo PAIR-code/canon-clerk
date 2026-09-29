@@ -10,4 +10,4 @@ Agent skill scripts MUST emit standard POSIX text streams, consisting exclusivel
 
 Rationale: Terminal escape sequences, animated spinners, and carriage returns consume precious model tokens, corrupt automated parsers, and crash non-interactive subshell harnesses.
 
-**Guidance:** Strip ANSI color escapes (e.g. `sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'`), eliminate carriage returns (`\r`), and ensure all output lines terminate with standard newlines (`\n`).
+**Remediation:** Strip ANSI color escapes (e.g. `sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'`), eliminate carriage returns (`\r`), and ensure all output lines terminate with standard newlines (`\n`).

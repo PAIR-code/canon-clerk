@@ -10,4 +10,4 @@ Canon `Exception` clauses MUST specify objective, verifiable conditions using RF
 
 Rationale: Following the Canon Format Specification (SPEC.md §5), the AI evaluator screens exceptions for semantic sufficiency; subjective exemptions introduce evaluation nondeterminism and prompt drift.
 
-**Guidance:** Formulate exceptions with concrete, falsifiable evidentiary requirements, such as benchmark metrics, CVE citations, or explicit inline architectural comments.
+**Remediation:** Formulate exceptions with concrete, falsifiable evidentiary requirements, such as benchmark metrics, CVE citations, or explicit inline architectural comments.

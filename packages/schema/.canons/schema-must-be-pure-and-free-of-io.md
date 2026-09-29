@@ -10,4 +10,4 @@ Code in `@canon-clerk/schema` MUST consist strictly of static TypeScript type de
 
 Rationale: Grounded in RFC 8927 and Clean Architecture entity boundaries, schema definitions serve as universal contracts consumed across Node, browsers, and edge runtimes; coupling them to runtime I/O violates ISO/IEC 25010 portability.
 
-**Guidance:** Move any filesystem scanning, network requests, or environment access into `@canon-clerk/core`, keeping `@canon-clerk/schema` strictly focused on static types, Zod/JSON schemas, and AST structures.
+**Remediation:** Move any filesystem scanning, network requests, or environment access into `@canon-clerk/core`, keeping `@canon-clerk/schema` strictly focused on static types, Zod/JSON schemas, and AST structures.

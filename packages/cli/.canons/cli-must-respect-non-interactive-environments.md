@@ -8,4 +8,4 @@ CLI commands MUST detect non-interactive or automated environments (`!isTTY`, `C
 
 Rationale: Per the NO_COLOR standard (no-color.org) and clig.dev §Interactivity, interactive prompts hang unattended CI jobs indefinitely, while ANSI escapes and spinners pollute log aggregators with control sequence noise.
 
-**Guidance:** Check terminal TTY status and standard environment variables (`CI`, `NO_COLOR`) before initiating prompts or ANSI rendering, terminating with an actionable non-zero exit code if required parameters are missing in non-interactive mode.
+**Remediation:** Check terminal TTY status and standard environment variables (`CI`, `NO_COLOR`) before initiating prompts or ANSI rendering, terminating with an actionable non-zero exit code if required parameters are missing in non-interactive mode.

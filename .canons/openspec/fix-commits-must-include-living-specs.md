@@ -15,4 +15,4 @@ Exception: A `fix` pull request MAY omit changes to `openspec/specs/` IFF the pu
 
 Rationale: Under Conventional Commits 1.0.0 (SemVer PATCH) and Specification by Example (SBE), user-facing defects indicate unhandled boundary conditions or gaps in specification scenarios. Codifying the corrected behavior as a distinct OpenSpec scenario (`#### Scenario:`) anchors the fix as a regression guardrail and preserves living contract truth.
 
-**Guidance:** Add a new `#### Scenario:` under the affected requirement in `openspec/specs/<capability>/spec.md` codifying the failing input and expected output as a concrete regression guardrail.
+**Remediation:** Add a new `#### Scenario:` under the affected requirement in `openspec/specs/<capability>/spec.md` codifying the failing input and expected output as a concrete regression guardrail.
