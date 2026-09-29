@@ -20,5 +20,5 @@ Canon Clerk uses a **triangular Git worktree layout**. Depending on how the work
   - When starting work on an issue, scaffold a new worktree using the `git-worktree` skill. 
 
 ### Level B: A Worktree Checkout (Repo Root)
-- **Characteristics:** Contains `.canons/`, `docs/`, `package.json`, `README.md`, and project files directly in `.`.
+- **Characteristics:** Contains `.canons/`, `docs/`, `openspec/`, `package.json`, `README.md`, and project files directly in `.`.
 - **DIRECTIVE FOR AGENTS:** You are inside an active working branch. Proceed normally with code editing, testing, and Git operations.

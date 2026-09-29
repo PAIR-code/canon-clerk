@@ -168,12 +168,64 @@ npm run check
 
 This single command deterministically executes the local equivalent of the CI pipeline across all monorepo workspaces:
 - `npm run lint:lockfile`: Audits `package-lock.json` against untrusted registry URLs.
+- `npm run lint:specs`: Validates living specifications and active change proposals (`openspec validate --all --strict`).
 - `npm run typecheck`: Runs static typechecking across all workspaces (`tsc --noEmit`).
 - `npm run build`: Bundles distribution packages with `tsup`.
 - `npm test`: Runs all unit and integration tests via `vitest`.
 
 > [!NOTE]
 > The repository includes a Git `pre-push` hook configured in `.githooks/pre-push` (installed automatically during `npm install`). If you attempt to `git push`, the hook will execute `npm run check` automatically, catching any failures locally before continuous integration runs.
+
+### Spec-Driven Development (SDD) with OpenSpec
+
+Canon Clerk employs **Spec-Driven Development (SDD)** via OpenSpec to specify architectural contracts, CLI flags, exit codes, and engine behaviors before writing code.
+
+Living specifications reside in `openspec/specs/` (e.g. `core`, `cli`, `action`), while active change proposals live in `openspec/changes/<change-name>/`.
+
+#### The SDD Progression
+
+1. **Design / Propose:**
+   - Author a change proposal containing `proposal.md`, `specs/<capability>/spec.md` (deltas with `## ADDED/MODIFIED/REMOVED Requirements` and `#### Scenario:` blocks), `design.md`, and `tasks.md`.
+   - Commit using the `spec(<surface>):` prefix.
+2. **Verify / TDD:**
+   - Author unit or conformance tests reflecting the spec requirements in `packages/<package>/src/*.test.ts`.
+3. **Implement:**
+   - Write code fulfilling the specification in `packages/<package>/src/` using `feat(<surface>):` or `fix(<surface>):`.
+4. **Baseline & Archive:**
+   - Archive the change using `openspec-archive-change` (or sync deltas via `openspec-sync-specs`), promoting changes into living specs under `openspec/specs/`.
+
+#### Directing Your AI Assistant (Recommended)
+
+Prompt your assistant:
+> *"Propose a new spec for CLI streaming output"*  
+> *"Sync specs from the active change"*  
+> *"Apply the tasks from change cli-streaming"*  
+> *"Archive change cli-streaming"*
+
+**What happens:** The assistant activates the appropriate OpenSpec skill in `.agents/skills/`:
+- `openspec-propose`: Drafts proposal, spec deltas, design, and implementation tasks.
+- `openspec-explore`: Explores problem space and codebase patterns.
+- `openspec-apply-change`: Executes implementation tasks step-by-step.
+- `openspec-sync-specs`: Semantically merges spec deltas into main specs without archiving.
+- `openspec-archive-change`: Completes tasks and promotes deltas into `openspec/specs/`.
+- `openspec-update-change`: Updates existing change artifacts.
+
+#### Under the Hood & Manual Fallback
+
+You can run the OpenSpec CLI directly:
+```bash
+# Validate all specs and active changes:
+npx openspec validate --all --strict
+
+# Create a new change proposal:
+npx openspec new change <change-name>
+
+# Check status of an in-flight change:
+npx openspec status --change <change-name>
+
+# Archive a completed change into living specs:
+npx openspec archive <change-name>
+```
 
 ---
 
