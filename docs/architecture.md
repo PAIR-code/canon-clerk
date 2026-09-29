@@ -56,14 +56,20 @@ By cascading from deterministic filters to lightweight screening and finally to 
 
 ## 3. Directives & Execution Mechanics
 
-When evaluating canons that fail compliance, the Deep Auditor looks for two first-class directives defined in [SPEC.md](../SPEC.md):
+When evaluating canons against pull request diffs, the Deep Auditor enforces the **What / When / Why / How** tetrad using three first-class execution directives defined in [SPEC.md](../SPEC.md):
 
-### 3.1 `Guidance` (Contributor Directive)
+### 3.1 `Exception` (Permissible Deviations / Conditional Pass)
+* **Actor:** Evaluator (Clerk AI).
+* **CI Verdict:** Conditional **`pass`** (GitHub conclusion: `success` 🟢).
+* **Behavior:** When an invariant violation is detected, the Deep Auditor screens declared `Exception` clauses before issuing a failure. Rather than relying on simple comment flags (`// canon-ignore`), the auditor evaluates the **semantic sufficiency** and factual grounding of the author's justification against the diff and PR context. If all criteria of an exception are met, the check short-circuits and resolves to `pass`, appending an audit verification note to the Check Run summary.
+* **Precedence:** Evaluated prior to `Guidance` or `Supplement`. If an exception is satisfied, the check passes without requiring contributor remediation or automated synthesis.
+
+### 3.2 `Guidance` (Contributor Directive)
 * **Actor:** Contributor (Human or AI agent).
 * **CI Verdict:** **`fail`** (or **`action_required`** for PR metadata/process issues). Both are **blocking**.
 * **Behavior:** The auditor details what the PR author must do to bring the change into compliance (e.g., pointing to required templates, documentation sections, or missing test scenarios).
 
-### 3.2 `Supplement` (Clerk Synthesis)
+### 3.3 `Supplement` (Clerk Synthesis)
 * **Actor:** Clerk AI.
 * **CI Verdict:** **`warn`** (Non-blocking / GitHub conclusion: `neutral`).
 * **Behavior:** The Clerk cures the defect on the fly by synthesizing the missing asset (e.g., drafting a 3-step manual test script from the diff) and appending it directly to the Check Run summary.
@@ -77,8 +83,8 @@ Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one
 
 | Engine Verdict | GitHub Check Run Conclusion | Blocks Merge? | Scope | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`pass`** | `success` 🟢 | No | Both | Canon applies and the PR fully conforms to the invariant. |
-| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code violates the invariant. Includes cases where `Guidance` was provided or a `Supplement` attempt was infeasible. |
+| **`pass`** | `success` 🟢 | No | Both | Canon applies and the PR conforms to the invariant, either directly or via a verified `Exception` clause. |
+| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code violates the invariant and satisfies zero `Exception` clauses. Includes cases where `Guidance` was provided or a `Supplement` attempt was infeasible. |
 | **`action_required`** | `action_required` 🟡 | **Yes** | **Metadata & Process** | Canon applies, but PR metadata/process violates the invariant (e.g., missing test plan, invalid PR title). |
 | **`warn`** | `neutral` ⚪ | No | Both | Non-blocking advisory, or applied when the Clerk successfully synthesizes a `Supplement` (curing the defect). |
 | **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. *(Safety valve for optimistic Stage 1 screening).* |

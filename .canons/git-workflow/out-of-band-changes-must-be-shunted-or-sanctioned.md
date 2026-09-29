@@ -8,10 +8,10 @@ inspect:
 tags:
   - git-workflow
 ---
-A pull request MUST only implement changes sanctioned by its motivating issue and PR description. Out-of-band changes, drive-by refactorings, or unrelated improvements MUST be shunted to separate follow-up issues OR folded into the current workstream by deliberate expansion of the mandate via upstream chase to the motivating issue text.
+A pull request MUST only implement changes sanctioned by its motivating issue and PR description. Out-of-band changes, drive-by refactorings, or unrelated improvements MUST be omitted.
 
-Rationale: Bundling out-of-band changes discards situational discovery context, complicates code review, breaks Git bisectability, and distorts squash-merge changelogs.
+Exception: A pull request MAY introduce or update project canons not explicitly enumerated in the motivating issue IFF the canons codify invariants directly governing the files, subsystems, or specifications modified in the pull request, and are documented in the pull request summary.
 
-**Guidance:** If encountering an unrelated defect, missing canon, or cleanup opportunity:
-1. **Shunt it (Recommended):** File a new tracking issue documenting the problem and leave the current PR focused on its original scope.
-2. **Upstream Chase:** If the change is strictly necessary for the current task to land, update the motivating issue and PR description to document the expanded scope before committing.
+Rationale: In line with Git atomic commit practices and standard change isolation, bundling out-of-band changes discards situational discovery context, complicates code review, breaks Git bisectability, and distorts squash-merge changelogs.
+
+**Guidance:** Shunt unrelated work to a new tracking issue (recommended) OR execute an upstream chase to expand the motivating issue scope.
