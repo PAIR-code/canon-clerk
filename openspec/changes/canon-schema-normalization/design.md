@@ -44,6 +44,7 @@
   * `inspect`: Frontmatter `inspect` $\rightarrow$ `["diff", "pr_title", "pr_body"]`.
   * `tags`: Frontmatter `tags` (coercing scalar string to array) $\rightarrow$ `[]`.
   * `references`: Frontmatter `references` $\rightarrow$ `[]`.
+  * `invariant`: Body text outside directives $\rightarrow$ derived `title` (supporting 0-byte and heading-only canons).
 
 ## Risks / Trade-offs
 

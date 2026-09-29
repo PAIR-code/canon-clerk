@@ -21,10 +21,19 @@ The system SHALL derive missing canon metadata according to the deterministic hi
 4. `inspect`: Frontmatter `inspect` list, falling back to `["diff", "pr_title", "pr_body"]`.
 5. `tags`: Frontmatter `tags` list (coercing scalar string to a single-element list), falling back to `[]`.
 6. `references`: Frontmatter `references` list, falling back to `[]`.
+7. `invariant`: Primary body invariant statement, falling back to the derived `title` when the body contains zero invariant text.
 
 #### Scenario: Deriving metadata from bare markdown canon
 - **WHEN** a canon markdown file contains no frontmatter and begins with `# Prs Must Include Tests`
 - **THEN** the system derives `id` from the file stem, `title` as `"Prs Must Include Tests"`, `triggers` as `["**/*"]`, `inspect` as `["diff", "pr_title", "pr_body"]`, `tags` as `[]`, and `references` as `[]`
+
+#### Scenario: Deriving invariant from filename for zero-byte canon
+- **WHEN** a canon markdown file is completely empty (0 bytes) with path `.canons/all-caps-spec-must-refer-to-spec-md.md`
+- **THEN** the system derives `id` from the file stem, `title` as `"All Caps Spec Must Refer To Spec Md"`, and `invariant` as `"All Caps Spec Must Refer To Spec Md"`
+
+#### Scenario: Deriving invariant from heading in heading-only canon
+- **WHEN** a canon markdown file contains only a single heading `# PRs Must Include Tests` with zero body text
+- **THEN** the system derives `title` and `invariant` as `"PRs Must Include Tests"`
 
 #### Scenario: Coercing scalar frontmatter tags
 - **WHEN** a canon frontmatter specifies `tags: internal` as a scalar string
