@@ -31,10 +31,10 @@
 ### 3. Progressive AST Decomposition for Cognitive Tetrad
 * **Decision:** Parse the markdown body into structured sections:
   * `invariant`: The primary invariant statement (What).
-  * `exception`: Permissible deviation conditions (`Exception: ...`).
+  * `exceptions`: An array of zero or more discrete permissible deviation conditions (`exceptions: string[]`, evaluated as independent logical ORs).
   * `rationale`: Precedent reasoning (`Rationale: ...`).
   * `remediation`: Actionable instructions for contributors (`Remediation: ...` or `**Remediation:** ...`).
-* **Rationale:** Reflects the living `SPEC.md` What/When/Why/How tetrad. Enables downstream Deep Auditor and CLI formatters to selectively access directives without ad-hoc string searching.
+* **Rationale:** Reflects the living `SPEC.md` What/When/Why/How tetrad. Enables downstream Deep Auditor and CLI formatters to selectively access directives without ad-hoc string searching. Discrete exceptions are collected into an array for independent logical OR evaluation per SPEC.md Section 5.
 
 ### 4. Metadata Derivation Precedence Matrix
 * **Decision:** Implement exact resolution hierarchy matching `SPEC.md` Section 4.2:

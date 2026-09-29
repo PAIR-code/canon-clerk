@@ -51,8 +51,12 @@ The canon parsing and normalization functions in `@canon-clerk/schema` SHALL be 
 - **THEN** the system returns a normalized `Canon` entity without performing filesystem or network operations
 
 ### Requirement: Cognitive Directives and Section AST
-The parser SHALL parse the canon body into structured sections, separating the primary invariant statement (What) from recognized directives: `Exception` (When), `Rationale` (Why), and `Remediation` (How).
+The parser SHALL parse the canon body into structured sections, separating the primary invariant statement (What) from recognized directives: `Exception` (When), `Rationale` (Why), and `Remediation` (How). Discrete `Exception` clauses SHALL be collected into a normalized `exceptions: string[]` array containing zero or more elements, evaluated as independent logical ORs.
 
 #### Scenario: Parsing the complete cognitive tetrad
 - **WHEN** a canon body contains an invariant statement, `Exception:` clause, `Rationale:` clause, and `**Remediation:**` clause
-- **THEN** the parsed AST categorizes each directive into distinct, typed fields on the canon entity
+- **THEN** the parsed AST categorizes each directive into distinct, typed fields on the canon entity, with `exceptions` containing the single extracted exception clause
+
+#### Scenario: Parsing multiple discrete exception clauses
+- **WHEN** a canon body declares multiple discrete `Exception:` directives
+- **THEN** the parsed AST collects each discrete clause into `exceptions: string[]` preserving declaration order
