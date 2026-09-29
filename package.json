@@ -24,6 +24,7 @@
   },
   "license": "Apache-2.0",
   "devDependencies": {
+    "@fission-ai/openspec": "^1.13.2",
     "@types/node": "^24.0.9",
     "lockfile-lint": "^4.14.1",
     "tsup": "^8.5.0",
