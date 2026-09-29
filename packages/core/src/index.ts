@@ -2,8 +2,8 @@ import type { Canon } from '@canon-clerk/schema';
 
 export interface AuditContext {
   changedFiles: string[];
-  prTitle?: string;
-  prBody?: string;
+  prTitle?: string | undefined;
+  prBody?: string | undefined;
 }
 
 export interface FilterResult {
@@ -17,14 +17,14 @@ export interface FilterResult {
  */
 export function filterCanonsByPath(canons: Canon[], changedFiles: string[]): FilterResult {
   const matchedCanons = canons.filter((canon) => {
-    const paths = canon.triggers?.['paths'];
-    if (!paths || !Array.isArray(paths) || paths.length === 0) {
+    const triggers = canon.triggers;
+    if (!triggers || !Array.isArray(triggers) || triggers.length === 0) {
       // Default: canons without path triggers match all files
       return true;
     }
-    return paths.some((pattern) => {
+    return triggers.some((pattern) => {
       if (typeof pattern !== 'string') return false;
-      if (pattern === '**' || pattern === '**/*') return true;
+      if (pattern === '**' || pattern === '**/*' || pattern === '*') return true;
       const prefix = pattern.replace(/\*.*$/, '');
       return changedFiles.some((file) => file.startsWith(prefix));
     });
@@ -35,4 +35,6 @@ export function filterCanonsByPath(canons: Canon[], changedFiles: string[]): Fil
   return { matchedCanons, unmatchedCanons };
 }
 
-export const CORE_VERSION = '0.1.0';
+import pkg from '../package.json' with { type: 'json' };
+
+export const CORE_VERSION = pkg.version;
