@@ -45,6 +45,13 @@
   * `references`: Frontmatter `references` $\rightarrow$ `[]`.
   * `invariant`: Body text outside directives $\rightarrow$ derived `title` (supporting 0-byte and heading-only canons).
 
+### 5. Two-Stage Lexer and Parser Architecture
+* **Decision:** Separate lexical analysis (`tokenizeCanon`) from syntactic parsing and normalization (`parseCanon`):
+  * **Lexer (`tokenizeCanon`):** Emits an ordered stream of typed lexical tokens (`CanonToken`) tracking 1-indexed source line numbers, raw source text, and token-specific properties (code blocks, frontmatter, headings, directives, text, blank lines). Directives preserve raw labels and trimmed values (including empty values for whitespace-only directives).
+  * **Parser (`parseCanon`):** Consumes the token stream to assemble the normalized `Canon` domain entity, resolving fallbacks, defaults, and multi-line continuations.
+  * **Linter Enablement:** Downstream linters can inspect the token stream directly to detect style issues (such as empty directives or duplicate clauses) with exact line numbers, without needing to re-scan raw text.
+* **Rationale:** Adheres to single-responsibility and compiler design best practices. Decouples tolerant domain normalization from strict diagnostic linting.
+
 ## Risks / Trade-offs
 
 - **[Malformed Frontmatter]** $\rightarrow$ Parser validates frontmatter types and emits clean descriptive parse errors if YAML syntax is invalid or frontmatter is not a mapping.

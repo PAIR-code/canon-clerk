@@ -60,3 +60,14 @@ The parser SHALL parse the canon body into structured cognitive directives, sepa
 #### Scenario: Parsing multiple discrete exception clauses
 - **WHEN** a canon body declares multiple discrete `Exception:` directives
 - **THEN** the parsed canon entity collects each discrete clause into `exceptions: string[]` preserving declaration order
+
+### Requirement: Lexical Tokenization
+The system SHALL provide a pure lexical tokenizer (`tokenizeCanon`) that scans raw canon markdown content into an ordered stream of typed lexical tokens (`CanonToken`) tracking 1-indexed source line numbers, raw source text, and token-specific properties for frontmatter blocks, headings, code blocks, cognitive directives (`Exception`, `Rationale`, `Remediation`), text paragraphs, and blank lines.
+
+#### Scenario: Tokenizing complete canon with frontmatter and directives
+- **WHEN** a canon contains frontmatter, headings, directives, and code blocks
+- **THEN** the lexer emits typed tokens (`frontmatter`, `heading`, `directive`, `code_block`, `text`, `blank_line`) with 1-indexed line numbers and raw text
+
+#### Scenario: Preserving directive trivia and empty values in tokens
+- **WHEN** a canon body contains an empty directive such as `Rationale:    `
+- **THEN** the lexer emits a `directive` token with `name: "rationale"`, `value: ""`, and its exact source line number
