@@ -170,19 +170,25 @@ export function deriveInspect(frontmatterInspect?: unknown): InspectToken[] {
  * 2. Default: `[]`
  */
 export function deriveTags(frontmatterTags?: unknown): string[] {
-  if (typeof frontmatterTags === 'string') {
-    const trimmed = frontmatterTags.trim();
-    return trimmed.length > 0 ? [trimmed] : [];
+  const rawList =
+    typeof frontmatterTags === 'string'
+      ? [frontmatterTags]
+      : Array.isArray(frontmatterTags)
+        ? frontmatterTags.filter((item): item is string => typeof item === 'string')
+        : [];
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of rawList) {
+    const normalized = toKebabCase(raw);
+    if (normalized.length > 0 && !seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
   }
 
-  if (Array.isArray(frontmatterTags)) {
-    return frontmatterTags
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  return [];
+  return result;
 }
 
 /**

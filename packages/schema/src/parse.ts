@@ -18,6 +18,11 @@ export function parseCanon(rawContent: string, options?: ParseCanonOptions): Can
   const { metadata, scope } = deriveMetadata(frontmatter, body, options);
   const sections = parseSections(body);
 
+  // SPEC.md Section 4.2.7: Invariant falls back to derived title for empty or heading-only canons
+  if (!sections.invariant || sections.invariant.trim().length === 0) {
+    sections.invariant = metadata.title;
+  }
+
   const canon: Canon = {
     ...metadata,
     sections,

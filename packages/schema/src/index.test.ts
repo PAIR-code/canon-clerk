@@ -80,17 +80,40 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
       expect(canon.sections.remediation).toBeUndefined();
     });
 
-    it('coerces scalar string tags into array', () => {
+    it('coerces and normalizes tags with deduplication', () => {
       const raw = `---
-tags: internal
+tags:
+  - Architecture
+  - "API Design"
+  - core_module
+  - architecture
 ---
-# Internal Rule
+# Tagged Rule
 
-Internal rules MUST not be exported.`;
+Tags must be normalized.`;
 
       const canon = parseCanon(raw);
-      expect(canon.tags).toEqual(['internal']);
-      expect(canon.title).toBe('Internal Rule');
+      expect(canon.tags).toEqual(['architecture', 'api-design', 'core-module']);
+    });
+
+    it('derives invariant from filename for a completely empty (0-byte) canon', () => {
+      const canon = parseCanon('', {
+        filePath: '.canons/all-caps-spec-must-refer-to-spec-md.md',
+      });
+
+      expect(canon.id).toBe('all-caps-spec-must-refer-to-spec-md');
+      expect(canon.title).toBe('All Caps Spec Must Refer To Spec Md');
+      expect(canon.sections.invariant).toBe('All Caps Spec Must Refer To Spec Md');
+      expect(canon.sections.exception).toBeUndefined();
+      expect(canon.sections.rationale).toBeUndefined();
+      expect(canon.sections.remediation).toBeUndefined();
+    });
+
+    it('derives invariant from heading for a heading-only canon file', () => {
+      const canon = parseCanon('# PRs Must Include Tests\n');
+
+      expect(canon.title).toBe('PRs Must Include Tests');
+      expect(canon.sections.invariant).toBe('PRs Must Include Tests');
     });
 
     it('propagates CanonParseError on malformed frontmatter', () => {
