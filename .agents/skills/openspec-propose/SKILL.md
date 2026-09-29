@@ -1,9 +1,9 @@
 ---
 name: openspec-propose
 description: Propose a new OpenSpec change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation. Also use when the user says "openspec propose" or "opsx propose".
-allowed-tools: Bash(openspec:*)
+allowed-tools: Bash(openspec:*), Bash(npm run opsx:*), Bash(npm run openspec:*)
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires openspec CLI (execute via 'npm run opsx -- <command>' or 'npm run openspec -- <command>').
 metadata:
   author: openspec
   version: "1.0"
@@ -11,6 +11,8 @@ metadata:
 ---
 
 Propose a new change - create the change and generate all artifacts in one step.
+
+**CLI Execution Invariant:** In this repository, execute all OpenSpec CLI commands via `npm run opsx -- <command>` or `npm run openspec -- <command>` (e.g. `npm run opsx -- list --json`). Do not invoke `openspec` directly or via `npx openspec`. Unscoped `openspec` commands in the steps below represent the arguments passed to `npm run opsx --`.
 
 **Planning boundary**: This workflow creates planning artifacts only. The user request that selected or triggered this workflow authorizes planning only, even if it asks to build or fix something. Do not edit project code. After the planning artifacts are complete, stop. Do not start implementation in the same response, even if the initial request asks for it. Wait for a new user request after the artifacts are presented; then start the apply workflow.
 
@@ -80,18 +82,18 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
    Using the configured default:
    ```bash
-   openspec new change "<name>"
+   npm run opsx -- new change "<name>"
    ```
 
    Using an explicitly requested schema:
    ```bash
-   openspec new change "<name>" --schema "<schema-name>"
+   npm run opsx -- new change "<name>" --schema "<schema-name>"
    ```
    This creates a scaffolded change in the planning home resolved by the CLI with `.openspec.yaml`.
 
 5. **Get the artifact build order**
    ```bash
-   openspec status --change "<name>" --json
+   npm run opsx -- status --change "<name>" --json
    ```
    Parse the JSON to get:
    - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
@@ -107,7 +109,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
    a. **For each artifact that is `ready` (dependencies satisfied)**:
       - Get instructions:
         ```bash
-        openspec instructions <artifact-id> --change "<name>" --json
+        npm run opsx -- instructions <artifact-id> --change "<name>" --json
         ```
       - The instructions JSON includes:
         - `context`: Project background (constraints for you - do NOT include in output)
@@ -143,7 +145,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
 7. **Show final status**
    ```bash
-   openspec status --change "<name>"
+   npm run opsx -- status --change "<name>"
    ```
 
 **Output**

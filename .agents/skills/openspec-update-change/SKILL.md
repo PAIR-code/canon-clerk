@@ -1,9 +1,9 @@
 ---
 name: openspec-update-change
 description: Update an OpenSpec change by revising its existing planning artifacts and keeping them coherent with one another. Use when the user wants to revise a change's plan, fold new decisions into it, or reconcile its artifacts after an edit. Also use when the user says "openspec update change" or "opsx update". If the user means the openspec update CLI command, which refreshes generated files, run that command instead. Never edits code.
-allowed-tools: Bash(openspec:*)
+allowed-tools: Bash(openspec:*), Bash(npm run opsx:*), Bash(npm run openspec:*)
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires openspec CLI (execute via 'npm run opsx -- <command>' or 'npm run openspec -- <command>').
 metadata:
   author: openspec
   version: "1.0"
@@ -11,6 +11,8 @@ metadata:
 ---
 
 Revise a change's existing planning artifacts and keep them coherent. Never edit code.
+
+**CLI Execution Invariant:** In this repository, execute all OpenSpec CLI commands via `npm run opsx -- <command>` or `npm run openspec -- <command>` (e.g. `npm run opsx -- list --json`). Do not invoke `openspec` directly or via `npx openspec`. Unscoped `openspec` commands in the steps below represent the arguments passed to `npm run opsx --`.
 
 **Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `schemas`, `view`). Once selected, treat `--store <id>` as sticky for the rest of the workflow. Every unscoped example of those commands below is shorthand: before running it, append the flag. For example, run `openspec status --change "<name>" --json --store "<id>"`, not the unscoped form shown below. Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
@@ -49,7 +51,7 @@ This workflow revises artifacts that already exist; it never creates missing one
 
 2. **Get the change's artifacts**
    ```bash
-   openspec status --change "<name>" --json
+   npm run opsx -- status --change "<name>" --json
    ```
    Parse the JSON to understand current state. The response includes:
    - `schemaName`: The workflow schema being used (e.g., "spec-driven")
@@ -84,7 +86,7 @@ This workflow revises artifacts that already exist; it never creates missing one
    - If the user rejects a revision, do not write it - leave that artifact unchanged.
    - When a substantial rewrite is needed, get that artifact's rules and template first:
      ```bash
-     openspec instructions "<artifact-id>" --change "<name>" --json
+     npm run opsx -- instructions "<artifact-id>" --change "<name>" --json
      ```
 
 6. **Point to the next step (guidance only - NEVER act on it)**

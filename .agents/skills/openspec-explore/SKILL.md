@@ -1,9 +1,9 @@
 ---
 name: openspec-explore
 description: Enter OpenSpec explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements in a project that uses OpenSpec. Use when the user wants to think through something before or during an OpenSpec change. Also use when the user says "openspec explore" or "opsx explore".
-allowed-tools: Bash(openspec:*)
+allowed-tools: Bash(openspec:*), Bash(npm run opsx:*), Bash(npm run openspec:*)
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires openspec CLI (execute via 'npm run opsx -- <command>' or 'npm run openspec -- <command>').
 metadata:
   author: openspec
   version: "1.0"
@@ -11,6 +11,8 @@ metadata:
 ---
 
 Enter explore mode. Think deeply. Visualize freely. Follow the conversation wherever it goes.
+
+**CLI Execution Invariant:** In this repository, execute all OpenSpec CLI commands via `npm run opsx -- <command>` or `npm run openspec -- <command>` (e.g. `npm run opsx -- list --json`). Do not invoke `openspec` directly or via `npx openspec`. Unscoped `openspec` commands in the steps below represent the arguments passed to `npm run opsx --`.
 
 **IMPORTANT: Explore mode is for thinking, not implementing.** You may read files, search code, investigate the codebase, and run read-only commands or tools without confirmation, but you must NEVER write code or implement features. If the user asks you to implement something, do not start it here: say that explore mode does not implement, and point them at `/openspec-propose`, which turns the discussion into a change. The work happens from that change, never from explore mode. You MAY create or update OpenSpec change artifacts (proposals, designs, specs) within a confirmed scope—that's capturing thinking, not implementing. Answering design or clarifying questions is never consent to write. Before the first write-capable action, name the artifacts or files you would change and what you would do, ask a direct yes/no question, and wait for the user's confirmation in a separate message. Confirmation covers only the scope you described; ask again before expanding it. An explicit request from the user to capture the exploration as a new change is itself that confirmation, covering the change and the change artifacts the request names; scaffold it first as described below.
 
@@ -124,7 +126,7 @@ You have full context of the OpenSpec system. Use it naturally, don't force it.
 
 At the start, quickly check what exists:
 ```bash
-openspec list --json
+npm run opsx -- list --json
 ```
 
 This tells you:
@@ -134,7 +136,7 @@ This tells you:
 
 That is the *change* list - work in flight. It does not include the project's durable capabilities, so list those too:
 ```bash
-openspec list --specs
+npm run opsx -- list --specs
 ```
 Add `--json` for ids and requirement counts, and append `--store "<id>"` only for a registered standalone store. This is the inventory of what the project already claims to do, and `openspec list` on its own never shows it. To look at one, run `openspec show "<spec-id>" --type spec --json --no-scenarios` (same `--store` rule) - it returns that capability's purpose and requirement texts without pulling the whole spec file into context, and `--type spec` stops a change of the same name from making it ambiguous.
 

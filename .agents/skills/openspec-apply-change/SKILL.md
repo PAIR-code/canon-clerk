@@ -1,9 +1,9 @@
 ---
 name: openspec-apply-change
 description: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks. Also use when the user says "openspec apply", "opsx apply", or "openspec implement".
-allowed-tools: Bash(openspec:*)
+allowed-tools: Bash(openspec:*), Bash(npm run opsx:*), Bash(npm run openspec:*)
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires openspec CLI (execute via 'npm run opsx -- <command>' or 'npm run openspec -- <command>').
 metadata:
   author: openspec
   version: "1.0"
@@ -11,6 +11,8 @@ metadata:
 ---
 
 Implement tasks from an OpenSpec change.
+
+**CLI Execution Invariant:** In this repository, execute all OpenSpec CLI commands via `npm run opsx -- <command>` or `npm run openspec -- <command>` (e.g. `npm run opsx -- list --json`). Do not invoke `openspec` directly or via `npx openspec`. Unscoped `openspec` commands in the steps below represent the arguments passed to `npm run opsx --`.
 
 **Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `schemas`, `view`). Once selected, treat `--store <id>` as sticky for the rest of the workflow. Every unscoped example of those commands below is shorthand: before running it, append the flag. For example, run `openspec status --change "<name>" --json --store "<id>"`, not the unscoped form shown below. Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
@@ -40,7 +42,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
 2. **Check status to understand the schema**
    ```bash
-   openspec status --change "<name>" --json
+   npm run opsx -- status --change "<name>" --json
    ```
    Parse the JSON to understand:
    - `schemaName`: The workflow being used (e.g., "spec-driven")
@@ -50,7 +52,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
 3. **Get apply instructions**
 
    ```bash
-   openspec instructions apply --change "<name>" --json
+   npm run opsx -- instructions apply --change "<name>" --json
    ```
 
    This returns:

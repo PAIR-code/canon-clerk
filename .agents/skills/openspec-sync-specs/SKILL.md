@@ -1,9 +1,9 @@
 ---
 name: openspec-sync-specs
 description: Sync delta specs from an OpenSpec change to main specs. Use when the user wants to update main specs with changes from a delta spec, without archiving the change. Also use when the user says "openspec sync" or "opsx sync".
-allowed-tools: Bash(openspec:*)
+allowed-tools: Bash(openspec:*), Bash(npm run opsx:*), Bash(npm run openspec:*)
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires openspec CLI (execute via 'npm run opsx -- <command>' or 'npm run openspec -- <command>').
 metadata:
   author: openspec
   version: "1.0"
@@ -11,6 +11,8 @@ metadata:
 ---
 
 Sync delta specs from a change to main specs.
+
+**CLI Execution Invariant:** In this repository, execute all OpenSpec CLI commands via `npm run opsx -- <command>` or `npm run openspec -- <command>` (e.g. `npm run opsx -- list --json`). Do not invoke `openspec` directly or via `npx openspec`. Unscoped `openspec` commands in the steps below represent the arguments passed to `npm run opsx --`.
 
 This is an **agent-driven** operation - you will read delta specs and directly edit main specs to apply the changes. This allows intelligent merging (e.g., adding a scenario without copying the entire requirement).
 
@@ -48,7 +50,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
    Run:
    ```bash
-   openspec status --change "<name>" --json
+   npm run opsx -- status --change "<name>" --json
    ```
 
    The JSON includes `planningHome.root`. Main specs live under `<planningHome.root>/openspec/specs/` — use that (store-aware) root for every main-spec path below, not a hardcoded repo path. When a store is selected it points at the store, not the current repository.
