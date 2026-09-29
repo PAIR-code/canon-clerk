@@ -15,6 +15,7 @@ Key architectural concepts:
 - [Canon Format Specification](SPEC.md): Complete normative grammar, What-Why-How triad, metadata derivation rules (id, title, triggers, inspect, tags, references), directive contracts (Guidance, Supplement, Rationale), and progressive disclosure tiers.
 - [Canon Authoring Canons](.canons/canon-authoring/): Reusable, project-agnostic exemplars tagged `canon-authoring` codifying canon-authoring invariants (naming, atomicity, falsifiability, semantic scope, succinctness, and directive contracts).
 - [README Authoring Canons](.canons/readme-authoring/): Reusable, project-agnostic exemplars tagged `readme-authoring` codifying landing documentation invariants (orientation, feature parity, roadmap omission, and architecture shunting).
+- [OpenSpec Canons](.canons/openspec/): Reusable exemplars tagged `openspec` codifying Spec-Driven Development invariants for features and bug fixes.
 - [Dogfood Canons](.canons/internal/): Internal project governance policies tagged `internal` enforced in CI on this repository.
 
 ## The Clerk Runner
