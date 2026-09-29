@@ -9,7 +9,7 @@
 # 📜 Canon Clerk
 
 [![CI Status](https://img.shields.io/github/actions/workflow/status/PAIR-code/canon-clerk/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/PAIR-code/canon-clerk/actions/workflows/ci.yml)
-[![Canons](https://img.shields.io/badge/canons-54_active-e3b341?style=flat-square)](.canons/)
+[![Canons](https://img.shields.io/badge/canons-55_active-e3b341?style=flat-square)](.canons/)
 [![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 
@@ -63,12 +63,12 @@ Canon Clerk addresses the friction points where static code analysis ends and se
 
 ## The Canon Corpus
 
-While the automated reference runner is in active development, Canon Clerk already provides a production-grade corpus of **54 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)). These rule packs are ready to explore, adapt, and use today:
+While the automated reference runner is in active development, Canon Clerk already provides a production-grade corpus of **55 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)). These rule packs are ready to explore, adapt, and use today:
 
 | Domain Pack | Path | Count | Governed Conventions |
 | :--- | :--- | :--- | :--- |
 | 🛠️ **CLI Ergonomics** | [`packages/cli/.canons/`](packages/cli/.canons/) | 20 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
-| 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 10 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What-Why-How triad, succinctness, and mutual exclusivity of directives. |
+| 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 11 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
 | 🤖 **Agent Skills** | [`.agents/skills/.canons/`](.agents/skills/.canons/) | 9 | Runtime script standards for AI agent skills: execution targets, command echo traces, unbounded output shunting, and POSIX compliance. |
 | 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 5 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps/vaporware, synchronization with user-facing features, responsive dark/light hero banners, and shunting architecture to `docs/`. |
 | 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
@@ -83,7 +83,7 @@ You do not need to wait for the automated CI runner to benefit from the canon co
 
 - **AI Coding Assistants (Claude Code, Cursor, Copilot, Antigravity):** Reference canon directories or individual canons in `AGENTS.md`, system prompts, or cursorrules to anchor agent generation to your team's architectural invariants.
 - **Pull Request Review Checklists:** Link directly to version-controlled canons in PR templates to make expectations transparent and citations unambiguous.
-- **Architectural Standards:** Use the normative What-Why-How triad ([`SPEC.md`](SPEC.md)) as a clean, standardized format for Architectural Decision Records (ADRs) and engineering tenets.
+- **Architectural Standards:** Use the normative What/When/Why/How tetrad ([`SPEC.md`](SPEC.md)) as a clean, standardized format for Architectural Decision Records (ADRs) and engineering tenets.
 
 ---
 
