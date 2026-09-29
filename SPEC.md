@@ -138,6 +138,11 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * **File Count Limit:** Implementations MUST NOT load more than **5 files** per canon by default.
      * **Byte Size Limit:** Total reference content per canon MUST NOT exceed **32KB** by default; content exceeding this cap MUST be truncated with a visible diagnostic notice.
 
+7. **`invariant` Derivation (The Invariant Statement):**
+   * If a Markdown body contains text outside recognized directive blocks (`Exception`, `Rationale`, `Remediation`), the first text block (excluding any opening `#` or `##` heading) MUST be used as the invariant statement.
+   * If the Markdown body is empty, or consists solely of headings or directives with zero invariant body text (e.g., a 0-byte file such as `all-caps-spec-must-refer-to-spec-md.md` or a heading-only file `# PRs Must Include Tests`), implementations MUST fall back to using the derived `title` as the invariant statement.
+   * *Rationale:* Adhering to Principle 1.3.1 (Zero Barrier to Entry) and canon naming standards (`canon-names-must-state-invariants`), a canon's filename or heading embodies its normative policy. This guarantees that minimal, 0-byte, or heading-only files function as valid, evaluable canons without producing empty evaluation prompts.
+
 ---
 
 ## 5. Directives & Reserved Keywords
