@@ -9,7 +9,7 @@
 # 📜 Canon Clerk
 
 [![CI Status](https://img.shields.io/github/actions/workflow/status/PAIR-code/canon-clerk/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/PAIR-code/canon-clerk/actions/workflows/ci.yml)
-[![Canons](https://img.shields.io/badge/canons-52_active-e3b341?style=flat-square)](.canons/)
+[![Canons](https://img.shields.io/badge/canons-54_active-e3b341?style=flat-square)](.canons/)
 [![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 
@@ -63,17 +63,18 @@ Canon Clerk addresses the friction points where static code analysis ends and se
 
 ## The Canon Corpus
 
-While the automated reference runner is in active development, Canon Clerk already provides a production-grade corpus of **52 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)). These rule packs are ready to explore, adapt, and use today:
+While the automated reference runner is in active development, Canon Clerk already provides a production-grade corpus of **54 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)). These rule packs are ready to explore, adapt, and use today:
 
 | Domain Pack | Path | Count | Governed Conventions |
 | :--- | :--- | :--- | :--- |
 | 🛠️ **CLI Ergonomics** | [`packages/cli/.canons/`](packages/cli/.canons/) | 20 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
 | 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 10 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What-Why-How triad, succinctness, and mutual exclusivity of directives. |
 | 🤖 **Agent Skills** | [`.agents/skills/.canons/`](.agents/skills/.canons/) | 9 | Runtime script standards for AI agent skills: execution targets, command echo traces, unbounded output shunting, and POSIX compliance. |
-| 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 4 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps/vaporware, synchronization with user-facing features, and shunting architecture to `docs/`. |
+| 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 5 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps/vaporware, synchronization with user-facing features, responsive dark/light hero banners, and shunting architecture to `docs/`. |
 | 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
 | 🏷️ **Conventional Commits** | [`.canons/conventional-commits/`](.canons/conventional-commits/) | 2 | Semantic commit invariants (`feat` for user-facing functionality, `fix` for user-facing bug fixes). |
 | 🔀 **Git Workflow** | [`.canons/git-workflow/`](.canons/git-workflow/) | 1 | Out-of-band change shunting and sanctioned issue mandate hygiene. |
+| 🎨 **Visual Identity** | [`.canons/visual-identity/`](.canons/visual-identity/) | 1 | Standalone brand iconography isolation, transparent canvas defaults, and defringed alpha perimeter standards. |
 | 🏛️ **Repository Governance** | [`.canons/internal/`](.canons/internal/) | 5 | Internal dogfood policies: curated `llms.txt` maintenance, domain-scoped tagging, and reusable standards. |
 
 ### Adopting Canons Today
