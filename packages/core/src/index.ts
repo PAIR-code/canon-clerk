@@ -35,4 +35,6 @@ export function filterCanonsByPath(canons: Canon[], changedFiles: string[]): Fil
   return { matchedCanons, unmatchedCanons };
 }
 
-export const CORE_VERSION = '0.1.0';
+import pkg from '../package.json' with { type: 'json' };
+
+export const CORE_VERSION = pkg.version;

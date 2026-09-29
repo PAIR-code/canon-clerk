@@ -6,4 +6,6 @@ export * from './lexer.js';
 export * from './body.js';
 export * from './parse.js';
 
-export const SCHEMA_VERSION = '1.0.0';
+import pkg from '../package.json' with { type: 'json' };
+
+export const SCHEMA_VERSION = pkg.version;

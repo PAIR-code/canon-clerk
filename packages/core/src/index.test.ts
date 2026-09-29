@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { filterCanonsByPath, CORE_VERSION } from './index.js';
 import { parseCanon } from '@canon-clerk/schema';
+import pkg from '../package.json' with { type: 'json' };
 
 describe('@canon-clerk/core', () => {
-  it('exports CORE_VERSION', () => {
-    expect(CORE_VERSION).toBe('0.1.0');
+  it('exports CORE_VERSION matching package.json', () => {
+    expect(CORE_VERSION).toBe(pkg.version);
+    expect(CORE_VERSION).toMatch(/^\d+\.\d+\.\d+/);
   });
 
   it('filters canons based on path triggers', () => {

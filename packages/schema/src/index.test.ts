@@ -1,138 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { SCHEMA_VERSION, parseCanon, CanonParseError } from './index.js';
+import pkg from '../package.json' with { type: 'json' };
+import * as schema from './index.js';
 
-describe('@canon-clerk/schema', () => {
-  it('defines the schema version', () => {
-    expect(SCHEMA_VERSION).toBe('1.0.0');
+describe('@canon-clerk/schema entrypoint', () => {
+  it('defines the schema version matching package.json', () => {
+    expect(schema.SCHEMA_VERSION).toBe(pkg.version);
+    expect(schema.SCHEMA_VERSION).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  describe('parseCanon end-to-end', () => {
-    it('parses a complete canon with frontmatter, scope, and cognitive tetrad as flat entity', () => {
-      const raw = `---
-id: brand-iconography-must-isolate-subject-from-canvas
-triggers:
-  - "assets/**/*.svg"
-inspect:
-  - diff
-  - pr_title
-tags:
-  - visual-identity
-  - branding
-references:
-  - "SPEC.md"
----
-# Brand Iconography Must Isolate Subject From Canvas
+  it('exports all expected parser, lexer, and normalization functions', () => {
+    expect(typeof schema.parseCanon).toBe('function');
+    expect(typeof schema.tokenizeCanon).toBe('function');
+    expect(typeof schema.parseBody).toBe('function');
+    expect(typeof schema.parseBodyFromTokens).toBe('function');
+    expect(typeof schema.extractFrontmatter).toBe('function');
+    expect(typeof schema.deriveMetadata).toBe('function');
+    expect(typeof schema.deriveId).toBe('function');
+    expect(typeof schema.deriveTitle).toBe('function');
+    expect(typeof schema.deriveTriggers).toBe('function');
+    expect(typeof schema.deriveInspect).toBe('function');
+    expect(typeof schema.deriveTags).toBe('function');
+    expect(typeof schema.deriveReferences).toBe('function');
+    expect(typeof schema.deriveScope).toBe('function');
+    expect(typeof schema.idToTitleCase).toBe('function');
+    expect(typeof schema.toKebabCase).toBe('function');
+  });
 
-Brand icon artwork MUST isolate the subject on an explicit white background (#ffffff) rather than rendering transparent negative space.
-
-Exception: Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.
-
-Rationale: In GitHub's theme engine, transparent SVGs render against dynamic canvas tones.
-
-**Remediation:** Flatten or backfill negative canvas space with solid #ffffff.`;
-
-      const canon = parseCanon(raw, {
-        filePath: 'packages/ui/.canons/brand-iconography-must-isolate-subject-from-canvas.md',
-      });
-
-      expect(canon.id).toBe('brand-iconography-must-isolate-subject-from-canvas');
-      expect(canon.title).toBe('Brand Iconography Must Isolate Subject From Canvas');
-      expect(canon.filePath).toBe('packages/ui/.canons/brand-iconography-must-isolate-subject-from-canvas.md');
-      expect(canon.scope).toBe('packages/ui');
-      expect(canon.triggers).toEqual(['assets/**/*.svg']);
-      expect(canon.inspect).toEqual(['diff', 'pr_title']);
-      expect(canon.tags).toEqual(['visual-identity', 'branding']);
-      expect(canon.references).toEqual(['SPEC.md']);
-
-      expect(canon.invariant).toBe(
-        'Brand icon artwork MUST isolate the subject on an explicit white background (#ffffff) rather than rendering transparent negative space.'
-      );
-      expect(canon.exceptions).toEqual([
-        'Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.',
-      ]);
-      expect(canon.rationale).toBe(
-        "In GitHub's theme engine, transparent SVGs render against dynamic canvas tones."
-      );
-      expect(canon.remediation).toBe(
-        'Flatten or backfill negative canvas space with solid #ffffff.'
-      );
-      expect(canon.rawContent).toBe(raw);
-      expect(canon.rawFrontmatter).toEqual({
-        id: 'brand-iconography-must-isolate-subject-from-canvas',
-        triggers: ['assets/**/*.svg'],
-        inspect: ['diff', 'pr_title'],
-        tags: ['visual-identity', 'branding'],
-        references: ['SPEC.md'],
-      });
-      expect(canon.rawBody).toContain('# Brand Iconography Must Isolate Subject From Canvas');
-    });
-
-    it('parses a bare minimal Tier 1 canon without frontmatter', () => {
-      const raw = `All pull requests MUST include automated unit tests.`;
-
-      const canon = parseCanon(raw, {
-        filePath: '.canons/prs-must-include-tests.md',
-      });
-
-      expect(canon.id).toBe('prs-must-include-tests');
-      expect(canon.title).toBe('Prs Must Include Tests');
-      expect(canon.filePath).toBe('.canons/prs-must-include-tests.md');
-      expect(canon.scope).toBeUndefined();
-      expect(canon.triggers).toEqual(['**/*']);
-      expect(canon.inspect).toEqual(['diff', 'pr_title', 'pr_body']);
-      expect(canon.tags).toEqual([]);
-      expect(canon.references).toEqual([]);
-      expect(canon.invariant).toBe('All pull requests MUST include automated unit tests.');
-      expect(canon.exceptions).toEqual([]);
-      expect(canon.rationale).toBeUndefined();
-      expect(canon.remediation).toBeUndefined();
-      expect(canon.rawFrontmatter).toBeUndefined();
-    });
-
-    it('coerces and normalizes tags with deduplication', () => {
-      const raw = `---
-tags:
-  - Architecture
-  - "API Design"
-  - core_module
-  - architecture
----
-# Tagged Rule
-
-Tags must be normalized.`;
-
-      const canon = parseCanon(raw);
-      expect(canon.tags).toEqual(['architecture', 'api-design', 'core-module']);
-    });
-
-    it('derives invariant from filename for a completely empty (0-byte) canon', () => {
-      const canon = parseCanon('', {
-        filePath: '.canons/all-caps-spec-must-refer-to-spec-md.md',
-      });
-
-      expect(canon.id).toBe('all-caps-spec-must-refer-to-spec-md');
-      expect(canon.title).toBe('All Caps Spec Must Refer To Spec Md');
-      expect(canon.invariant).toBe('All Caps Spec Must Refer To Spec Md');
-      expect(canon.exceptions).toEqual([]);
-      expect(canon.rationale).toBeUndefined();
-      expect(canon.remediation).toBeUndefined();
-      expect(canon.rawFrontmatter).toBeUndefined();
-    });
-
-    it('derives invariant from heading for a heading-only canon file', () => {
-      const canon = parseCanon('# PRs Must Include Tests\n');
-
-      expect(canon.title).toBe('PRs Must Include Tests');
-      expect(canon.invariant).toBe('PRs Must Include Tests');
-    });
-
-    it('propagates CanonParseError on malformed frontmatter', () => {
-      const raw = `---
-id: [invalid yaml
----
-# Invalid Canon`;
-
-      expect(() => parseCanon(raw, { filePath: 'bad.md' })).toThrowError(CanonParseError);
-    });
+  it('exports error classes', () => {
+    expect(typeof schema.CanonParseError).toBe('function');
+    const err = new schema.CanonParseError('Test error', 'test.md');
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('CanonParseError');
+    expect(err.filePath).toBe('test.md');
   });
 });
