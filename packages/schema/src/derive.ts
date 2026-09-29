@@ -1,4 +1,4 @@
-import type { CanonFrontmatter, CanonMetadata, InspectToken, ParseCanonOptions } from './types.js';
+import type { CanonMetadata, InspectToken, ParseCanonOptions, RawFrontmatter } from './types.js';
 
 const DEFAULT_INSPECT_TOKENS: InspectToken[] = ['diff', 'pr_title', 'pr_body'];
 const DEFAULT_GLOBAL_TRIGGERS: string[] = ['**/*'];
@@ -216,17 +216,18 @@ export function deriveReferences(frontmatterReferences?: unknown): string[] {
  * Derives all normalized canon metadata attributes per SPEC.md Section 4.
  */
 export function deriveMetadata(
-  frontmatter: CanonFrontmatter,
+  frontmatter: RawFrontmatter | undefined,
   markdownBody: string,
   options?: ParseCanonOptions
 ): { metadata: CanonMetadata; scope: string | undefined } {
+  const fm = frontmatter ?? {};
   const scope = options?.scope ?? deriveScope(options?.filePath);
-  const id = deriveId(frontmatter.id, options?.filePath);
-  const title = deriveTitle(frontmatter.title, markdownBody, id);
-  const triggers = deriveTriggers(frontmatter.triggers, scope);
-  const inspect = deriveInspect(frontmatter.inspect);
-  const tags = deriveTags(frontmatter.tags);
-  const references = deriveReferences(frontmatter.references);
+  const id = deriveId(fm['id'] as string | undefined, options?.filePath);
+  const title = deriveTitle(fm['title'] as string | undefined, markdownBody, id);
+  const triggers = deriveTriggers(fm['triggers'], scope);
+  const inspect = deriveInspect(fm['inspect'] as unknown[]);
+  const tags = deriveTags(fm['tags']);
+  const references = deriveReferences(fm['references']);
 
   return {
     metadata: {

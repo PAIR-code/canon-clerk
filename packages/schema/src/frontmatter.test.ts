@@ -7,6 +7,7 @@ describe('extractFrontmatter', () => {
     const raw = '# Invariant Heading\n\nAll files must have tests.';
     const result = extractFrontmatter(raw);
 
+    expect(result.rawFrontmatter).toBeUndefined();
     expect(result.frontmatter).toEqual({});
     expect(result.body).toBe(raw);
   });
@@ -26,12 +27,13 @@ Body text describing invariant.`;
 
     const result = extractFrontmatter(raw, 'some/path.md');
 
-    expect(result.frontmatter).toEqual({
+    expect(result.rawFrontmatter).toEqual({
       id: 'custom-canon-id',
       title: 'Custom Canon Title',
       triggers: ['**/*.ts'],
       tags: ['architecture'],
     });
+    expect(result.frontmatter).toEqual(result.rawFrontmatter);
     expect(result.body).toBe('# Invariant Heading\n\nBody text describing invariant.');
   });
 
@@ -41,6 +43,7 @@ Body text describing invariant.`;
 # Only Heading`;
 
     const result = extractFrontmatter(raw);
+    expect(result.rawFrontmatter).toBeUndefined();
     expect(result.frontmatter).toEqual({});
     expect(result.body).toBe('# Only Heading');
   });
@@ -49,6 +52,7 @@ Body text describing invariant.`;
     const raw = '---\r\nid: crlf-canon\r\n---\r\n# Heading\r\n';
     const result = extractFrontmatter(raw);
 
+    expect(result.rawFrontmatter).toEqual({ id: 'crlf-canon' });
     expect(result.frontmatter).toEqual({ id: 'crlf-canon' });
     expect(result.body).toBe('# Heading\n');
   });
@@ -86,6 +90,7 @@ id: [unclosed bracket
   it('ignores line with hyphens that is not frontmatter', () => {
     const raw = '---not frontmatter---\nSome text';
     const result = extractFrontmatter(raw);
+    expect(result.rawFrontmatter).toBeUndefined();
     expect(result.frontmatter).toEqual({});
     expect(result.body).toBe(raw);
   });

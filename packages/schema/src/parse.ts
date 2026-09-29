@@ -1,6 +1,6 @@
 import { extractFrontmatter } from './frontmatter.js';
 import { deriveMetadata } from './derive.js';
-import { parseSections } from './sections.js';
+import { parseBody } from './body.js';
 import type { Canon, ParseCanonOptions } from './types.js';
 
 /**
@@ -14,19 +14,22 @@ import type { Canon, ParseCanonOptions } from './types.js';
  * @returns The fully resolved and normalized Canon entity.
  */
 export function parseCanon(rawContent: string, options?: ParseCanonOptions): Canon {
-  const { frontmatter, body } = extractFrontmatter(rawContent, options?.filePath);
-  const { metadata, scope } = deriveMetadata(frontmatter, body, options);
-  const sections = parseSections(body);
+  const { rawFrontmatter, body } = extractFrontmatter(rawContent, options?.filePath);
+  const { metadata, scope } = deriveMetadata(rawFrontmatter, body, options);
+  const bodyParsed = parseBody(body);
 
   // SPEC.md Section 4.2.7: Invariant falls back to derived title for empty or heading-only canons
-  if (!sections.invariant || sections.invariant.trim().length === 0) {
-    sections.invariant = metadata.title;
-  }
+  const invariant =
+    !bodyParsed.invariant || bodyParsed.invariant.trim().length === 0
+      ? metadata.title
+      : bodyParsed.invariant;
 
   const canon: Canon = {
     ...metadata,
-    sections,
+    ...bodyParsed,
+    invariant,
     rawContent,
+    rawFrontmatter,
   };
 
   if (options?.filePath) {

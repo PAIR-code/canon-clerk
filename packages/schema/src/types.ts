@@ -10,17 +10,9 @@ export type InspectToken =
   | (string & {});
 
 /**
- * Raw frontmatter mapping parsed from a canon file's YAML block.
+ * Raw unvalidated YAML mapping parsed from a canon file's frontmatter block.
  */
-export interface CanonFrontmatter {
-  id?: string | undefined;
-  title?: string | undefined;
-  triggers?: string[] | { paths?: string[] } | undefined;
-  inspect?: InspectToken[] | undefined;
-  tags?: string[] | string | undefined;
-  references?: string[] | undefined;
-  [key: string]: unknown;
-}
+export type RawFrontmatter = Record<string, unknown>;
 
 /**
  * Normalized canon metadata attributes per SPEC.md Section 4.
@@ -41,9 +33,9 @@ export interface CanonMetadata {
 }
 
 /**
- * Cognitive sections and directives extracted from a canon's CommonMark body.
+ * Cognitive directives and body content extracted from a canon's CommonMark body.
  */
-export interface CanonSections {
+export interface CanonBody {
   /** The primary invariant statement (What) */
   invariant: string;
   /** Discrete permissible deviation clauses evaluated as logical ORs (When / Exception) */
@@ -56,26 +48,28 @@ export interface CanonSections {
   rawBody: string;
 }
 
+
 /**
- * Normalized, in-memory domain entity representing a validated canon.
+ * Normalized, unified in-memory domain entity representing a validated canon.
+ * Contains flat properties across metadata, cognitive body content, and file provenance.
  */
-export interface Canon extends CanonMetadata {
+export interface Canon extends CanonMetadata, CanonBody {
   /** Relative repository file path to the canon, if available */
   filePath?: string | undefined;
   /** Monorepo scope prefix (e.g., "packages/schema"), if scoped */
   scope?: string | undefined;
-  /** Structured cognitive sections and directives */
-  sections: CanonSections;
   /** Full raw string content of the canon file, if retained */
   rawContent?: string | undefined;
+  /** Raw unvalidated YAML mapping parsed from frontmatter, if present */
+  rawFrontmatter?: RawFrontmatter | undefined;
 }
 
 /**
  * Options passed to parseCanon or normalize functions.
  */
 export interface ParseCanonOptions {
-  /** Relative file path of the canon (used to derive id and scope) */
+  /** Relative repository file path of the canon (e.g. ".canons/pr-tests.md") */
   filePath?: string | undefined;
-  /** Explicit scope override if not derived from filePath */
+  /** Explicit monorepo scope prefix (e.g. "packages/core") */
   scope?: string | undefined;
 }

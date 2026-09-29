@@ -7,7 +7,7 @@ describe('@canon-clerk/schema', () => {
   });
 
   describe('parseCanon end-to-end', () => {
-    it('parses a complete canon with frontmatter, scope, and cognitive tetrad', () => {
+    it('parses a complete canon with frontmatter, scope, and cognitive tetrad as flat entity', () => {
       const raw = `---
 id: brand-iconography-must-isolate-subject-from-canvas
 triggers:
@@ -44,19 +44,27 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
       expect(canon.tags).toEqual(['visual-identity', 'branding']);
       expect(canon.references).toEqual(['SPEC.md']);
 
-      expect(canon.sections.invariant).toBe(
+      expect(canon.invariant).toBe(
         'Brand icon artwork MUST isolate the subject on an explicit white background (#ffffff) rather than rendering transparent negative space.'
       );
-      expect(canon.sections.exceptions).toEqual([
+      expect(canon.exceptions).toEqual([
         'Dark mode or alternate theme variants MAY invert the background to the primary dark theme canvas tone.',
       ]);
-      expect(canon.sections.rationale).toBe(
+      expect(canon.rationale).toBe(
         "In GitHub's theme engine, transparent SVGs render against dynamic canvas tones."
       );
-      expect(canon.sections.remediation).toBe(
+      expect(canon.remediation).toBe(
         'Flatten or backfill negative canvas space with solid #ffffff.'
       );
       expect(canon.rawContent).toBe(raw);
+      expect(canon.rawFrontmatter).toEqual({
+        id: 'brand-iconography-must-isolate-subject-from-canvas',
+        triggers: ['assets/**/*.svg'],
+        inspect: ['diff', 'pr_title'],
+        tags: ['visual-identity', 'branding'],
+        references: ['SPEC.md'],
+      });
+      expect(canon.rawBody).toContain('# Brand Iconography Must Isolate Subject From Canvas');
     });
 
     it('parses a bare minimal Tier 1 canon without frontmatter', () => {
@@ -74,10 +82,11 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
       expect(canon.inspect).toEqual(['diff', 'pr_title', 'pr_body']);
       expect(canon.tags).toEqual([]);
       expect(canon.references).toEqual([]);
-      expect(canon.sections.invariant).toBe('All pull requests MUST include automated unit tests.');
-      expect(canon.sections.exceptions).toEqual([]);
-      expect(canon.sections.rationale).toBeUndefined();
-      expect(canon.sections.remediation).toBeUndefined();
+      expect(canon.invariant).toBe('All pull requests MUST include automated unit tests.');
+      expect(canon.exceptions).toEqual([]);
+      expect(canon.rationale).toBeUndefined();
+      expect(canon.remediation).toBeUndefined();
+      expect(canon.rawFrontmatter).toBeUndefined();
     });
 
     it('coerces and normalizes tags with deduplication', () => {
@@ -103,17 +112,18 @@ Tags must be normalized.`;
 
       expect(canon.id).toBe('all-caps-spec-must-refer-to-spec-md');
       expect(canon.title).toBe('All Caps Spec Must Refer To Spec Md');
-      expect(canon.sections.invariant).toBe('All Caps Spec Must Refer To Spec Md');
-      expect(canon.sections.exceptions).toEqual([]);
-      expect(canon.sections.rationale).toBeUndefined();
-      expect(canon.sections.remediation).toBeUndefined();
+      expect(canon.invariant).toBe('All Caps Spec Must Refer To Spec Md');
+      expect(canon.exceptions).toEqual([]);
+      expect(canon.rationale).toBeUndefined();
+      expect(canon.remediation).toBeUndefined();
+      expect(canon.rawFrontmatter).toBeUndefined();
     });
 
     it('derives invariant from heading for a heading-only canon file', () => {
       const canon = parseCanon('# PRs Must Include Tests\n');
 
       expect(canon.title).toBe('PRs Must Include Tests');
-      expect(canon.sections.invariant).toBe('PRs Must Include Tests');
+      expect(canon.invariant).toBe('PRs Must Include Tests');
     });
 
     it('propagates CanonParseError on malformed frontmatter', () => {

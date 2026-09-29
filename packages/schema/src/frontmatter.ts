@@ -1,9 +1,13 @@
 import { parse as parseYaml } from 'yaml';
-import type { CanonFrontmatter } from './types.js';
+import type { RawFrontmatter } from './types.js';
 import { CanonParseError } from './errors.js';
 
 export interface ExtractedFrontmatter {
-  frontmatter: CanonFrontmatter;
+  /** Raw unvalidated YAML mapping parsed from frontmatter, or undefined if no frontmatter exists */
+  rawFrontmatter?: RawFrontmatter | undefined;
+  /** Frontmatter mapping defaulting to empty object {} if omitted */
+  frontmatter: RawFrontmatter;
+  /** Remaining Markdown body text after frontmatter removal */
   body: string;
 }
 
@@ -21,14 +25,14 @@ export function extractFrontmatter(rawContent: string, filePath?: string): Extra
 
   // Check if content begins with opening delimiter --- on the first line
   if (!content.startsWith('---')) {
-    return { frontmatter: {}, body: content };
+    return { rawFrontmatter: undefined, frontmatter: {}, body: content };
   }
 
   // Verify that the first line is exactly '---'
   const firstLineEnd = content.indexOf('\n');
   const firstLine = firstLineEnd === -1 ? content : content.slice(0, firstLineEnd);
   if (firstLine.trim() !== '---') {
-    return { frontmatter: {}, body: content };
+    return { rawFrontmatter: undefined, frontmatter: {}, body: content };
   }
 
   if (firstLineEnd === -1) {
@@ -55,15 +59,17 @@ export function extractFrontmatter(rawContent: string, filePath?: string): Extra
   }
 
   if (parsed === null || parsed === undefined || (typeof parsed === 'string' && parsed.trim() === '')) {
-    return { frontmatter: {}, body };
+    return { rawFrontmatter: undefined, frontmatter: {}, body };
   }
 
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new CanonParseError('Frontmatter content must be a valid YAML mapping/object', filePath);
   }
 
+  const rawFrontmatter = parsed as RawFrontmatter;
   return {
-    frontmatter: parsed as CanonFrontmatter,
+    rawFrontmatter,
+    frontmatter: rawFrontmatter,
     body,
   };
 }

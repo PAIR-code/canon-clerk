@@ -1,33 +1,32 @@
-import type { CanonSections } from './types.js';
+import type { CanonBody } from './types.js';
 
 type DirectiveType = 'exception' | 'rationale' | 'remediation';
-
-const DIRECTIVE_PREFIX_REGEX =
-  /^(#{1,4}\s+|(?:\*\*|__)?)?(Exception|Rationale|Remediation)(?::(?:\*\*|__)?|(?:\*\*|__)?:\s*|\s*$)(.*)$/i;
 
 interface DirectiveMatch {
   directive: DirectiveType;
   rest: string;
 }
 
+const DIRECTIVE_REGEX =
+  /^(?:(?:\*{2})?(?:(Exception|Rationale|Remediation):?)(?:\*{2})?:?|#{1,6}\s*(Exception|Rationale|Remediation):?)\s*(.*)$/i;
+
 function matchDirective(line: string): DirectiveMatch | null {
-  const match = DIRECTIVE_PREFIX_REGEX.exec(line.trim());
-  if (!match || !match[2]) return null;
-  return {
-    directive: match[2].toLowerCase() as DirectiveType,
-    rest: (match[3] ?? '').trim(),
-  };
+  const match = DIRECTIVE_REGEX.exec(line.trim());
+  if (!match) return null;
+  const rawDirective = (match[1] || match[2])!.toLowerCase() as DirectiveType;
+  const rest = (match[3] || '').trim();
+  return { directive: rawDirective, rest };
 }
 
 /**
- * Parses a canon's Markdown body into structured cognitive sections per SPEC.md Section 1.3:
+ * Parses a canon's Markdown body into structured cognitive directives per SPEC.md Section 1.3:
  * - What (The Invariant)
  * - When (exceptions: discrete permissible deviation clauses as string[])
  * - Why (Rationale)
  * - How (Remediation)
  * - rawBody (Complete unparsed body)
  */
-export function parseSections(rawBody: string): CanonSections {
+export function parseBody(rawBody: string): CanonBody {
   const normalized = rawBody.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
 
@@ -68,13 +67,10 @@ export function parseSections(rawBody: string): CanonSections {
       continue;
     }
 
-    // Skip the first markdown heading if we are still at the start of invariant
-    if (!skippedHeading && currentSection === 'invariant') {
-      const isHeading = /^#{1,2}\s+/.test(line);
-      if (isHeading) {
-        skippedHeading = true;
-        continue;
-      }
+    // Skip the first Markdown heading (# or ##) if it hasn't been skipped yet
+    if (!skippedHeading && /^#{1,2}\s+/.test(line.trim())) {
+      skippedHeading = true;
+      continue;
     }
 
     // Check if line begins with a cognitive directive
@@ -105,8 +101,8 @@ export function parseSections(rawBody: string): CanonSections {
   }
 
   const clean = (arr: string[]): string | undefined => {
-    const joined = arr.join('\n').trim();
-    return joined.length > 0 ? joined : undefined;
+    const trimmed = arr.join('\n').trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   };
 
   const invariant = clean(sectionLines.invariant) ?? '';
@@ -124,3 +120,4 @@ export function parseSections(rawBody: string): CanonSections {
     rawBody: normalized,
   };
 }
+
