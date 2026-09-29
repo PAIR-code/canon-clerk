@@ -1,36 +1,14 @@
-import type { CanonBody } from './types.js';
-
-type DirectiveType = 'exception' | 'rationale' | 'remediation';
-
-interface DirectiveMatch {
-  directive: DirectiveType;
-  rest: string;
-}
-
-const DIRECTIVE_REGEX =
-  /^(?:(?:\*{2})?(?:(Exception|Rationale|Remediation):?)(?:\*{2})?:?|#{1,6}\s*(Exception|Rationale|Remediation):?)\s*(.*)$/i;
-
-function matchDirective(line: string): DirectiveMatch | null {
-  const match = DIRECTIVE_REGEX.exec(line.trim());
-  if (!match) return null;
-  const rawDirective = (match[1] || match[2])!.toLowerCase() as DirectiveType;
-  const rest = (match[3] || '').trim();
-  return { directive: rawDirective, rest };
-}
+import type { CanonBody, CanonToken } from './types.js';
+import { tokenizeCanon } from './lexer.js';
 
 /**
- * Parses a canon's Markdown body into structured cognitive directives per SPEC.md Section 1.3:
- * - What (The Invariant)
- * - When (exceptions: discrete permissible deviation clauses as string[])
- * - Why (Rationale)
- * - How (Remediation)
- * - rawBody (Complete unparsed body)
+ * Parses a stream of lexical CanonToken items into structured cognitive directives.
+ *
+ * @param tokens The lexical token stream produced by tokenizeCanon.
+ * @param rawBody Optional raw body string for retention. If omitted, reconstructs from tokens.
+ * @returns The structured CanonBody domain entity.
  */
-export function parseBody(rawBody: string): CanonBody {
-  const normalized = rawBody.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-  const lines = normalized.split('\n');
-
-  let inCodeBlock = false;
+export function parseBodyFromTokens(tokens: CanonToken[], rawBody?: string): CanonBody {
   let skippedHeading = false;
 
   type SectionKey = 'invariant' | 'rationale' | 'remediation';
@@ -43,60 +21,65 @@ export function parseBody(rawBody: string): CanonBody {
 
   const exceptionBuckets: string[][] = [];
   let currentExceptionBucket: string[] | null = null;
+  const rawBodyLines: string[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-
-    // Track code fences
-    if (line.trim().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      if (currentSection === 'exception') {
-        currentExceptionBucket?.push(line);
-      } else {
-        sectionLines[currentSection].push(line);
-      }
+  for (const token of tokens) {
+    if (token.type === 'frontmatter') {
       continue;
     }
 
-    if (inCodeBlock) {
-      if (currentSection === 'exception') {
-        currentExceptionBucket?.push(line);
-      } else {
-        sectionLines[currentSection].push(line);
-      }
-      continue;
-    }
+    rawBodyLines.push(token.raw);
 
     // Skip the first Markdown heading (# or ##) if it hasn't been skipped yet
-    if (!skippedHeading && /^#{1,2}\s+/.test(line.trim())) {
+    if (!skippedHeading && token.type === 'heading' && token.level <= 2) {
       skippedHeading = true;
       continue;
     }
 
-    // Check if line begins with a cognitive directive
-    const match = matchDirective(line);
-    if (match) {
-      if (match.directive === 'exception') {
+    if (token.type === 'directive') {
+      if (token.name === 'exception') {
         currentSection = 'exception';
         currentExceptionBucket = [];
         exceptionBuckets.push(currentExceptionBucket);
-        if (match.rest.length > 0) {
-          currentExceptionBucket.push(match.rest);
+        if (token.value.length > 0) {
+          currentExceptionBucket.push(token.value);
         }
       } else {
-        currentSection = match.directive;
+        currentSection = token.name;
         currentExceptionBucket = null;
-        if (match.rest.length > 0) {
-          sectionLines[match.directive].push(match.rest);
+        if (token.value.length > 0) {
+          sectionLines[token.name].push(token.value);
         }
       }
       continue;
     }
 
-    if (currentSection === 'exception') {
-      currentExceptionBucket?.push(line);
-    } else {
-      sectionLines[currentSection].push(line);
+    if (token.type === 'code_block') {
+      if (currentSection === 'exception') {
+        currentExceptionBucket?.push(token.raw);
+      } else {
+        sectionLines[currentSection].push(token.raw);
+      }
+      continue;
+    }
+
+    if (token.type === 'blank_line') {
+      if (currentSection === 'exception') {
+        currentExceptionBucket?.push('');
+      } else {
+        sectionLines[currentSection].push('');
+      }
+      continue;
+    }
+
+    if (token.type === 'heading' || token.type === 'text') {
+      const text = token.type === 'heading' ? token.raw : token.content;
+      if (currentSection === 'exception') {
+        currentExceptionBucket?.push(text);
+      } else {
+        sectionLines[currentSection].push(text);
+      }
+      continue;
     }
   }
 
@@ -117,7 +100,22 @@ export function parseBody(rawBody: string): CanonBody {
     exceptions,
     rationale,
     remediation,
-    rawBody: normalized,
+    rawBody: rawBody !== undefined ? rawBody.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n') : rawBodyLines.join('\n'),
   };
 }
 
+/**
+ * Parses a canon's Markdown body string into structured cognitive directives:
+ * - What (The Invariant)
+ * - When (exceptions: discrete permissible deviation clauses as string[])
+ * - Why (Rationale)
+ * - How (Remediation)
+ * - rawBody (Complete unparsed body)
+ *
+ * @param rawBody Full markdown body string.
+ * @returns The structured CanonBody domain entity.
+ */
+export function parseBody(rawBody: string): CanonBody {
+  const tokens = tokenizeCanon(rawBody);
+  return parseBodyFromTokens(tokens, rawBody);
+}
