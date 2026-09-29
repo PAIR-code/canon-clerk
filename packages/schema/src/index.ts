@@ -1,8 +1,7 @@
 export interface Canon {
   id: string;
   title: string;
-  directive?: 'Requirement' | 'Guidance' | 'Supplement' | 'Exception';
-  exceptions?: string[];
+  directive?: 'Requirement' | 'Guidance' | 'Supplement';
   triggers?: {
     paths?: string[];
     [key: string]: unknown;
