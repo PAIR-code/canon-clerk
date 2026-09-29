@@ -1,4 +1,17 @@
-# Canon Clerk
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.png">
+    <img alt="Canon Clerk Logo" src="assets/logo-dark.png" width="340">
+  </picture>
+</p>
+
+# 📜 Canon Clerk
+
+[![CI Status](https://img.shields.io/github/actions/workflow/status/PAIR-code/canon-clerk/build-test.yml?branch=main&label=CI&style=flat-square)](https://github.com/PAIR-code/canon-clerk/actions/workflows/build-test.yml)
+[![Canons](https://img.shields.io/badge/canons-52_active-e3b341?style=flat-square)](.canons/)
+[![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
+[![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 
 **Canon Clerk** is an open specification and emerging **semantic linter** for software architecture, engineering conventions, and project tenets. It pairs declarative, version-controlled rule packs (*canons*) with an automated multi-stage evaluation engine (*clerk*) that audits pull requests against architectural invariants in CI.
 
@@ -11,6 +24,16 @@
 **Solution:** Canon Clerk introduces **Semantic Linting**:
 - **AST Linters (ESLint, Clippy, Flake8):** Verify syntax, type signatures, and local AST structures.
 - **Semantic Linters (Canon Clerk):** Verify architectural invariants, author intent, cross-cutting conventions, and domain policies that static ASTs cannot observe.
+
+```mermaid
+flowchart LR
+    PR[Pull Request] --> AST["AST Linters<br/><i>(ESLint, Clippy, Ruff)</i>"]
+    PR --> CC["📜 Canon Clerk<br/><i>(Semantic Linter)</i>"]
+    AST --> V1["Syntax & Local Types"]
+    CC --> V2["Architectural Invariants & Tenets"]
+    V1 --> CI[Automated CI Review Gate]
+    V2 --> CI
+```
 
 Canon Clerk codifies these rules into plain, zero-friction Markdown files stored in `.canons/` directories. Organized into modular, domain-scoped rule packs (such as CLI ergonomics, canon authoring, and Conventional Commits), canons establish clear, enforceable boundaries for human contributors and AI coding assistants alike.
 
@@ -44,14 +67,14 @@ While the automated reference runner is in active development, Canon Clerk alrea
 
 | Domain Pack | Path | Count | Governed Conventions |
 | :--- | :--- | :--- | :--- |
-| **CLI Ergonomics** | [`packages/cli/.canons/`](packages/cli/.canons/) | 20 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
-| **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 10 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What-Why-How triad, succinctness, and mutual exclusivity of directives. |
-| **Agent Skills** | [`.agents/skills/.canons/`](.agents/skills/.canons/) | 9 | Runtime script standards for AI agent skills: execution targets, command echo traces, unbounded output shunting, and POSIX compliance. |
-| **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 4 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps/vaporware, synchronization with user-facing features, and shunting architecture to `docs/`. |
-| **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
-| **Conventional Commits** | [`.canons/conventional-commits/`](.canons/conventional-commits/) | 2 | Semantic commit invariants (`feat` for user-facing functionality, `fix` for user-facing bug fixes). |
-| **Git Workflow** | [`.canons/git-workflow/`](.canons/git-workflow/) | 1 | Out-of-band change shunting and sanctioned issue mandate hygiene. |
-| **Repository Governance** | [`.canons/internal/`](.canons/internal/) | 5 | Internal dogfood policies: curated `llms.txt` maintenance, domain-scoped tagging, and reusable standards. |
+| 🛠️ **CLI Ergonomics** | [`packages/cli/.canons/`](packages/cli/.canons/) | 20 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
+| 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 10 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What-Why-How triad, succinctness, and mutual exclusivity of directives. |
+| 🤖 **Agent Skills** | [`.agents/skills/.canons/`](.agents/skills/.canons/) | 9 | Runtime script standards for AI agent skills: execution targets, command echo traces, unbounded output shunting, and POSIX compliance. |
+| 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 4 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps/vaporware, synchronization with user-facing features, and shunting architecture to `docs/`. |
+| 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
+| 🏷️ **Conventional Commits** | [`.canons/conventional-commits/`](.canons/conventional-commits/) | 2 | Semantic commit invariants (`feat` for user-facing functionality, `fix` for user-facing bug fixes). |
+| 🔀 **Git Workflow** | [`.canons/git-workflow/`](.canons/git-workflow/) | 1 | Out-of-band change shunting and sanctioned issue mandate hygiene. |
+| 🏛️ **Repository Governance** | [`.canons/internal/`](.canons/internal/) | 5 | Internal dogfood policies: curated `llms.txt` maintenance, domain-scoped tagging, and reusable standards. |
 
 ### Adopting Canons Today
 
