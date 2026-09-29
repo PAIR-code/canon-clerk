@@ -43,14 +43,14 @@ By cascading from deterministic filters to lightweight screening and finally to 
 * **CI Lifecycle:** Canons passing Stage 1 transition into in-progress GitHub Check Runs.
 
 ### Stage 2: Deep Auditor (Reasoning LLM)
-* **Goal:** Deeply analyze the actual changes to reach a definitive compliance verdict and generate helpful remediation guidance.
+* **Goal:** Deeply analyze the actual changes to reach a definitive compliance verdict and generate actionable remediation instructions.
 * **Model Class:** Frontier reasoning models (e.g., Gemini Pro with reasoning/thinking enabled).
 * **Inputs:**
   * Unified git diff of modified files.
   * Scoped context specified by the canon's `inspect:` frontmatter (`diff`, `pr_title`, `pr_body`, `commit_messages`, `linked_issues`).
   * Persistent repository grounding files resolved via the canon's `references:` frontmatter.
-  * Full canon text (rule, evaluation criteria, guidance directives).
-* **Outputs:** Structured verdict, failure rationale, line-level code annotations, and actionable remediation guidance.
+  * Full canon text (rule, evaluation criteria, remediation directives).
+* **Outputs:** Structured verdict, failure rationale, line-level code annotations, and actionable remediation instructions.
 
 ---
 
@@ -62,9 +62,9 @@ When evaluating canons against pull request diffs, the Deep Auditor enforces the
 * **Actor:** Evaluator (Clerk AI).
 * **CI Verdict:** Conditional **`pass`** (GitHub conclusion: `success` 🟢).
 * **Behavior:** When an invariant violation is detected, the Deep Auditor screens declared `Exception` clauses before issuing a failure. Rather than relying on simple comment flags (`// canon-ignore`), the auditor evaluates the **semantic sufficiency** and factual grounding of the author's justification against the diff and PR context. If all criteria of an exception are met, the check short-circuits and resolves to `pass`, appending an audit verification note to the Check Run summary.
-* **Precedence:** Evaluated prior to `Guidance`. If an exception is satisfied, the check passes without requiring contributor remediation.
+* **Precedence:** Evaluated prior to `Remediation`. If an exception is satisfied, the check passes without requiring contributor remediation.
 
-### 3.2 `Guidance` (Contributor Directive)
+### 3.2 `Remediation` (Contributor Directive)
 * **Actor:** Contributor (Human or AI agent).
 * **CI Verdict:** **`fail`** (or **`action_required`** for PR metadata/process issues). Both are **blocking**.
 * **Behavior:** The auditor details what the PR author must do to bring the change into compliance (e.g., pointing to required templates, documentation sections, or missing test scenarios).
@@ -78,7 +78,7 @@ Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one
 | Engine Verdict | GitHub Check Run Conclusion | Blocks Merge? | Scope | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **`pass`** | `success` 🟢 | No | Both | Canon applies and the PR conforms to the invariant, either directly or via a verified `Exception` clause. |
-| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code violates the invariant and satisfies zero `Exception` clauses. Includes cases where `Guidance` was provided. |
+| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code violates the invariant and satisfies zero `Exception` clauses. Includes cases where `Remediation` instructions were provided. |
 | **`action_required`** | `action_required` 🟡 | **Yes** | **Metadata & Process** | Canon applies, but PR metadata/process violates the invariant (e.g., missing test plan, invalid PR title). |
 | **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. *(Safety valve for optimistic Stage 1 screening).* |
 

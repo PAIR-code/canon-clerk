@@ -12,4 +12,4 @@ Pull request titles and commit messages using the `fix` Conventional Commit type
 
 Rationale: The `fix` type triggers a SemVer patch release and publishes user-facing release notes; repairing internal developer infrastructure does not warrant a public release bump.
 
-**Guidance:** Re-title the pull request or adjust commit messages to use an appropriate non-releasing type (such as `chore:`, `ci:`, `build:`, or `test:`) following the surface-to-prefix mappings in `docs/conventional-commits.md#2-surface-to-prefix-mapping`.
+**Remediation:** Re-title the pull request or adjust commit messages to use an appropriate non-releasing type (such as `chore:`, `ci:`, `build:`, or `test:`) following the surface-to-prefix mappings in `docs/conventional-commits.md#2-surface-to-prefix-mapping`.

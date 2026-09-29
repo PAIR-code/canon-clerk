@@ -10,4 +10,4 @@ Agent skill scripts MUST serve as lightweight plumbing conduits that directly st
 
 Rationale: AI coding assistants read standard CLI output natively; re-parsing tool outputs into bespoke dashboards adds latency, creates maintenance overhead, duplicates native tool functionality, and corrodes agent confidence in the output, causing models to re-run commands.
 
-**Guidance:** Execute the underlying command directly and emit its raw output rather than re-parsing its stream into custom counters or synthetic summaries.
+**Remediation:** Execute the underlying command directly and emit its raw output rather than re-parsing its stream into custom counters or synthetic summaries.

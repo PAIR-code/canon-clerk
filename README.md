@@ -57,7 +57,7 @@ Canon Clerk addresses the friction points where static code analysis ends and se
 
 ### 4. Open-Source Project Leads
 * **The Challenge:** Onboarding external contributors is exhausting when review feedback feels subjective, unwritten, or gatekeep-y ("we don't do it that way here"), burning maintainer goodwill and frustrating new contributors.
-* **With Canon Clerk:** Transparent, objective, self-service guardrails committed right in the repository. Contributors see expectations upfront, and CI provides actionable remediation (`Guidance`) when invariants are violated.
+* **With Canon Clerk:** Transparent, objective, self-service guardrails committed right in the repository. Contributors see expectations upfront, and CI provides actionable remediation (`Remediation`) when invariants are violated.
 
 ---
 

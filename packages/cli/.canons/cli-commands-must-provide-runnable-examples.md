@@ -8,4 +8,4 @@ CLI command help screens (`--help`) MUST include at least one realistic, copy-pa
 
 Rationale: Following GNU Coding Standards §4.8 and clig.dev §Help, concrete examples communicate workflow invocation context and argument combinations that isolated, abstract flag lists cannot convey.
 
-**Guidance:** Include an `Examples:` block within the command help metadata displaying representative, functional command invocations for primary use cases.
+**Remediation:** Include an `Examples:` block within the command help metadata displaying representative, functional command invocations for primary use cases.

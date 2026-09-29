@@ -14,4 +14,4 @@ Pull requests introducing, upgrading, or modifying runtime prerequisites, system
 
 Rationale: When runtime prerequisites drift from documented setup steps and workspace scaffolding scripts, new contributors and AI agents encounter unbootstrapped environments, missing toolchains, and cryptic build failures.
 
-**Guidance:** Document the newly introduced runtime or toolchain requirement under Prerequisites in `docs/development-setup.md`, update setup instructions in `docs/development-workflow.md`, and add necessary bootstrap commands (such as dependency installation) to `worktree-start.sh`.
+**Remediation:** Document the newly introduced runtime or toolchain requirement under Prerequisites in `docs/development-setup.md`, update setup instructions in `docs/development-workflow.md`, and add necessary bootstrap commands (such as dependency installation) to `worktree-start.sh`.

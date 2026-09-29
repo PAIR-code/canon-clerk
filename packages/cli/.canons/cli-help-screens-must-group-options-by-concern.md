@@ -8,4 +8,4 @@ CLI commands that expose more than six configuration options MUST organize their
 
 Rationale: Following GNU Coding Standards §4.8 and modern CLI help conventions (e.g. cargo, kubectl), option grouping provides progressive disclosure, preventing advanced flags from obscuring primary workflow options.
 
-**Guidance:** Configure the CLI argument parser with option groups or categories (e.g. `Input Options`, `Execution Options`, `Output Options`) to provide structured progressive disclosure in `--help` output.
+**Remediation:** Configure the CLI argument parser with option groups or categories (e.g. `Input Options`, `Execution Options`, `Output Options`) to provide structured progressive disclosure in `--help` output.

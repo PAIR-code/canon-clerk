@@ -262,7 +262,7 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
   ```
   *Examples:*
   - `feat(cli): add streaming json output (#7)`
-  - `spec(canons): define Exception and Guidance semantics (#3)`
+  - `spec(canons): define Exception and Remediation semantics (#3)`
   - `ci: add PR title linting workflow (#9)`
   - `docs: add development setup guide (#1)`
 

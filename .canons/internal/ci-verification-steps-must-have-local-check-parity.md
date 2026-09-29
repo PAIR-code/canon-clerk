@@ -14,4 +14,4 @@ Exception: A verification step MAY be declared in only one surface IFF an inline
 
 Rationale: In accordance with Martin Fowler's Continuous Integration principles (automated local/CI build parity) and Continuous Delivery commit-stage practices (Humble & Farley), local verification scripts provide the primary shift-left mechanism for contributors and AI agents; discrepancies between local checks and continuous integration lead to preventable review cycle churn.
 
-**Guidance:** Mirror verification steps added to `.github/workflows/ci.yml` into the root `package.json` `check` pipeline using `npm run`, or annotate one-sided gates with an inline explanatory comment.
+**Remediation:** Mirror verification steps added to `.github/workflows/ci.yml` into the root `package.json` `check` pipeline using `npm run`, or annotate one-sided gates with an inline explanatory comment.

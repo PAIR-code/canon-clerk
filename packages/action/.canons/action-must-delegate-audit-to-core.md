@@ -10,4 +10,4 @@ The GitHub Action runner (`@canon-clerk/action`) MUST act strictly as an integra
 
 Rationale: Conforming to GitHub's thin adapter architecture and ISO/IEC 25010 testability, action runners must purely adapt workflow contexts; embedding domain logic creates behavioral divergence between local pre-push validation and remote CI gates.
 
-**Guidance:** Keep `packages/action` minimal by parsing inputs (via `@actions/core`), invoking domain methods exposed by `@canon-clerk/core`, and translating the structured results into GitHub Action summaries, outputs, and annotations.
+**Remediation:** Keep `packages/action` minimal by parsing inputs (via `@actions/core`), invoking domain methods exposed by `@canon-clerk/core`, and translating the structured results into GitHub Action summaries, outputs, and annotations.

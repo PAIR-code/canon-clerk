@@ -12,4 +12,4 @@ Exception: Canons codifying purely project-internal conventions or proprietary w
 
 Rationale: Explicit standard citations (e.g. RFCs, POSIX, IEEE, SemVer, clig.dev) serve as high-affinity latent anchors for evaluator models, grounding edge-case evaluation in established consensus without verbose prose.
 
-**Guidance:** Identify the governing specification or industry precedent (such as RFC 2119, POSIX.1-2017, The Twelve-Factor App, or clig.dev) and cite it directly within the invariant statement or `Rationale` directive.
+**Remediation:** Identify the governing specification or industry precedent (such as RFC 2119, POSIX.1-2017, The Twelve-Factor App, or clig.dev) and cite it directly within the invariant statement or `Rationale` directive.

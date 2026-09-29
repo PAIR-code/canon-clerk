@@ -15,4 +15,4 @@ Pull requests introducing or fundamentally altering architectural surfaces, core
 
 Rationale: AI coding assistants rely on `llms.txt` for cold-read repository orientation; omission of newly introduced architectural boundaries leads to stale navigation models.
 
-**Guidance:** Identify the new architectural surface introduced in this PR and suggest an entry under the appropriate section in `llms.txt` (or introduce a new section if a new architectural pillar is being established).
+**Remediation:** Identify the new architectural surface introduced in this PR and suggest an entry under the appropriate section in `llms.txt` (or introduce a new section if a new architectural pillar is being established).

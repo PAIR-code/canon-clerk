@@ -8,4 +8,4 @@ CLI commands that accept collections of paths, files, or query targets MUST supp
 
 Rationale: Per POSIX utility conventions and the Unix composition principle, supporting standard input streams enables seamless piping from tools like `git diff` without encountering OS argument length limits (`ARG_MAX`).
 
-**Guidance:** Detect when `-` is supplied as an operand or when `!process.stdin.isTTY`, reading newline-delimited stream items into the collection before executing query resolution.
+**Remediation:** Detect when `-` is supplied as an operand or when `!process.stdin.isTTY`, reading newline-delimited stream items into the collection before executing query resolution.

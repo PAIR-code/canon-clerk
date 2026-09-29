@@ -11,4 +11,4 @@ tags:
 
 Rationale: Skills load directly into the assistant's active context during execution; narrative background dilutes attention and wastes tokens.
 
-**Guidance:** Move architectural background or design rationale to `docs/` or PR descriptions.
+**Remediation:** Move architectural background or design rationale to `docs/` or PR descriptions.

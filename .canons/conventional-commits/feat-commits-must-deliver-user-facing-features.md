@@ -12,4 +12,4 @@ Pull request titles and commit messages using the `feat` Conventional Commit typ
 
 Rationale: The `feat` type triggers a SemVer minor release and publishes user-facing release notes; marking internal changes as features generates spurious releases and misleads consumers.
 
-**Guidance:** Re-title the pull request or adjust commit messages to use an appropriate non-releasing type (such as `chore:`, `ci:`, `build:`, or `refactor:`) following the surface-to-prefix mappings in `docs/conventional-commits.md#2-surface-to-prefix-mapping`.
+**Remediation:** Re-title the pull request or adjust commit messages to use an appropriate non-releasing type (such as `chore:`, `ci:`, `build:`, or `refactor:`) following the surface-to-prefix mappings in `docs/conventional-commits.md#2-surface-to-prefix-mapping`.

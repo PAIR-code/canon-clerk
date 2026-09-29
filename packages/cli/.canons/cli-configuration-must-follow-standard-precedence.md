@@ -8,4 +8,4 @@ CLI configuration options resolution MUST adhere to strict hierarchical preceden
 
 Rationale: Grounded in The Twelve-Factor App and standard CLI configuration hierarchy (e.g. Viper, Cosmiconfig), this order ensures CLI flags reliably override persistent config files and environment variables during ad-hoc debugging.
 
-**Guidance:** Implement option parsing so values supplied via command-line arguments take precedence over environment variables, falling back to loaded configuration files and finally default settings.
+**Remediation:** Implement option parsing so values supplied via command-line arguments take precedence over environment variables, falling back to loaded configuration files and finally default settings.
