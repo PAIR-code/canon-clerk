@@ -1,7 +1,12 @@
 import { extractFrontmatter } from './frontmatter.js';
-import { deriveMetadata } from './derive.js';
+import { deriveMetadata, type DeriveMetadataOptions } from './derive.js';
 import { parseBody } from './body.js';
-import type { Canon, ParseCanonOptions } from './types.js';
+import type { Canon } from './types.js';
+
+/**
+ * Options passed to parseCanon or normalize functions.
+ */
+export interface ParseCanonOptions extends DeriveMetadataOptions {}
 
 /**
  * Pure parsing and normalization function that converts raw canon markdown into
