@@ -78,6 +78,12 @@ describe('RuleContext', () => {
       const second = context.tokens;
       expect(first).toBe(second);
     });
+
+    it('returns empty frozen tokens array when content has unclosed frontmatter delimiters', () => {
+      const context = new RuleContext('---\nid: unclosed\n', '.canons/unclosed.md');
+      expect(context.tokens).toEqual([]);
+      expect(Object.isFrozen(context.tokens)).toBe(true);
+    });
   });
 
   describe('Lazy evaluation and memoization of YAML parsing', () => {

@@ -1,5 +1,6 @@
 import { parseDocument, LineCounter, type Document } from 'yaml';
 import { tokenizeCanon } from './lexer.js';
+import { CanonParseError } from './errors.js';
 import type { RawFrontmatter } from './types/canon.js';
 import type { CanonToken, FrontmatterToken } from './types/tokens.js';
 
@@ -72,11 +73,19 @@ export class RuleContext {
    */
   get tokens(): readonly CanonToken[] {
     if (!this._tokens) {
-      const scanned = tokenizeCanon(this.rawContent);
-      for (const token of scanned) {
-        Object.freeze(token);
+      try {
+        const scanned = tokenizeCanon(this.rawContent, this.filePath);
+        for (const token of scanned) {
+          Object.freeze(token);
+        }
+        this._tokens = Object.freeze(scanned);
+      } catch (err) {
+        if (err instanceof CanonParseError) {
+          this._tokens = Object.freeze([]);
+        } else {
+          throw err;
+        }
       }
-      this._tokens = Object.freeze(scanned);
     }
     return this._tokens;
   }
