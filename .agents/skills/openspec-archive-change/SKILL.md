@@ -69,7 +69,14 @@ Intelligently merge delta requirements into the existing living spec:
    mkdir -p openspec/changes/archive
    ```
 2. Determine target archive directory name: `YYYY-MM-DD-<change-name>` using the current date (if `<change-name>` already starts with `YYYY-MM-DD-`, preserve the name as-is without double-dating).
-3. Relocate the change:
+3. Guard against destination collision before moving:
+   ```bash
+   if [ -d "openspec/changes/archive/<target-name>" ]; then
+     echo "Archive destination already exists: openspec/changes/archive/<target-name>" >&2
+     exit 1
+   fi
+   ```
+4. Relocate the change:
    ```bash
    mv "openspec/changes/<change-name>" "openspec/changes/archive/<target-name>"
    ```

@@ -59,7 +59,12 @@ Author all four planning files directly inside `openspec/changes/<change-name>/`
 ```
 
 #### B. `specs/<capability-path>/spec.md`
-Delta specification capturing behavioral additions, modifications, or removals using RFC 2119 keywords (`SHALL`, `MUST`) and executable scenarios:
+Delta specification capturing behavioral additions, modifications, or removals using RFC 2119 keywords (`SHALL`, `MUST`) and executable scenarios.
+
+> [!TIP]
+> - Keep individual requirement descriptions under 500 characters to satisfy strict length limits.
+> - Scenarios must use exactly four hashtags (`#### Scenario:`).
+
 ```markdown
 # Spec Delta
 
