@@ -1,11 +1,7 @@
 ---
 triggers:
   - ".agents/skills/**"
-inspect:
-  - diff
-  - pr_body
 tags:
-  - internal
   - agent-scripts
 ---
 Agent skill scripts MUST orchestrate multiple CLI commands commonly executed together into a composite recipe.

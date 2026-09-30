@@ -2,7 +2,6 @@
 triggers:
   - ".agents/skills/**"
 tags:
-  - internal
   - agent-scripts
 ---
 Agent skill scripts MUST NOT use heuristic regular expressions or error-guessing filters to truncate diagnostic outputs.
