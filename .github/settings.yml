@@ -1,0 +1,24 @@
+# GitHub Repository Settings for PAIR-code/canon-clerk
+# Declarative source of truth for repository metadata and discoverability.
+
+repository:
+  name: "canon-clerk"
+  description: "Semantic linter, standard rulepack catalog, and open specification for project canons."
+  homepage: "https://github.com/PAIR-code/canon-clerk"
+  topics:
+    # Canon standard & reference
+    - canon
+    - spec
+    - markdown
+    # Semantic linting & rule packs
+    - semantic-linter
+    - rule-packs
+    - architectural-linter
+    # Clerk tooling & enforcement
+    - code-review
+    - ai-governance
+    - linters
+    - developer-tools
+    - github-actions
+    - cli
+    - llm
