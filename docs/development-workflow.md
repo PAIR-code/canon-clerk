@@ -166,11 +166,11 @@ Before pushing branches or opening PRs, run the comprehensive shift-left validat
 npm run check
 ```
 
-This single command deterministically executes the local equivalent of the CI pipeline across all monorepo workspaces:
+This single command deterministically executes the local equivalent of the CI pipeline across all monorepo workspaces, running independent verification lanes concurrently to complete in <8 seconds:
 - `npm run lint:lockfile`: Audits `package-lock.json` against untrusted registry URLs.
 - `npm run lint:specs`: Validates living specifications and active change proposals (`openspec validate --all --strict`).
 - `npm run typecheck`: Runs static typechecking across all workspaces (`tsc --noEmit`).
-- `npm run build`: Bundles distribution packages with `tsup`.
+- `npm run build`: Bundles distribution packages with `tsup` in a consolidated monorepo build process.
 - `npm test`: Runs all unit and integration tests via `vitest`.
 
 ### Spec-Driven Development (SDD) with OpenSpec

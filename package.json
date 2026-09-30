@@ -10,15 +10,15 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w packages/schema && npm run build -w packages/core && npm run build -w packages/cli && npm run build -w packages/action && npm run build -w packages/repo-settings",
+    "build": "tsup",
     "test": "vitest run",
     "dev": "vitest",
     "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules",
     "bump": "npm version --workspaces --include-workspace-root",
-    "typecheck": "npm run typecheck --workspaces",
+    "typecheck": "tsc --noEmit",
     "lint:lockfile": "lockfile-lint --path package-lock.json --validate-https --allowed-hosts npm",
     "lint:specs": "openspec validate --all --strict",
-    "check": "npm run lint:lockfile && npm run lint:specs && npm run typecheck && npm run build && npm test",
+    "check": "concurrently --kill-others-on-fail --timings -p \"[{name}] \" -n \"lockfile,specs,typecheck,build,test\" -c \"blue,magenta,cyan,green,yellow\" \"npm run lint:lockfile\" \"npm run lint:specs\" \"npm run typecheck\" \"npm run build\" \"npm test\"",
     "precli": "npm run build -w packages/cli",
     "cli": "canon-clerk",
     "settings:check": "npm run check -w packages/repo-settings",
@@ -30,6 +30,7 @@
   "devDependencies": {
     "@fission-ai/openspec": "^1.13.2",
     "@types/node": "^24.0.9",
+    "concurrently": "^10.0.5",
     "lockfile-lint": "^4.14.1",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
