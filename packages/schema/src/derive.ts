@@ -1,4 +1,4 @@
-import type { CanonMetadata, InspectToken, ParseCanonOptions, RawFrontmatter } from './types.js';
+import type { CanonMetadata, InspectToken, RawFrontmatter } from './types.js';
 
 const DEFAULT_INSPECT_TOKENS: InspectToken[] = ['diff', 'pr_title', 'pr_body'];
 const DEFAULT_GLOBAL_TRIGGERS: string[] = ['**/*'];
@@ -213,12 +213,22 @@ export function deriveReferences(frontmatterReferences?: unknown): string[] {
 }
 
 /**
+ * Options passed to deriveMetadata or normalization helper functions.
+ */
+export interface DeriveMetadataOptions {
+  /** Relative repository file path of the canon (e.g. ".canons/pr-tests.md") */
+  filePath?: string | undefined;
+  /** Explicit monorepo scope prefix (e.g. "packages/core") */
+  scope?: string | undefined;
+}
+
+/**
  * Derives all normalized canon metadata attributes per SPEC.md Section 4.
  */
 export function deriveMetadata(
   frontmatter: RawFrontmatter | undefined,
   markdownBody: string,
-  options?: ParseCanonOptions
+  options?: DeriveMetadataOptions
 ): { metadata: CanonMetadata; scope: string | undefined } {
   const fm = frontmatter ?? {};
   const scope = options?.scope ?? deriveScope(options?.filePath);

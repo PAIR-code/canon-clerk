@@ -61,13 +61,3 @@ export interface Canon extends CanonMetadata, CanonBody {
   /** Raw unvalidated YAML mapping parsed from frontmatter, if present */
   rawFrontmatter?: RawFrontmatter | undefined;
 }
-
-/**
- * Options passed to parseCanon or normalize functions.
- */
-export interface ParseCanonOptions {
-  /** Relative repository file path of the canon (e.g. ".canons/pr-tests.md") */
-  filePath?: string | undefined;
-  /** Explicit monorepo scope prefix (e.g. "packages/core") */
-  scope?: string | undefined;
-}
