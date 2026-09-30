@@ -43,6 +43,10 @@
   color: "1D76DB"
   description: "Core Auditor Engine, prompt assembly, and screening logic."
 
+- name: "scope: schema"
+  color: "1D76DB"
+  description: "Canon schema definitions, AST interfaces, parser, and static linter (@canon-clerk/schema)."
+
 - name: "scope: cli"
   color: "006B75"
   description: "CLI binary and command-line execution."
