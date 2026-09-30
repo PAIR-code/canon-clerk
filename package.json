@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w packages/schema && npm run build -w packages/core && npm run build -w packages/cli && npm run build -w packages/action",
+    "build": "npm run build -w packages/schema && npm run build -w packages/core && npm run build -w packages/cli && npm run build -w packages/action && npm run build -w packages/repo-settings",
     "test": "vitest run",
     "dev": "vitest",
     "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules",
@@ -21,6 +21,8 @@
     "check": "npm run lint:lockfile && npm run lint:specs && npm run typecheck && npm run build && npm test",
     "precli": "npm run build -w packages/cli",
     "cli": "canon-clerk",
+    "settings:check": "npm run check -w packages/repo-settings",
+    "settings:sync": "npm run sync -w packages/repo-settings",
     "openspec": "openspec",
     "opsx": "openspec"
   },
