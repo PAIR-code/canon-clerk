@@ -1,0 +1,76 @@
+name: "Repository Metadata"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/settings.yml"
+      - ".github/workflows/repo-metadata.yml"
+      - "packages/repo-settings/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/settings.yml"
+      - ".github/workflows/repo-metadata.yml"
+      - "packages/repo-settings/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: "Validate & Dry-Run"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: 24.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build repo-settings tool
+        run: npm run build -w packages/repo-settings
+
+      - name: Dry-run settings synchronization
+        run: npm run settings:check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync:
+    name: "Synchronize Metadata"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: 24.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build repo-settings tool
+        run: npm run build -w packages/repo-settings
+
+      - name: Synchronize repository settings
+        run: npm run settings:sync
+        env:
+          GH_TOKEN: ${{ secrets.REPO_SETTINGS_TOKEN }}
