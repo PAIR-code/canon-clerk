@@ -38,6 +38,7 @@ jobs:
             cli
             action
             core
+            schema
             canons
             agents
             spec
