@@ -173,6 +173,16 @@ This single command deterministically executes the local equivalent of the CI pi
 - `npm run build`: Bundles distribution packages with `tsup` in a consolidated monorepo build process.
 - `npm test`: Runs all unit and integration tests via `vitest`.
 
+### Dependency Management & Lockfile Integrity
+
+Canon Clerk strictly validates package provenance and lockfile integrity via `lockfile-lint` (`--allowed-hosts npm`). All dependencies in `package-lock.json` must resolve from the official npm registry (`https://registry.npmjs.org/`).
+
+- **Canonical Registry Pinning:** The repository root `.npmrc` explicitly pins `registry=https://registry.npmjs.org/` and `omit-lockfile-registry-resolved=true`. This ensures local installations override ambient user or system configurations (such as caching proxies or internal mirrors) to generate clean, compliant lockfiles.
+- **Troubleshooting Proxy / Mirror Environments:** If working in an environment where an ambient caching proxy lags behind upstream npm (causing `E404 Not Found` errors on newly published packages or native bindings), you can explicitly enforce direct registry resolution when installing packages:
+  ```bash
+  npm install <package> --registry https://registry.npmjs.org
+  ```
+
 ### Spec-Driven Development (SDD) with OpenSpec
 
 Canon Clerk employs **Spec-Driven Development (SDD)** via OpenSpec to specify architectural contracts, CLI flags, exit codes, and engine behaviors before writing code.

@@ -101,6 +101,8 @@ Canon Clerk is built as a TypeScript monorepo using npm workspaces, `tsup`, and 
 
 The repository strictly requires **Node.js 24 (`^24.0.0`)** and npm (enforced via `.npmrc` with `engine-strict=true` and `package.json` engines).
 
+The root `.npmrc` also pins the canonical public package registry (`registry=https://registry.npmjs.org/`) and enables `omit-lockfile-registry-resolved=true` to guarantee deterministic, unpolluted lockfile generation across all contributor environments.
+
 If you use a Node version manager such as `nvm`:
 
 ```bash
