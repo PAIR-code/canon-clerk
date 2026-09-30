@@ -24,6 +24,8 @@ describe('@canon-clerk/schema entrypoint', () => {
     expect(typeof schema.deriveScope).toBe('function');
     expect(typeof schema.idToTitleCase).toBe('function');
     expect(typeof schema.toKebabCase).toBe('function');
+    expect(typeof schema.lintCanon).toBe('function');
+    expect(typeof schema.RuleContext).toBe('function');
   });
 
   it('exports error classes', () => {

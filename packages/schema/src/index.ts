@@ -5,6 +5,8 @@ export * from './derive.js';
 export * from './lexer.js';
 export * from './body.js';
 export * from './parse.js';
+export * from './runner.js';
+export * from './context.js';
 
 import pkg from '../package.json' with { type: 'json' };
 
