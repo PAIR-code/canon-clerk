@@ -1,6 +1,10 @@
-# Spec Delta: Frontmatter Schema & Metadata Lint Rules
+# canon-linter/frontmatter-rules Specification
 
-## ADDED Requirements
+## Purpose
+
+Defines frontmatter schema verification, delimiter integrity, recognized key restrictions, property types, and naming convention lint rules for Canon documents.
+
+## Requirements
 
 ### Requirement: YAML Frontmatter Syntax and Delimiter Verification
 The static linter SHALL provide a rule (`valid-yaml-frontmatter`, default severity `error`) that verifies canon frontmatter blocks open and close with `---` delimiters and contain valid YAML mapping syntax. Syntax errors MUST report 1-indexed source line and column numbers. Canons without frontmatter MUST produce zero diagnostics.

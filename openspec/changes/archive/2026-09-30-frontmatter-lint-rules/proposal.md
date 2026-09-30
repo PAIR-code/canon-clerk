@@ -15,10 +15,10 @@ Implement pure frontmatter and metadata lint rules in `@canon-clerk/schema` adhe
 
 ## Capabilities
 ### New Capabilities
-- None (extends existing `canon-linter` capability).
+- `canon-linter/frontmatter-rules`: Pure frontmatter schema verification, delimiter integrity, recognized key restrictions, property types, naming conventions, and catalog exports.
 
 ### Modified Capabilities
-- `canon-linter`: Added requirements and test scenarios for pure frontmatter syntax verification, schema key restriction, property type validation, filename-id alignment, affirmative naming, and rule catalog registration.
+- None
 
 ## Impact
 - `@canon-clerk/schema`: New rule modules under `src/rules/frontmatter/`, rule registration, and unit test suites.
