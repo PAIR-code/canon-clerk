@@ -6,21 +6,19 @@ Static linting of canons in `@canon-clerk/schema` provides in-memory validation 
 
 ## What Changes
 
-- Implement `discoverCanonFiles(workspaceRoot, options?)` in `@canon-clerk/core` to recursively discover `.canons/**/*.md` files across workspace root and package subdirectories while skipping `node_modules`, `dist`, `.bare`, and hidden VCS directories.
-- Implement `lintWorkspace(workspaceRoot, options?)` in `@canon-clerk/core` to read discovered canon files, execute `@canon-clerk/schema`'s `lintCanon()` with `DEFAULT_RULES`, and aggregate diagnostics into structured summary records.
-- Define and export structured, presentation-agnostic result types: `FileLintResult`, `WorkspaceLintResult`, `DiscoverCanonsOptions`, and `LintWorkspaceOptions`.
-- Export discovery and workspace linting functions and types from `@canon-clerk/core`'s entrypoint.
-- Add comprehensive unit test coverage with fixture directories testing clean canons, rule violations, missing files, and path filtering.
+- Implement streaming `lintWorkspace(workspaceRoot, options?)` in `@canon-clerk/core` as an async generator yielding `FileLintResult` records as canon files are discovered, read, and evaluated.
+- Support default noise directory pruning (`DEFAULT_IGNORES`), custom ignores (`ignores`) with standard `.gitignore` semantics via the `ignore` package, and target filtering with explicit target precedence.
+- Define and export structured, presentation-agnostic result and option types: `FileLintResult` and `LintWorkspaceOptions`.
+- Export `lintWorkspace`, `LintWorkspaceOptions`, `FileLintResult`, `DEFAULT_IGNORES`, `toPosixPath`, and `CORE_VERSION` from `@canon-clerk/core`'s entrypoint.
+- Add comprehensive unit test coverage with fixture directories testing streaming evaluation, clean canons, rule violations, missing files, and path filtering.
 
 ## Capabilities
 
-### New Capabilities
-- `canon-discovery`: Filesystem discovery of canon markdown files across workspace root and package subdirectories, respecting exclusions and path filters.
-
 ### Modified Capabilities
-- `canon-linter`: Extends static linting with workspace-wide orchestration (`lintWorkspace`) in `@canon-clerk/core` and structured diagnostic aggregation (`FileLintResult`, `WorkspaceLintResult`).
+- `canon-linter`: Extends static linting with streaming workspace-wide orchestration (`lintWorkspace`) in `@canon-clerk/core` yielding structured `FileLintResult` records.
 
 ## Impact
 
-- `@canon-clerk/core`: Expands core API to include canon filesystem discovery and workspace linting orchestration.
-- Consumers (`@canon-clerk/cli`, `@canon-clerk/action`): Unblocks Issue #140 (`feat(cli): add lint subcommand and terminal formatters`) to consume uniform domain services without implementing filesystem traversal or execution logic.
+- `@canon-clerk/core`: Expands core API to provide streaming workspace linting orchestration.
+- Consumers (`@canon-clerk/cli`, `@canon-clerk/action`): Unblocks Issue #140 (`feat(cli): add lint subcommand and terminal formatters`) to consume uniform domain streaming services without implementing filesystem traversal or execution logic.
+
