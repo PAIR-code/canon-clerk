@@ -14,8 +14,8 @@ Static linting of canons in `@canon-clerk/schema` provides in-memory validation 
 
 ## Capabilities
 
-### Modified Capabilities
-- `canon-linter`: Extends static linting with streaming workspace-wide orchestration (`lintWorkspace`) in `@canon-clerk/core` yielding structured `FileLintResult` records.
+### New Capabilities
+- `canon-linter/workspace`: Defines streaming workspace canon linting orchestration (`lintWorkspace`) in `@canon-clerk/core`, filesystem traversal, ignore resolution adhering to `.gitignore` semantics, and presentation-agnostic `FileLintResult` records.
 
 ## Impact
 
