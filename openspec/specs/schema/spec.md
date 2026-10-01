@@ -1,8 +1,8 @@
-# core Specification
+# schema Specification
 
 ## Purpose
 
-Defines the core evaluation engine contracts, canonical canon data representations, AST interfaces, and deterministic metadata derivation rules governing Canon Clerk.
+Defines the canonical canon data representations, AST interfaces, lexical tokenization, and deterministic metadata derivation rules governing Canon Clerk.
 
 ## Requirements
 
