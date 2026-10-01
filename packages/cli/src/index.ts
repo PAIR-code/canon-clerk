@@ -16,3 +16,7 @@ export function getCompatibleSchemaVersion(): string {
 export function getCompatibleCoreVersion(): string {
   return CORE_VERSION;
 }
+
+export * from './formatters/index.js';
+export * from './commands/lint.js';
+export * from './app.js';

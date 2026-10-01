@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import { getCliVersion } from './index.js';
+import { runCli } from './app.js';
 
-console.log(`canon-clerk v${getCliVersion()}`);
+await runCli();
