@@ -1,4 +1,4 @@
-import { readFile, stat, glob } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import ignore from 'ignore';
 import {
@@ -66,7 +66,7 @@ async function* discoverCanonPaths(
   }
 
   const shouldIgnore = (rawPath: string): boolean => {
-    const cleanPath = toPosixPath(rawPath).replace(/^\.\/?/, '').replace(/^\/+/, '');
+    const cleanPath = toPosixPath(rawPath).replace(/^\.\//, '').replace(/^\/+/, '');
     if (!cleanPath || cleanPath === '.' || cleanPath === './') {
       return false;
     }
@@ -75,26 +75,51 @@ async function* discoverCanonPaths(
 
   const yieldedPaths = new Set<string>();
 
-  async function* discoverInDir(dir: string, pattern: string): AsyncGenerator<string> {
+  async function* walk(dir: string, inCanonsDir: boolean): AsyncGenerator<string> {
+    let entries;
     try {
-      for await (const entry of glob(pattern, {
-        cwd: dir,
-        exclude: (p) => shouldIgnore(p),
-      })) {
-        const fullPath = resolve(dir, entry);
-        const relPath = toPosixPath(relative(root, fullPath));
-        if (!shouldIgnore(relPath) && !yieldedPaths.has(relPath)) {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      const fullPath = resolve(dir, entry.name);
+      const relPath = toPosixPath(relative(root, fullPath));
+      if (shouldIgnore(relPath)) {
+        continue;
+      }
+
+      let isDir = entry.isDirectory();
+      let isFile = entry.isFile();
+      if (entry.isSymbolicLink()) {
+        try {
+          const s = await stat(fullPath);
+          isDir = s.isDirectory();
+          isFile = s.isFile();
+        } catch {
+          continue;
+        }
+      }
+
+      if (isDir) {
+        const nowInCanons = inCanonsDir || entry.name === '.canons';
+        yield* walk(fullPath, nowInCanons);
+      } else if (isFile && inCanonsDir && entry.name.endsWith('.md')) {
+        if (!yieldedPaths.has(relPath)) {
           yieldedPaths.add(relPath);
           yield relPath;
         }
       }
-    } catch {
-      // Gracefully ignore directory read errors
     }
   }
 
   if (targets.length > 0) {
-    for (const target of targets) {
+    const sortedTargets = [...targets].sort((a, b) =>
+      toPosixPath(a).localeCompare(toPosixPath(b))
+    );
+    for (const target of sortedTargets) {
       const cleanTarget = toPosixPath(target).replace(/\/+$/, '');
       const fullTarget = resolve(root, cleanTarget);
       try {
@@ -110,18 +135,15 @@ async function* discoverCanonPaths(
           }
         } else if (s.isDirectory()) {
           const pathSegments = fullTarget.split(sep);
-          if (pathSegments.includes('.canons')) {
-            yield* discoverInDir(fullTarget, '**/*.md');
-          } else {
-            yield* discoverInDir(fullTarget, '**/.canons/**/*.md');
-          }
+          const inCanons = pathSegments.includes('.canons');
+          yield* walk(fullTarget, inCanons);
         }
       } catch {
         // Target does not exist on disk as a file/directory; skip discovery
       }
     }
   } else {
-    yield* discoverInDir(root, '**/.canons/**/*.md');
+    yield* walk(root, false);
   }
 }
 
@@ -184,23 +206,25 @@ export async function* lintWorkspace(
 
   // Handle explicit target files that were missing from discovery (e.g. non-existent target files)
   if (options?.targets) {
-    for (const target of options.targets) {
-      const cleanTarget = toPosixPath(target.trim()).replace(/\/+$/, '');
-      if (cleanTarget.endsWith('.md') && !processedPaths.has(cleanTarget)) {
-        processedPaths.add(cleanTarget);
-        yield {
-          filePath: cleanTarget,
-          diagnostics: [
-            {
-              code: 'file-not-found',
-              severity: 'error',
-              message: `Canon file not found: ${cleanTarget}`,
-            },
-          ],
-          errorCount: 1,
-          warningCount: 0,
-        };
-      }
+    const missingTargets = options.targets
+      .map((t) => toPosixPath(t.trim()).replace(/\/+$/, ''))
+      .filter((t) => t.endsWith('.md') && !processedPaths.has(t))
+      .sort((a, b) => a.localeCompare(b));
+
+    for (const cleanTarget of missingTargets) {
+      processedPaths.add(cleanTarget);
+      yield {
+        filePath: cleanTarget,
+        diagnostics: [
+          {
+            code: 'file-not-found',
+            severity: 'error',
+            message: `Canon file not found: ${cleanTarget}`,
+          },
+        ],
+        errorCount: 1,
+        warningCount: 0,
+      };
     }
   }
 }

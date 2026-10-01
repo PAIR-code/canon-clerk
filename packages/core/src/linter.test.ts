@@ -410,4 +410,54 @@ describe('lintWorkspace', () => {
     // Verify no ANSI escape codes (ESC [ ... m)
     expect(serialized).not.toMatch(/\u001b\[[0-9;]*m/);
   });
+
+  it('yields FileLintResult records in strictly ascending lexicographical order across nested directories without manual sorting', async () => {
+    // Create intentionally scrambled directory structure
+    await mkdir(join(testDir, 'packages', 'pkg-z', '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-z', '.canons', 'z-canon.md'),
+      '---\nid: z-canon\ntriggers:\n  - "**/*"\n---\n# Z\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'packages', 'pkg-a', '.canons', 'sub-b'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-a', '.canons', 'sub-b', 'b-canon.md'),
+      '---\nid: b-canon\ntriggers:\n  - "**/*"\n---\n# B\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'packages', 'pkg-a', '.canons', 'sub-a'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-a', '.canons', 'sub-a', 'a-canon.md'),
+      '---\nid: a-canon\ntriggers:\n  - "**/*"\n---\n# A\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, '.canons', 'root-z.md'),
+      '---\nid: root-z\ntriggers:\n  - "**/*"\n---\n# Root Z\n\nInvariant.\n'
+    );
+    await writeFile(
+      join(testDir, '.canons', 'root-a.md'),
+      '---\nid: root-a\ntriggers:\n  - "**/*"\n---\n# Root A\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'packages', 'pkg-m', '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-m', '.canons', 'm-canon.md'),
+      '---\nid: m-canon\ntriggers:\n  - "**/*"\n---\n# M\n\nInvariant.\n'
+    );
+
+    const results = await toArray(lintWorkspace(testDir));
+    const paths = results.map((r) => r.filePath);
+
+    // Directly assert natural stream yield order (no results.sort() called!)
+    expect(paths).toEqual([
+      '.canons/root-a.md',
+      '.canons/root-z.md',
+      'packages/pkg-a/.canons/sub-a/a-canon.md',
+      'packages/pkg-a/.canons/sub-b/b-canon.md',
+      'packages/pkg-m/.canons/m-canon.md',
+      'packages/pkg-z/.canons/z-canon.md',
+    ]);
+  });
 });
