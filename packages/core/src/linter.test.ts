@@ -2,9 +2,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_IGNORES, lintWorkspace, type FileLintResult } from './linter.js';
+import { DEFAULT_IGNORES, lintCanons, type FileLintResult } from './linter.js';
 
-describe('lintWorkspace', () => {
+describe('lintCanons', () => {
   let testDir: string;
 
   beforeEach(async () => {
@@ -44,7 +44,7 @@ describe('lintWorkspace', () => {
       '---\nid: rule-two\ntriggers:\n  - "**/*"\n---\n# Rule Two\n\nRule invariant statement.\n'
     );
 
-    const results = await toArray(lintWorkspace(testDir));
+    const results = await toArray(lintCanons({ cwd: testDir }));
 
     expect(results).toHaveLength(2);
     results.sort((a, b) => a.filePath.localeCompare(b.filePath));
@@ -81,7 +81,7 @@ describe('lintWorkspace', () => {
       '---\nid: [broken yaml\n---\n# Error Rule\n\nInvariant statement.\n'
     );
 
-    const results = await toArray(lintWorkspace(testDir));
+    const results = await toArray(lintCanons({ cwd: testDir }));
     expect(results).toHaveLength(3);
 
     const cleanResult = results.find((f: FileLintResult) => f.filePath.endsWith('clean-rule.md'));
@@ -118,7 +118,7 @@ describe('lintWorkspace', () => {
     await writeFile(join(testDir, 'packages', 'pkg-a', 'index.ts'), 'export const a = 1;');
     await writeFile(join(testDir, '.canons', 'notes.txt'), 'Not a markdown file');
 
-    const results = await toArray(lintWorkspace(testDir));
+    const results = await toArray(lintCanons({ cwd: testDir }));
     results.sort((a, b) => a.filePath.localeCompare(b.filePath));
 
     expect(results.map((r) => r.filePath)).toEqual([
@@ -143,7 +143,7 @@ describe('lintWorkspace', () => {
       );
     }
 
-    const results = await toArray(lintWorkspace(testDir));
+    const results = await toArray(lintCanons({ cwd: testDir }));
     expect(results.map((r) => r.filePath)).toEqual(['.canons/valid.md']);
   });
 
@@ -160,7 +160,7 @@ describe('lintWorkspace', () => {
       '---\nid: dep-rule\ntriggers:\n  - "**/*"\n---\n# Dep\n\nInvariant.\n'
     );
 
-    const results = await toArray(lintWorkspace(testDir, { defaultIgnores: false }));
+    const results = await toArray(lintCanons({ cwd: testDir, defaultIgnores: false }));
     results.sort((a, b) => a.filePath.localeCompare(b.filePath));
 
     expect(results.map((r) => r.filePath)).toEqual([
@@ -183,7 +183,7 @@ describe('lintWorkspace', () => {
     );
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         ignores: ['!node_modules'],
       })
     );
@@ -218,7 +218,7 @@ describe('lintWorkspace', () => {
     await writeFile(join(testDir, 'test-temp', '.canons', 'temp.md'), '# Temp');
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         ignores: ['legacy', 'experimental/sub', '*-temp'],
       })
     );
@@ -241,7 +241,7 @@ describe('lintWorkspace', () => {
     );
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         ignores: [
           '# Ignore all markdown in temp except keep.md',
           'temp/.canons/*.md',
@@ -271,7 +271,7 @@ describe('lintWorkspace', () => {
     );
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         targets: ['packages/pkg-a'],
       })
     );
@@ -287,7 +287,7 @@ describe('lintWorkspace', () => {
     );
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         targets: ['packages/pkg-a/.canons/'],
       })
     );
@@ -307,7 +307,7 @@ describe('lintWorkspace', () => {
     );
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         targets: ['.canons/rule-1.md'],
       })
     );
@@ -323,7 +323,7 @@ describe('lintWorkspace', () => {
     );
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         targets: ['node_modules/dep/.canons/dep-rule.md'],
       })
     );
@@ -335,7 +335,7 @@ describe('lintWorkspace', () => {
     await mkdir(join(testDir, 'packages', 'empty-pkg'), { recursive: true });
 
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         targets: ['packages/empty-pkg'],
       })
     );
@@ -345,7 +345,7 @@ describe('lintWorkspace', () => {
 
   it('handles missing or unreadable target canon files gracefully with error diagnostics', async () => {
     const results = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         targets: ['.canons/non-existent-rule.md'],
       })
     );
@@ -373,7 +373,7 @@ describe('lintWorkspace', () => {
 
     // Run with rule turned off
     const resultsOff = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         ruleConfig: {
           'no-unrecognized-keys': 'off',
         },
@@ -386,7 +386,7 @@ describe('lintWorkspace', () => {
 
     // Run with rule elevated to error
     const resultsElevated = await toArray(
-      lintWorkspace(testDir, {
+      lintCanons({ cwd: testDir,
         ruleConfig: {
           'no-unrecognized-keys': 'error',
         },
@@ -404,10 +404,220 @@ describe('lintWorkspace', () => {
       '---\nid: [bad\n---\n# Bad\n\nInvariant.\n'
     );
 
-    const results = await toArray(lintWorkspace(testDir));
+    const results = await toArray(lintCanons({ cwd: testDir }));
     const serialized = JSON.stringify(results);
 
     // Verify no ANSI escape codes (ESC [ ... m)
     expect(serialized).not.toMatch(/\u001b\[[0-9;]*m/);
   });
+
+  it('yields FileLintResult records in strictly ascending lexicographical order across nested directories without manual sorting', async () => {
+    // Create intentionally scrambled directory structure
+    await mkdir(join(testDir, 'packages', 'pkg-z', '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-z', '.canons', 'z-canon.md'),
+      '---\nid: z-canon\ntriggers:\n  - "**/*"\n---\n# Z\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'packages', 'pkg-a', '.canons', 'sub-b'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-a', '.canons', 'sub-b', 'b-canon.md'),
+      '---\nid: b-canon\ntriggers:\n  - "**/*"\n---\n# B\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'packages', 'pkg-a', '.canons', 'sub-a'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-a', '.canons', 'sub-a', 'a-canon.md'),
+      '---\nid: a-canon\ntriggers:\n  - "**/*"\n---\n# A\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, '.canons', 'root-z.md'),
+      '---\nid: root-z\ntriggers:\n  - "**/*"\n---\n# Root Z\n\nInvariant.\n'
+    );
+    await writeFile(
+      join(testDir, '.canons', 'root-a.md'),
+      '---\nid: root-a\ntriggers:\n  - "**/*"\n---\n# Root A\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'packages', 'pkg-m', '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, 'packages', 'pkg-m', '.canons', 'm-canon.md'),
+      '---\nid: m-canon\ntriggers:\n  - "**/*"\n---\n# M\n\nInvariant.\n'
+    );
+
+    const results = await toArray(lintCanons({ cwd: testDir }));
+    const paths = results.map((r) => r.filePath);
+
+    // Directly assert natural stream yield order (no results.sort() called!)
+    expect(paths).toEqual([
+      '.canons/root-a.md',
+      '.canons/root-z.md',
+      'packages/pkg-a/.canons/sub-a/a-canon.md',
+      'packages/pkg-a/.canons/sub-b/b-canon.md',
+      'packages/pkg-m/.canons/m-canon.md',
+      'packages/pkg-z/.canons/z-canon.md',
+    ]);
+  });
+
+  it('evaluates clean workspace with zero arguments using process.cwd()', async () => {
+    await mkdir(join(testDir, '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, '.canons', 'rule.md'),
+      '---\nid: rule\ntriggers:\n  - "**/*"\n---\n# Rule\n\nInvariant.\n'
+    );
+
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(testDir);
+      const results = await toArray(lintCanons());
+      expect(results).toHaveLength(1);
+      expect(results[0]?.filePath).toBe('.canons/rule.md');
+      expect(results[0]?.errorCount).toBe(0);
+    } finally {
+      process.chdir(prevCwd);
+    }
+  });
+
+  it('sorts and evaluates multiple explicit file targets in ascending lexicographic order', async () => {
+    await mkdir(join(testDir, 'foo'), { recursive: true });
+    await mkdir(join(testDir, 'bar'), { recursive: true });
+    await writeFile(
+      join(testDir, 'foo', 'first.md'),
+      '---\nid: first\ntriggers:\n  - "**/*"\n---\n# First\n\nInvariant.\n'
+    );
+    await writeFile(
+      join(testDir, 'bar', 'second.md'),
+      '---\nid: second\ntriggers:\n  - "**/*"\n---\n# Second\n\nInvariant.\n'
+    );
+
+    const results = await toArray(
+      lintCanons({
+        cwd: testDir,
+        targets: ['foo/first.md', 'bar/second.md'],
+      })
+    );
+
+    expect(results.map((r) => r.filePath)).toEqual(['bar/second.md', 'foo/first.md']);
+  });
+
+  it('normalizes target syntax and sorts resolved targets regardless of leading ./ or redundant segments', async () => {
+    await mkdir(join(testDir, 'foo'), { recursive: true });
+    await mkdir(join(testDir, 'bar'), { recursive: true });
+    await writeFile(
+      join(testDir, 'foo', 'first.md'),
+      '---\nid: first\ntriggers:\n  - "**/*"\n---\n# First\n\nInvariant.\n'
+    );
+    await writeFile(
+      join(testDir, 'bar', 'second.md'),
+      '---\nid: second\ntriggers:\n  - "**/*"\n---\n# Second\n\nInvariant.\n'
+    );
+
+    const results = await toArray(
+      lintCanons({
+        cwd: testDir,
+        targets: ['././foo/first.md', './bar/second.md'],
+      })
+    );
+
+    expect(results.map((r) => r.filePath)).toEqual(['bar/second.md', 'foo/first.md']);
+  });
+
+  it('discovers and evaluates markdown files outside .canons/ when custom glob is provided', async () => {
+    await mkdir(join(testDir, 'tmp'), { recursive: true });
+    await writeFile(
+      join(testDir, 'tmp', 'unclosed-frontmatter.md'),
+      '---\nid: unclosed\n# No closing frontmatter delimiter\n'
+    );
+    await writeFile(
+      join(testDir, 'README.md'),
+      '---\nid: readme\ntriggers:\n  - "**/*"\n---\n# Readme\n\nInvariant.\n'
+    );
+
+    const results = await toArray(
+      lintCanons({
+        cwd: testDir,
+        globs: '**/*.md',
+      })
+    );
+
+    expect(results.map((r) => r.filePath)).toEqual(['README.md', 'tmp/unclosed-frontmatter.md']);
+    expect(results[1]?.errorCount).toBeGreaterThan(0);
+  });
+
+  it('evaluates multiple globs as a union', async () => {
+    await mkdir(join(testDir, '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, '.canons', 'root.md'),
+      '---\nid: root\ntriggers:\n  - "**/*"\n---\n# Root\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'docs', 'canons'), { recursive: true });
+    await writeFile(
+      join(testDir, 'docs', 'canons', 'guide.md'),
+      '---\nid: guide\ntriggers:\n  - "**/*"\n---\n# Guide\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'other'), { recursive: true });
+    await writeFile(
+      join(testDir, 'other', 'ignored.md'),
+      '---\nid: ignored\ntriggers:\n  - "**/*"\n---\n# Ignored\n\nInvariant.\n'
+    );
+
+    const results = await toArray(
+      lintCanons({
+        cwd: testDir,
+        globs: ['**/.canons/**/*.md', 'docs/canons/**/*.md'],
+      })
+    );
+
+    expect(results.map((r) => r.filePath)).toEqual(['.canons/root.md', 'docs/canons/guide.md']);
+  });
+
+  it('scopes custom glob to targeted directory', async () => {
+    await mkdir(join(testDir, 'tmp'), { recursive: true });
+    await writeFile(
+      join(testDir, 'tmp', 'scoped.md'),
+      '---\nid: scoped\ntriggers:\n  - "**/*"\n---\n# Scoped\n\nInvariant.\n'
+    );
+
+    await mkdir(join(testDir, 'other'), { recursive: true });
+    await writeFile(
+      join(testDir, 'other', 'ignored.md'),
+      '---\nid: ignored\ntriggers:\n  - "**/*"\n---\n# Ignored\n\nInvariant.\n'
+    );
+
+    const results = await toArray(
+      lintCanons({
+        cwd: testDir,
+        targets: 'tmp',
+        globs: '**/*.md',
+      })
+    );
+
+    expect(results.map((r) => r.filePath)).toEqual(['tmp/scoped.md']);
+  });
+
+  it('defaults discovery to .canons directory pattern', async () => {
+    await mkdir(join(testDir, '.canons'), { recursive: true });
+    await writeFile(
+      join(testDir, '.canons', 'rule.md'),
+      '---\nid: rule\ntriggers:\n  - "**/*"\n---\n# Rule\n\nInvariant.\n'
+    );
+    await writeFile(
+      join(testDir, 'notes.md'),
+      '---\nid: notes\ntriggers:\n  - "**/*"\n---\n# Notes\n\nInvariant.\n'
+    );
+
+    const results = await toArray(
+      lintCanons({
+        cwd: testDir,
+      })
+    );
+
+    expect(results.map((r) => r.filePath)).toEqual(['.canons/rule.md']);
+  });
 });
+
+
