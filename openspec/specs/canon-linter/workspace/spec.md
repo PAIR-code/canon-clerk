@@ -7,10 +7,12 @@ Defines streaming workspace canon linting orchestration in `@canon-clerk/core`, 
 ## Requirements
 
 ### Requirement: Streaming Workspace Canon Linting Orchestration
-The system SHALL provide a streaming canon linting generator (`lintCanons`) in `@canon-clerk/core` accepting `options: LintCanonsOptions` and yielding `FileLintResult` records in deterministic lexicographic order.
+The system SHALL provide a streaming canon linting generator (`lintCanons`) in `@canon-clerk/core` accepting `options: LintCanonsOptions` and yielding individual `FileLintResult` records in deterministic lexicographic order by relative POSIX file path as canon files are discovered, read from disk, and evaluated against static lint rules via `lintCanon()`.
 `workspaceRoot: string` SHALL be required, anchoring all path resolution without relying on ambient `process.cwd`.
 Discovery scope SHALL be specified via `targetPaths` (defaulting to `['.']`).
+Target paths SHALL be resolved relative to `workspaceRoot`, normalized to canonical POSIX paths, pruned of redundant descendant paths, and sorted lexicographically before traversal and evaluation.
 Canon discovery SHALL be configured via `canonQuery?: QueryDomainInput`.
+Files with zero diagnostics SHALL be yielded with empty diagnostic arrays.
 
 #### Scenario: Linting a clean workspace
 - **WHEN** invoking `lintCanons({ workspaceRoot: '.' })` on a workspace where all discovered canons conform to active rules
