@@ -1,10 +1,6 @@
-# canon-linter/workspace Specification
+# Spec Delta
 
-## Purpose
-
-Defines streaming workspace canon linting orchestration in `@canon-clerk/core`, filesystem traversal, ignore resolution adhering to `.gitignore` semantics, and presentation-agnostic file lint results.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Streaming Workspace Canon Linting Orchestration
 The system SHALL provide a streaming canon linting generator (`lintCanons`) in `@canon-clerk/core` accepting `options: LintCanonsOptions` and yielding individual `FileLintResult` records in deterministic lexicographic order by relative POSIX file path as canon files are discovered, read from disk, and evaluated against static lint rules via `lintCanon()`.
@@ -61,10 +57,3 @@ Files with zero diagnostics SHALL be yielded with empty diagnostic arrays.
 #### Scenario: Defaulting discovery pattern to `.canons`
 - **WHEN** invoking `lintCanons({ workspaceRoot: '.' })` without specifying a custom `canonQuery` option
 - **THEN** discovery only yields markdown files matching `**/.canons/**/*.md`
-
-### Requirement: Structured Presentation-Agnostic File Lint Results
-The system SHALL yield linting results as structured data objects (`FileLintResult`) containing the relative POSIX `filePath`, `diagnostics` array, `errorCount`, and `warningCount`. Output MUST remain strictly presentation-agnostic with zero terminal styling or ANSI codes.
-
-#### Scenario: Presentation agnosticism in file results
-- **WHEN** inspecting messages or file paths in `FileLintResult`
-- **THEN** no ANSI color escape sequences or terminal formatting codes are present

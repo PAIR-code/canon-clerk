@@ -1,3 +1,4 @@
+export * from './glob-query.js';
 export * from './linter.js';
 export * from './path.js';
 

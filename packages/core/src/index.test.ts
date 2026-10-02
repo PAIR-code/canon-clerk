@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   CORE_VERSION,
+  DEFAULT_CANON_GLOB,
+  DEFAULT_CANON_GLOBS,
   DEFAULT_IGNORES,
   lintCanons,
   toPosixPath,
@@ -18,6 +20,8 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(typeof toPosixPath).toBe('function');
     expect(DEFAULT_IGNORES).toBeDefined();
     expect(Array.isArray(DEFAULT_IGNORES)).toBe(true);
+    expect(DEFAULT_CANON_GLOB).toBe('**/.canons/**/*.md');
+    expect(DEFAULT_CANON_GLOBS).toEqual([DEFAULT_CANON_GLOB]);
   });
 });
 
