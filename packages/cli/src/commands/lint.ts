@@ -1,7 +1,7 @@
 import { text } from 'node:stream/consumers';
 import { Command, InvalidArgumentError } from 'commander';
 import { DEFAULT_RULES, lintCanon } from '@canon-clerk/schema';
-import { lintCanons, type FileLintResult } from '@canon-clerk/core';
+import { DEFAULT_CANON_GLOB, lintCanons, type FileLintResult } from '@canon-clerk/core';
 import {
   formatFileResult,
   formatJson,
@@ -133,11 +133,13 @@ export async function runLintCommand(
     // 1. Traverse and lint filesystem targets if specified or if no stdin requested
     if (!containsStdin || fileTargets.length > 0) {
       const canonGenerator = lintCanons({
-        cwd,
-        targets: fileTargets.length > 0 ? fileTargets : undefined,
-        globs: config.globs,
-        defaultIgnores: config.defaultIgnores,
-        ignores: config.ignores,
+        workspaceRoot: cwd ?? process.cwd(),
+        targetPaths: fileTargets.length > 0 ? fileTargets : undefined,
+        canonQuery: {
+          globs: config.globs,
+          defaultIgnores: config.defaultIgnores,
+          ignores: config.ignores,
+        },
       });
 
       for await (const result of canonGenerator) {
@@ -238,7 +240,7 @@ export function createLintCommand(): Command {
     )
     .option(
       '-g, --glob <pattern>',
-      'Glob pattern(s) to discover canon files (repeatable, default: "**/.canons/**/*.md")',
+      `Glob pattern(s) to discover canon files (repeatable, default: "${DEFAULT_CANON_GLOB}")`,
       collectPatterns
     )
     .option(
@@ -287,7 +289,7 @@ export function createLintCommand(): Command {
         '',
         'Targets & Filtering:',
         '  [targets...]               Target file paths, directories, or globs to lint (default: ".", or "-" for stdin)',
-        '  -g, --glob <pattern>       Glob pattern(s) to discover canon files (repeatable, default: "**/.canons/**/*.md")',
+        `  -g, --glob <pattern>       Glob pattern(s) to discover canon files (repeatable, default: "${DEFAULT_CANON_GLOB}")`,
         '  --stdin-filename <path>    Virtual relative path when linting standard input',
         '  --ignore <pattern>         Additional path or glob patterns to ignore during discovery (repeatable)',
         '  --default-ignores          Apply default noise directory ignores (default: true)',

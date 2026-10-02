@@ -1,6 +1,5 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
-import ignore from 'ignore';
 import {
   DEFAULT_RULES,
   lintCanon,
@@ -8,53 +7,43 @@ import {
   type CanonLintRule,
   type RuleConfig,
 } from '@canon-clerk/schema';
+import {
+  DEFAULT_CANON_GLOB,
+  DEFAULT_CANON_GLOBS,
+  DEFAULT_IGNORES,
+  isPathIgnored,
+  isPathMatch,
+  normalizeGlobQueryOptions,
+  type QueryDomainInput,
+} from './glob-query.js';
 import { toPosixPath } from './path.js';
 
-export const DEFAULT_IGNORES: readonly string[] = Object.freeze([
-  'node_modules',
-  'dist',
-  '.bare',
-  '.git',
-  '.turbo',
-]);
+export { DEFAULT_CANON_GLOB, DEFAULT_CANON_GLOBS, DEFAULT_IGNORES } from './glob-query.js';
 
 /**
  * Options configuring canon linting orchestration.
  */
 export interface LintCanonsOptions {
   /**
-   * Root working directory from which paths and targets are resolved.
-   * Defaults to `process.cwd()`.
+   * Root directory of the workspace for path resolution.
+   * Required to avoid ambient process.cwd coupling.
    */
-  cwd?: string | undefined;
+  workspaceRoot: string;
 
   /**
-   * Target file paths, directory paths, or patterns to restrict discovery and linting.
-   * Accepts a single path or an array of paths.
-   * Defaults to `['.']`.
+   * Path(s) restricting where canon discovery takes place.
+   * May be literal directories ('packages/ui') or files ('packages/ui/.canons/btn.md').
+   * Shells expand wildcards prior to execution.
+   * Defaults to ['.'] (the whole workspace).
    */
-  targets?: string | readonly string[] | undefined;
+  targetPaths?: string | readonly string[] | undefined;
 
   /**
-   * Glob pattern(s) used for discovering canon markdown files.
-   * When multiple globs are provided, they are evaluated as a logical OR (union).
-   * Defaults to `['**\/.canons/**\/*.md']`.
+   * Canon discovery and ignore query.
+   * Defines canon file pattern(s) and noise/custom ignore rules.
+   * Defaults to DEFAULT_CANON_GLOBS and defaultIgnores: true.
    */
-  globs?: string | readonly string[] | undefined;
-
-  /**
-   * Alias for `globs`.
-   */
-  glob?: string | readonly string[] | undefined;
-
-  /** Custom path or glob patterns to ignore during traversal, adhering to .gitignore semantics */
-  ignores?: string[] | readonly string[] | undefined;
-
-  /**
-   * Whether to apply default noise directory ignores ('node_modules', 'dist', '.bare', '.git', '.turbo').
-   * Defaults to true.
-   */
-  defaultIgnores?: boolean | undefined;
+  canonQuery?: QueryDomainInput | undefined;
 
   /** Rules to execute. Defaults to schema's DEFAULT_RULES */
   rules?: readonly CanonLintRule[] | CanonLintRule[] | undefined;
@@ -77,9 +66,19 @@ interface NormalizedTarget {
   raw: string;
   cleanRel: string;
   fullPath: string;
+  isFile: boolean;
+  isDirectory: boolean;
 }
 
-function normalizeTargets(root: string, rawTargets?: string | readonly string[]): NormalizedTarget[] {
+interface NormalizedTargetsResult {
+  allExplicitTargets: readonly NormalizedTarget[];
+  disjointTargets: readonly NormalizedTarget[];
+}
+
+async function normalizeTargets(
+  workspaceRoot: string,
+  rawTargets?: string | readonly string[]
+): Promise<NormalizedTargetsResult> {
   const targetArray = rawTargets !== undefined
     ? (Array.isArray(rawTargets) ? rawTargets : [rawTargets])
     : ['.'];
@@ -88,129 +87,121 @@ function normalizeTargets(root: string, rawTargets?: string | readonly string[])
   const effectiveTargets = candidateTargets.length > 0 ? candidateTargets : ['.'];
 
   const seen = new Set<string>();
-  const normalized: NormalizedTarget[] = [];
+  const allExplicitTargets: NormalizedTarget[] = [];
 
   for (const raw of effectiveTargets) {
-    const fullPath = resolve(root, raw);
-    const rel = toPosixPath(relative(root, fullPath));
+    const fullPath = resolve(workspaceRoot, raw);
+    const rel = toPosixPath(relative(workspaceRoot, fullPath));
     const cleanRel = (rel === '' || rel === '.') ? '.' : rel.replace(/\/+$/, '');
     if (!seen.has(cleanRel)) {
       seen.add(cleanRel);
-      normalized.push({ raw, cleanRel, fullPath });
+      let isFile = false;
+      let isDirectory = false;
+      try {
+        const s = await stat(fullPath);
+        isFile = s.isFile();
+        isDirectory = s.isDirectory();
+      } catch {
+        isFile = false;
+        isDirectory = false;
+      }
+      allExplicitTargets.push({ raw, cleanRel, fullPath, isFile, isDirectory });
     }
   }
 
-  normalized.sort((a, b) => a.cleanRel.localeCompare(b.cleanRel));
-  return normalized;
-}
+  // Prune redundant descendant targets:
+  // Target B is a redundant descendant of Target A iff Target A is an existing directory (or '.')
+  // and Target B is strictly inside Target A.
+  const disjointTargets = allExplicitTargets.filter((targetB) => {
+    return !allExplicitTargets.some((targetA) => {
+      if (targetA === targetB) return false;
+      if (!targetA.isDirectory && targetA.cleanRel !== '.') return false;
+      if (targetA.cleanRel === '.') return true;
+      return targetB.cleanRel.startsWith(targetA.cleanRel + '/');
+    });
+  });
 
-function normalizeGlobs(options?: LintCanonsOptions): string[] {
-  const raw = options?.globs ?? options?.glob;
-  if (!raw) {
-    return ['**/.canons/**/*.md'];
-  }
-  const list = Array.isArray(raw) ? raw : [raw];
-  const cleaned = list.map((g) => g.trim()).filter((g) => g.length > 0);
-  return cleaned.length > 0 ? cleaned : ['**/.canons/**/*.md'];
+  disjointTargets.sort((a, b) => a.cleanRel.localeCompare(b.cleanRel));
+  allExplicitTargets.sort((a, b) => a.cleanRel.localeCompare(b.cleanRel));
+
+  return { allExplicitTargets, disjointTargets };
 }
 
 /**
  * Internal helper to discover and yield canon markdown file paths across a workspace or targets.
  */
 async function* discoverCanonPaths(
-  root: string,
-  normalizedTargets: readonly NormalizedTarget[],
+  workspaceRoot: string,
+  disjointTargets: readonly NormalizedTarget[],
   options?: LintCanonsOptions
 ): AsyncGenerator<string> {
-  const applyDefaultIgnores = options?.defaultIgnores !== false;
-
-  const ig = ignore();
-  if (applyDefaultIgnores) {
-    ig.add(DEFAULT_IGNORES);
-  }
-  if (options?.ignores && options.ignores.length > 0) {
-    ig.add([...options.ignores]);
-  }
-
-  const shouldIgnore = (rawPath: string): boolean => {
-    const cleanPath = toPosixPath(rawPath).replace(/^\.\//, '').replace(/^\/+/, '');
-    if (!cleanPath || cleanPath === '.' || cleanPath === './') {
-      return false;
-    }
-    return ig.ignores(cleanPath) || (!cleanPath.endsWith('/') && ig.ignores(`${cleanPath}/`));
-  };
-
-  const globList = normalizeGlobs(options);
-  const globMatcher = ignore();
-  globMatcher.add(globList);
-
-  const matchesGlob = (relPath: string, targetRelPath: string): boolean => {
-    const cleanRel = toPosixPath(relPath).replace(/^\.\//, '').replace(/^\/+/, '');
-    const cleanTargetRel = toPosixPath(targetRelPath).replace(/^\.\//, '').replace(/^\/+/, '');
-    return globMatcher.ignores(cleanRel) || (cleanTargetRel !== '' && globMatcher.ignores(cleanTargetRel));
-  };
+  const canonQueryConfig = normalizeGlobQueryOptions(
+    options?.canonQuery,
+    DEFAULT_CANON_GLOBS
+  );
 
   const yieldedPaths = new Set<string>();
 
-  async function* walk(dir: string, targetDir: string): AsyncGenerator<string> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const entry of entries) {
-      const fullPath = resolve(dir, entry.name);
-      const relPath = toPosixPath(relative(root, fullPath));
-      if (shouldIgnore(relPath)) {
-        continue;
-      }
-
-      let isDir = entry.isDirectory();
-      let isFile = entry.isFile();
-      if (entry.isSymbolicLink()) {
-        try {
-          const s = await stat(fullPath);
-          isDir = s.isDirectory();
-          isFile = s.isFile();
-        } catch {
-          continue;
+  for (const target of disjointTargets) {
+    if (target.isFile) {
+      // Explicit target file: yields directly (explicit target precedence over default ignores)
+      if (target.cleanRel.endsWith('.md')) {
+        if (!yieldedPaths.has(target.cleanRel)) {
+          yieldedPaths.add(target.cleanRel);
+          yield target.cleanRel;
         }
       }
+      continue;
+    }
 
-      if (isDir) {
-        yield* walk(fullPath, targetDir);
-      } else if (isFile && entry.name.endsWith('.md')) {
-        const targetRelPath = toPosixPath(relative(targetDir, fullPath));
-        if (matchesGlob(relPath, targetRelPath)) {
-          if (!yieldedPaths.has(relPath)) {
-            yieldedPaths.add(relPath);
-            yield relPath;
+    if (!target.isDirectory) {
+      continue;
+    }
+
+    async function* walk(dir: string): AsyncGenerator<string> {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const entry of entries) {
+        const fullPath = resolve(dir, entry.name);
+        const relPath = toPosixPath(relative(workspaceRoot, fullPath));
+
+        let isDir = entry.isDirectory();
+        let isFile = entry.isFile();
+        if (entry.isSymbolicLink()) {
+          try {
+            const s = await stat(fullPath);
+            isDir = s.isDirectory();
+            isFile = s.isFile();
+          } catch {
+            continue;
+          }
+        }
+
+        if (isDir) {
+          // If the target is not '.', evaluate ignore relative to target.fullPath so target root itself is not suppressed
+          const ignoreBase = target.cleanRel === '.' ? workspaceRoot : target.fullPath;
+          if (isPathIgnored(fullPath, canonQueryConfig, ignoreBase)) {
+            continue;
+          }
+          yield* walk(fullPath);
+        } else if (isFile && entry.name.endsWith('.md')) {
+          if (isPathMatch(relPath, canonQueryConfig, workspaceRoot)) {
+            if (!yieldedPaths.has(relPath)) {
+              yieldedPaths.add(relPath);
+              yield relPath;
+            }
           }
         }
       }
     }
-  }
 
-  for (const target of normalizedTargets) {
-    try {
-      const s = await stat(target.fullPath);
-      if (s.isFile()) {
-        // Explicit target file: yields directly (bypasses default ignores and glob matching)
-        if (target.cleanRel.endsWith('.md')) {
-          if (!yieldedPaths.has(target.cleanRel)) {
-            yieldedPaths.add(target.cleanRel);
-            yield target.cleanRel;
-          }
-        }
-      } else if (s.isDirectory()) {
-        yield* walk(target.fullPath, target.fullPath);
-      }
-    } catch {
-      // Target does not exist on disk as a file/directory; skip discovery
-    }
+    yield* walk(target.fullPath);
   }
 }
 
@@ -221,19 +212,19 @@ async function* discoverCanonPaths(
  * evaluates them against schema lint rules, and yields individual FileLintResult records in real time.
  * Handles missing explicit target files and file read errors gracefully by yielding error diagnostics.
  *
- * @param options Options controlling target filtering, discovery globs, rule selection, and configuration overrides.
- * @yields Structured result for each evaluated canon file.
+ * @param options Options controlling workspaceRoot, targetPaths, canonQuery, rule selection, and configuration overrides.
+ * @yields Structured result for each evaluated canon file in deterministic lexicographic order.
  */
 export async function* lintCanons(
-  options?: LintCanonsOptions
+  options: LintCanonsOptions
 ): AsyncGenerator<FileLintResult> {
-  const root = resolve(options?.cwd ?? process.cwd());
-  const normalizedTargets = normalizeTargets(root, options?.targets);
+  const root = resolve(options.workspaceRoot);
+  const { allExplicitTargets, disjointTargets } = await normalizeTargets(root, options.targetPaths);
   const processedPaths = new Set<string>();
-  const rules = options?.rules ? [...options.rules] : [...DEFAULT_RULES];
+  const rules = options.rules ? [...options.rules] : [...DEFAULT_RULES];
 
   // Stream and evaluate discovered canon files in real time
-  for await (const relPath of discoverCanonPaths(root, normalizedTargets, options)) {
+  for await (const relPath of discoverCanonPaths(root, disjointTargets, options)) {
     processedPaths.add(relPath);
     const fullPath = resolve(root, relPath);
 
@@ -241,7 +232,7 @@ export async function* lintCanons(
       const content = await readFile(fullPath, 'utf8');
       const diagnostics = lintCanon(content, relPath, {
         rules,
-        ruleConfig: options?.ruleConfig,
+        ruleConfig: options.ruleConfig,
       });
 
       const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
@@ -271,7 +262,7 @@ export async function* lintCanons(
   }
 
   // Handle explicit target files that were missing from discovery (e.g. non-existent target files)
-  const missingTargets = normalizedTargets
+  const missingTargets = allExplicitTargets
     .filter((t) => t.cleanRel.endsWith('.md') && !processedPaths.has(t.cleanRel))
     .sort((a, b) => a.cleanRel.localeCompare(b.cleanRel));
 
