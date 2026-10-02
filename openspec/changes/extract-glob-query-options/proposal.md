@@ -20,17 +20,17 @@ Extracting discovery into a cohesive `glob-query` module with `GlobQueryOptions`
   - `DEFAULT_IGNORES`: Frozen array of standard repository noise directories (such as `node_modules`, `dist`, `.bare`, `.git`, `.turbo`).
   - `GlobQueryOptions`, `QueryDomainInput`, and `NormalizedGlobQueryOptions` interfaces and types.
   - `normalizeGlobQueryOptions(input?, defaultGlobs?)`: Normalizes flexible input and prepends `DEFAULT_IGNORES` unless explicitly disabled.
-  - `isPathIgnored(path, options, workspaceRoot?)`: Evaluates ignore patterns with `.gitignore` syntax without ambient process state.
-  - `isPathMatch(path, options, workspaceRoot?)`: Evaluates whether a path matches at least one glob pattern and zero active ignore patterns.
-  - `getMatchedGlobs(path, options, workspaceRoot?)`: Returns all matched glob patterns for a path.
+  - `isPathIgnored(path, options, workspaceRoot)`: Evaluates ignore patterns with `.gitignore` syntax requiring an explicit `workspaceRoot`.
+  - `isPathMatch(path, options, workspaceRoot)`: Evaluates whether a path matches at least one glob pattern and zero active ignore patterns.
+  - `getMatchedGlobs(path, options, workspaceRoot)`: Returns all matched glob patterns for a path.
 - Refactor `packages/core/src/linter.ts`:
   - Expunge legacy flat properties (`targets`, `globs`, `glob`, `ignores`, `defaultIgnores`) from `LintCanonsOptions`.
   - Require `workspaceRoot: string` on `LintCanonsOptions` to anchor all relative path resolution explicitly, eliminating all calls to `process.cwd()` from `@canon-clerk/core`.
-  - Introduce `targetGlobs?: string | readonly string[] | undefined` for where discovery occurs (defaulting to `['.']`).
-  - Introduce `canons?: QueryDomainInput | undefined` for canon patterns and ignore rules (defaulting to `{ globs: ['**/.canons/**/*.md'], defaultIgnores: true }`).
-  - Use `glob-query` utilities inside `discoverCanonPaths()`.
-- Update `@canon-clerk/cli`'s `lint` command to pass `workspaceRoot: process.cwd()`, `targetGlobs`, and `canons`.
-- Update `@canon-clerk/core` test suites to pass `workspaceRoot` and use `targetGlobs` and `canons`.
+  - Introduce `targetPaths?: string | readonly string[] | undefined` for where discovery occurs (defaulting to `['.']`).
+  - Introduce `canonQuery?: QueryDomainInput | undefined` for canon patterns and ignore rules (defaulting to `{ globs: ['**/.canons/**/*.md'], defaultIgnores: true }`).
+  - Use `glob-query` utilities inside `discoverCanonPaths()`, normalizing and pruning redundant descendant targets to guarantee deterministic lexicographical order.
+- Update `@canon-clerk/cli`'s `lint` command to pass `workspaceRoot: cwd ?? process.cwd()`, `targetPaths`, and `canonQuery`.
+- Update `@canon-clerk/core` test suites to pass `workspaceRoot`, `targetPaths`, and `canonQuery`.
 - Re-export `glob-query` types and utilities from `packages/core/src/index.ts`.
 
 ## Capabilities
@@ -39,7 +39,7 @@ Extracting discovery into a cohesive `glob-query` module with `GlobQueryOptions`
 - `glob-query`: Defines flexible filesystem discovery options, default noise ignores, `.gitignore` parsing, and path filtering predicates for bipartite query domains anchored to an explicit workspace root.
 
 ### Modified Capabilities
-- `canon-linter/workspace`: Updates `lintCanons` discovery options to require `workspaceRoot: string`, use `targetGlobs` and `canons?: QueryDomainInput`, and expunge legacy flat options.
+- `canon-linter/workspace`: Updates `lintCanons` discovery options to require `workspaceRoot: string`, use `targetPaths` and `canonQuery?: QueryDomainInput`, and expunge legacy flat options.
 
 ## Impact
 

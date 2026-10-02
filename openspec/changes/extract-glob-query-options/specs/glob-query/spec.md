@@ -29,33 +29,33 @@ The system SHALL provide `normalizeGlobQueryOptions` to normalize string, string
 - **THEN** `ignores` contains only `['custom/**']` without `DEFAULT_IGNORES`
 
 ### Requirement: Path Ignore Evaluation
-The system SHALL provide `isPathIgnored(path, options, workspaceRoot?)` returning true if a relative path or directory matches any active ignore pattern adhering to `.gitignore` syntax semantics.
+The system SHALL provide `isPathIgnored(path, options, workspaceRoot)` returning true if a relative path or directory matches any active ignore pattern adhering to `.gitignore` syntax semantics.
 
 #### Scenario: Path inside ignored directory
-- **WHEN** evaluating `isPathIgnored('node_modules/foo/index.js', options)` where default ignores are active
+- **WHEN** evaluating `isPathIgnored('node_modules/foo/index.js', options, '/workspace')` where default ignores are active
 - **THEN** returns `true`
 
 #### Scenario: Unignored path
-- **WHEN** evaluating `isPathIgnored('packages/core/src/index.ts', options)`
+- **WHEN** evaluating `isPathIgnored('packages/core/src/index.ts', options, '/workspace')`
 - **THEN** returns `false`
 
 ### Requirement: Path Pattern Matching Predicate
-The system SHALL provide `isPathMatch(path, options, workspaceRoot?)` returning true if and only if the path matches at least one glob pattern in `options.globs` AND matches zero ignore patterns in `options.ignores`.
+The system SHALL provide `isPathMatch(path, options, workspaceRoot)` returning true if and only if the path matches at least one glob pattern in `options.globs` AND matches zero ignore patterns in `options.ignores`.
 
 #### Scenario: Matching glob and not ignored
-- **WHEN** evaluating `isPathMatch('.canons/pr-rules.md', options)` where globs match and ignores do not
+- **WHEN** evaluating `isPathMatch('.canons/pr-rules.md', options, '/workspace')` where globs match and ignores do not
 - **THEN** returns `true`
 
 #### Scenario: Matching glob but ignored
-- **WHEN** evaluating `isPathMatch('node_modules/.canons/foo.md', options)` where default ignores are active
+- **WHEN** evaluating `isPathMatch('node_modules/.canons/foo.md', options, '/workspace')` where default ignores are active
 - **THEN** returns `false`
 
 #### Scenario: Not matching glob
-- **WHEN** evaluating `isPathMatch('src/index.ts', options)` where globs only select markdown
+- **WHEN** evaluating `isPathMatch('src/index.ts', options, '/workspace')` where globs only select markdown
 - **THEN** returns `false`
 
 ### Requirement: Matched Glob Attribution
-The system SHALL provide `getMatchedGlobs(path, options, workspaceRoot?)` returning all glob patterns from `options.globs` that match the path, or an empty array if the path is ignored or matches no globs.
+The system SHALL provide `getMatchedGlobs(path, options, workspaceRoot)` returning all glob patterns from `options.globs` that match the path, or an empty array if the path is ignored or matches no globs.
 
 #### Scenario: Path matching multiple globs
 - **WHEN** a path matches two configured glob patterns and is not ignored

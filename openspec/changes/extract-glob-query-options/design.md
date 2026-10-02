@@ -12,10 +12,11 @@ Issue #157 establishes `GlobQueryOptions` as the canonical abstraction for query
 
 **Goals:**
 - Extract noise directory defaults, glob normalization, and `.gitignore` matching into `packages/core/src/glob-query.ts`.
-- Require `workspaceRoot: string` on `LintCanonsOptions`, eliminating all `process.cwd()` calls in `@canon-clerk/core`.
+- Require `workspaceRoot: string` on `LintCanonsOptions` and in `glob-query` predicates, eliminating all `process.cwd()` calls in `@canon-clerk/core`.
 - Provide pure, deterministic predicates: `isPathIgnored`, `isPathMatch`, and `getMatchedGlobs`.
-- Clean `LintCanonsOptions` by separating where to search (`targetGlobs`) from what constitutes a canon (`canons?: QueryDomainInput`).
+- Clean `LintCanonsOptions` by separating where to search (`targetPaths`) from what constitutes a canon (`canonQuery?: QueryDomainInput`).
 - Expunge legacy flat options (`targets`, `globs`, `glob`, `ignores`, `defaultIgnores`) completely.
+- Normalize and prune redundant descendant target paths to guarantee deterministic lexicographical streaming with zero duplicates.
 - Migrate CLI callers (`workspaceRoot: process.cwd()`) and core test suites cleanly.
 
 **Non-Goals:**
@@ -34,19 +35,19 @@ Issue #157 establishes `GlobQueryOptions` as the canonical abstraction for query
 - **Rationale:** Decouples normalization from execution, ensuring traversal and matching loops operate on resolved, non-null pattern lists without redundant normalization checks.
 - **Alternatives Considered:** Lazy resolution during traversal (higher per-path overhead and risk of inconsistent ignore rules).
 
-### 3. Separation of `targetGlobs` and `canons` in `LintCanonsOptions`
-- **Decision:** `LintCanonsOptions` separates traversal boundaries (`targetGlobs`) from canon pattern definition (`canons`).
-- **Rationale:** `targetGlobs` answers *where* in the filesystem to look (directories or specific files), while `canons` answers *what* file patterns constitute canons and which directories to prune during recursion.
-- **Alternatives Considered:** Merging targets and canons into a single glob list (breaks directory-scoped traversal and explicit file overrides).
+### 3. Separation of `targetPaths` and `canonQuery` in `LintCanonsOptions`
+- **Decision:** `LintCanonsOptions` separates traversal boundaries (`targetPaths`) from canon pattern definition (`canonQuery`).
+- **Rationale:** `targetPaths` answers *where* in the filesystem to look (directories or specific files, where shells expand wildcards before invocation), while `canonQuery` answers *what* file patterns constitute canons and which directories to prune during recursion.
+- **Alternatives Considered:** Allowing arbitrary wildcard globs in `targetPaths` (breaks deterministic lexicographical ordering during streaming traversal).
 
 ### 4. Required `workspaceRoot` and Ban on `process.cwd()` in `core`
-- **Decision:** `workspaceRoot: string` is a required parameter on `LintCanonsOptions`. No method or helper inside `@canon-clerk/core` shall invoke `process.cwd()`.
-- **Rationale:** Decouples core business logic from OS process ambient state. The boundary adapters (`@canon-clerk/cli`, `@canon-clerk/action`, `@canon-clerk/lsp`) supply their environment-specific root (`process.cwd()`, `GITHUB_WORKSPACE`, `rootUri`), while unit tests pass explicit fixture paths without mutating process state.
+- **Decision:** `workspaceRoot: string` is a required parameter on `LintCanonsOptions` and in pattern-matching predicates (`isPathIgnored`, `isPathMatch`, `getMatchedGlobs`). No method or helper inside `@canon-clerk/core` shall invoke `process.cwd()`.
+- **Rationale:** Decouples core business logic from OS process ambient state and guarantees deterministic relativization of both absolute and relative paths against `workspaceRoot`. The boundary adapters (`@canon-clerk/cli`, `@canon-clerk/action`, `@canon-clerk/lsp`) supply their environment-specific root (`process.cwd()`, `GITHUB_WORKSPACE`, `rootUri`), while unit tests pass explicit fixture paths without mutating process state.
 - **Alternatives Considered:** Defaulting `workspaceRoot` to `process.cwd()` inside core (retains ambient coupling and breaks in multi-root daemon environments).
 
-### 5. Pure Traversal and Pruning Semantics
-- **Decision:** Directory subtrees matching `isPathIgnored(dir, options, workspaceRoot)` are pruned depth-first during discovery. Files matching `isPathMatch(file, options, workspaceRoot)` are yielded.
-- **Rationale:** Avoids unnecessary I/O into large directories like `node_modules` and `.git` while ensuring only legitimate canon files reach the linter.
+### 5. Target Path Normalization & Disjoint Subtree Walk
+- **Decision:** Normalize all `targetPaths` relative to `workspaceRoot`, prune redundant descendant targets (e.g. if `foo` is targeted, discard `foo/bar/baz.md`; if `.` is targeted, all sub-targets are covered), and sort remaining disjoint targets lexicographically before traversal. Each disjoint target directory is traversed depth-first with sorted `readdir` entries.
+- **Rationale:** Guarantees strict lexicographical yield order across all targets, eliminates duplicate yields, and preserves explicit target precedence (explicit file targets yield directly and are not suppressed by default noise ignores).
 
 ## Risks / Trade-offs
 
