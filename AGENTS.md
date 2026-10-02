@@ -4,7 +4,9 @@ Welcome! This document provides orientation, architectural anchors, and operatio
 
 ## 1. Project Overview
 
-**Canon Clerk** is an automated review gate that enforces project-specific _canons_ authored as Markdown files (with optional YAML frontmatter). See [SPEC.md](SPEC.md) for the formal canon specification.
+**Canon Clerk** is an automated review gate that enforces _canons_—standard engineering rule packs and repository-specific invariants authored as Markdown files (with optional YAML frontmatter). See [SPEC.md](SPEC.md) for the formal canon specification.
+
+> **Canon:** *(n)*. A source code or repository change rule that is: **semantic**, **atomic**, **falsifiable**, **bounded**, **grounded**, **salient**, and **correctable**.
 
 **Primary Repository:** `PAIR-code/canon-clerk`
 

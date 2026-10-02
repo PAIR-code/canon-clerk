@@ -8,7 +8,7 @@
 ## 1. Scope & Conformance
 
 ### 1.1 Purpose
-This specification defines the syntax, schema, progressive disclosure tiers, and metadata derivation rules for **project canons**—declarative, natural language architectural invariants stored in repository `.canons/` directories.
+This specification defines the syntax, schema, progressive disclosure tiers, and metadata derivation rules for **canons**—declarative, source code or repository change rules (both portable standard rule packs and repository-specific extensions) stored in `.canons/` directories that are semantic, atomic, falsifiable, bounded, grounded, salient, and correctable.
 
 ### 1.2 Conformance Terminology
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)] [[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)] when, and only when, they appear in all capitals, as shown here.
@@ -23,6 +23,18 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
    * **How (Remediation):** Actionable contributor remediation instructions detailing how to achieve compliance upon failure.
    While Tier 1 canons require only the "What", mature canons naturally synthesize this tetrad.
 4. **Clarity of Action:** The specification strictly defines an enforcement boundary: Canon Clerk evaluates invariants and emits actionable `Remediation` instructions, leaving artifact synthesis to the contributor or their client-side coding agent.
+
+### 1.4 The Seven Canon Attributes
+> **Canon:** *(n)*. A source code or repository change rule that is: **semantic**, **atomic**, **falsifiable**, **bounded**, **grounded**, **salient**, and **correctable**.
+
+A conforming canon adheres to the following heptad of core attributes:
+1. **Semantic:** A canon MUST govern architectural intent, conventions, or domain policies that cannot be evaluated purely deterministically by an AST parser or regular expression. Constraints verifiable via static analysis are forbidden.
+2. **Atomic:** A canon MUST address a single cohesive invariant to prevent compound evaluation flakiness.
+3. **Falsifiable:** A canon MUST define a testable, binary condition of violation; unfalsifiable or purely aspirational assertions are forbidden.
+4. **Bounded:** A canon MUST demarcate its applicability via explicit directory scoping, trigger path patterns, or verified exception conditions.
+5. **Grounded:** A canon MUST be warranted by authoritative precedent, industry standards, or documented architectural trade-offs (Chesterton's Fence) rather than arbitrary personal preference.
+6. **Salient:** A canon MUST maximize signal density and employ precise domain terminology tailored for an AI readership, omitting needless words and conversational padding.
+7. **Correctable:** A canon MUST admit a viable path to compliance, whether through explicit remediation instructions or implicit action.
 
 ---
 
