@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   CORE_VERSION,
+  checkFileInCanonScope,
   DEFAULT_CANON_GLOB,
   DEFAULT_CANON_GLOBS,
   DEFAULT_IGNORES,
   lintCanons,
+  matchesTriggers,
   toPosixPath,
 } from './index.js';
 import pkg from '../package.json' with { type: 'json' };
@@ -22,6 +24,11 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(Array.isArray(DEFAULT_IGNORES)).toBe(true);
     expect(DEFAULT_CANON_GLOB).toBe('**/.canons/**/*.md');
     expect(DEFAULT_CANON_GLOBS).toEqual([DEFAULT_CANON_GLOB]);
+  });
+
+  it('re-exports Stage 0 scope and trigger primitives', () => {
+    expect(typeof checkFileInCanonScope).toBe('function');
+    expect(typeof matchesTriggers).toBe('function');
   });
 });
 
