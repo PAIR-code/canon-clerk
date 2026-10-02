@@ -17,6 +17,22 @@
 
 ---
 
+## What is a Canon?
+
+> **Canon:** *(n)*. A source code or repository change rule that is: **semantic**, **atomic**, **falsifiable**, **bounded**, **grounded**, **salient**, and **correctable**.
+
+- **Semantic** — Governs architectural intent and conventions that cannot be evaluated purely deterministically by an AST parser or regex.
+- **Atomic** — Enforces a single cohesive invariant to prevent compound evaluation flakiness.
+- **Falsifiable** — Defines a testable, binary condition of violation rather than an aspirational goal.
+- **Bounded** — Demarcates its applicability via explicit directory scoping, trigger paths, or verified exception conditions.
+- **Grounded** — Warranted by authoritative precedent, standards, or documented architectural trade-offs (Chesterton's Fence) rather than arbitrary personal preference.
+- **Salient** — Maximizes signal density and precise domain terminology tailored for an AI readership.
+- **Correctable** — Admits a viable path to compliance, whether through explicit remediation instructions or implicit action.
+
+Canons scale across an intuitive **What / When / Why / How** cognitive tetrad ([`SPEC.md`](SPEC.md)), functioning both as off-the-shelf standard rule packs and as custom repository-specific invariants.
+
+---
+
 ## Why This? Why Now?
 
 **Problem:** Generative AI tools have accelerated code production, shifting the engineering bottleneck to code custodians and maintainers. Reviewers bear an asymmetric cognitive tax: vetting plausible, AI-assisted pull requests that pass existing unit tests and AST linters, but quietly violate unwritten architectural boundaries, domain conventions, or repository tenets.

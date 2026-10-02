@@ -12,7 +12,7 @@ Key architectural concepts:
 ## The Canon Standard
 
 - [The Canon Corpus](README.md#the-canon-corpus): Index and overview of modular, domain-scoped canons governing CLI ergonomics, canon authoring, visual identity, AI skills, and commit standards.
-- [Canon Format Specification](SPEC.md): Complete normative grammar, What/When/Why/How tetrad, metadata derivation rules (id, title, triggers, inspect, tags, references), directive contracts (Exception, Remediation, Rationale), and progressive disclosure tiers.
+- [Canon Format Specification](SPEC.md): Normative definition of a canon (semantic, atomic, falsifiable, bounded, grounded, salient, correctable), formal grammar, What/When/Why/How tetrad, metadata derivation rules, directive contracts, and progressive disclosure tiers.
 - [Canon Authoring Canons](.canons/canon-authoring/): Reusable, project-agnostic exemplars tagged `canon-authoring` codifying canon-authoring invariants (naming, atomicity, falsifiability, semantic scope, succinctness, and directive contracts).
 - [README Authoring Canons](.canons/readme-authoring/): Reusable, project-agnostic exemplars tagged `readme-authoring` codifying landing documentation invariants (orientation, feature parity, roadmap omission, responsive hero banners, and architecture shunting).
 - [Visual Identity Canons](.canons/visual-identity/): Reusable exemplars tagged `visual-identity` codifying brand iconography isolation and alpha transparency.
