@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@canon-clerk/schema": "*",
-    "ignore": "^7.0.5"
+    "ignore": "^7.0.5",
+    "picomatch": "^4.0.2"
   },
   "license": "Apache-2.0"
 }
