@@ -1,8 +1,8 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { runLintCommand } from './lint.js';
+import { runCheckCanonsCommand } from './check-canons.js';
 
-describe('runLintCommand', () => {
+describe('runCheckCanonsCommand', () => {
   it('lints a clean workspace and returns exit code 0', async () => {
     let stdoutText = '';
     const stdout = new PassThrough();
@@ -10,7 +10,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand([], {}, { stdout, isTTY: true });
+    const code = await runCheckCanonsCommand([], {}, { stdout, isTTY: true });
     expect(code).toBe(0);
     expect(stdoutText).toContain('canons passed (0 problems)');
   });
@@ -22,7 +22,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand([], {}, { stdout, isTTY: false });
+    const code = await runCheckCanonsCommand([], {}, { stdout, isTTY: false });
     expect(code).toBe(0);
     expect(stdoutText).toBe('');
   });
@@ -34,7 +34,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand([], { json: true }, { stdout });
+    const code = await runCheckCanonsCommand([], { json: true }, { stdout });
     expect(code).toBe(0);
     expect(JSON.parse(stdoutText.trim())).toEqual([]);
   });
@@ -49,7 +49,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand(
+    const code = await runCheckCanonsCommand(
       ['-'],
       { stdinFilename: '.canons/test.md' },
       { stdin, stdout, isTTY: false }
@@ -69,7 +69,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand(
+    const code = await runCheckCanonsCommand(
       ['-'],
       { maxWarnings: 0 },
       { stdin, stdout, isTTY: false }
@@ -88,7 +88,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand(
+    const code = await runCheckCanonsCommand(
       ['-'],
       { quiet: true, maxWarnings: 0 },
       { stdin, stdout, isTTY: false }
@@ -107,7 +107,7 @@ describe('runLintCommand', () => {
       stdoutText += chunk.toString();
     });
 
-    const code = await runLintCommand(
+    const code = await runCheckCanonsCommand(
       ['-'],
       { json: true, stdinFilename: '.canons/virtual.md' },
       { stdin, stdout }

@@ -8,7 +8,7 @@ import {
   formatStylishSummary,
 } from '../formatters/index.js';
 
-export interface LintCliOptions {
+export interface CheckCanonsCliOptions {
   glob?: string[] | undefined;
   stdinFilename?: string | undefined;
   format?: 'stylish' | 'json' | undefined;
@@ -19,7 +19,7 @@ export interface LintCliOptions {
   defaultIgnores?: boolean | undefined;
 }
 
-export interface LintCommandContext {
+export interface CheckCanonsCommandContext {
   stdout?: NodeJS.WritableStream | undefined;
   stderr?: NodeJS.WritableStream | undefined;
   stdin?: NodeJS.ReadableStream | undefined;
@@ -53,7 +53,7 @@ function parseMaxWarnings(value: string): number {
 /**
  * Resolves option precedence: CLI flags > environment variables > defaults.
  */
-function resolveLintConfig(options: LintCliOptions) {
+function resolveCheckCanonsConfig(options: CheckCanonsCliOptions) {
   let format: 'stylish' | 'json' = 'stylish';
   if (options.json) {
     format = 'json';
@@ -83,17 +83,17 @@ function resolveLintConfig(options: LintCliOptions) {
 }
 
 /**
- * Executes the lint command with given targets, parsed options, and I/O context.
+ * Executes the check-canons command with given targets, parsed options, and I/O context.
  *
  * @param targets Explicit target paths, directories, globs, or '-' for stdin.
  * @param options Parsed CLI options.
  * @param context Optional I/O streams and environment overrides.
  * @returns Process exit status code (0 for clean/pass, 1 for violations, 2 for usage errors).
  */
-export async function runLintCommand(
+export async function runCheckCanonsCommand(
   targets: string[] = [],
-  options: LintCliOptions = {},
-  context?: LintCommandContext
+  options: CheckCanonsCliOptions = {},
+  context?: CheckCanonsCommandContext
 ): Promise<number> {
   const stdout = context?.stdout ?? process.stdout;
   const stderr = context?.stderr ?? process.stderr;
@@ -103,7 +103,7 @@ export async function runLintCommand(
     context?.isTTY ??
     (Boolean((stdout as { isTTY?: boolean }).isTTY) && !process.env.NO_COLOR);
 
-  const config = resolveLintConfig(options);
+  const config = resolveCheckCanonsConfig(options);
 
   const containsStdin = targets.includes('-');
   const fileTargets = targets.filter((t) => t !== '-');
@@ -130,7 +130,7 @@ export async function runLintCommand(
   };
 
   try {
-    // 1. Traverse and lint filesystem targets if specified or if no stdin requested
+    // 1. Traverse and check filesystem targets if specified or if no stdin requested
     if (!containsStdin || fileTargets.length > 0) {
       const canonGenerator = lintCanons({
         workspaceRoot: cwd ?? process.cwd(),
@@ -210,10 +210,10 @@ export async function runLintCommand(
 }
 
 /**
- * Creates and configures the Commander Command for `canon-clerk lint`.
+ * Creates and configures the Commander Command for `canon-clerk check-canons`.
  */
-export function createLintCommand(): Command {
-  const cmd = new Command('lint');
+export function createCheckCanonsCommand(): Command {
+  const cmd = new Command('check-canons');
 
   cmd.exitOverride();
 
@@ -226,7 +226,7 @@ export function createLintCommand(): Command {
         str.includes('missing')
       ) {
         write(
-          "  Hint: Run 'canon-clerk lint --help' to inspect supported options and flags.\n"
+          "  Hint: Run 'canon-clerk check-canons --help' to inspect supported options and flags.\n"
         );
       }
     },
@@ -236,7 +236,7 @@ export function createLintCommand(): Command {
     .description('Validate repository canons against syntax and schema rules')
     .argument(
       '[targets...]',
-      'Target file paths, directories, or globs to lint (default: ".", or "-" for stdin)'
+      'Target file paths, directories, or globs to check (default: ".", or "-" for stdin)'
     )
     .option(
       '-g, --glob <pattern>',
@@ -245,7 +245,7 @@ export function createLintCommand(): Command {
     )
     .option(
       '--stdin-filename <path>',
-      'Virtual relative path when linting standard input'
+      'Virtual relative path when checking standard input'
     )
     .option(
       '-f, --format <format>',
@@ -275,22 +275,22 @@ export function createLintCommand(): Command {
     )
     .option('--no-default-ignores', 'Do not apply default noise directory ignores')
     .action(async (targets: string[]) => {
-      const options = cmd.opts<LintCliOptions>();
-      const exitCode = await runLintCommand(targets, options);
+      const options = cmd.opts<CheckCanonsCliOptions>();
+      const exitCode = await runCheckCanonsCommand(targets, options);
       process.exitCode = exitCode;
     });
 
   cmd.configureHelp({
     formatHelp: () => {
       return [
-        'Usage: canon-clerk lint [options] [targets...]',
+        'Usage: canon-clerk check-canons [options] [targets...]',
         '',
         'Validate repository canons against syntax and schema rules.',
         '',
         'Targets & Filtering:',
-        '  [targets...]               Target file paths, directories, or globs to lint (default: ".", or "-" for stdin)',
+        '  [targets...]               Target file paths, directories, or globs to check (default: ".", or "-" for stdin)',
         `  -g, --glob <pattern>       Glob pattern(s) to discover canon files (repeatable, default: "${DEFAULT_CANON_GLOB}")`,
-        '  --stdin-filename <path>    Virtual relative path when linting standard input',
+        '  --stdin-filename <path>    Virtual relative path when checking standard input',
         '  --ignore <pattern>         Additional path or glob patterns to ignore during discovery (repeatable)',
         '  --default-ignores          Apply default noise directory ignores (default: true)',
         '  --no-default-ignores       Do not apply default noise directory ignores',
@@ -307,25 +307,25 @@ export function createLintCommand(): Command {
         '  -h, --help                 Display help for command',
         '',
         'Examples:',
-        '  # Lint all canons across the workspace',
-        '  $ canon-clerk lint',
+        '  # Validate all canons across the workspace',
+        '  $ canon-clerk check-canons',
         '',
-        '  # Lint explicit canon files or directories',
-        '  $ canon-clerk lint .canons/pr-tests.md',
-        '  $ canon-clerk lint packages/ui/.canons',
+        '  # Validate explicit canon files or directories',
+        '  $ canon-clerk check-canons .canons/pr-tests.md',
+        '  $ canon-clerk check-canons packages/ui/.canons',
         '',
-        '  # Lint markdown files matching a custom glob',
-        '  $ canon-clerk lint tmp -g "**/*.md"',
+        '  # Validate markdown files matching a custom glob',
+        '  $ canon-clerk check-canons tmp -g "**/*.md"',
         '',
-        '  # Lint raw canon markdown content from standard input',
-        '  $ cat .canons/pr-tests.md | canon-clerk lint -',
-        '  $ echo "..." | canon-clerk lint - --stdin-filename .canons/virtual.md',
+        '  # Validate raw canon markdown content from standard input',
+        '  $ cat .canons/pr-tests.md | canon-clerk check-canons -',
+        '  $ echo "..." | canon-clerk check-canons - --stdin-filename .canons/virtual.md',
         '',
         '  # Output canonical JSON array for CI or tooling',
-        '  $ canon-clerk lint --json',
+        '  $ canon-clerk check-canons --json',
         '',
         '  # Enforce zero warnings threshold in CI',
-        '  $ canon-clerk lint --max-warnings 0',
+        '  $ canon-clerk check-canons --max-warnings 0',
         '',
       ].join('\n');
     },

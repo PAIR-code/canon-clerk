@@ -1,6 +1,6 @@
 # Architecture & Evaluation Cascade
 
-**Status:** Aspirational Architectural Waypoint (Formal machine contracts will be codified in OpenSpec).
+**Status:** Living Architectural Framework. For the formal multi-phase cascade specification, see **[Three-Phase Evaluation Cascade](architecture/evaluation-cascade.md)**.
 
 ---
 
@@ -8,49 +8,43 @@
 
 Canon Clerk is designed to audit pull requests against natural language project invariants without incurring the latency and cost of running large reasoning models over every canon for every commit.
 
-To balance token economics, latency, and audit rigor, Canon Clerk executes audits through a **three-stage evaluation cascade**:
+To balance token economics, latency, and audit rigor, Canon Clerk executes audits through a domain-partitioned **Three-Phase Evaluation Cascade: Check → Docket → Audit**:
 
 ```mermaid
 flowchart LR
-    PR[Pull Request] --> S0["Stage 0: Path Filter<br/>(Deterministic Globs)"]
-    S0 -- "Matched Canons<br/>(0 tokens)" --> S1["Stage 1: Screener<br/>(Fast LLM)"]
-    S1 -- "Applicable Canons" --> S2["Stage 2: Deep Auditor<br/>(Reasoning LLM)"]
-    S2 --> Verdict[PR Verdict & Annotations]
+    PR[Pull Request] --> P1["Phase 1: Check<br/>(Deterministic · 0 tokens)"]
+    P1 -- "Candidate Canons" --> P2["Phase 2: Docket<br/>(Fast Triage · Fast LLM)"]
+    P2 -- "Docketed Targets" --> P3["Phase 3: Audit<br/>(Adjudication · Reasoning LLM)"]
+    P3 --> Verdict[PR Verdict & Annotations]
 ```
 
-By cascading from deterministic filters to lightweight screening and finally to deep reasoning, Canon Clerk minimizes API costs while maintaining high-fidelity review gates.
+By cascading from deterministic filters (Phase 1) to lightweight jurisdiction screening (Phase 2) and finally to targeted deep reasoning (Phase 3), Canon Clerk minimizes API costs while maintaining high-fidelity review gates.
 
 ---
 
-## 2. The Three-Stage Cascade
+## 2. The Three-Phase Cascade
 
-### Stage 0: Path Filter (Deterministic)
-* **Goal:** Instantly discard canons whose file boundaries do not intersect with the changes in the pull request.
-* **Cost & Latency:** 0 tokens, near-instantaneous execution.
-* **Mechanism:**
-  * Compares the list of modified files against each canon's `triggers:` globs.
-  * Honors monorepo package boundaries: a canon residing in `<scope>/.canons/` automatically inherits an implicit `<scope>/**` path filter.
-  * If a canon specifies no `triggers:` filter and is located at root, it defaults to `["**/*"]` and always passes Stage 0.
+See **[Evaluation Cascade Specification](architecture/evaluation-cascade.md)** for the complete state machine, normative AI contracts, and `FileArtifact` data structures.
 
-### Stage 1: Screener (Fast LLM or System One Model)
-* **Goal:** Rapidly determine which remaining candidate canons are plausibly applicable based on high-level PR context.
-* **Model Class:** Fast, low-latency models (e.g., Gemini Flash).
-* **Inputs:**
-  * Pull request metadata: title, description/body, branch name.
-  * Diff statistics: touched file list, change counts (lines added/removed).
-  * Canon summaries: title, invariant statement, evaluation criteria.
-* **Outputs:** A filtered list of canons flagged as potentially applicable.
-* **CI Lifecycle:** Canons passing Stage 1 transition into in-progress GitHub Check Runs.
+### Phase 1: Check (Deterministic Intake · 0 Tokens)
+* **Goal:** Instantly verify procedural compliance, syntax/schema validity, and discard canons whose file boundaries do not intersect with PR changes.
+* **Normative AI Contract:** **MUST NOT** use AI. 100% deterministic, local, and offline.
+* **Commands:**
+  * `canon-clerk check-canons`: Validates canon markdown syntax, YAML frontmatter schemas, naming conventions, and structural rules.
+  * `canon-clerk check-triggers`: Evaluates file changes against canon declared `triggers:` globs, enforcing monorepo package boundaries (`<scope>/.canons/` $\implies$ `<scope>/**`).
 
-### Stage 2: Deep Auditor (Reasoning LLM)
-* **Goal:** Deeply analyze the actual changes to reach a definitive compliance verdict and generate actionable remediation instructions.
-* **Model Class:** Frontier reasoning models (e.g., Gemini Pro with reasoning/thinking enabled).
-* **Inputs:**
-  * Unified git diff of modified files.
-  * Scoped context specified by the canon's `inspect:` frontmatter (`diff`, `pr_title`, `pr_body`, `commit_messages`, `linked_issues`).
-  * Persistent repository grounding files resolved via the canon's `references:` frontmatter.
-  * Full canon text (rule, evaluation criteria, remediation directives).
-* **Outputs:** Structured verdict, failure rationale, line-level code annotations, and actionable remediation instructions.
+### Phase 2: Docket (Triage & Jurisdiction · Minimal Tokens)
+* **Goal:** Rapidly determine which candidate canons have a colorable claim against the PR, and docket specific target diff hunks and referenced exhibits.
+* **Normative AI Contract:** **MAY** use AI. **SHOULD** use fast, low-cost triage models (`gemini-3.5-flash-lite`).
+* **Commands:**
+  * `canon-clerk docket-canons`: Evaluates candidate canons against high-level PR metadata and diff statistics in a single aggregate triage call.
+  * `canon-clerk docket-targets`: Resolves specific diff hunks, referenced artifacts, or metadata fields into evidence for each docketed canon.
+
+### Phase 3: Audit (Substantive Adjudication · Targeted Tokens)
+* **Goal:** Deeply analyze docketed exhibits to reach a definitive compliance verdict, evaluate exceptions, and generate actionable remediation instructions.
+* **Normative AI Contract:** **WILL** use AI. **MAY** use frontier reasoning models (`gemini-3.8-pro`).
+* **Commands:**
+  * `canon-clerk audit`: Evaluates docketed targets against the What/When/Why/How tetrad, short-circuits verified `Exception` clauses, and posts line-level code annotations.
 
 ---
 
@@ -80,7 +74,7 @@ Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one
 | **`pass`** | `success` 🟢 | No | Both | Canon applies and the PR conforms to the invariant, either directly or via a verified `Exception` clause. |
 | **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code violates the invariant and satisfies zero `Exception` clauses. Includes cases where `Remediation` instructions were provided. |
 | **`action_required`** | `action_required` 🟡 | **Yes** | **Metadata & Process** | Canon applies, but PR metadata/process violates the invariant (e.g., missing test plan, invalid PR title). |
-| **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. *(Safety valve for optimistic Stage 1 screening).* |
+| **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. *(Safety valve for optimistic Phase 2 docketing).* |
 
 ---
 

@@ -7,7 +7,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
       const res = runCliSync([]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain('Usage: canon-clerk [options] [command]');
-      expect(res.stdout).toContain('lint [options]');
+      expect(res.stdout).toContain('check-canons [options]');
       expect(res.stdout).toContain('check-triggers [options]');
     });
 
@@ -43,7 +43,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
 
   describe('POSIX signal handling', () => {
     it('terminates with status 130 on SIGINT', async () => {
-      const child = spawnCli(['lint', '-']);
+      const child = spawnCli(['check-canons', '-']);
 
       // Allow child process to boot, load ESM modules, and register signal handlers
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -63,7 +63,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
     });
 
     it('terminates with status 143 on SIGTERM', async () => {
-      const child = spawnCli(['lint', '-']);
+      const child = spawnCli(['check-canons', '-']);
 
       // Allow child process to boot, load ESM modules, and register signal handlers
       await new Promise((resolve) => setTimeout(resolve, 300));

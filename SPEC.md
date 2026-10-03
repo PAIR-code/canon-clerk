@@ -83,10 +83,10 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | :--- | :--- | :--- | :--- | :--- |
 | **`id`** | `string` | No | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
-| **`triggers`** | `string[]` | No | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs defining the pull request file modifications that activate this canon for evaluation (Stage 0). |
-| **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to the Deep Auditor. |
+| **`triggers`** | `string[]` | No | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs defining the pull request file modifications that activate this canon for evaluation (Phase 1: Check). |
+| **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements supplied to Phase 3: Audit. |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
-| **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files supplied to the Deep Auditor as grounding context. |
+| **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files supplied to Phase 3: Audit as grounding context. |
 
 ### 4.2 Deterministic Derivation Rules
 
@@ -177,7 +177,7 @@ Canon text may include reserved semantic directives to govern auditor behavior, 
 > **Exception Normative Constraints & Auditor Behavioral Contracts:**
 > Real-world engineering invariants frequently admit legitimate escape hatches (e.g. performance hot-paths, transitional shims, or vendor workarounds). To ensure escape hatches preserve architectural integrity:
 > * **Short-Circuit to Pass:** When an invariant violation is detected, the evaluator AI screens the diff and pull request context against declared `Exception` clauses. If all criteria of an exception are met semantically, the check short-circuits and resolves to `pass`, recording the matched exception clause and justification in the Check Run summary.
-> * **Semantic Sufficiency Over Syntactic Presence:** Unlike deterministic linters that only verify comment flags (such as `// eslint-disable-next-line` or `// canon-ignore`), the Deep Auditor MUST evaluate the *substantive content*, factual grounding, and truthfulness of the justification against the diff and PR context. A hand-wavy or tautological comment (e.g., `// bespoke: this is faster`) MUST fail an exception demanding specific, measurable performance benchmarks or CVE isolation.
+> * **Semantic Sufficiency Over Syntactic Presence:** Unlike deterministic linters that only verify comment flags (such as `// eslint-disable-next-line` or `// canon-ignore`), the Phase 3 Auditor MUST evaluate the *substantive content*, factual grounding, and truthfulness of the justification against the diff and PR context. A hand-wavy or tautological comment (e.g., `// bespoke: this is faster`) MUST fail an exception demanding specific, measurable performance benchmarks or CVE isolation.
 > * **Plurality & Independent Evaluation (Logical OR):** Multiple discrete `Exception` clauses evaluate independently as logical ORs. If any single exception clause is fully satisfied, the invariant violation is waived.
 > * **Biconditional Formulation (ADVISORY):** Authors SHOULD formulate `Exception` clauses using RFC 2119 keywords specifying permissible deviation (e.g. `MAY be introduced IFF accompanied by...`). The keyword `IFF` (if and only if) establishes a rigorous, testable biconditional boundary.
 > * **Orthogonality & Antecedent Gating:** `Exception` is orthogonal to `Rationale` and `Remediation`. It acts as an antecedent gate before contributor remediation: if an exception is met, the check passes without triggering `Remediation`. If all exception clauses fail, the violation stands, executing `Remediation` (`fail`) or default blocking `fail`.
@@ -283,7 +283,7 @@ Standard platform APIs MUST be used rather than introducing bespoke implementati
 ```
 
 ### Tier 3: Cost-Optimized Canon
-A canon adding YAML frontmatter (`triggers:`) purely to enable deterministic Stage 0 path filtering at zero token cost:
+A canon adding YAML frontmatter (`triggers:`) purely to enable deterministic Phase 1 path filtering at zero token cost:
 ```markdown
 ---
 triggers:
@@ -344,4 +344,4 @@ Add a numbered `### Manual Test Script` section to the PR description outlining 
 
 ## 8. Execution & Architecture *(Informative)*
 
-This specification defines the grammar, document model, and derivation rules for authoring canons. For the architecture of the three-stage evaluation cascade (Deterministic Path Filter $\rightarrow$ Screener LLM $\rightarrow$ Deep Auditor LLM), context extraction, and GitHub Check Run verdict mapping, see **[Architecture & Evaluation Cascade](docs/architecture.md)**.
+This specification defines the grammar, document model, and derivation rules for authoring canons. For the architecture of the Three-Phase Evaluation Cascade (Check → Docket → Audit), context extraction, and GitHub Check Run verdict mapping, see **[Three-Phase Evaluation Cascade](docs/architecture/evaluation-cascade.md)** (with overview at **[Architecture Overview](docs/architecture.md)**).

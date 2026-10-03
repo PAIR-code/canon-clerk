@@ -27,7 +27,7 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(DEFAULT_CANON_GLOBS).toEqual([DEFAULT_CANON_GLOB]);
   });
 
-  it('re-exports Stage 0 scope and trigger primitives and streaming query engine', () => {
+  it('re-exports Phase 1 scope and trigger primitives and streaming query engine', () => {
     expect(typeof checkFileInCanonScope).toBe('function');
     expect(typeof matchesTriggers).toBe('function');
     expect(typeof queryCanons).toBe('function');
