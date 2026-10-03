@@ -25,7 +25,7 @@ The system SHALL evaluate model configuration inputs along a descending specific
 The system SHALL automatically infer the model provider and apply corresponding default models when an API key is supplied without explicit model or provider configuration.
 
 #### Scenario: Inferring provider and defaults from lone API key
-- **WHEN** only a provider-specific credential key (such as `geminiApiKey`) is available without explicit model selection
+- **WHEN** only a provider-specific credential (such as `providers.google.apiKey` or `GEMINI_API_KEY`) is available without explicit model selection
 - **THEN** infers the matching provider and assigns the standard default model for the requested tier
 
 ### Requirement: Multi-Key Ambiguity Detection and Advisory Warnings
