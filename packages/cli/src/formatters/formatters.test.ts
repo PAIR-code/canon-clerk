@@ -11,6 +11,11 @@ import {
   formatCheckTriggersStylish,
   formatCheckTriggersJson,
 } from './check-triggers.js';
+import {
+  formatCheckConfigStylish,
+  formatCheckConfigJson,
+} from './check-config.js';
+import type { CascadeDiagnostics } from '@canon-clerk/configuration';
 
 describe('formatDiagnostic', () => {
   it('formats diagnostic with line, column, badge, message, ruleId', () => {
@@ -264,5 +269,162 @@ describe('formatCheckTriggersStylish', () => {
 describe('formatCheckTriggersJson', () => {
   it('formats array of matches as JSON', () => {
     expect(formatCheckTriggersJson([])).toBe('[]');
+  });
+});
+
+describe('formatCheckConfigStylish', () => {
+  const mockDiagnostics: CascadeDiagnostics = {
+    store: {
+      path: '/home/user/.config/canon-clerk/config.json',
+      exists: true,
+      byteLength: 142,
+      mode: 0o600,
+      modeOctal: '0o600',
+      isSecure: true,
+      availableKeys: ['providers'],
+    },
+    tiers: {
+      screener: {
+        tier: 'screener',
+        provider: 'google',
+        model: 'google:gemini-3.5-flash-lite',
+        modelName: 'gemini-3.5-flash-lite',
+        effort: 'minimal',
+        hasKey: true,
+        maskedKey: '...4x9Z',
+        sources: {
+          model: 'default',
+          effort: 'default',
+          apiKey: 'store (providers.google.apiKey)',
+          baseURL: 'default',
+        },
+        warnings: [],
+      },
+      auditor: {
+        tier: 'auditor',
+        provider: 'google',
+        model: 'google:gemini-3.8-flash',
+        modelName: 'gemini-3.8-flash',
+        effort: 'medium',
+        hasKey: true,
+        maskedKey: '...4x9Z',
+        sources: {
+          model: 'default',
+          effort: 'default',
+          apiKey: 'store (providers.google.apiKey)',
+          baseURL: 'default',
+        },
+        warnings: [],
+      },
+    },
+    warnings: [],
+    errors: [],
+    valid: true,
+  };
+
+  it('renders complete diagnostic tree for healthy configuration', () => {
+    const output = formatCheckConfigStylish(mockDiagnostics, { isTTY: false });
+
+    expect(output).toContain('Canon Clerk Configuration Diagnostics');
+    expect(output).toContain('Host Credential Store:');
+    expect(output).toContain('/home/user/.config/canon-clerk/config.json');
+    expect(output).toContain('0o600 (owner-only · OK)');
+    expect(output).toContain('Phase 2: Screener');
+    expect(output).toContain('gemini-3.5-flash-lite [minimal effort] (source: default)');
+    expect(output).toContain('...4x9Z (source: store (providers.google.apiKey))');
+    expect(output).toContain('Phase 3: Auditor');
+    expect(output).toContain('gemini-3.8-flash [medium effort] (source: default)');
+    expect(output).toContain('Status: Healthy (All tiers ready for evaluation)');
+  });
+
+  it('renders single tier when targetTier filter is applied', () => {
+    const output = formatCheckConfigStylish(mockDiagnostics, {
+      isTTY: false,
+      targetTier: 'screener',
+    });
+
+    expect(output).toContain('Phase 2: Screener');
+    expect(output).not.toContain('Phase 3: Auditor');
+  });
+
+  it('renders warnings and errors when present', () => {
+    const unhealthyDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      warnings: ['Multiple provider credentials detected.'],
+      errors: ['Missing API key for screener tier.'],
+      valid: false,
+    };
+
+    const output = formatCheckConfigStylish(unhealthyDiagnostics, { isTTY: false });
+
+    expect(output).toContain('Warnings:');
+    expect(output).toContain('  - Multiple provider credentials detected.');
+    expect(output).toContain('Errors:');
+    expect(output).toContain('  - Missing API key for screener tier.');
+    expect(output).toContain('Status: Unhealthy (Configuration requires attention)');
+  });
+});
+
+describe('formatCheckConfigJson', () => {
+  const mockDiagnostics: CascadeDiagnostics = {
+    store: {
+      path: '/home/user/.config/canon-clerk/config.json',
+      exists: true,
+      byteLength: 142,
+      mode: 0o600,
+      modeOctal: '0o600',
+      isSecure: true,
+    },
+    tiers: {
+      screener: {
+        tier: 'screener',
+        provider: 'google',
+        model: 'google:gemini-3.5-flash-lite',
+        modelName: 'gemini-3.5-flash-lite',
+        hasKey: true,
+        maskedKey: '...4x9Z',
+        sources: {
+          model: 'default',
+          baseURL: 'default',
+        },
+        warnings: [],
+      },
+      auditor: {
+        tier: 'auditor',
+        provider: 'google',
+        model: 'google:gemini-3.8-flash',
+        modelName: 'gemini-3.8-flash',
+        hasKey: true,
+        maskedKey: '...4x9Z',
+        sources: {
+          model: 'default',
+          baseURL: 'default',
+        },
+        warnings: [],
+      },
+    },
+    warnings: [],
+    errors: [],
+    valid: true,
+  };
+
+  it('emits valid canonical JSON payload', () => {
+    const jsonStr = formatCheckConfigJson(mockDiagnostics);
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.valid).toBe(true);
+    expect(parsed.store.exists).toBe(true);
+    expect(parsed.store.mode).toBe('0o600');
+    expect(parsed.tiers.screener.model).toBe('gemini-3.5-flash-lite');
+    expect(parsed.tiers.screener.maskedKey).toBe('...4x9Z');
+    expect(parsed.tiers.screener.sources.model).toBe('default');
+  });
+
+  it('filters tiers in JSON output when targetTier is provided', () => {
+    const jsonStr = formatCheckConfigJson(mockDiagnostics, { targetTier: 'screener' });
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.tiers.screener).toBeDefined();
+    expect(parsed.tiers.auditor).toBeUndefined();
   });
 });

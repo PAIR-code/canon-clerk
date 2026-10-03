@@ -21,6 +21,7 @@
     "start": "node ./dist/cli.js"
   },
   "dependencies": {
+    "@canon-clerk/configuration": "*",
     "@canon-clerk/core": "*",
     "@canon-clerk/schema": "*",
     "commander": "^15.0.0"

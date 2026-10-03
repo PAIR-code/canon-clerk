@@ -2,6 +2,7 @@ import { Command, CommanderError } from 'commander';
 import { getCliVersion } from './index.js';
 import { createCheckCanonsCommand } from './commands/check-canons.js';
 import { createCheckTriggersCommand } from './commands/check-triggers.js';
+import { createCheckConfigCommand } from './commands/check-config.js';
 
 /**
  * Creates and configures the root Commander program.
@@ -15,7 +16,8 @@ export function createApp(): Command {
       'Automated review gate enforcing project canons in CI and local workflows'
     )
     .addCommand(createCheckCanonsCommand())
-    .addCommand(createCheckTriggersCommand());
+    .addCommand(createCheckTriggersCommand())
+    .addCommand(createCheckConfigCommand());
 
   program.exitOverride();
 
@@ -30,7 +32,7 @@ export function createApp(): Command {
         str.includes('missing')
       ) {
         write(
-          "  Hint: Run 'canon-clerk --help', 'canon-clerk check-canons --help', or 'canon-clerk check-triggers --help' for usage guidance.\n"
+          "  Hint: Run 'canon-clerk --help', 'canon-clerk check-canons --help', 'canon-clerk check-triggers --help', or 'canon-clerk check-config --help' for usage guidance.\n"
         );
       }
     },
@@ -50,6 +52,7 @@ export function createApp(): Command {
         'Commands:',
         '  check-canons [options]    Validate repository canons against syntax and schema rules',
         '  check-triggers [options]  Evaluate Phase 1 path triggers and monorepo package scopes against target files',
+        '  check-config [options]    Inspect configuration health, cascade resolution sources, and OS credential store permissions',
         '',
         'Examples:',
         '  # Validate all canons in the workspace',
@@ -57,6 +60,9 @@ export function createApp(): Command {
         '',
         '  # Check which canons govern modified files via stdin',
         '  $ git diff --name-only | canon-clerk check-triggers -',
+        '',
+        '  # Inspect configuration health and cascade resolution',
+        '  $ canon-clerk check-config',
         '',
         '  # Display help for a subcommand',
         '  $ canon-clerk check-triggers --help',

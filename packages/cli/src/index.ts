@@ -19,4 +19,6 @@ export function getCompatibleCoreVersion(): string {
 
 export * from './formatters/index.js';
 export * from './commands/check-canons.js';
+export * from './commands/check-triggers.js';
+export * from './commands/check-config.js';
 export * from './app.js';
