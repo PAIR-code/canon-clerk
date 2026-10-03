@@ -277,7 +277,7 @@ export function createLintCommand(): Command {
     .action(async (targets: string[]) => {
       const options = cmd.opts<LintCliOptions>();
       const exitCode = await runLintCommand(targets, options);
-      process.exit(exitCode);
+      process.exitCode = exitCode;
     });
 
   cmd.configureHelp({

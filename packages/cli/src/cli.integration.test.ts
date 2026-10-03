@@ -8,6 +8,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
       expect(res.status).toBe(0);
       expect(res.stdout).toContain('Usage: canon-clerk [options] [command]');
       expect(res.stdout).toContain('lint [options]');
+      expect(res.stdout).toContain('check-triggers [options]');
     });
 
     it('outputs version string with --version or -v and exits 0', () => {
