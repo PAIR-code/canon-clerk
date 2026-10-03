@@ -21,6 +21,10 @@ The system SHALL store and retrieve host-level credentials in standard operating
 - **WHEN** updating or deleting a credential key in the store
 - **THEN** persists the updated key-value mapping or removes the key from the underlying storage file
 
+#### Scenario: Reading structured provider configurations
+- **WHEN** querying a provider configuration block from `providers.<name>`
+- **THEN** returns the typed provider configuration containing `apiKey` and optional `baseURL`
+
 ### Requirement: Owner-Only Credential Access Permissions
 The system SHALL enforce POSIX `0o600` permissions on local credential files, ensuring credential stores are readable and writable solely by the executing user.
 

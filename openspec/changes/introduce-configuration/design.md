@@ -45,6 +45,11 @@ Simultaneously, conventional in-workspace `.env.local` patterns present major se
 - **Rationale:** Avoids silent non-deterministic selection when users have multiple provider keys configured, guiding the user to declare an explicit model choice while maintaining forward compatibility.
 - **Alternatives Considered:** Throwing an unhandled exception (rejected because missing configuration should fail soft where a viable default exists).
 
+### 5. Structured `providers` and Tier Execution Model vs Flat Property Soup
+- **Decision:** Organize configuration storage into orthogonal namespaces: a `providers` dictionary encapsulating per-provider connection properties (`apiKey`, `baseURL`), and dedicated tier objects (`screenerModel`, `auditorModel`) encapsulating model selection and reasoning `effort`.
+- **Rationale:** Grounded in Docker (`~/.docker/config.json`) and AWS credential profile conventions, namespacing by provider makes `apiKey` completely unambiguous within its provider block while avoiding fragile vendor-specific property prefixes (`geminiApiKey`, `anthropicApiKey`). Tier objects provide a natural home for execution options (such as reasoning effort for flash models) without polluting global settings.
+- **Alternatives Considered:** Flat top-level keys with vendor prefixes (rejected due to namespace pollution and ambiguity over generic keys).
+
 ## Risks / Trade-offs
 
 - **Cross-Platform Storage Variations:** Operating systems place configuration files in different standard directories (Linux XDG, macOS Library Preferences, Windows AppData).

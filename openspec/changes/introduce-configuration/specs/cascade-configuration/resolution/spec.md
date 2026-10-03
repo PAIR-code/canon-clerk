@@ -45,3 +45,7 @@ The system SHALL resolve independent model configurations for both screener and 
 #### Scenario: Resolving distinct configurations across cascade tiers
 - **WHEN** resolving a cascade model configuration with tier-differentiated inputs
 - **THEN** produces a cascade structure containing distinct screener and auditor model configurations
+
+#### Scenario: Resolving tier model and reasoning effort from storage
+- **WHEN** resolving a cascade tier with a stored model object specifying model name and effort
+- **THEN** produces a model configuration populated with the configured model and reasoning effort
