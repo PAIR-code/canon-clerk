@@ -7,6 +7,10 @@ import {
   formatStylishSummary,
 } from './stylish.js';
 import { formatJson } from './json.js';
+import {
+  formatCheckTriggersStylish,
+  formatCheckTriggersJson,
+} from './check-triggers.js';
 
 describe('formatDiagnostic', () => {
   it('formats diagnostic with line, column, badge, message, ruleId', () => {
@@ -196,5 +200,69 @@ describe('formatJson', () => {
     expect(parsed[0].diagnostics).toHaveLength(1);
     expect(parsed[0].diagnostics[0].severity).toBe('error');
     expect(parsed[0].warningCount).toBe(0);
+  });
+});
+
+describe('formatCheckTriggersStylish', () => {
+  it('renders clean notice on empty matches', () => {
+    expect(formatCheckTriggersStylish([])).toBe(
+      'No canons triggered for the specified target files.'
+    );
+  });
+
+  it('renders grouped tree for scoped and global canons', () => {
+    const output = formatCheckTriggersStylish(
+      [
+        {
+          canonId: 'scoped-canon',
+          canonPath: 'packages/core/.canons/scoped.md',
+          title: 'Scoped Canon',
+          scopePath: '/repo/packages/core',
+          scopeRelativePath: 'packages/core',
+          matchedCanonPatterns: ['**/.canons/**/*.md'],
+          matchedTargets: [
+            {
+              targetPath: 'packages/core/src/index.ts',
+              targetScopeRelativePath: 'src/index.ts',
+              targetRelativePath: 'src/index.ts',
+              matchedTargetPatterns: ['**/*.ts'],
+              matchedTriggers: ['src/**'],
+            },
+          ],
+        },
+        {
+          canonId: 'global-canon',
+          canonPath: '.canons/global.md',
+          title: 'Global Canon',
+          scopePath: '/repo',
+          scopeRelativePath: '.',
+          matchedCanonPatterns: ['**/.canons/**/*.md'],
+          matchedTargets: [
+            {
+              targetPath: 'packages/cli/src/app.ts',
+              targetScopeRelativePath: 'packages/cli/src/app.ts',
+              targetRelativePath: 'packages/cli/src/app.ts',
+              matchedTargetPatterns: ['**/*'],
+              matchedTriggers: ['**/*'],
+            },
+          ],
+        },
+      ],
+      { isTTY: false }
+    );
+
+    expect(output).toContain('Found 2 active canons for 2 target files:');
+    expect(output).toContain('• packages/core/scoped-canon (packages/core/.canons/scoped.md)');
+    expect(output).toContain('  Scope: packages/core');
+    expect(output).toContain("    - packages/core/src/index.ts (matched 'src/**')");
+    expect(output).toContain('• global-canon (.canons/global.md)');
+    expect(output).toContain('  Scope: . (global)');
+    expect(output).toContain("    - packages/cli/src/app.ts (matched '**/*')");
+  });
+});
+
+describe('formatCheckTriggersJson', () => {
+  it('formats array of matches as JSON', () => {
+    expect(formatCheckTriggersJson([])).toBe('[]');
   });
 });

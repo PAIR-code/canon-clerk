@@ -1,6 +1,7 @@
 import { Command, CommanderError } from 'commander';
 import { getCliVersion } from './index.js';
 import { createLintCommand } from './commands/lint.js';
+import { createCheckTriggersCommand } from './commands/check-triggers.js';
 
 /**
  * Creates and configures the root Commander program.
@@ -13,7 +14,8 @@ export function createApp(): Command {
     .description(
       'Automated review gate enforcing project canons in CI and local workflows'
     )
-    .addCommand(createLintCommand());
+    .addCommand(createLintCommand())
+    .addCommand(createCheckTriggersCommand());
 
   program.exitOverride();
 
@@ -28,7 +30,7 @@ export function createApp(): Command {
         str.includes('missing')
       ) {
         write(
-          "  Hint: Run 'canon-clerk --help' or 'canon-clerk lint --help' for usage guidance.\n"
+          "  Hint: Run 'canon-clerk --help', 'canon-clerk lint --help', or 'canon-clerk check-triggers --help' for usage guidance.\n"
         );
       }
     },
@@ -42,18 +44,22 @@ export function createApp(): Command {
         'Automated review gate enforcing project canons in CI and local workflows.',
         '',
         'Options:',
-        '  -v, --version   Output the current version',
-        '  -h, --help      Display help for command',
+        '  -v, --version             Output the current version',
+        '  -h, --help                Display help for command',
         '',
         'Commands:',
-        '  lint [options]  Validate repository canons against syntax and schema rules',
+        '  lint [options]            Validate repository canons against syntax and schema rules',
+        '  check-triggers [options]  Evaluate Stage 0 path triggers and monorepo package scopes against target files',
         '',
         'Examples:',
         '  # Validate all canons in the workspace',
         '  $ canon-clerk lint',
         '',
-        '  # Display help for the lint subcommand',
-        '  $ canon-clerk lint --help',
+        '  # Check which canons govern modified files via stdin',
+        '  $ git diff --name-only | canon-clerk check-triggers -',
+        '',
+        '  # Display help for a subcommand',
+        '  $ canon-clerk check-triggers --help',
         '',
       ].join('\n');
     },
