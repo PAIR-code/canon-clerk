@@ -47,6 +47,10 @@
   color: "1D76DB"
   description: "Canon schema definitions, AST interfaces, parser, and static linter (@canon-clerk/schema)."
 
+- name: "scope: configuration"
+  color: "1D76DB"
+  description: "Configuration discovery, cascade resolution, and OS credential store (@canon-clerk/configuration)."
+
 - name: "scope: cli"
   color: "006B75"
   description: "CLI binary and command-line execution."

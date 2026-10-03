@@ -39,6 +39,7 @@ jobs:
             action
             core
             schema
+            configuration
             canons
             agents
             spec

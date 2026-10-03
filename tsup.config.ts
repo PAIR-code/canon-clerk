@@ -26,6 +26,14 @@ export default defineConfig(() => {
       external: ['@canon-clerk/schema'],
     },
     {
+      entry: ['packages/configuration/src/index.ts'],
+      outDir: 'packages/configuration/dist',
+      format: ['esm'],
+      dts: true,
+      clean: true,
+      external: ['@canon-clerk/core', 'conf', 'env-paths'],
+    },
+    {
       entry: ['packages/cli/src/cli.ts', 'packages/cli/src/index.ts'],
       outDir: 'packages/cli/dist',
       format: ['esm'],

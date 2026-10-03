@@ -52,7 +52,7 @@ type(scope): description
 ```
 
 To support Spec-Driven Development (SDD) alongside standard engineering, we adopt an orthogonal matrix:
-* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(schema)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(deps-dev)`, `(readme)`.
+* **The Scope is ALWAYS the Surface / Component:** `(core)`, `(schema)`, `(configuration)`, `(cli)`, `(action)`, `(canons)`, `(agents)`, `(spec)`, `(deps)`, `(deps-dev)`, `(readme)`.
 * **The Type is ALWAYS the Intent:** `spec`, `feat`, `fix`, `test`, `docs`, `chore`, `build`, `ci`, `refactor`, `perf`, `revert`.
 
 See the [Conventional Commit & Label Taxonomy Reference](conventional-commits.md) for the complete surface-to-prefix mapping table and label taxonomy.

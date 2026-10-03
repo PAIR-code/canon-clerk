@@ -46,7 +46,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
       const child = spawnCli(['check-canons', '-']);
 
       // Allow child process to boot, load ESM modules, and register signal handlers
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
       const exitPromise = new Promise<{
         code: number | null;
@@ -66,7 +66,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
       const child = spawnCli(['check-canons', '-']);
 
       // Allow child process to boot, load ESM modules, and register signal handlers
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
       const exitPromise = new Promise<{
         code: number | null;

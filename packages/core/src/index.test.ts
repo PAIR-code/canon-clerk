@@ -9,6 +9,10 @@ import {
   matchesTriggers,
   queryCanons,
   toPosixPath,
+  DEFAULT_AUDITOR_MODEL,
+  DEFAULT_PROVIDER,
+  DEFAULT_SCREENER_MODEL,
+  parseModelSpec,
 } from './index.js';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -31,6 +35,13 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(typeof checkFileInCanonScope).toBe('function');
     expect(typeof matchesTriggers).toBe('function');
     expect(typeof queryCanons).toBe('function');
+  });
+
+  it('re-exports model configuration types, constants, and spec parser', () => {
+    expect(typeof DEFAULT_PROVIDER).toBe('string');
+    expect(typeof DEFAULT_SCREENER_MODEL).toBe('string');
+    expect(typeof DEFAULT_AUDITOR_MODEL).toBe('string');
+    expect(typeof parseModelSpec).toBe('function');
   });
 });
 
