@@ -1,5 +1,5 @@
 /**
- * Supported context tokens for the Stage 2 Deep Auditor per SPEC.md Section 4.1.
+ * Supported context tokens for the Phase 3 Auditor per SPEC.md Section 4.1.
  */
 export type InspectToken =
   | 'diff'
@@ -23,11 +23,11 @@ export interface CanonMetadata {
   title: string;
   /** Path globs defining PR file modifications that activate this canon */
   triggers: string[];
-  /** Context elements supplied to the Deep Auditor */
+  /** Context elements supplied to Phase 3: Audit */
   inspect: InspectToken[];
   /** Categorical labels used for topical organization and filtering */
   tags: string[];
-  /** Path globs of persistent repository files supplied as grounding context */
+  /** Path globs of persistent repository files supplied to Phase 3: Audit as grounding context */
   references: string[];
 }
 

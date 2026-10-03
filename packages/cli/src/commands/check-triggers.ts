@@ -335,7 +335,7 @@ export function createCheckTriggersCommand(): Command {
   });
 
   cmd
-    .description('Evaluate Stage 0 path triggers and monorepo package scopes against target files')
+    .description('Evaluate Phase 1 path triggers and monorepo package scopes against target files')
     .argument(
       '[targets...]',
       'Target file paths, directories, or globs to test (or "-" for stdin)'
@@ -419,7 +419,7 @@ export function createCheckTriggersCommand(): Command {
       return [
         'Usage: canon-clerk check-triggers [options] [targets...]',
         '',
-        'Evaluate Stage 0 path triggers and monorepo package scopes against target files.',
+        'Evaluate Phase 1 path triggers and monorepo package scopes against target files.',
         '',
         'Targets & Filtering:',
         '  [targets...]                   Target file paths, directories, or globs to test (or "-" for stdin)',

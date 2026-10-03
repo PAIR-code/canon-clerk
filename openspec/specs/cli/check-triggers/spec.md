@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the Stage 0 canon trigger checking subcommand (`canon-clerk check-triggers`), target and canon operand handling, standard input ingestion, traversal options, terminal formatting, canonical JSON reporting, and predicate exit codes.
+Defines the Phase 1 canon trigger checking subcommand (`canon-clerk check-triggers`), target and canon operand handling, standard input ingestion, traversal options, terminal formatting, canonical JSON reporting, and predicate exit codes.
 
 ## Requirements
 

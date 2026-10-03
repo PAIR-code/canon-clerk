@@ -1,6 +1,6 @@
 import { Command, CommanderError } from 'commander';
 import { getCliVersion } from './index.js';
-import { createLintCommand } from './commands/lint.js';
+import { createCheckCanonsCommand } from './commands/check-canons.js';
 import { createCheckTriggersCommand } from './commands/check-triggers.js';
 
 /**
@@ -14,7 +14,7 @@ export function createApp(): Command {
     .description(
       'Automated review gate enforcing project canons in CI and local workflows'
     )
-    .addCommand(createLintCommand())
+    .addCommand(createCheckCanonsCommand())
     .addCommand(createCheckTriggersCommand());
 
   program.exitOverride();
@@ -30,7 +30,7 @@ export function createApp(): Command {
         str.includes('missing')
       ) {
         write(
-          "  Hint: Run 'canon-clerk --help', 'canon-clerk lint --help', or 'canon-clerk check-triggers --help' for usage guidance.\n"
+          "  Hint: Run 'canon-clerk --help', 'canon-clerk check-canons --help', or 'canon-clerk check-triggers --help' for usage guidance.\n"
         );
       }
     },
@@ -48,12 +48,12 @@ export function createApp(): Command {
         '  -h, --help                Display help for command',
         '',
         'Commands:',
-        '  lint [options]            Validate repository canons against syntax and schema rules',
-        '  check-triggers [options]  Evaluate Stage 0 path triggers and monorepo package scopes against target files',
+        '  check-canons [options]    Validate repository canons against syntax and schema rules',
+        '  check-triggers [options]  Evaluate Phase 1 path triggers and monorepo package scopes against target files',
         '',
         'Examples:',
         '  # Validate all canons in the workspace',
-        '  $ canon-clerk lint',
+        '  $ canon-clerk check-canons',
         '',
         '  # Check which canons govern modified files via stdin',
         '  $ git diff --name-only | canon-clerk check-triggers -',

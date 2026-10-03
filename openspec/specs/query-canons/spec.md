@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the Stage 0 streaming evaluation engine in `@canon-clerk/core`, orchestrating bipartite discovery across target codebase files and canon definition rules to stream relational activation tuples with zero memory buffering, explicit workspace scoping, and lazy filesystem I/O.
+Defines the Phase 1: Check streaming evaluation engine in `@canon-clerk/core`, orchestrating bipartite discovery across target codebase files and canon definition rules to stream relational activation tuples with zero memory buffering, explicit workspace scoping, and lazy filesystem I/O.
 
 ## Requirements
 
