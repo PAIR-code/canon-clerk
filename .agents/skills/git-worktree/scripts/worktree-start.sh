@@ -103,12 +103,24 @@ fi
 
 # Set up dependencies, build workspace packages, and run smoke tests if package.json exists
 if [ -f "${TARGET_DIR}/package.json" ]; then
+  SEED_SOURCE=""
   if [ -d "${MAIN_WORKTREE}/node_modules" ]; then
-    echo "Seeding node_modules from main worktree..."
-    cp -a "${MAIN_WORKTREE}/node_modules" "${TARGET_DIR}/node_modules"
+    SEED_SOURCE="${MAIN_WORKTREE}"
   elif [ -d "${CONTAINER_ROOT}/main/node_modules" ]; then
+    SEED_SOURCE="${CONTAINER_ROOT}/main"
+  fi
+
+  if [ -n "$SEED_SOURCE" ]; then
     echo "Seeding node_modules from main worktree..."
-    cp -a "${CONTAINER_ROOT}/main/node_modules" "${TARGET_DIR}/node_modules"
+    cp -a "${SEED_SOURCE}/node_modules" "${TARGET_DIR}/node_modules"
+    for pkg_nm in "${SEED_SOURCE}"/packages/*/node_modules; do
+      if [ -d "$pkg_nm" ]; then
+        rel_pkg="${pkg_nm#${SEED_SOURCE}/}"
+        target_pkg_nm="${TARGET_DIR}/${rel_pkg}"
+        mkdir -p "$(dirname "$target_pkg_nm")"
+        cp -a "$pkg_nm" "$target_pkg_nm"
+      fi
+    done
   else
     echo "Installing dependencies via npm ci..."
     (cd "$TARGET_DIR" && npm ci)
