@@ -30,7 +30,7 @@ export default defineConfig(() => {
       outDir: 'packages/cli/dist',
       format: ['esm'],
       clean: true,
-      external: ['@canon-clerk/schema', '@canon-clerk/core'],
+      external: ['@canon-clerk/schema', '@canon-clerk/core', 'commander'],
     },
     {
       entry: ['packages/action/src/index.ts'],
