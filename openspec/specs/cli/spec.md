@@ -7,7 +7,7 @@ Defines the base command-line interface entrypoint, subcommand routing, global o
 ## Requirements
 
 ### Requirement: Subcommand Dispatch and Entrypoint Routing
-The CLI binary SHALL route execution based on the first positional command argument. When executed with a recognized subcommand (`check-canons`, `check-triggers`), execution SHALL dispatch to the registered command handler. When executed without arguments, the CLI SHALL display the root help screen and exit with status 0. Invoking the retired `lint` subcommand SHALL exit with status 2 and remediation guidance to use `check-canons`.
+The CLI binary SHALL route execution based on the first positional command argument. When executed with a recognized subcommand (`check-canons`, `check-triggers`, `check-config`), execution SHALL dispatch to the registered command handler. When executed without arguments, the CLI SHALL display the root help screen and exit with status 0. Invoking the retired `lint` subcommand SHALL exit with status 2 and remediation guidance to use `check-canons`.
 
 #### Scenario: Dispatching to registered subcommand
 - **WHEN** invoking `canon-clerk check-canons` with valid arguments

@@ -32,6 +32,9 @@ export interface CredentialStoreDiagnostics {
   readonly path: string;
   readonly exists: boolean;
   readonly byteLength?: number | undefined;
+  readonly mode?: number | undefined;
+  readonly modeOctal?: string | undefined;
+  readonly isSecure?: boolean | undefined;
   readonly availableKeys?: string[] | undefined;
   readonly error?: string | undefined;
 }
@@ -196,6 +199,22 @@ export function inspectCredentialStore(options: CredentialStoreOptions = {}): Cr
     };
   }
 
+  let mode: number | undefined;
+  let modeOctal: string | undefined;
+  let isSecure: boolean | undefined;
+  let statSize: number | undefined;
+
+  try {
+    const stat = statSync(filePath);
+    statSize = stat.size;
+    const permBits = stat.mode & 0o777;
+    mode = permBits;
+    modeOctal = `0o${permBits.toString(8).padStart(3, '0')}`;
+    isSecure = process.platform === 'win32' || (permBits & 0o077) === 0;
+  } catch {
+    // Ignore stat error
+  }
+
   try {
     const raw = readFileSync(filePath, 'utf8');
     const parsed = JSON.parse(raw);
@@ -204,19 +223,19 @@ export function inspectCredentialStore(options: CredentialStoreOptions = {}): Cr
       path: filePath,
       exists: true,
       byteLength: Buffer.byteLength(raw, 'utf8'),
+      mode,
+      modeOctal,
+      isSecure,
       availableKeys: keys,
     };
   } catch (err) {
-    let size = 0;
-    try {
-      size = statSync(filePath).size;
-    } catch {
-      // Ignore stat error
-    }
     return {
       path: filePath,
       exists: true,
-      byteLength: size,
+      byteLength: statSize ?? 0,
+      mode,
+      modeOctal,
+      isSecure,
       error: err instanceof Error ? err.message : String(err),
     };
   }

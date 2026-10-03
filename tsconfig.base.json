@@ -9,7 +9,8 @@
     // Path aliases for monorepo development
     "paths": {
       "@canon-clerk/schema": ["./packages/schema/src/index.ts"],
-      "@canon-clerk/core": ["./packages/core/src/index.ts"]
+      "@canon-clerk/core": ["./packages/core/src/index.ts"],
+      "@canon-clerk/configuration": ["./packages/configuration/src/index.ts"]
     },
 
     // Type checking only; bundling and emits are managed by tsup
