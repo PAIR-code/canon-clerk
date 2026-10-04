@@ -92,6 +92,17 @@ export function formatCheckConfigStylish(
       baseStr = 'default';
     }
     lines.push(`    Base URL:  ${baseStr}`);
+
+    if (tierDiag.probe) {
+      if (tierDiag.probe.ok) {
+        const checkMark = isTTY ? styleText('green', '✔') : '✔';
+        lines.push(`    Probe:     ${checkMark} Reachable (${tierDiag.probe.durationMs ?? 0}ms · OK)`);
+      } else {
+        const xMark = isTTY ? styleText('red', '✖') : '✖';
+        const latency = tierDiag.probe.durationMs !== undefined ? `${tierDiag.probe.durationMs}ms · ` : '';
+        lines.push(`    Probe:     ${xMark} Failed (${latency}${tierDiag.probe.error ?? 'Unknown error'})`);
+      }
+    }
   };
 
   if (!targetTier || targetTier === 'screener') {
@@ -155,6 +166,7 @@ function formatTierJson(tierDiag: ModelTierDiagnostics) {
       apiKey: tierDiag.sources.apiKey ?? null,
       baseURL: tierDiag.sources.baseURL ?? 'default',
     },
+    ...(tierDiag.probe ? { probe: tierDiag.probe } : {}),
   };
 }
 

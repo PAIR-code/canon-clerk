@@ -79,3 +79,15 @@ The `check-config` command SHALL support `--help` (`-h`). When requested, the co
 #### Scenario: Displaying check-config help screen
 - **WHEN** invoking `canon-clerk check-config --help`
 - **THEN** categorized help with runnable examples is printed to stdout and the process exits with status 0
+
+### Requirement: Active Model Endpoint Probing
+When `--probe` is passed, the `check-config` command SHALL actively probe configured model endpoints for the active tiers to verify remote service reachability and credential authorization.
+
+#### Scenario: Successfully probing reachable model endpoint
+- **WHEN** invoking `canon-clerk check-config --probe` with valid credentials and network reachability
+- **THEN** reports reachability status with roundtrip latency in milliseconds and exits 0
+
+#### Scenario: Failing probe on missing credentials or unreachable model
+- **WHEN** invoking `canon-clerk check-config --probe` with missing credentials or an unsupported model
+- **THEN** reports probe failure diagnostic and exits with status 1
+
