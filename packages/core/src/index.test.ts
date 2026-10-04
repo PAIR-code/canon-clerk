@@ -13,6 +13,11 @@ import {
   DEFAULT_PROVIDER,
   DEFAULT_SCREENER_MODEL,
   parseModelSpec,
+  createFileArtifact,
+  createColorabilityAssessment,
+  FILE_CHANGE_STATUSES,
+  PATCH_OMISSION_REASONS,
+  CONTENT_OMISSION_REASONS,
 } from './index.js';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -49,6 +54,14 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(typeof core.createModelClient).toBe('function');
     expect(typeof core.createMockModelClient).toBe('function');
     expect(typeof core.GoogleModelClient).toBe('function');
+  });
+
+  it('re-exports Phase 2 data plane primitives and builders', () => {
+    expect(typeof createFileArtifact).toBe('function');
+    expect(typeof createColorabilityAssessment).toBe('function');
+    expect(FILE_CHANGE_STATUSES).toBeDefined();
+    expect(PATCH_OMISSION_REASONS).toBeDefined();
+    expect(CONTENT_OMISSION_REASONS).toBeDefined();
   });
 });
 
