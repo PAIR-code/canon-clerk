@@ -4,6 +4,7 @@ import {
   createMockModelClient,
   createModelClient,
   GoogleModelClient,
+  type ModelStreamEvent,
   type StructuredGenerationRequest,
 } from './client.js';
 
@@ -88,6 +89,161 @@ describe('client', () => {
 
       expect(result).toEqual({ status: 'async-ok' });
     });
+
+    it('streams mock thoughts and finish event with usage and duration', async () => {
+      const mockClient = createMockModelClient(
+        (_req) => ({ answer: 42 }),
+        {
+          mockThoughts: ['Analyzing input...', 'Formulating response...'],
+          mockResolvedModel: 'gemini-3.8-flash-snapshot-001',
+          mockUsage: {
+            promptTokens: 15,
+            completionTokens: 25,
+            thoughtTokens: 10,
+            totalTokens: 40,
+          },
+        }
+      );
+
+      const schema = z.object({ answer: z.number() });
+      const events: ModelStreamEvent<z.infer<typeof schema>>[] = [];
+
+      for await (const event of mockClient.streamStructured!({
+        prompt: 'What is the answer?',
+        schema,
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(3);
+      expect(events[0]).toEqual({ type: 'thought', delta: 'Analyzing input...' });
+      expect(events[1]).toEqual({ type: 'thought', delta: 'Formulating response...' });
+      expect(events[2]?.type).toBe('finish');
+
+      if (events[2]?.type === 'finish') {
+        expect(events[2].output).toEqual({ answer: 42 });
+        expect(events[2].resolvedModel).toBe('gemini-3.8-flash-snapshot-001');
+        expect(events[2].usage).toEqual({
+          promptTokens: 15,
+          completionTokens: 25,
+          thoughtTokens: 10,
+          totalTokens: 40,
+        });
+        expect(typeof events[2].durationMs).toBe('number');
+      }
+    });
+
+    it('streams mock text deltas when configured', async () => {
+      const mockClient = createMockModelClient(
+        (_req) => ({ val: 'test' }),
+        {
+          mockTextDeltas: ['{"val":', ' "test"}'],
+        }
+      );
+
+      const schema = z.object({ val: z.string() });
+      const events: ModelStreamEvent<z.infer<typeof schema>>[] = [];
+
+      for await (const event of mockClient.streamStructured!({
+        prompt: 'test',
+        schema,
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(3);
+      expect(events[0]).toEqual({ type: 'text-delta', delta: '{"val":' });
+      expect(events[1]).toEqual({ type: 'text-delta', delta: ' "test"}' });
+      expect(events[2]?.type).toBe('finish');
+    });
+
+    it('enforces Zod schema validation during streaming before finish', async () => {
+      const mockClient = createMockModelClient(
+        (_req) => ({ invalid: true }),
+        {
+          mockThoughts: ['Reasoning about invalid data...'],
+        }
+      );
+
+      const schema = z.object({ answer: z.number() });
+
+      const stream = mockClient.streamStructured!({
+        prompt: 'test',
+        schema,
+      });
+
+      const firstEvent = await stream.next();
+      expect(firstEvent.value).toEqual({
+        type: 'thought',
+        delta: 'Reasoning about invalid data...',
+      });
+
+      // Next step validates the output schema and should reject
+      await expect(stream.next()).rejects.toThrow();
+    });
+
+    it('aborts streaming when signal is cancelled upfront', async () => {
+      const mockClient = createMockModelClient((_req) => ({ val: 1 }), {
+        mockThoughts: ['Thought 1'],
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      const schema = z.object({ val: z.number() });
+
+      const stream = mockClient.streamStructured!({
+        prompt: 'test',
+        schema,
+        signal: controller.signal,
+      });
+
+      await expect(stream.next()).rejects.toThrow('The operation was aborted');
+    });
+
+    it('aborts streaming during iteration when signal is triggered', async () => {
+      const controller = new AbortController();
+      const mockClient = createMockModelClient((_req) => ({ val: 1 }), {
+        mockThoughts: ['Thought 1', 'Thought 2'],
+      });
+
+      const schema = z.object({ val: z.number() });
+      const stream = mockClient.streamStructured!({
+        prompt: 'test',
+        schema,
+        signal: controller.signal,
+      });
+
+      const firstEvent = await stream.next();
+      expect(firstEvent.value).toEqual({ type: 'thought', delta: 'Thought 1' });
+
+      // Abort before second thought
+      controller.abort();
+
+      await expect(stream.next()).rejects.toThrow('The operation was aborted');
+    });
+
+    it('supports dynamic mock thoughts via function', async () => {
+      const mockClient = createMockModelClient((_req) => ({ done: true }), {
+        mockThoughts: async (req) => [`Processing prompt: ${req.prompt}`],
+      });
+
+      const schema = z.object({ done: z.boolean() });
+      const events: ModelStreamEvent<z.infer<typeof schema>>[] = [];
+
+      for await (const event of mockClient.streamStructured!({
+        prompt: 'Custom prompt',
+        schema,
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(2);
+      expect(events[0]).toEqual({
+        type: 'thought',
+        delta: 'Processing prompt: Custom prompt',
+      });
+      expect(events[1]?.type).toBe('finish');
+    });
   });
 
   describe('createModelClient', () => {
@@ -114,7 +270,7 @@ describe('client', () => {
   });
 
   describe('GoogleModelClient', () => {
-    it('throws descriptive error when API key is missing', async () => {
+    it('throws descriptive error when API key is missing on unary call', async () => {
       const client = new GoogleModelClient();
       const schema = z.object({ ok: z.boolean() });
 
@@ -124,6 +280,33 @@ describe('client', () => {
           schema,
         })
       ).rejects.toThrow(/Gemini API key is missing/);
+    });
+
+    it('throws descriptive error when API key is missing on streamStructured call', async () => {
+      const client = new GoogleModelClient();
+      const schema = z.object({ ok: z.boolean() });
+
+      const stream = client.streamStructured!({
+        prompt: 'test',
+        schema,
+      });
+
+      await expect(stream.next()).rejects.toThrow(/Gemini API key is missing/);
+    });
+
+    it('aborts streamStructured immediately when signal is cancelled upfront', async () => {
+      const client = new GoogleModelClient({ apiKey: 'fake-key' });
+      const controller = new AbortController();
+      controller.abort();
+
+      const schema = z.object({ ok: z.boolean() });
+      const stream = client.streamStructured!({
+        prompt: 'test',
+        schema,
+        signal: controller.signal,
+      });
+
+      await expect(stream.next()).rejects.toThrow('The operation was aborted');
     });
   });
 });
