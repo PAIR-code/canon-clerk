@@ -43,5 +43,12 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(typeof DEFAULT_AUDITOR_MODEL).toBe('string');
     expect(typeof parseModelSpec).toBe('function');
   });
+
+  it('re-exports ModelClient factories and implementations', async () => {
+    const core = await import('./index.js');
+    expect(typeof core.createModelClient).toBe('function');
+    expect(typeof core.createMockModelClient).toBe('function');
+    expect(typeof core.GoogleModelClient).toBe('function');
+  });
 });
 
