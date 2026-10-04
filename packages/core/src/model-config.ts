@@ -4,7 +4,7 @@
 
 export const DEFAULT_PROVIDER = 'google';
 export const DEFAULT_SCREENER_MODEL = 'google:gemini-3.5-flash-lite';
-export const DEFAULT_AUDITOR_MODEL = 'google:gemini-3.1-pro';
+export const DEFAULT_AUDITOR_MODEL = 'google:gemini-3.8-flash';
 
 export type ModelTier = 'screener' | 'auditor';
 

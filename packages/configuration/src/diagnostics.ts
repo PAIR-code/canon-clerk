@@ -24,6 +24,13 @@ export interface ModelPropertySources {
   readonly baseURL?: string | undefined;
 }
 
+export interface ModelTierProbeResult {
+  readonly ok: boolean;
+  readonly durationMs?: number | undefined;
+  readonly message?: string | undefined;
+  readonly error?: string | undefined;
+}
+
 export interface ModelTierDiagnostics {
   readonly tier: ModelTier;
   readonly provider: string;
@@ -35,6 +42,7 @@ export interface ModelTierDiagnostics {
   readonly maskedKey?: string | undefined;
   readonly sources: ModelPropertySources;
   readonly warnings: string[];
+  readonly probe?: ModelTierProbeResult | undefined;
 }
 
 export interface CascadeDiagnostics {

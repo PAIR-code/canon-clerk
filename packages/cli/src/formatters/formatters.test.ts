@@ -363,6 +363,36 @@ describe('formatCheckConfigStylish', () => {
     expect(output).toContain('  - Missing API key for screener tier.');
     expect(output).toContain('Status: Unhealthy (Configuration requires attention)');
   });
+
+  it('renders probe results when present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 250,
+            message: 'Reachable (OK)',
+          },
+        },
+        auditor: {
+          ...mockDiagnostics.tiers.auditor,
+          probe: {
+            ok: false,
+            durationMs: 120,
+            error: 'Connection refused',
+          },
+        },
+      },
+    };
+
+    const output = formatCheckConfigStylish(probedDiagnostics, { isTTY: false });
+
+    expect(output).toContain('Probe:     ✔ Reachable (250ms · OK)');
+    expect(output).toContain('Probe:     ✖ Failed (120ms · Connection refused)');
+  });
 });
 
 describe('formatCheckConfigJson', () => {
@@ -426,5 +456,31 @@ describe('formatCheckConfigJson', () => {
 
     expect(parsed.tiers.screener).toBeDefined();
     expect(parsed.tiers.auditor).toBeUndefined();
+  });
+
+  it('includes probe results in JSON payload when present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 250,
+            message: 'Reachable (OK)',
+          },
+        },
+      },
+    };
+
+    const jsonStr = formatCheckConfigJson(probedDiagnostics);
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.tiers.screener.probe).toEqual({
+      ok: true,
+      durationMs: 250,
+      message: 'Reachable (OK)',
+    });
   });
 });

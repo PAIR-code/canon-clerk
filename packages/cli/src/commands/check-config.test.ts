@@ -201,4 +201,25 @@ describe('runCheckConfigCommand (unit)', () => {
     expect(code).toBe(1);
     expect(stdoutText).toContain('insecure · group/world accessible');
   });
+
+  it('fails probe and exits 1 when credentials are missing', async () => {
+    let stdoutText = '';
+    const stdout = new PassThrough();
+    stdout.on('data', (chunk) => {
+      stdoutText += chunk.toString();
+    });
+
+    const code = await runCheckConfigCommand(
+      { probe: true, tier: 'screener' },
+      {
+        stdout,
+        configDir: tempDir,
+        env: {},
+        isTTY: false,
+      }
+    );
+
+    expect(code).toBe(1);
+    expect(stdoutText).toContain('Probe:     ✖ Failed (Missing API key for provider \'google\')');
+  });
 });

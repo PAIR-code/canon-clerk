@@ -1,9 +1,13 @@
 import { Command, InvalidArgumentError } from 'commander';
+import { z } from 'zod';
 import {
   inspectCascadeDiagnostics,
+  resolveModelConfig,
   type CascadeDiagnostics,
+  type ModelTierDiagnostics,
+  type ModelTierProbeResult,
 } from '@canon-clerk/configuration';
-import type { ModelTier } from '@canon-clerk/core';
+import { createModelClient, type ModelTier } from '@canon-clerk/core';
 import {
   formatCheckConfigJson,
   formatCheckConfigStylish,
@@ -16,6 +20,7 @@ export interface CheckConfigCliOptions {
   readonly quiet?: boolean | undefined;
   readonly maxWarnings?: number | undefined;
   readonly configDir?: string | undefined;
+  readonly probe?: boolean | undefined;
 }
 
 export interface CheckConfigCommandContext {
@@ -84,7 +89,54 @@ function resolveConfig(
     quiet: Boolean(options.quiet),
     maxWarnings,
     configDir: options.configDir,
+    probe: Boolean(options.probe),
   };
+}
+
+async function probeTier(
+  tier: ModelTier,
+  tierDiag: ModelTierDiagnostics,
+  env: Record<string, string | undefined>,
+  configDir?: string | undefined
+): Promise<ModelTierProbeResult> {
+  if (!tierDiag.hasKey && tierDiag.provider !== 'ollama') {
+    return {
+      ok: false,
+      error: `Missing API key for provider '${tierDiag.provider}'`,
+    };
+  }
+
+  const modelConfig = resolveModelConfig({
+    tier,
+    env,
+    configDir,
+  });
+
+  const schema = z.object({ ok: z.boolean() });
+  const client = createModelClient(modelConfig);
+
+  const startTime = Date.now();
+  try {
+    await client.generateStructuredJson({
+      prompt: 'Respond with a JSON object containing "ok": true to verify connectivity.',
+      schema,
+      signal: AbortSignal.timeout(15000),
+    });
+    const durationMs = Date.now() - startTime;
+    return {
+      ok: true,
+      durationMs,
+      message: 'Reachable (OK)',
+    };
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      durationMs,
+      error: errorMsg,
+    };
+  }
 }
 
 /**
@@ -110,11 +162,39 @@ export async function runCheckConfigCommand(
     context?.isTTY ??
     (Boolean((stdout as { isTTY?: boolean }).isTTY) && !env['NO_COLOR']);
 
-  const diagnostics = inspectCascadeDiagnostics({
+  let diagnostics = inspectCascadeDiagnostics({
     env,
     configDir,
     targetTier: config.tier,
   });
+
+  let probeFailed = false;
+
+  if (config.probe) {
+    const tiersToProbe: ModelTier[] = config.tier
+      ? [config.tier]
+      : ['screener', 'auditor'];
+
+    const probedTiers = { ...diagnostics.tiers };
+
+    for (const tier of tiersToProbe) {
+      const tierDiag = diagnostics.tiers[tier];
+      const probeResult = await probeTier(tier, tierDiag, env, configDir);
+      if (!probeResult.ok) {
+        probeFailed = true;
+      }
+      probedTiers[tier] = {
+        ...tierDiag,
+        probe: probeResult,
+      };
+    }
+
+    diagnostics = {
+      ...diagnostics,
+      tiers: probedTiers,
+      valid: diagnostics.valid && !probeFailed,
+    };
+  }
 
   if (!config.quiet) {
     const formatted =
@@ -125,8 +205,8 @@ export async function runCheckConfigCommand(
     stdout.write(formatted + '\n');
   }
 
-  // 1. Missing credentials, insecure permissions, or store errors -> 1
-  if (!diagnostics.valid) {
+  // 1. Missing credentials, insecure permissions, store errors, or failed probe -> 1
+  if (!diagnostics.valid || probeFailed) {
     return 1;
   }
 
@@ -192,6 +272,10 @@ export function createCheckConfigCommand(): Command {
       '--config-dir <path>',
       'Custom directory path for OS-level credential store'
     )
+    .option(
+      '--probe',
+      'Actively probe model endpoints to verify reachability and authorization'
+    )
     .action(async () => {
       const options = cmd.opts<CheckConfigCliOptions>();
       const exitCode = await runCheckConfigCommand(options);
@@ -209,6 +293,9 @@ export function createCheckConfigCommand(): Command {
         '  --tier <name>           Filter inspection to a specific tier: screener, auditor',
         '  --config-dir <path>     Custom directory path for OS-level credential store',
         '',
+        'Connectivity & Probing:',
+        '  --probe                 Actively probe model endpoints to verify reachability and authorization',
+        '',
         'Output & Presentation:',
         '  -f, --format <format>   Output format: stylish, json (default: "stylish", env: CANON_CLERK_FORMAT)',
         '  --json                  Shorthand for --format json',
@@ -224,8 +311,11 @@ export function createCheckConfigCommand(): Command {
         '  # Inspect full cascade resolution, sources, and store health',
         '  $ canon-clerk check-config',
         '',
-        '  # Inspect only the Phase 2 Screener tier',
-        '  $ canon-clerk check-config --tier screener',
+        '  # Actively probe configured model endpoints to verify connectivity',
+        '  $ canon-clerk check-config --probe',
+        '',
+        '  # Probe only the Phase 2 Screener tier',
+        '  $ canon-clerk check-config --probe --tier screener',
         '',
         '  # Emit canonical JSON diagnostic report',
         '  $ canon-clerk check-config --json',
