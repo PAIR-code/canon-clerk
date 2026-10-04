@@ -1,6 +1,6 @@
 # GitHub Repository Settings for PAIR-code/canon-clerk
 # Declarative source of truth for repository metadata and discoverability.
-# Validated and synchronized by @canon-clerk/repo-settings (see packages/repo-settings/README.md).
+# Validated and synchronized by @canon-clerk/repo-settings-private (see packages/repo-settings-private/README.md).
 
 repository:
   name: "canon-clerk"

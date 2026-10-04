@@ -56,8 +56,8 @@ export default defineConfig(() => {
       noExternal: [/^@canon-clerk\//],
     },
     {
-      entry: ['packages/repo-settings/src/cli.ts', 'packages/repo-settings/src/index.ts'],
-      outDir: 'packages/repo-settings/dist',
+      entry: ['packages/repo-settings-private/src/cli.ts', 'packages/repo-settings-private/src/index.ts'],
+      outDir: 'packages/repo-settings-private/dist',
       format: ['esm'],
       clean: true,
       external: ['yaml'],

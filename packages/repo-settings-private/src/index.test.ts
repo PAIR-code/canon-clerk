@@ -4,7 +4,7 @@ import { diffRepoSettings, formatDiff } from "./diff.js";
 import { applyRepoSettings, resolveTargetRepo } from "./gh.js";
 import type { RepoSettingsFile, RemoteRepoMetadata } from "./types.js";
 
-describe("@canon-clerk/repo-settings", () => {
+describe("@canon-clerk/repo-settings-private", () => {
   describe("schema parsing & validation", () => {
     it("successfully parses valid settings YAML", () => {
       const yaml = `
