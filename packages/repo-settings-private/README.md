@@ -1,4 +1,4 @@
-# @canon-clerk/repo-settings
+# @canon-clerk/repo-settings-private
 
 Internal workspace tool for validating and synchronizing declarative repository metadata (description, homepage, topics) from `.github/settings.yml` to GitHub using the native GitHub CLI (`gh`).
 
@@ -6,7 +6,7 @@ Internal workspace tool for validating and synchronizing declarative repository 
 
 ## 1. Overview
 
-Repository metadata in GitHub is commonly configured manually via the web interface. To bring this under version control, peer review, and automation without relying on prohibited third-party GitHub Apps (such as Probot), `@canon-clerk/repo-settings` provides:
+Repository metadata in GitHub is commonly configured manually via the web interface. To bring this under version control, peer review, and automation without relying on prohibited third-party GitHub Apps (such as Probot), `@canon-clerk/repo-settings-private` provides:
 
 * **Declarative Schema Validation:** Validates `.github/settings.yml` syntax and GitHub topic restrictions.
 * **Diff Computation:** Detects differences between local desired settings and live GitHub repository metadata.

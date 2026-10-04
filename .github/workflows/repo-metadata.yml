@@ -7,14 +7,14 @@ on:
     paths:
       - ".github/settings.yml"
       - ".github/workflows/repo-metadata.yml"
-      - "packages/repo-settings/**"
+      - "packages/repo-settings-private/**"
   pull_request:
     branches:
       - main
     paths:
       - ".github/settings.yml"
       - ".github/workflows/repo-metadata.yml"
-      - "packages/repo-settings/**"
+      - "packages/repo-settings-private/**"
   workflow_dispatch:
 
 permissions:
@@ -43,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Build repo-settings tool
-        run: npm run build -w packages/repo-settings
+        run: npm run build -w packages/repo-settings-private
 
       - name: Dry-run settings synchronization
         run: npm run settings:check
@@ -68,7 +68,7 @@ jobs:
         run: npm ci
 
       - name: Build repo-settings tool
-        run: npm run build -w packages/repo-settings
+        run: npm run build -w packages/repo-settings-private
 
       - name: Synchronize repository settings
         run: npm run settings:sync

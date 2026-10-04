@@ -136,7 +136,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
         "\nRemediation: Updating repository metadata (description, homepage, topics) on GitHub requires administrative permissions on the repository." +
         "\n  • For local runs: Ensure 'gh auth status' is logged into an account with repository admin permissions." +
         "\n  • For CI runs: Ensure the 'REPO_SETTINGS_TOKEN' secret is configured with 'Administration: Read and write' permissions." +
-        "\n  • Refer to packages/repo-settings/README.md for token creation and secret setup instructions."
+        "\n  • Refer to packages/repo-settings-private/README.md for token creation and secret setup instructions."
       );
       return 1;
     }

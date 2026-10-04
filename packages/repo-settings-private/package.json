@@ -1,5 +1,5 @@
 {
-  "name": "@canon-clerk/repo-settings",
+  "name": "@canon-clerk/repo-settings-private",
   "version": "0.1.0",
   "private": true,
   "type": "module",
