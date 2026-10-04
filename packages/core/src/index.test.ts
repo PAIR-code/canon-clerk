@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as core from './index.js';
 import {
   CORE_VERSION,
   checkFileInCanonScope,
@@ -18,6 +19,9 @@ import {
   FILE_CHANGE_STATUSES,
   PATCH_OMISSION_REASONS,
   CONTENT_OMISSION_REASONS,
+  docketCanons,
+  collectDocketCanons,
+  DEFAULT_MAX_DIFF_BYTES,
 } from './index.js';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -62,6 +66,18 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(FILE_CHANGE_STATUSES).toBeDefined();
     expect(PATCH_OMISSION_REASONS).toBeDefined();
     expect(CONTENT_OMISSION_REASONS).toBeDefined();
+    expect(core.ASSESSMENT_PROVENANCES).toBeDefined();
+    expect(core.MISSING_CANON_POLICIES).toBeDefined();
+    expect(core.DUPLICATE_CANON_POLICIES).toBeDefined();
+  });
+
+  it('re-exports Phase 2 Step 1 docket-canons triage functions and constants', () => {
+    expect(typeof docketCanons).toBe('function');
+    expect(typeof collectDocketCanons).toBe('function');
+    expect(typeof DEFAULT_MAX_DIFF_BYTES).toBe('number');
+    expect(typeof core.normalizeAssessments).toBe('function');
+    expect(typeof core.normalizeAssessmentsMap).toBe('function');
+    expect(typeof core.createDocketCanonsSchema).toBe('function');
   });
 });
 

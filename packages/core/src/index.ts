@@ -7,6 +7,7 @@ export * from './scope.js';
 export * from './triggers.js';
 export * from './model-config.js';
 export * from './artifact.js';
+export * from './docket-canons.js';
 
 import pkg from '../package.json' with { type: 'json' };
 

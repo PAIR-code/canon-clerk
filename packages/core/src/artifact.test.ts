@@ -399,4 +399,115 @@ describe('ColorabilityAssessment and createColorabilityAssessment builder', () =
       })
     ).toThrow(RangeError);
   });
+
+  describe('provenance and policy', () => {
+    it('defaults to provenance: "result" and policy: undefined when omitted', () => {
+      const assessment = createColorabilityAssessment({
+        colorabilitySummary: 'Model evaluated result.',
+        colorabilityScore: 0.85,
+      });
+
+      expect(assessment.provenance).toBe('result');
+      expect(assessment.policy).toBeUndefined();
+    });
+
+    it('rejects policy when provenance is "result"', () => {
+      expect(() =>
+        createColorabilityAssessment({
+          colorabilitySummary: 'Invalid configuration.',
+          colorabilityScore: 0.5,
+          provenance: 'result',
+          policy: 'escalate' as unknown as undefined,
+        })
+      ).toThrow(/policy must be undefined when provenance is "result"/);
+    });
+
+    it('creates missing assessment with escalate policy', () => {
+      const assessment = createColorabilityAssessment({
+        colorabilitySummary: 'Omitted during triage; escalated.',
+        colorabilityScore: 1.0,
+        provenance: 'missing',
+        policy: 'escalate',
+      });
+
+      expect(assessment.provenance).toBe('missing');
+      expect(assessment.policy).toBe('escalate');
+      expect(assessment.colorabilityScore).toBe(1.0);
+    });
+
+    it('creates missing assessment with exclude policy', () => {
+      const assessment = createColorabilityAssessment({
+        colorabilitySummary: 'Omitted during triage; excluded.',
+        colorabilityScore: 0.0,
+        provenance: 'missing',
+        policy: 'exclude',
+      });
+
+      expect(assessment.provenance).toBe('missing');
+      expect(assessment.policy).toBe('exclude');
+      expect(assessment.colorabilityScore).toBe(0.0);
+    });
+
+    it('rejects missing assessment without policy or with invalid policy', () => {
+      expect(() =>
+        createColorabilityAssessment({
+          colorabilitySummary: 'Missing without policy.',
+          colorabilityScore: 1.0,
+          provenance: 'missing',
+        })
+      ).toThrow(/Invalid policy for missing provenance/);
+
+      expect(() =>
+        createColorabilityAssessment({
+          colorabilitySummary: 'Missing with wrong policy.',
+          colorabilityScore: 1.0,
+          provenance: 'missing',
+          policy: 'highest' as unknown as 'escalate',
+        })
+      ).toThrow(/Invalid policy for missing provenance/);
+    });
+
+    it('creates duplicate assessment with highest, first, or last policy', () => {
+      for (const policy of ['highest', 'first', 'last'] as const) {
+        const assessment = createColorabilityAssessment({
+          colorabilitySummary: 'Duplicate resolved.',
+          colorabilityScore: 0.9,
+          provenance: 'duplicate',
+          policy,
+        });
+
+        expect(assessment.provenance).toBe('duplicate');
+        expect(assessment.policy).toBe(policy);
+      }
+    });
+
+    it('rejects duplicate assessment without policy or with invalid policy', () => {
+      expect(() =>
+        createColorabilityAssessment({
+          colorabilitySummary: 'Duplicate without policy.',
+          colorabilityScore: 0.9,
+          provenance: 'duplicate',
+        })
+      ).toThrow(/Invalid policy for duplicate provenance/);
+
+      expect(() =>
+        createColorabilityAssessment({
+          colorabilitySummary: 'Duplicate with wrong policy.',
+          colorabilityScore: 0.9,
+          provenance: 'duplicate',
+          policy: 'escalate' as unknown as 'highest',
+        })
+      ).toThrow(/Invalid policy for duplicate provenance/);
+    });
+
+    it('rejects unrecognized provenance string', () => {
+      expect(() =>
+        createColorabilityAssessment({
+          colorabilitySummary: 'Unknown provenance.',
+          colorabilityScore: 0.5,
+          provenance: 'alien' as unknown as 'result',
+        })
+      ).toThrow(/Invalid provenance/);
+    });
+  });
 });

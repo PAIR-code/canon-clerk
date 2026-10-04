@@ -19,12 +19,23 @@ The system SHALL immediately yield a `finish` event with an empty assessment map
 - **WHEN** invoking `docketCanons` with an empty array of canons
 - **THEN** immediately yields `{ type: 'finish', assessments: {}, telemetry: { durationMs: 0 } }`
 
-### Requirement: Dynamic Strict Schema Enforcement
-The system SHALL dynamically construct a strict structured schema requiring every candidate canon path as an explicit key with reason-first `colorabilitySummary` followed by `colorabilityScore`.
+### Requirement: Dynamic Strict Schema and Trie Constraint Enforcement
+The system SHALL dynamically construct a structured schema utilizing an array of assessment items with an enum trie constraint restricting `canonPath` to candidate canon identifiers, preserving linear FST complexity and preventing hallucinated keys during constrained decoding.
 
-#### Scenario: Schema guarantees completeness
+#### Scenario: Schema guarantees candidate path integrity
 - **WHEN** constructing the screening schema for candidate canons
-- **THEN** generates a strict schema containing every canon path as a required property
+- **THEN** generates an array schema where `canonPath` is constrained by a string enum (or literal) of the candidate canon keys
+
+### Requirement: Responsible Aggregation and Anomalies Manifest
+The system SHALL provide an anomalies manifest (`DocketAnomaliesManifest`) tracking omitted, duplicate, or unrecognized entries, and SHALL record `provenance` ('result' | 'missing' | 'duplicate') and `policy` on each `ColorabilityAssessment`.
+
+#### Scenario: Missing canon escalation policy
+- **WHEN** the screener model omits a candidate canon from its output
+- **THEN** applies `missingCanonPolicy` (defaulting to 'escalate' with score 1.0 and a path-woven summary) and records the omitted path in `anomalies.missing`
+
+#### Scenario: Duplicate canon resolution policy
+- **WHEN** the screener model emits multiple assessments for the same canon
+- **THEN** applies `duplicateCanonPolicy` (defaulting to 'highest' score) and records all duplicate occurrences in `anomalies.duplicates`
 
 ### Requirement: Diff Budgeting and Graceful Truncation
 The system SHALL enforce a configurable diff budget (`maxDiffBytes`, defaulting to 100KB), gracefully truncating diff content that exceeds the budget while preserving file paths and line delta statistics.
