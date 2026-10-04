@@ -253,6 +253,13 @@ export class GoogleModelClient implements ModelClient {
         ...(request.systemInstruction ? { system: request.systemInstruction } : {}),
         ...(request.temperature !== undefined ? { temperature: request.temperature } : { temperature: 0 }),
         abortSignal: abortController.signal,
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              includeThoughts: true,
+            },
+          },
+        },
       });
 
       for await (const part of result.fullStream) {

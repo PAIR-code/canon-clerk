@@ -400,6 +400,54 @@ describe('formatCheckConfigStylish', () => {
     expect(output).toContain('Hint:   Unable to reach provider endpoint. Check internet connection.');
   });
 
+  it('renders streaming latency telemetry line when thoughts are present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 850,
+            timeToFirstThoughtMs: 150,
+            timeToFirstTokenMs: 650,
+            thoughtTokens: 42,
+            thoughtChunks: 3,
+            resolvedModel: 'gemini-3.5-flash-lite-001',
+            message: 'Reachable (OK)',
+          },
+        },
+      },
+    };
+
+    const output = formatCheckConfigStylish(probedDiagnostics, { isTTY: false });
+    expect(output).toContain('Latency:   150ms to first thought · 500ms reasoning (42 tokens · 3 chunks)');
+  });
+
+  it('renders (0 thoughts) when probe yielded zero thought chunks', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 850,
+            timeToFirstTokenMs: 650,
+            thoughtChunks: 0,
+            resolvedModel: 'gemini-3.5-flash-lite-001',
+            message: 'Reachable (OK)',
+          },
+        },
+      },
+    };
+
+    const output = formatCheckConfigStylish(probedDiagnostics, { isTTY: false });
+    expect(output).toContain('Latency:   650ms to first token (0 thoughts)');
+  });
+
   it('renders unprobed signpost tip when valid and unprobed', () => {
     const output = formatCheckConfigStylish(mockDiagnostics, { isTTY: false });
     expect(output).toContain("Tip: Run 'canon-clerk check-config --probe' to verify live endpoint reachability.");
@@ -491,6 +539,40 @@ describe('formatCheckConfigJson', () => {
     expect(parsed.tiers.screener.probe).toEqual({
       ok: true,
       durationMs: 250,
+      message: 'Reachable (OK)',
+    });
+  });
+
+  it('includes streaming latency telemetry in JSON payload when present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 850,
+            timeToFirstThoughtMs: 150,
+            timeToFirstTokenMs: 650,
+            thoughtTokens: 42,
+            resolvedModel: 'gemini-3.5-flash-lite-001',
+            message: 'Reachable (OK)',
+          },
+        },
+      },
+    };
+
+    const jsonStr = formatCheckConfigJson(probedDiagnostics);
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.tiers.screener.probe).toEqual({
+      ok: true,
+      durationMs: 850,
+      timeToFirstThoughtMs: 150,
+      timeToFirstTokenMs: 650,
+      thoughtTokens: 42,
+      resolvedModel: 'gemini-3.5-flash-lite-001',
       message: 'Reachable (OK)',
     });
   });

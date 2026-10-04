@@ -26,12 +26,17 @@ When `--probe` is executed, the probe runner SHALL invoke the streaming model cl
 - **THEN** no thought output is written to stderr or stdout
 
 ### Requirement: Streaming Latency Telemetry Attribution
-When active model probing exercises an endpoint that yields reasoning thoughts and token deltas, the probe result SHALL capture streaming latency metrics including Time-to-First-Thought (`timeToFirstThoughtMs`), Time-to-First-Token (`timeToFirstTokenMs`), and thought token count (`thoughtTokens`) in stylish and JSON outputs.
+When active model probing exercises an endpoint that yields reasoning thoughts and token deltas, the probe result SHALL capture streaming latency metrics including Time-to-First-Thought (`timeToFirstThoughtMs`), Time-to-First-Token (`timeToFirstTokenMs`), thought token count (`thoughtTokens`), and thought chunk count (`thoughtChunks`) in stylish and JSON outputs. When an endpoint emits zero thought chunks, the output SHALL explicitly disambiguate by reporting `(0 thoughts)` in stylish format and `thoughtChunks: 0` in JSON format.
 
 #### Scenario: Emitting streaming latency telemetry in stylish format
 - **WHEN** probing a tier that generates thoughts and token deltas in stylish format
-- **THEN** stylish output renders a dimmed Latency line showing time to first thought, reasoning duration, and token count
+- **THEN** stylish output renders a dimmed Latency line showing time to first thought, reasoning duration, token count, and chunk count
+
+#### Scenario: Disambiguating zero thought packets in stylish format
+- **WHEN** probing a tier that emits zero thought events during streaming
+- **THEN** stylish output renders a dimmed Latency line with `(0 thoughts)` suffix
 
 #### Scenario: Emitting streaming latency telemetry in JSON format
 - **WHEN** invoking `canon-clerk check-config --probe --json` against a tier generating thoughts
-- **THEN** the probe JSON object includes `timeToFirstThoughtMs`, `timeToFirstTokenMs`, and `thoughtTokens`
+- **THEN** the probe JSON object includes `timeToFirstThoughtMs`, `timeToFirstTokenMs`, `thoughtTokens`, and `thoughtChunks`
+

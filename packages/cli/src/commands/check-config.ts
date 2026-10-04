@@ -1,3 +1,4 @@
+import { styleText } from 'node:util';
 import { Command, InvalidArgumentError } from 'commander';
 import {
   inspectCascadeDiagnostics,
@@ -21,6 +22,7 @@ export interface CheckConfigCliOptions {
   readonly configDir?: string | undefined;
   readonly probe?: boolean | undefined;
   readonly probeTimeout?: number | undefined;
+  readonly thoughts?: boolean | undefined;
 }
 
 export interface CheckConfigCommandContext {
@@ -103,6 +105,19 @@ function resolveConfig(
     }
   }
 
+  let thoughts = options.thoughts ?? true;
+  if (env['CANON_CLERK_PROBE_THOUGHTS'] !== undefined) {
+    const envVal = env['CANON_CLERK_PROBE_THOUGHTS'].trim().toLowerCase();
+    if (envVal === 'false' || envVal === '0') {
+      thoughts = false;
+    } else if (envVal === 'true' || envVal === '1') {
+      thoughts = true;
+    }
+  }
+  if (options.thoughts === false) {
+    thoughts = false;
+  }
+
   return {
     tier: options.tier,
     format,
@@ -111,6 +126,7 @@ function resolveConfig(
     configDir: options.configDir,
     probe: Boolean(options.probe),
     probeTimeout,
+    thoughts,
   };
 }
 
@@ -129,6 +145,7 @@ export async function runCheckConfigCommand(
   context?: CheckConfigCommandContext
 ): Promise<number> {
   const stdout = context?.stdout ?? process.stdout;
+  const stderr = context?.stderr ?? process.stderr;
   const env = context?.env ?? (typeof process !== 'undefined' ? process.env : {});
   const config = resolveConfig(options, env);
   const configDir = config.configDir ?? context?.configDir;
@@ -146,13 +163,39 @@ export async function runCheckConfigCommand(
   let probeFailed = false;
 
   if (config.probe) {
+    let currentThoughtTier: ModelTier | null = null;
+    const onThought = (delta: string, tier: ModelTier) => {
+      if (config.quiet || !config.thoughts) {
+        return;
+      }
+      if (currentThoughtTier !== tier) {
+        if (currentThoughtTier !== null) {
+          stderr.write('\n');
+        }
+        currentThoughtTier = tier;
+        const prefix = isTTY
+          ? styleText('dim', `[probe:${tier}] thinking: `)
+          : `[probe:${tier}] thinking: `;
+        stderr.write(prefix);
+      }
+      const text = isTTY ? styleText('dim', delta) : delta;
+      stderr.write(text);
+    };
+
     const probeOutcome = await executeCascadeProbes({
       diagnostics,
       targetTier: config.tier,
       env,
       configDir,
       timeoutMs: config.probeTimeout,
+      onThought,
     });
+
+    if (currentThoughtTier !== null) {
+      stderr.write('\n');
+      currentThoughtTier = null;
+    }
+
     diagnostics = probeOutcome.diagnostics;
     probeFailed = probeOutcome.probeFailed;
   }
@@ -242,6 +285,10 @@ export function createCheckConfigCommand(): Command {
       'Deadline timeout in milliseconds for active model probes (default: 15000)',
       parseProbeTimeout
     )
+    .option(
+      '--no-thoughts',
+      'Suppress streaming reasoning thoughts during active endpoint probing'
+    )
     .action(async () => {
       const options = cmd.opts<CheckConfigCliOptions>();
       const exitCode = await runCheckConfigCommand(options);
@@ -262,6 +309,7 @@ export function createCheckConfigCommand(): Command {
         'Connectivity & Probing:',
         '  --probe                 Actively probe model endpoints to verify reachability and authorization',
         '  --probe-timeout <ms>    Deadline timeout in milliseconds for active probes (default: 15000, env: CANON_CLERK_PROBE_TIMEOUT_MS)',
+        '  --no-thoughts           Suppress streaming reasoning thoughts during active probes (env: CANON_CLERK_PROBE_THOUGHTS=false)',
         '',
         'Output & Presentation:',
         '  -f, --format <format>   Output format: stylish, json (default: "stylish", env: CANON_CLERK_FORMAT)',

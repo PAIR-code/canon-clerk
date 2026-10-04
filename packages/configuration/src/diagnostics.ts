@@ -38,6 +38,10 @@ export type ProbeFailureCategory =
 export interface ModelTierProbeResult {
   readonly ok: boolean;
   readonly durationMs?: number | undefined;
+  readonly timeToFirstThoughtMs?: number | undefined;
+  readonly timeToFirstTokenMs?: number | undefined;
+  readonly thoughtTokens?: number | undefined;
+  readonly thoughtChunks?: number | undefined;
   readonly category?: ProbeFailureCategory | undefined;
   readonly resolvedModel?: string | undefined;
   readonly message?: string | undefined;
