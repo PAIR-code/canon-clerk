@@ -21,11 +21,21 @@ export interface StructuredGenerationRequest<T = unknown> {
   readonly signal?: AbortSignal | undefined;
 }
 
+export interface StructuredGenerationResult<T = unknown> {
+  readonly output: T;
+  readonly resolvedModel?: string | undefined;
+}
+
 export interface ModelClient {
   /**
    * Invokes the model with schema-constrained decoding and returns the parsed, validated JSON payload.
    */
   generateStructuredJson<T = unknown>(request: StructuredGenerationRequest<T>): Promise<T>;
+
+  /**
+   * Invokes the model with schema-constrained decoding and returns the full result including resolved model metadata.
+   */
+  generateStructured?<T = unknown>(request: StructuredGenerationRequest<T>): Promise<StructuredGenerationResult<T>>;
 }
 
 export interface GoogleModelClientOptions {
@@ -45,10 +55,10 @@ export class GoogleModelClient implements ModelClient {
   constructor(options: GoogleModelClientOptions = {}) {
     this.apiKey = options.apiKey;
     this.baseURL = options.baseURL;
-    this.defaultModel = options.defaultModel ?? 'gemini-3.5-flash-lite';
+    this.defaultModel = options.defaultModel ?? 'gemini-flash-lite-latest';
   }
 
-  async generateStructuredJson<T = unknown>(request: StructuredGenerationRequest<T>): Promise<T> {
+  async generateStructured<T = unknown>(request: StructuredGenerationRequest<T>): Promise<StructuredGenerationResult<T>> {
     if (!this.apiKey) {
       throw new Error(
         'Gemini API key is missing. Provide an apiKey to GoogleModelClient or resolve it via @canon-clerk/configuration. ' +
@@ -77,8 +87,48 @@ export class GoogleModelClient implements ModelClient {
       ...(request.systemInstruction ? { system: request.systemInstruction } : {}),
       ...(request.temperature !== undefined ? { temperature: request.temperature } : { temperature: 0 }),
       ...(request.signal ? { abortSignal: request.signal } : {}),
+      include: {
+        responseBody: true,
+      },
     });
 
+    let resolvedModel: string | undefined;
+    const rawBody =
+      (result.response as unknown as { body?: unknown })?.body ??
+      (result.finalStep as unknown as { response?: { body?: unknown } })?.response?.body;
+
+    if (rawBody && typeof rawBody === 'object' && 'modelVersion' in rawBody) {
+      resolvedModel = String((rawBody as { modelVersion?: unknown }).modelVersion);
+    } else if (typeof rawBody === 'string') {
+      try {
+        const parsed = JSON.parse(rawBody) as { modelVersion?: unknown };
+        if (parsed?.modelVersion) {
+          resolvedModel = String(parsed.modelVersion);
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+    }
+
+    if (!resolvedModel && (result.response as unknown as { modelId?: unknown })?.modelId) {
+      resolvedModel = String((result.response as unknown as { modelId?: unknown }).modelId);
+    }
+
+    if (!resolvedModel) {
+      const googleMeta = (result.providerMetadata as Record<string, Record<string, unknown>> | undefined)?.google;
+      if (googleMeta?.modelVersion) {
+        resolvedModel = String(googleMeta.modelVersion);
+      }
+    }
+
+    return {
+      output: result.output,
+      ...(resolvedModel ? { resolvedModel } : {}),
+    };
+  }
+
+  async generateStructuredJson<T = unknown>(request: StructuredGenerationRequest<T>): Promise<T> {
+    const result = await this.generateStructured(request);
     return result.output;
   }
 }
@@ -136,6 +186,10 @@ export function createMockModelClient<T = unknown>(
       }
 
       return rawResult;
+    },
+    async generateStructured<R = unknown>(request: StructuredGenerationRequest<R>): Promise<StructuredGenerationResult<R>> {
+      const output = await this.generateStructuredJson(request);
+      return { output };
     },
   };
 }

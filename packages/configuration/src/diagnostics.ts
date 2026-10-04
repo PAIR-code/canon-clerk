@@ -24,6 +24,27 @@ export interface ModelPropertySources {
   readonly baseURL?: string | undefined;
 }
 
+export type ProbeFailureCategory =
+  | 'missing_credentials'
+  | 'authentication'
+  | 'authorization'
+  | 'bad_request'
+  | 'model_not_found'
+  | 'rate_limited'
+  | 'network_error'
+  | 'timeout'
+  | 'unknown';
+
+export interface ModelTierProbeResult {
+  readonly ok: boolean;
+  readonly durationMs?: number | undefined;
+  readonly category?: ProbeFailureCategory | undefined;
+  readonly resolvedModel?: string | undefined;
+  readonly message?: string | undefined;
+  readonly error?: string | undefined;
+  readonly hint?: string | undefined;
+}
+
 export interface ModelTierDiagnostics {
   readonly tier: ModelTier;
   readonly provider: string;
@@ -35,6 +56,7 @@ export interface ModelTierDiagnostics {
   readonly maskedKey?: string | undefined;
   readonly sources: ModelPropertySources;
   readonly warnings: string[];
+  readonly probe?: ModelTierProbeResult | undefined;
 }
 
 export interface CascadeDiagnostics {
