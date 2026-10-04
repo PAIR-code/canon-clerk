@@ -14,7 +14,7 @@ Furthermore, remote failures stem from distinct root causes:
 7. Transport and DNS failures (Network Error)
 8. Unresponsive endpoints (Timeout)
 
-Without active endpoint probing and structured failure disambiguation, developers must decipher raw provider error payloads and stack traces.
+Without active endpoint probing and structured failure disambiguation, developers must decipher raw provider error payloads and stack traces. Additionally, when using evergreen dynamic aliases (like `-latest`), developers need visibility into which concrete model snapshot was resolved by the provider.
 
 ## What Changes
 
@@ -27,7 +27,11 @@ Without active endpoint probing and structured failure disambiguation, developer
    - Add `--probe-timeout <ms>` flag and `CANON_CLERK_PROBE_TIMEOUT_MS` environment variable, defaulting to 15,000ms.
    - Bound probe execution with an explicit timeout signal (`AbortSignal.timeout(timeoutMs)`).
 
-3. **Failure Disambiguation Taxonomy:**
+3. **Dynamic Alias Defaults & Resolved Model Attribution:**
+   - Align default models in `@canon-clerk/core` to evergreen dynamic aliases (`google:gemini-flash-lite-latest` for screener and `google:gemini-flash-latest` for auditor), preventing 404 deprecation rot.
+   - Extract the provider's resolved concrete model snapshot (`modelVersion` from the provider response) and report it in probe results (`resolvedModel`).
+
+4. **Failure Disambiguation Taxonomy:**
    - Define structured `ProbeFailureCategory` across `@canon-clerk/configuration` and `@canon-clerk/cli`:
      - `missing_credentials`
      - `authentication`
@@ -41,16 +45,16 @@ Without active endpoint probing and structured failure disambiguation, developer
    - Classify errors based on HTTP status codes, error causes, and provider message signatures.
    - Attach actionable remediation hints to failure diagnostics (e.g. key generation URL, permission hints).
 
-4. **Signposting & Triage Guidance:**
+5. **Signposting & Triage Guidance:**
    - Establish `canon-clerk check-config --probe` as the canonical diagnostic destination across Canon Clerk.
    - Suggest `--probe` in `check-config` output hints when configuration is valid but unprobed.
    - Establish signposting conventions for downstream cascade commands (Phase 2 & 3) to direct users to `--probe` when encountering model connectivity errors.
 
-5. **Terminal and Machine-Readable Reporting:**
-   - Stylish tree output: Colorized success checkmarks with latency, or categorized failure details with root cause and actionable remediation hints.
-   - JSON report (`--json`): Embed typed probe object containing `ok`, `durationMs`, `category`, `error`, and `hint`.
+6. **Terminal and Machine-Readable Reporting:**
+   - Stylish tree output: Colorized success checkmarks with latency and resolved concrete model snapshot, or categorized failure details with root cause and actionable remediation hints.
+   - JSON report (`--json`): Embed typed probe object containing `ok`, `durationMs`, `resolvedModel`, `category`, `error`, and `hint`.
 
-6. **Deterministic Exit Codes:**
+7. **Deterministic Exit Codes:**
    - Exit 0 if all probed tiers succeed.
    - Exit 1 if any probed tier fails reachability or authorization.
 
@@ -60,10 +64,10 @@ Without active endpoint probing and structured failure disambiguation, developer
 - None.
 
 ### Modified Capabilities
-- `cli/check-config`: Add `--probe` and `--probe-timeout <ms>` options, active endpoint reachability verification, failure classification taxonomy, actionable remediation hints, diagnostic exemption rationale, and probe-sensitive exit codes.
+- `cli/check-config`: Add `--probe` and `--probe-timeout <ms>` options, active endpoint reachability verification, failure classification taxonomy, resolved model snapshot attribution, actionable remediation hints, diagnostic exemption rationale, and probe-sensitive exit codes.
 
 ## Impact
 
 - **CLI (`@canon-clerk/cli`):** Enhances `check-config` command options, probe runner, and formatters.
-- **Configuration (`@canon-clerk/configuration`):** Extends `ModelTierDiagnostics` and `ModelTierProbeResult` type definitions.
-- **Dependencies:** Leverages `@canon-clerk/core` model client without introducing external runtime dependencies.
+- **Core (`@canon-clerk/core`):** Aligns default models to dynamic `-latest` aliases and captures `resolvedModel` in structured generation.
+- **Configuration (`@canon-clerk/configuration`):** Extends `ModelTierDiagnostics` and `ModelTierProbeResult` type definitions with `resolvedModel` and `ProbeFailureCategory`.

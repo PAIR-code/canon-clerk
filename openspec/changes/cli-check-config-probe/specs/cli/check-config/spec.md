@@ -9,6 +9,10 @@ When `--probe` is passed, the `check-config` command SHALL actively exercise the
 - **WHEN** invoking `canon-clerk check-config --probe` with valid credentials and network reachability
 - **THEN** actively exercises the production generation API, reports reachability status with roundtrip latency in milliseconds, and exits 0
 
+#### Scenario: Attributing resolved concrete model snapshot
+- **WHEN** probing a model tier configured with an alias where the provider returns underlying model version metadata
+- **THEN** captures the underlying model identifier in `resolvedModel` and reports it in stylish and JSON outputs
+
 #### Scenario: Failing probe on missing credentials
 - **WHEN** invoking `canon-clerk check-config --probe` without configured provider credentials
 - **THEN** fails without network call, reports `missing_credentials` category, and exits with status 1

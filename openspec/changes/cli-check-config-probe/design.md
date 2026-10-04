@@ -20,6 +20,7 @@ When connectivity issues occur, developers face varied failure modes:
 - Provide `--probe` on `check-config` to verify live end-to-end model reachability using a minimal structured query (`{ ok: boolean }`).
 - Support configurable probe timeouts via `--probe-timeout <ms>` and `CANON_CLERK_PROBE_TIMEOUT_MS` (defaulting to 15,000ms).
 - Codify the **Diagnostic Exemption Invariant** reconciling Phase 1's 0-token offline rule with diagnostic probing.
+- Align defaults with evergreen `-latest` aliases and capture the provider's underlying concrete `resolvedModel` in probe output.
 - Disambiguate errors into a clear, standardized `ProbeFailureCategory` taxonomy.
 - Provide actionable remediation hints (URLs, env var suggestions) for each failure category.
 - Establish `check-config --probe` as the universal diagnostic signpost for downstream cascade failures.
@@ -51,7 +52,11 @@ When connectivity issues occur, developers face varied failure modes:
   - *Model Metadata `GET` requests (e.g. `GET /v1beta/models/{model}`):* Rejected due to high risk of false positives (a credential may have read permissions to inspect model metadata while lacking permissions or quota to run `generateContent`), provider coupling (bypasses the Vercel AI SDK / `ModelClient` abstraction, requiring provider-specific URL templates), and failure to verify structured JSON decoding capabilities.
   - *Unconstrained text generation:* Rejected because unconstrained text does not verify that the model satisfies JSON schema output constraints, which is the foundational contract required by Canon Clerk's evaluation cascade.
 
-### 4. Structured Failure Category Taxonomy
+### 4. Dynamic Alias Defaults & Concrete Model Resolution
+- **Decision:** Use dynamic `-latest` aliases for defaults in `@canon-clerk/core` (`google:gemini-flash-lite-latest` for screener and `google:gemini-flash-latest` for auditor). During probe execution, extract the provider's underlying concrete model identifier from the response (`modelVersion` in Google Generative AI) and report it as `resolvedModel` in `ModelTierProbeResult`.
+- **Rationale:** Dynamic aliases prevent 404 deprecation breakage when upstream providers roll versions forward. Exposing `resolvedModel` gives developers full transparency into the exact snapshot actively answering queries (e.g. `gemini-3.5-flash-lite-001`), eliminating ambiguity while preserving zero-configuration durability.
+
+### 5. Structured Failure Category Taxonomy
 - **Decision:** Introduce `ProbeFailureCategory` in `@canon-clerk/configuration` with the following members:
   - `missing_credentials`: Intercepted locally before initiating network call.
   - `authentication`: HTTP 401 or 400 indicating invalid or expired API keys.
@@ -64,11 +69,11 @@ When connectivity issues occur, developers face varied failure modes:
   - `unknown`: Any uncategorized error.
 - **Rationale:** Standardizes classification across different provider adapters (e.g. Google, Anthropic, Ollama) and decouples UI presentation from vendor-specific error messages.
 
-### 5. Pre-flight Network Short-Circuit for Missing Credentials
+### 6. Pre-flight Network Short-Circuit for Missing Credentials
 - **Decision:** If `tierDiag.hasKey` is false (and provider is not credential-free like Ollama), fail immediately with `missing_credentials` at 0ms latency without making a doomed network request.
 - **Rationale:** Prevents unnecessary network overhead and confusing error messages.
 
-### 6. Error Disambiguation Parser
+### 7. Error Disambiguation Parser
 - **Decision:** Implement a robust error classification helper that inspects:
   - `err.statusCode` (from Vercel AI SDK `APICallError`)
   - `err.name` (`TimeoutError`, `AbortError`)
@@ -76,7 +81,7 @@ When connectivity issues occur, developers face varied failure modes:
   - Substring signatures in `err.message` (e.g. `API_KEY_INVALID`, `SERVICE_DISABLED`, `RESOURCE_EXHAUSTED`).
 - **Rationale:** Ensures accurate categorization regardless of whether the error originated from the SDK wrapper, Node fetch, or the upstream REST API.
 
-### 7. Downstream Signposting
+### 8. Downstream Signposting
 - **Decision:** When downstream cascade phases (Phase 2 Docket, Phase 3 Audit) encounter model invocation failures (authentication, network, rate limits), or when default `check-config` validates local configuration without probing, the CLI outputs an actionable hint directing users to `canon-clerk check-config --probe`.
 - **Rationale:** Prevents developers from getting stranded by unhelpful vendor traces and establishes a single canonical troubleshooting tool across the repository.
 
