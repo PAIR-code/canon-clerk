@@ -2,8 +2,17 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createModelClient } from '@canon-clerk/core';
 import { runCheckConfigCommand } from './check-config.js';
+
+vi.mock('@canon-clerk/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@canon-clerk/core')>();
+  return {
+    ...actual,
+    createModelClient: vi.fn(),
+  };
+});
 
 describe('runCheckConfigCommand (unit)', () => {
   let tempDir: string;
@@ -262,4 +271,236 @@ describe('runCheckConfigCommand (unit)', () => {
     // Missing key short-circuits at 0ms, exiting 1
     expect(code).toBe(1);
   });
+
+  describe('probe thought streaming and latency telemetry', () => {
+    function setupMockThoughtStream() {
+      async function* mockStream() {
+        yield { type: 'thought' as const, delta: 'Checking reachability...' };
+        yield { type: 'text-delta' as const, delta: '{"ok": true}' };
+        yield {
+          type: 'finish' as const,
+          output: { ok: true },
+          resolvedModel: 'gemini-3.5-flash-lite-001',
+          usage: { promptTokens: 10, completionTokens: 5, thoughtTokens: 15, totalTokens: 30 },
+          durationMs: 45,
+        };
+      }
+
+      vi.mocked(createModelClient).mockReturnValue({
+        streamStructured: vi.fn().mockImplementation(mockStream),
+        generateStructuredJson: vi.fn(),
+      });
+    }
+
+    it('streams reasoning thoughts to stderr during --probe', async () => {
+      setupMockThoughtStream();
+
+      let stdoutText = '';
+      const stdout = new PassThrough();
+      stdout.on('data', (chunk) => {
+        stdoutText += chunk.toString();
+      });
+
+      let stderrText = '';
+      const stderr = new PassThrough();
+      stderr.on('data', (chunk) => {
+        stderrText += chunk.toString();
+      });
+
+      const code = await runCheckConfigCommand(
+        { probe: true, tier: 'screener' },
+        {
+          stdout,
+          stderr,
+          configDir: tempDir,
+          env: {
+            GEMINI_API_KEY: 'valid-gemini-key-1234',
+          },
+          isTTY: false,
+        }
+      );
+
+      expect(code).toBe(0);
+      expect(stderrText).toContain('[probe:screener] thinking: Checking reachability...');
+      expect(stdoutText).toContain('Probe:     ✔ Reachable');
+      expect(stdoutText).toContain('Latency:   ');
+      expect(stdoutText).toContain('15 tokens');
+      expect(stdoutText).toContain('1 chunks');
+    });
+
+    it('suppresses reasoning thoughts to stderr when --no-thoughts is passed', async () => {
+      setupMockThoughtStream();
+
+      let stdoutText = '';
+      const stdout = new PassThrough();
+      stdout.on('data', (chunk) => {
+        stdoutText += chunk.toString();
+      });
+
+      let stderrText = '';
+      const stderr = new PassThrough();
+      stderr.on('data', (chunk) => {
+        stderrText += chunk.toString();
+      });
+
+      const code = await runCheckConfigCommand(
+        { probe: true, tier: 'screener', thoughts: false },
+        {
+          stdout,
+          stderr,
+          configDir: tempDir,
+          env: {
+            GEMINI_API_KEY: 'valid-gemini-key-1234',
+          },
+          isTTY: false,
+        }
+      );
+
+      expect(code).toBe(0);
+      expect(stderrText).toBe('');
+      expect(stdoutText).toContain('Probe:     ✔ Reachable');
+    });
+
+    it('suppresses reasoning thoughts to stderr when CANON_CLERK_PROBE_THOUGHTS=false', async () => {
+      setupMockThoughtStream();
+
+      let stderrText = '';
+      const stderr = new PassThrough();
+      stderr.on('data', (chunk) => {
+        stderrText += chunk.toString();
+      });
+
+      const stdout = new PassThrough();
+
+      const code = await runCheckConfigCommand(
+        { probe: true, tier: 'screener' },
+        {
+          stdout,
+          stderr,
+          configDir: tempDir,
+          env: {
+            GEMINI_API_KEY: 'valid-gemini-key-1234',
+            CANON_CLERK_PROBE_THOUGHTS: 'false',
+          },
+          isTTY: false,
+        }
+      );
+
+      expect(code).toBe(0);
+      expect(stderrText).toBe('');
+    });
+
+    it('streams thoughts to stderr and emits strictly valid JSON on stdout when --probe --json is passed', async () => {
+      setupMockThoughtStream();
+
+      let stdoutText = '';
+      const stdout = new PassThrough();
+      stdout.on('data', (chunk) => {
+        stdoutText += chunk.toString();
+      });
+
+      let stderrText = '';
+      const stderr = new PassThrough();
+      stderr.on('data', (chunk) => {
+        stderrText += chunk.toString();
+      });
+
+      const code = await runCheckConfigCommand(
+        { probe: true, tier: 'screener', json: true },
+        {
+          stdout,
+          stderr,
+          configDir: tempDir,
+          env: {
+            GEMINI_API_KEY: 'valid-gemini-key-1234',
+          },
+        }
+      );
+
+      expect(code).toBe(0);
+      expect(stderrText).toContain('[probe:screener] thinking: Checking reachability...');
+
+      // stdout must be valid JSON without any stderr thought leakage
+      const parsed = JSON.parse(stdoutText);
+      expect(parsed.valid).toBe(true);
+      expect(parsed.tiers.screener.probe.ok).toBe(true);
+      expect(parsed.tiers.screener.probe.thoughtTokens).toBe(15);
+      expect(parsed.tiers.screener.probe.thoughtChunks).toBe(1);
+      expect(typeof parsed.tiers.screener.probe.timeToFirstThoughtMs).toBe('number');
+      expect(typeof parsed.tiers.screener.probe.timeToFirstTokenMs).toBe('number');
+      expect(parsed.tiers.screener.probe.resolvedModel).toBe('gemini-3.5-flash-lite-001');
+    });
+
+    it('suppresses thoughts and stdout completely in quiet mode (-q) during --probe', async () => {
+      setupMockThoughtStream();
+
+      let stdoutText = '';
+      const stdout = new PassThrough();
+      stdout.on('data', (chunk) => {
+        stdoutText += chunk.toString();
+      });
+
+      let stderrText = '';
+      const stderr = new PassThrough();
+      stderr.on('data', (chunk) => {
+        stderrText += chunk.toString();
+      });
+
+      const code = await runCheckConfigCommand(
+        { probe: true, tier: 'screener', quiet: true },
+        {
+          stdout,
+          stderr,
+          configDir: tempDir,
+          env: {
+            GEMINI_API_KEY: 'valid-gemini-key-1234',
+          },
+        }
+      );
+
+      expect(code).toBe(0);
+      expect(stderrText).toBe('');
+      expect(stdoutText).toBe('');
+    });
+
+    it('displays (0 thoughts) in stylish output when probe yielded zero thoughts', async () => {
+      async function* mockStreamWithoutThoughts() {
+        yield { type: 'text-delta' as const, delta: '{"ok": true}' };
+        yield {
+          type: 'finish' as const,
+          output: { ok: true },
+          resolvedModel: 'gemini-3.5-flash-lite-001',
+          durationMs: 35,
+        };
+      }
+
+      vi.mocked(createModelClient).mockReturnValueOnce({
+        streamStructured: vi.fn().mockImplementation(mockStreamWithoutThoughts),
+        generateStructuredJson: vi.fn(),
+      });
+
+      let stdoutText = '';
+      const stdout = new PassThrough();
+      stdout.on('data', (chunk) => {
+        stdoutText += chunk.toString();
+      });
+
+      const code = await runCheckConfigCommand(
+        { probe: true, tier: 'screener' },
+        {
+          stdout,
+          configDir: tempDir,
+          env: {
+            GEMINI_API_KEY: 'valid-gemini-key-1234',
+          },
+          isTTY: false,
+        }
+      );
+
+      expect(code).toBe(0);
+      expect(stdoutText).toContain('Latency:   ');
+      expect(stdoutText).toContain('to first token (0 thoughts)');
+    });
+  });
 });
+

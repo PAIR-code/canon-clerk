@@ -102,6 +102,43 @@ export function formatCheckConfigStylish(
           const sourceDim = isTTY ? styleText('dim', sourceStr) : sourceStr;
           lines.push(`    Resolved:  ${tierDiag.probe.resolvedModel}${sourceDim}`);
         }
+        if (
+          tierDiag.probe.timeToFirstThoughtMs !== undefined ||
+          tierDiag.probe.timeToFirstTokenMs !== undefined
+        ) {
+          const parts: string[] = [];
+          if (tierDiag.probe.timeToFirstThoughtMs !== undefined) {
+            parts.push(`${tierDiag.probe.timeToFirstThoughtMs}ms to first thought`);
+          }
+          if (
+            tierDiag.probe.timeToFirstThoughtMs !== undefined &&
+            tierDiag.probe.timeToFirstTokenMs !== undefined &&
+            tierDiag.probe.timeToFirstTokenMs >= tierDiag.probe.timeToFirstThoughtMs
+          ) {
+            const reasoningMs = tierDiag.probe.timeToFirstTokenMs - tierDiag.probe.timeToFirstThoughtMs;
+            const chunksStr =
+              tierDiag.probe.thoughtChunks !== undefined
+                ? ` · ${tierDiag.probe.thoughtChunks} chunks`
+                : '';
+            const tokenStr =
+              tierDiag.probe.thoughtTokens !== undefined
+                ? ` (${tierDiag.probe.thoughtTokens} tokens${chunksStr})`
+                : chunksStr
+                  ? ` (${tierDiag.probe.thoughtChunks} chunks)`
+                  : '';
+            parts.push(`${reasoningMs}ms reasoning${tokenStr}`);
+          } else if (tierDiag.probe.timeToFirstTokenMs !== undefined) {
+            const thoughtsSuffix =
+              tierDiag.probe.thoughtChunks !== undefined && tierDiag.probe.thoughtChunks === 0
+                ? ' (0 thoughts)'
+                : '';
+            parts.push(`${tierDiag.probe.timeToFirstTokenMs}ms to first token${thoughtsSuffix}`);
+          }
+          const latencyStr = isTTY
+            ? styleText('dim', `Latency:   ${parts.join(' · ')}`)
+            : `Latency:   ${parts.join(' · ')}`;
+          lines.push(`    ${latencyStr}`);
+        }
       } else {
         const xMark = isTTY ? styleText('red', '✖') : '✖';
         const latency = tierDiag.probe.durationMs !== undefined ? ` (${tierDiag.probe.durationMs}ms)` : '';
