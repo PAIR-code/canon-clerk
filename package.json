@@ -12,7 +12,8 @@
   "scripts": {
     "build": "tsup",
     "postbuild": "npm rebuild canon-clerk",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'packages/integration-tests-private/**'",
+    "test:integration": "vitest run packages/integration-tests-private",
     "dev": "vitest",
     "clean": "rm -rf node_modules packages/*/dist packages/*/node_modules",
     "bump": "npm version --workspaces --include-workspace-root",
