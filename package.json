@@ -22,7 +22,7 @@
     "check-canons": "canon-clerk check-canons",
     "precheck-canons": "npm run build -w packages/cli && npm rebuild canon-clerk",
     "check": "concurrently --kill-others-on-fail --timings -p \"[{name}] \" -n \"lockfile,specs,canons,typecheck,build,test\" -c \"blue,magenta,red,cyan,green,yellow\" \"npm run lint:lockfile\" \"npm run lint:specs\" \"npm run check-canons\" \"npm run typecheck\" \"npm run build\" \"npm test\"",
-    "precli": "npm run build -w packages/cli && npm rebuild canon-clerk",
+    "precli": "npm run build",
     "cli": "canon-clerk",
     "settings:check": "npm run check -w packages/repo-settings",
     "settings:sync": "npm run sync -w packages/repo-settings",

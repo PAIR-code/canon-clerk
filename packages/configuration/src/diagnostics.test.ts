@@ -55,7 +55,7 @@ describe('diagnostics', () => {
 
       expect(diag.tier).toBe('screener');
       expect(diag.provider).toBe('google');
-      expect(diag.model).toBe('google:gemini-3.5-flash-lite');
+      expect(diag.model).toBe('google:gemini-flash-lite-latest');
       expect(diag.effort).toBeUndefined();
       expect(diag.hasKey).toBe(false);
       expect(diag.maskedKey).toBeUndefined();

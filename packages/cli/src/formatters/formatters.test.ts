@@ -363,6 +363,47 @@ describe('formatCheckConfigStylish', () => {
     expect(output).toContain('  - Missing API key for screener tier.');
     expect(output).toContain('Status: Unhealthy (Configuration requires attention)');
   });
+
+  it('renders probe results with failure category, detail, and hint when present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 250,
+            resolvedModel: 'gemini-3.5-flash-lite-001',
+            message: 'Reachable (OK)',
+          },
+        },
+        auditor: {
+          ...mockDiagnostics.tiers.auditor,
+          probe: {
+            ok: false,
+            durationMs: 120,
+            category: 'network_error',
+            error: 'Connection refused',
+            hint: 'Unable to reach provider endpoint. Check internet connection.',
+          },
+        },
+      },
+    };
+
+    const output = formatCheckConfigStylish(probedDiagnostics, { isTTY: false });
+
+    expect(output).toContain('Probe:     ✔ Reachable (250ms · OK)');
+    expect(output).toContain('Resolved:  gemini-3.5-flash-lite-001 (source: provider response)');
+    expect(output).toContain('Probe:     ✖ Failed [network_error] (120ms)');
+    expect(output).toContain('Detail: Connection refused');
+    expect(output).toContain('Hint:   Unable to reach provider endpoint. Check internet connection.');
+  });
+
+  it('renders unprobed signpost tip when valid and unprobed', () => {
+    const output = formatCheckConfigStylish(mockDiagnostics, { isTTY: false });
+    expect(output).toContain("Tip: Run 'canon-clerk check-config --probe' to verify live endpoint reachability.");
+  });
 });
 
 describe('formatCheckConfigJson', () => {
@@ -426,5 +467,61 @@ describe('formatCheckConfigJson', () => {
 
     expect(parsed.tiers.screener).toBeDefined();
     expect(parsed.tiers.auditor).toBeUndefined();
+  });
+
+  it('includes probe results in JSON payload when present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: true,
+            durationMs: 250,
+            message: 'Reachable (OK)',
+          },
+        },
+      },
+    };
+
+    const jsonStr = formatCheckConfigJson(probedDiagnostics);
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.tiers.screener.probe).toEqual({
+      ok: true,
+      durationMs: 250,
+      message: 'Reachable (OK)',
+    });
+  });
+
+  it('includes categorized probe failure in JSON payload when present', () => {
+    const probedDiagnostics: CascadeDiagnostics = {
+      ...mockDiagnostics,
+      tiers: {
+        ...mockDiagnostics.tiers,
+        screener: {
+          ...mockDiagnostics.tiers.screener,
+          probe: {
+            ok: false,
+            durationMs: 15,
+            category: 'authentication',
+            error: 'API key not valid',
+            hint: 'Check CANON_CLERK_SCREENER_API_KEY',
+          },
+        },
+      },
+    };
+
+    const jsonStr = formatCheckConfigJson(probedDiagnostics);
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.tiers.screener.probe).toEqual({
+      ok: false,
+      durationMs: 15,
+      category: 'authentication',
+      error: 'API key not valid',
+      hint: 'Check CANON_CLERK_SCREENER_API_KEY',
+    });
   });
 });

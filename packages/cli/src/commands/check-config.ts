@@ -2,12 +2,15 @@ import { Command, InvalidArgumentError } from 'commander';
 import {
   inspectCascadeDiagnostics,
   type CascadeDiagnostics,
+  type ModelTierDiagnostics,
+  type ModelTierProbeResult,
 } from '@canon-clerk/configuration';
 import type { ModelTier } from '@canon-clerk/core';
 import {
   formatCheckConfigJson,
   formatCheckConfigStylish,
 } from '../formatters/index.js';
+import { executeCascadeProbes } from './probe-runner.js';
 
 export interface CheckConfigCliOptions {
   readonly tier?: ModelTier | undefined;
@@ -16,6 +19,8 @@ export interface CheckConfigCliOptions {
   readonly quiet?: boolean | undefined;
   readonly maxWarnings?: number | undefined;
   readonly configDir?: string | undefined;
+  readonly probe?: boolean | undefined;
+  readonly probeTimeout?: number | undefined;
 }
 
 export interface CheckConfigCommandContext {
@@ -54,6 +59,16 @@ function parseMaxWarnings(value: string): number {
   return parsed;
 }
 
+function parseProbeTimeout(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError(
+      `Invalid probe-timeout value '${value}'. Must be a positive integer in milliseconds.`
+    );
+  }
+  return parsed;
+}
+
 /**
  * Resolves option precedence: CLI flags > environment variables > defaults.
  */
@@ -78,12 +93,24 @@ function resolveConfig(
     }
   }
 
+  let probeTimeout = 15000;
+  if (options.probeTimeout !== undefined) {
+    probeTimeout = options.probeTimeout;
+  } else if (env['CANON_CLERK_PROBE_TIMEOUT_MS'] !== undefined) {
+    const envVal = env['CANON_CLERK_PROBE_TIMEOUT_MS'].trim();
+    if (envVal !== '') {
+      probeTimeout = parseProbeTimeout(envVal);
+    }
+  }
+
   return {
     tier: options.tier,
     format,
     quiet: Boolean(options.quiet),
     maxWarnings,
     configDir: options.configDir,
+    probe: Boolean(options.probe),
+    probeTimeout,
   };
 }
 
@@ -110,11 +137,25 @@ export async function runCheckConfigCommand(
     context?.isTTY ??
     (Boolean((stdout as { isTTY?: boolean }).isTTY) && !env['NO_COLOR']);
 
-  const diagnostics = inspectCascadeDiagnostics({
+  let diagnostics = inspectCascadeDiagnostics({
     env,
     configDir,
     targetTier: config.tier,
   });
+
+  let probeFailed = false;
+
+  if (config.probe) {
+    const probeOutcome = await executeCascadeProbes({
+      diagnostics,
+      targetTier: config.tier,
+      env,
+      configDir,
+      timeoutMs: config.probeTimeout,
+    });
+    diagnostics = probeOutcome.diagnostics;
+    probeFailed = probeOutcome.probeFailed;
+  }
 
   if (!config.quiet) {
     const formatted =
@@ -125,8 +166,8 @@ export async function runCheckConfigCommand(
     stdout.write(formatted + '\n');
   }
 
-  // 1. Missing credentials, insecure permissions, or store errors -> 1
-  if (!diagnostics.valid) {
+  // 1. Missing credentials, insecure permissions, store errors, or failed probe -> 1
+  if (!diagnostics.valid || probeFailed) {
     return 1;
   }
 
@@ -192,6 +233,15 @@ export function createCheckConfigCommand(): Command {
       '--config-dir <path>',
       'Custom directory path for OS-level credential store'
     )
+    .option(
+      '--probe',
+      'Actively probe model endpoints to verify reachability and authorization'
+    )
+    .option(
+      '--probe-timeout <ms>',
+      'Deadline timeout in milliseconds for active model probes (default: 15000)',
+      parseProbeTimeout
+    )
     .action(async () => {
       const options = cmd.opts<CheckConfigCliOptions>();
       const exitCode = await runCheckConfigCommand(options);
@@ -209,6 +259,10 @@ export function createCheckConfigCommand(): Command {
         '  --tier <name>           Filter inspection to a specific tier: screener, auditor',
         '  --config-dir <path>     Custom directory path for OS-level credential store',
         '',
+        'Connectivity & Probing:',
+        '  --probe                 Actively probe model endpoints to verify reachability and authorization',
+        '  --probe-timeout <ms>    Deadline timeout in milliseconds for active probes (default: 15000, env: CANON_CLERK_PROBE_TIMEOUT_MS)',
+        '',
         'Output & Presentation:',
         '  -f, --format <format>   Output format: stylish, json (default: "stylish", env: CANON_CLERK_FORMAT)',
         '  --json                  Shorthand for --format json',
@@ -224,8 +278,11 @@ export function createCheckConfigCommand(): Command {
         '  # Inspect full cascade resolution, sources, and store health',
         '  $ canon-clerk check-config',
         '',
-        '  # Inspect only the Phase 2 Screener tier',
-        '  $ canon-clerk check-config --tier screener',
+        '  # Actively probe configured model endpoints to verify connectivity',
+        '  $ canon-clerk check-config --probe',
+        '',
+        '  # Probe only the Phase 2 Screener tier',
+        '  $ canon-clerk check-config --probe --tier screener',
         '',
         '  # Emit canonical JSON diagnostic report',
         '  $ canon-clerk check-config --json',

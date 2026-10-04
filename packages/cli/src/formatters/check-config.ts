@@ -92,6 +92,30 @@ export function formatCheckConfigStylish(
       baseStr = 'default';
     }
     lines.push(`    Base URL:  ${baseStr}`);
+
+    if (tierDiag.probe) {
+      if (tierDiag.probe.ok) {
+        const checkMark = isTTY ? styleText('green', '✔') : '✔';
+        lines.push(`    Probe:     ${checkMark} Reachable (${tierDiag.probe.durationMs ?? 0}ms · OK)`);
+        if (tierDiag.probe.resolvedModel) {
+          const sourceStr = ' (source: provider response)';
+          const sourceDim = isTTY ? styleText('dim', sourceStr) : sourceStr;
+          lines.push(`    Resolved:  ${tierDiag.probe.resolvedModel}${sourceDim}`);
+        }
+      } else {
+        const xMark = isTTY ? styleText('red', '✖') : '✖';
+        const latency = tierDiag.probe.durationMs !== undefined ? ` (${tierDiag.probe.durationMs}ms)` : '';
+        const categoryLabel = tierDiag.probe.category ? ` [${tierDiag.probe.category}]` : '';
+        lines.push(`    Probe:     ${xMark} Failed${categoryLabel}${latency}`);
+        if (tierDiag.probe.error) {
+          lines.push(`               Detail: ${tierDiag.probe.error}`);
+        }
+        if (tierDiag.probe.hint) {
+          const hintStr = isTTY ? styleText('dim', `Hint:   ${tierDiag.probe.hint}`) : `Hint:   ${tierDiag.probe.hint}`;
+          lines.push(`               ${hintStr}`);
+        }
+      }
+    }
   };
 
   if (!targetTier || targetTier === 'screener') {
@@ -131,6 +155,15 @@ export function formatCheckConfigStylish(
       ? styleText('green', 'Status: Healthy (All tiers ready for evaluation)')
       : 'Status: Healthy (All tiers ready for evaluation)';
     lines.push(statusText);
+
+    // Signposting tip when valid but unprobed
+    if (!diagnostics.tiers.screener.probe && !diagnostics.tiers.auditor.probe) {
+      lines.push('');
+      const tipText = isTTY
+        ? styleText('dim', "Tip: Run 'canon-clerk check-config --probe' to verify live endpoint reachability.")
+        : "Tip: Run 'canon-clerk check-config --probe' to verify live endpoint reachability.";
+      lines.push(`  ${tipText}`);
+    }
   } else {
     const statusText = isTTY
       ? styleText('red', 'Status: Unhealthy (Configuration requires attention)')
@@ -155,6 +188,7 @@ function formatTierJson(tierDiag: ModelTierDiagnostics) {
       apiKey: tierDiag.sources.apiKey ?? null,
       baseURL: tierDiag.sources.baseURL ?? 'default',
     },
+    ...(tierDiag.probe ? { probe: tierDiag.probe } : {}),
   };
 }
 

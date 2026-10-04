@@ -23,7 +23,14 @@ export default defineConfig(() => {
       format: ['esm'],
       dts: true,
       clean: true,
-      external: ['@canon-clerk/schema'],
+      external: [
+        '@canon-clerk/schema',
+        '@ai-sdk/google',
+        'ai',
+        'ignore',
+        'picomatch',
+        'zod',
+      ],
     },
     {
       entry: ['packages/configuration/src/index.ts'],
