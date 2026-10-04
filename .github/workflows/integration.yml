@@ -7,7 +7,9 @@ on:
     paths:
       - "packages/core/**"
       - "packages/configuration/**"
+      - "packages/schema/**"
       - "packages/integration-tests-private/**"
+      - "package.json"
       - "package-lock.json"
       - ".github/workflows/integration.yml"
   pull_request:
@@ -16,7 +18,9 @@ on:
     paths:
       - "packages/core/**"
       - "packages/configuration/**"
+      - "packages/schema/**"
       - "packages/integration-tests-private/**"
+      - "package.json"
       - "package-lock.json"
       - ".github/workflows/integration.yml"
 
@@ -48,7 +52,11 @@ jobs:
         run: npm ci
 
       - name: Run live service integration tests
-        if: ${{ secrets.GEMINI_API_KEY != '' }}
-        run: npm run test:integration
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "Notice: GEMINI_API_KEY secret is not present (e.g. fork PR). Running integration harness in skip mode."
+            export CANON_CLERK_SKIP_LIVE_TESTS=1
+          fi
+          npm run test:integration
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
