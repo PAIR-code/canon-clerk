@@ -105,7 +105,32 @@ export interface CreateFileArtifactParams {
   readonly contentOmissionReason?: ContentOmissionReason;
 }
 
-export interface ColorabilityAssessment {
+export type AssessmentProvenance = 'result' | 'missing' | 'duplicate';
+
+export const ASSESSMENT_PROVENANCES: readonly AssessmentProvenance[] = Object.freeze([
+  'result',
+  'missing',
+  'duplicate',
+]);
+
+export type MissingCanonPolicy = 'escalate' | 'exclude';
+
+export const MISSING_CANON_POLICIES: readonly MissingCanonPolicy[] = Object.freeze([
+  'escalate',
+  'exclude',
+]);
+
+export type DuplicateCanonPolicy = 'highest' | 'first' | 'last';
+
+export const DUPLICATE_CANON_POLICIES: readonly DuplicateCanonPolicy[] = Object.freeze([
+  'highest',
+  'first',
+  'last',
+]);
+
+export type AssessmentPolicy = MissingCanonPolicy | DuplicateCanonPolicy;
+
+export interface BaseColorabilityAssessment {
   /**
    * Single-sentence justification articulating subject-matter jurisdiction.
    * Generated before colorabilityScore in structured schemas to anchor
@@ -120,9 +145,30 @@ export interface ColorabilityAssessment {
   readonly colorabilityScore: number;
 }
 
+/**
+ * Discriminated union capturing assessment origin and resolution policy.
+ * Downstream consumers can access colorabilitySummary and colorabilityScore directly,
+ * or inspect provenance and policy for detailed triage auditability.
+ */
+export type ColorabilityAssessment =
+  | (BaseColorabilityAssessment & {
+      readonly provenance: 'result';
+      readonly policy?: undefined;
+    })
+  | (BaseColorabilityAssessment & {
+      readonly provenance: 'missing';
+      readonly policy: MissingCanonPolicy;
+    })
+  | (BaseColorabilityAssessment & {
+      readonly provenance: 'duplicate';
+      readonly policy: DuplicateCanonPolicy;
+    });
+
 export interface CreateColorabilityAssessmentParams {
   readonly colorabilitySummary: string;
   readonly colorabilityScore: number;
+  readonly provenance?: AssessmentProvenance | undefined;
+  readonly policy?: AssessmentPolicy | undefined;
 }
 
 function validatePosixRelativePath(field: string, p: unknown): string {
@@ -253,8 +299,55 @@ export function createColorabilityAssessment(
       `colorabilityScore must be a number in the unit interval [0.0, 1.0] (got: ${String(params.colorabilityScore)})`
     );
   }
+
+  const provenance: AssessmentProvenance = params.provenance ?? 'result';
+  if (!ASSESSMENT_PROVENANCES.includes(provenance)) {
+    throw new Error(
+      `Invalid provenance: "${String(params.provenance)}". Expected one of: ${ASSESSMENT_PROVENANCES.join(', ')}`
+    );
+  }
+
+  if (provenance === 'result') {
+    if (params.policy !== undefined) {
+      throw new Error('policy must be undefined when provenance is "result"');
+    }
+    return Object.freeze({
+      colorabilitySummary: params.colorabilitySummary.trim(),
+      colorabilityScore: params.colorabilityScore,
+      provenance: 'result' as const,
+    });
+  }
+
+  if (provenance === 'missing') {
+    if (
+      params.policy === undefined ||
+      !MISSING_CANON_POLICIES.includes(params.policy as MissingCanonPolicy)
+    ) {
+      throw new Error(
+        `Invalid policy for missing provenance: "${String(params.policy)}". Expected one of: ${MISSING_CANON_POLICIES.join(', ')}`
+      );
+    }
+    return Object.freeze({
+      colorabilitySummary: params.colorabilitySummary.trim(),
+      colorabilityScore: params.colorabilityScore,
+      provenance: 'missing' as const,
+      policy: params.policy as MissingCanonPolicy,
+    });
+  }
+
+  // provenance === 'duplicate'
+  if (
+    params.policy === undefined ||
+    !DUPLICATE_CANON_POLICIES.includes(params.policy as DuplicateCanonPolicy)
+  ) {
+    throw new Error(
+      `Invalid policy for duplicate provenance: "${String(params.policy)}". Expected one of: ${DUPLICATE_CANON_POLICIES.join(', ')}`
+    );
+  }
   return Object.freeze({
     colorabilitySummary: params.colorabilitySummary.trim(),
     colorabilityScore: params.colorabilityScore,
+    provenance: 'duplicate' as const,
+    policy: params.policy as DuplicateCanonPolicy,
   });
 }
