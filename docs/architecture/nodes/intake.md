@@ -8,10 +8,10 @@
 
 ## 1. Domain Concept & Role (`core`)
 
-`intake` serves as the **Universal Front Door** of the Canon Clerk evaluation pipeline. In the court clerkship taxonomy, it represents the formal clerk receiving in-flight filings at the intake counter. It converts raw inputs—file paths, directory trees, patch streams, and pull request metadata—into standardized, immutable `FileArtifact` structures.
+`intake` serves as the **Universal Front Door** of the Canon Clerk evaluation pipeline. In the court clerkship taxonomy, it represents the formal clerk receiving in-flight filings at the intake counter. It catalogs the initial **tendered exhibits** (literal metadata such as `pr_title`, `pr_body`, `commit_messages`, `linkedIssues`, and unified patch streams) alongside **exhibit discovery directives** (explicit file paths, directory pointers for recursive traversal, and glob patterns) into standardized, immutable structures on the `Caseload`.
 
 - **Imperative Verb:** `intake`
-- **Court Clerkship Role:** Filing intake and document receipt.
+- **Court Clerkship Role:** Filing intake, document receipt, and cataloging of tendered exhibits.
 - **Metric Pair:** N/A (Deterministic filing track).
 
 ---
@@ -72,15 +72,12 @@ export interface CaseloadIntake {
 1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), stdin token stream (`-`), `--all-targets`, or an incoming `--caseload`.
    - **Missing Source Guard (Naked Invocation):** Invoking `canon-clerk intake` with zero sources fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance. The CLI never silently hangs waiting for input on a TTY.
    - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `targetPaths: []`) and exits `0`.
-2. **Target Scope Normalization:** When `allTargets: true` is passed, resolves all tracked repository files into target paths, tagging `scope: 'all-targets'`. Note the crucial distinction: `--all-targets` operates on the *subject-matter codebase*, whereas `--all-canons` (in `discover`) operates on the *governing rule packs*.
-3. **Unified Diff Parsing:** If `patchContent` is provided, parses unified diff hunks into immutable `FileArtifact` objects detailing:
-   - `path`: Normalized repository-relative path.
-   - `status`: `'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'unchanged'`.
-   - `linesAdded` and `linesDeleted`: Line counts modified.
-   - `patch`: Exact diff hunk content.
-   - `contentOmissionReason`: Defaults to `'not_requested'` to preserve token hygiene.
-4. **Filesystem Context Verification:** When file paths are supplied without patch deltas, verifies file existence and stat metadata.
-5. **Metadata Merging:** Binds `pr_title`, `pr_body`, and any `linkedIssues` into the intake payload.
+2. **Tendered Exhibits Cataloging:** Captures raw literal exhibits directly from the invocation context:
+   - Metadata exhibits: `pr_title`, `pr_body`, and any `linkedIssues`.
+   - File exhibits: Unified patch hunks parsed into immutable `FileArtifact` objects (`linesAdded`, `linesDeleted`, `patch`, `status`).
+3. **Exhibit Discovery Directives Cataloging:** When file paths, directory pointers, or glob patterns are provided, packages them as directives for downstream resolution in `discover`.
+4. **Target Scope Normalization:** When `allTargets: true` is passed, flags `scope: 'all-targets'` to instruct `discover` to materialize the entire repository codebase as target exhibits. (Note the crucial distinction: `--all-targets` operates on the *subject-matter codebase*, whereas `--all-canons` in `discover` operates on the *governing rule packs*).
+5. **Filesystem Context Verification:** Verifies local file existence and stat metadata for explicitly named file exhibits.
 
 ---
 

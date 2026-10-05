@@ -13,7 +13,7 @@
 - **Imperative Verb:** `admit`
 - **Court Clerkship Role:** Micro triage establishing evidentiary admissibility.
 - **Metric Pair:** `admissibilityScore` (number [0.0, 1.0]) and `admissibilitySummary` (string rationale).
-- **Core Question:** *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"*
+- **Core Question:** *"For an active Case, is this candidate exhibit (diff hunk, PR title, PR body, or reference document) admissible as relevant evidence?"*
 
 ---
 
@@ -78,7 +78,7 @@ If all active cases retain zero admitted exhibits:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.activeDocket`.
-2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):** Evaluates candidate target files, diff hunks, and reference documents against the canon's specific requirements.
+2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):** Evaluates candidate exhibits—including code diff hunks, PR title, PR body, commit messages, and reference documents—against the canon's specific requirements, as declared by its `inspect:` frontmatter.
 3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**
    ```json
    {

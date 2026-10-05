@@ -126,10 +126,13 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 
 ### The Court Clerkship Taxonomy
 - **The Caseload:** The cumulative lifecycle container for the evaluation run.
-- **Candidate Canons:** Rules whose `triggers:` match touched files during `discover`.
+- **Candidate Canons:** Rules whose `triggers:` or `inspect:` planes match in-flight exhibits during `discover`.
 - **Cases:** Canons that pass macro triage during `docket` and enter the Active Docket.
-- **Exhibits:** Code files, diff hunks, or persistent reference documents admitted during `admit` as relevant evidence for a specific Case.
-- **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` per Case.
+- **Exhibits (The Unified Evidence Lifecycle):**
+  - **Tendered Exhibits (`intake`):** Raw filing inputs, including literal text metadata (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), diff streams (`diff`), and target file discovery directives.
+  - **Candidate Exhibits (`discover`):** Materialized exhibits retained after mutual pruning with candidate canons (dropping un-inspected exhibits to preserve token hygiene).
+  - **Admitted Exhibits (`admit`):** Exhibits formally admitted as relevant evidence for a specific Case on the docket (`admissibilityScore >= 0.5`).
+- **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` per Case against its admitted exhibits.
 
 ### Positive Polarity Consistency
 All three heuristic metrics share an identical polarity convention: **a higher score reflects the affirmative presence of the named property**:
@@ -223,6 +226,15 @@ export interface CaseloadDiscovery {
 
   /** Discovered candidate canon paths matching targets (or full corpus) */
   readonly candidateCanons: readonly string[];
+
+  /** Materialized active exhibits retained after mutual pruning with candidate canons */
+  readonly activeExhibits: {
+    readonly files: readonly string[];
+    readonly prTitle?: boolean | undefined;
+    readonly prBody?: boolean | undefined;
+    readonly commitMessages?: boolean | undefined;
+    readonly linkedIssues?: boolean | undefined;
+  };
 
   /** Map of canon paths to matched target file paths */
   readonly triggersJoin: Record<string, readonly string[]>;

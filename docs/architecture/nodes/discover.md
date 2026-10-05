@@ -8,11 +8,16 @@
 
 ## 1. Domain Concept & Role (`core`)
 
-`discover` acts as the **Jurisdictional Path Filter** in the evaluation pipeline. In the court clerkship taxonomy, it represents the clerk checking the initial jurisdictional caption of a filing against the court's rules to identify which statutory rule packs (canons) could possibly apply to the files touched.
+`discover` acts as the **Bipartite Relevance Sieve & Dual Pruning Gate** of the pipeline. In the court clerkship taxonomy, it represents the clerk reviewing tendered filings to resolve referenced files and compare all tendered exhibits against the court's codified canons:
+
+1. **Exhibit Materialization:** Resolves exhibit discovery directives (expanding directory recursion roots, matching globs against workspace checkout into concrete file exhibits).
+2. **Two-Sided Mutual Pruning:**
+   - **Prunes Inapplicable Canons:** Canons matching zero in-flight exhibits are dropped $\implies$ `candidateCanons`.
+   - **Prunes Un-inspected Exhibits:** Exhibits not inspected or triggered by any surviving candidate canon are dropped $\implies$ `activeExhibits` (preserving context-window hygiene).
 
 - **Imperative Verb:** `discover`
-- **Court Clerkship Role:** Candidate canon identification via path trigger matching.
-- **Metric Pair:** N/A (Deterministic glob intersection).
+- **Court Clerkship Role:** Exhibit materialization, candidate canon identification, and mutual exhibit pruning.
+- **Metric Pair:** N/A (Deterministic bipartite intersection).
 
 ---
 
@@ -54,7 +59,16 @@ export interface CaseloadDiscovery {
   /** Discovered candidate canon paths matching targets (or full corpus) */
   readonly candidateCanons: readonly string[];
 
-  /** Map of canon paths to matched target file paths */
+  /** Materialized active exhibits retained after mutual pruning with candidate canons */
+  readonly activeExhibits: {
+    readonly files: readonly string[];
+    readonly prTitle?: boolean | undefined;
+    readonly prBody?: boolean | undefined;
+    readonly commitMessages?: boolean | undefined;
+    readonly linkedIssues?: boolean | undefined;
+  };
+
+  /** Map of canon paths to matched target file paths and inspected planes */
   readonly triggersJoin: Record<string, readonly string[]>;
 }
 ```
@@ -68,15 +82,20 @@ If `candidateCanons.length === 0`:
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Target Path Extraction:** Extracts all repository-relative file paths from `caseload.intake.diffs` (or target paths).
+1. **Exhibit Materialization:** Resolves exhibit discovery directives from `caseload.intake` (e.g. expanding directory recursion roots and matching target glob patterns against workspace checkout into concrete file exhibits).
 2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidateCanons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
 3. **Canon Corpus Enumeration:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`).
 4. **Monorepo Scope Inheritance:** Applies implicit directory scoping:
    - Global canons in `.canons/**` apply repository-wide.
    - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` trigger boundary. If zero modified target files reside in `<scope>/`, the canon is excluded from candidates.
-5. **Trigger Glob Matching:** Evaluates the declared `triggers:` globs in each canon against the list of modified target paths using picomatch / minimatch semantics.
-6. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific modified files that activated it.
+5. **Bipartite Incidence & Matching:**
+   - **File Exhibits:** Evaluates declared `triggers:` globs in each canon against the list of modified target paths using picomatch / minimatch semantics.
+   - **Metadata Exhibits:** For canons inspecting non-file exhibits (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), matches whenever the corresponding metadata exhibit is present on `caseload.intake`.
+6. **Two-Sided Mutual Pruning & Token Hygiene:**
+   - **Inapplicable Canons Pruned:** Any canon whose `triggers:` match 0 file exhibits and whose `inspect:` matches 0 available metadata exhibits is dropped $\implies$ `candidateCanons`.
+   - **Un-inspected Exhibits Pruned:** Any tendered exhibit (file path, `pr_title`, `pr_body`, etc.) that is neither triggered nor inspected by any surviving candidate canon is dropped $\implies$ `activeExhibits`. Downstream screening (`docket`) and adjudication (`audit`) will never serialize un-inspected exhibits into model prompts.
+7. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific active exhibits that activated it.
 
 ---
 
