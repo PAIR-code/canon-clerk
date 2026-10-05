@@ -84,7 +84,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 | **`id`** | `string` | No | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | No | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
 | **`triggers`** | `string[]` | No | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs activating the canon for rule evaluation. |
-| **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title", "pr_body"]` | Context elements inspected during evaluation. |
+| **`inspect`** | `string[]` | No | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title?", "pr_body?"]` | Context elements inspected during evaluation (supports `?` optional rider). |
 | **`tags`** | `string[]` | No | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 | **`references`** | `string[]` | No | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Persistent repository reference files supplied as grounding context. |
 
@@ -110,13 +110,17 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * **Scoped Canons:** For scoped canons in `<scope>/.canons/`, patterns MUST be automatically scoped to `<scope>/**`.
 
 4. **`inspect` Derivation:**
-   * If omitted, defaults to `["diff", "pr_title", "pr_body"]`.
-   * Supported tokens include:
+   * If omitted, defaults to `["diff", "pr_title?", "pr_body?"]`.
+   * Supported base tokens include:
      * `diff`: Unified git diff of changed files.
      * `pr_title`: Pull request title text.
      * `pr_body`: Pull request description / body markdown.
      * `commit_messages`: Commit messages associated with the pull request.
      * `linked_issues`: Titles, bodies, and metadata of issues linked to or referenced by the pull request.
+   * **Required vs. Optional Modifiers (`?` Rider):**
+     * **Required Plane (Default, e.g. `diff`, `pr_body`):** The filing MUST contain this exhibit plane for the canon to apply. A canon will be pruned during `discover` unless all of its declared required exhibit planes are satisfied in the intake filing.
+     * **Optional Plane (`?` Suffix, e.g. `pr_title?`, `pr_body?`):** An aspirational exhibit plane. If present in the intake filing, it is retained and admitted as evidence. If absent, the canon is NOT pruned and evaluates without that exhibit.
+     * **All-Optional Edge Case:** If all declared `inspect` tokens bear the `?` modifier (e.g. `[diff?, pr_body?]`), the canon requires at least one of the declared planes to be present in the intake filing.
    * **Runtime Resolution Semantics for `pr_title`:**
      * In GitHub Actions and CI webhook environments, `pr_title` evaluates to the active pull request title.
      * In local CLI environments (e.g. evaluating uncommitted changes or a local branch prior to opening a PR), `pr_title` gracefully evaluates to the commit subject of the current `HEAD` commit (or an empty string if no commits exist).

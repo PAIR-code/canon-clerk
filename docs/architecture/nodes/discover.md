@@ -89,11 +89,12 @@ If `candidateCanons.length === 0`:
 4. **Monorepo Scope Inheritance:** Applies implicit directory scoping:
    - Global canons in `.canons/**` apply repository-wide.
    - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` trigger boundary. If zero modified target files reside in `<scope>/`, the canon is excluded from candidates.
-5. **Bipartite Incidence & Matching:**
-   - **File Exhibits:** Evaluates declared `triggers:` globs in each canon against the list of modified target paths using picomatch / minimatch semantics.
-   - **Metadata Exhibits:** For canons inspecting non-file exhibits (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), matches whenever the corresponding metadata exhibit is present on `caseload.intake`.
+5. **Bipartite Incidence & Matching (Required vs. Optional Exhibits):**
+   - **Required Planes (Default, e.g. `diff`, `pr_body`):** Evaluated strictly. A canon is pruned unless all of its declared required exhibit planes are satisfied in the intake filing (e.g. modified files matching `triggers:` or present metadata).
+   - **Optional Planes (`?` Suffix, e.g. `pr_title?`, `pr_body?`):** Evaluated opportunistically. If present on `caseload.intake`, they are retained as active exhibits for the canon; if absent (such as in local CLI diff-only audits), their absence never causes the canon to be pruned.
+   - **Default Frontmatter Ergonomics:** Canons with omitted `inspect` frontmatter default to `["diff", "pr_title?", "pr_body?"]`, guaranteeing that standard code rules apply seamlessly in local CLI runs (where `diff` is present but PR metadata is absent) without requiring dummy metadata flags.
 6. **Two-Sided Mutual Pruning & Token Hygiene:**
-   - **Inapplicable Canons Pruned:** Any canon whose `triggers:` match 0 file exhibits and whose `inspect:` matches 0 available metadata exhibits is dropped $\implies$ `candidateCanons`.
+   - **Inapplicable Canons Pruned:** Any canon whose required exhibit planes are unsatisfied is dropped $\implies$ `candidateCanons`.
    - **Un-inspected Exhibits Pruned:** Any tendered exhibit (file path, `pr_title`, `pr_body`, etc.) that is neither triggered nor inspected by any surviving candidate canon is dropped $\implies$ `activeExhibits`. Downstream screening (`docket`) and adjudication (`audit`) will never serialize un-inspected exhibits into model prompts.
 7. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific active exhibits that activated it.
 
