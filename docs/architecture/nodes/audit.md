@@ -1,7 +1,6 @@
-# Stage 7: Judicial Adjudication (`audit`)
+# Judicial Adjudication (`audit`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 7  
 **Core Domain Engine:** `@canon-clerk/core`  
 **Driving Adapters:** `@canon-clerk/cli` (`audit`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 

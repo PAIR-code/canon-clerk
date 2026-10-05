@@ -1,7 +1,6 @@
-# Stage 6: Docket Evidence (`admit`)
+# Evidence Admissibility Triage (`admit`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 6  
 **Core Domain Engine:** `@canon-clerk/core`  
 **Driving Adapters:** `@canon-clerk/cli` (`admit`, `docket-evidence`, `docket-targets`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
@@ -22,7 +21,7 @@
 
 - **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.activeDocket`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`.
-- **Pruned from Execution:** `probe`, Stage 7 (`audit`).
+- **Pruned from Execution:** `probe`, `audit`.
 
 ---
 

@@ -2,12 +2,12 @@
 
 > Canon Clerk is an open specification and emerging semantic linter for software architecture, engineering conventions, and project tenets.
 
-Canon Clerk addresses the asymmetric cognitive tax placed on maintainers by AI code generators: generative coding tools accelerate code production, generating pull requests that pass static tests and AST linters, but quietly violate unwritten architectural tenets and project conventions. Canon Clerk formalizes these rules into zero-friction Markdown files stored in `.canons/` and audits changes using an efficient 7-stage Caseload DAG.
+Canon Clerk addresses the asymmetric cognitive tax placed on maintainers by AI code generators: generative coding tools accelerate code production, generating pull requests that pass static tests and AST linters, but quietly violate unwritten architectural tenets and project conventions. Canon Clerk formalizes these rules into zero-friction Markdown files stored in `.canons/` and audits changes using the Caseload DAG execution model.
 
 Key architectural concepts:
 - **Dual Pillars:** The project encompasses both the **Canon Standard** (an open specification for declarative, natural-language architectural invariants) and the **Clerk Runner** (the CI review gate and CLI engine that executes multi-stage LLM evaluation).
 - **Core Platform:** Canon Clerk is an automated review engine and specification platform, not a shell utility or script collection; helper scripts in `.agents/skills/` are auxiliary automation tools for AI coding assistants.
-- **Caseload Pipeline:** Audits execute across a Seven-Stage Caseload DAG: Branch A filing (`intake` → `discover` → `validate`), Branch B environment (`configure`), and the adjudication spine (`docket` → `admit` → `audit`), plus diagnostic `probe`.
+- **Caseload Pipeline:** Audits execute across the Caseload DAG: Branch A filing (`intake` → `discover` → `validate`), Branch B environment (`configure`), and the adjudication spine (`docket` → `admit` → `audit`), plus diagnostic `probe`.
 
 ## The Canon Standard
 

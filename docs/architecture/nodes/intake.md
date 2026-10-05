@@ -1,7 +1,6 @@
-# Stage 1: Change & Context Assembly (`intake`)
+# Filing Intake (`intake`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 1  
 **Core Domain Engine:** `@canon-clerk/core`  
 **Driving Adapters:** `@canon-clerk/cli` (`intake`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
@@ -13,7 +12,7 @@
 
 - **Imperative Verb:** `intake`
 - **Court Clerkship Role:** Filing intake and document receipt.
-- **Metric Pair:** N/A (Deterministic filing stage).
+- **Metric Pair:** N/A (Deterministic filing track).
 
 ---
 

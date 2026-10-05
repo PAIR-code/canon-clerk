@@ -1,7 +1,6 @@
-# Stage 4: Configuration & Environment (`configure`)
+# Configuration & Environment (`configure`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 4  
 **Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
 **Driving Adapters:** `@canon-clerk/cli` (`configure`, `check-config`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
@@ -46,7 +45,7 @@ Populates the `.config` field on the cumulative `Caseload`:
 
 ```ts
 export interface CaseloadConfig {
-  /** Model specifier for screening stages (e.g. 'google:gemini-3.5-flash-lite') */
+  /** Model specifier for screening nodes (e.g. 'google:gemini-3.5-flash-lite') */
   readonly screenerModel: string;
 
   /** Model specifier for adjudication (e.g. 'google:gemini-3.8-pro') */

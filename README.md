@@ -13,7 +13,7 @@
 [![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 
-**Canon Clerk** is an open specification and emerging **semantic linter** for software architecture, engineering conventions, and project tenets. It pairs declarative, version-controlled rule packs (*canons*) with an automated [Caseload Pipeline](docs/architecture.md) (a 7-stage DAG execution model) that audits pull requests against architectural invariants in CI.
+**Canon Clerk** is an open specification and emerging **semantic linter** for software architecture, engineering conventions, and project tenets. It pairs declarative, version-controlled rule packs (*canons*) with an automated [Caseload Pipeline](docs/architecture.md) (a DAG execution model) that audits pull requests against architectural invariants in CI.
 
 ---
 

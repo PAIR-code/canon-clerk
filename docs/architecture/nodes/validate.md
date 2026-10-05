@@ -1,7 +1,6 @@
-# Stage 3: Canon Rule Linter (`validate`)
+# Statutory Rule Linter (`validate`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 3  
 **Core Domain Engine:** `@canon-clerk/core` (with `@canon-clerk/schema`)  
 **Driving Adapters:** `@canon-clerk/cli` (`validate`, `check-canons`, `lint`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 

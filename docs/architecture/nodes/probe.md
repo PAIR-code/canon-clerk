@@ -1,7 +1,6 @@
-# Diagnostic Leaf: Connectivity & Health (`probe`)
+# Diagnostic Health Check (`probe`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** Diagnostic Leaf (Branch B Termination)  
 **Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
 **Driving Adapters:** `@canon-clerk/cli` (`probe`, `check-health`, `ping`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 

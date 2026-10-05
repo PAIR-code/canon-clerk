@@ -16,7 +16,7 @@ Every evaluation in Canon Clerk begins with an in-flight change:
 
 That in-flight change initiates a **`Caseload`**.
 
-The `Caseload` is the central, cumulative state container flowing through a **Directed Acyclic Graph (DAG)** of **Seven Stages**. Rather than a collection of disjoint subcommands producing disparate outputs, Canon Clerk models the entire evaluation as a functional state machine where each stage enriches the shared `Caseload` record.
+The `Caseload` is the central, cumulative state container flowing through a **Directed Acyclic Graph (DAG)** of functional stages. Rather than a collection of disjoint subcommands producing disparate outputs, Canon Clerk models the entire evaluation as a functional state machine where each stage enriches the shared `Caseload` record.
 
 Subcommands serve as named **terminal stop points** along the DAG, formulated as crisp, single-word **imperative verbs**:
 
@@ -48,13 +48,13 @@ The DAG consists of **Two Feeder Branches** that converge at `docket`, followed 
 ```mermaid
 flowchart TD
     subgraph BranchA ["Branch A: The Filing (Deterministic · 100% Local · 0 Tokens · No Credentials)"]
-        InFlight["In-Flight Change<br/>(Target Paths, Globs, or Diff Stream)"] --> S1["Stage 1: intake<br/>(Parse diffs, target paths/globs, & PR metadata → FileArtifacts)"]
-        S1 --> S2["Stage 2: discover<br/>(Enumerate target paths & match candidate canon triggers)"]
-        S2 --> S3["Stage 3: validate<br/>(AST & schema pre-flight of candidate canons)"]
+        InFlight["In-Flight Change<br/>(Target Paths, Globs, or Diff Stream)"] --> S1["intake<br/>(Parse diffs, target paths/globs, & PR metadata → FileArtifacts)"]
+        S1 --> S2["discover<br/>(Enumerate target paths & match candidate canon triggers)"]
+        S2 --> S3["validate<br/>(AST & schema pre-flight of candidate canons)"]
     end
 
     subgraph BranchB ["Branch B: The Environment (Deterministic · 100% Local · 0 Tokens)"]
-        Env["Environment & Flags<br/>(API keys, model tiers, reasoning budgets)"] --> S4["Stage 4: configure<br/>(Resolve & normalize provider configuration)"]
+        Env["Environment & Flags<br/>(API keys, model tiers, reasoning budgets)"] --> S4["configure<br/>(Resolve & normalize provider configuration)"]
     end
 
     subgraph DiagnosticLeaf ["Diagnostic Leaf (Network · Latency · 0 Tokens)"]
@@ -62,8 +62,8 @@ flowchart TD
     end
 
     subgraph HeuristicCascade ["The Heuristic Cascade (AI-Driven · Positive Polarity ≥ 0.5 Threshold)"]
-        S5["Stage 5: docket<br/>(Macro Triage: Candidate canons → Active Cases)"] --> S6["Stage 6: admit<br/>(Micro Triage: Target files/diff hunks → Admitted Exhibits)"]
-        S6 --> S7["Stage 7: audit<br/>(Adjudication: Single-trial evaluation of Exhibits vs. Statute)"]
+        S5["docket<br/>(Macro Triage: Candidate canons → Active Cases)"] --> S6["admit<br/>(Micro Triage: Target files/diff hunks → Admitted Exhibits)"]
+        S6 --> S7["audit<br/>(Adjudication: Single-trial evaluation of Exhibits vs. Statute)"]
     end
 
     S3 --> S5
@@ -76,7 +76,7 @@ flowchart TD
 
 ## 3. Hexagonal Architecture: Driving Adapters vs. Core Domain Processing
 
-Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)** across its workspace packages. The 7-stage DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
+Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)** across its workspace packages. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
 
 ```mermaid
 flowchart TD
@@ -118,43 +118,39 @@ flowchart TD
 
 Grounding AI evaluation in the cognitive and procedural division of labor of a court clerkship establishes distinct, unambiguous semantics for every heuristic stage:
 
-| Pipeline Stage | Subcommand | Core Concept | Metric Pair | Question Answered | Gate / Verdict Threshold |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Stage 5: Colorability** | `docket` | **Colorability** *(Subject-Matter Jurisdiction)* | `colorabilityScore`<br/>`colorabilitySummary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
-| **Stage 6: Admissibility** | `admit` | **Admissibility** *(Relevance of Evidence)* | `admissibilityScore`<br/>`admissibilitySummary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
-| **Stage 7: Audit** | `audit` | **Compliance** *(Substantive Merits)* | `complianceScore`<br/>`complianceSummary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
+| Node / Imperative Verb | Core Concept | Metric Pair | Question Answered | Gate / Verdict Threshold |
+| :--- | :--- | :--- | :--- | :--- |
+| **`docket`** | **Colorability** *(Subject-Matter Jurisdiction)* | `colorabilityScore`<br/>`colorabilitySummary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
+| **`admit`** | **Admissibility** *(Relevance of Evidence)* | `admissibilityScore`<br/>`admissibilitySummary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
+| **`audit`** | **Compliance** *(Substantive Merits)* | `complianceScore`<br/>`complianceSummary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
 
 ### The Court Clerkship Taxonomy
 - **The Caseload:** The cumulative lifecycle container for the evaluation run.
-- **Candidate Canons:** Rules whose `triggers:` match touched files during `discover` (Stage 2).
-- **Cases:** Canons that pass macro triage during `docket` (Stage 5) and enter the Active Docket.
-- **Exhibits:** Code files, diff hunks, or persistent reference documents admitted during `admit` (Stage 6) as relevant evidence for a specific Case.
-- **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` (Stage 7) per Case.
+- **Candidate Canons:** Rules whose `triggers:` match touched files during `discover`.
+- **Cases:** Canons that pass macro triage during `docket` and enter the Active Docket.
+- **Exhibits:** Code files, diff hunks, or persistent reference documents admitted during `admit` as relevant evidence for a specific Case.
+- **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` per Case.
 
 ### Positive Polarity Consistency
 All three heuristic metrics share an identical polarity convention: **a higher score reflects the affirmative presence of the named property**:
-- **Stage 5 (High Colorability):** Affirmative jurisdiction $\implies$ canon opened as an active Case.
-- **Stage 6 (High Admissibility):** Affirmative relevance $\implies$ file/hunk admitted as an Exhibit for that Case.
-- **Stage 7 (High Compliance):** Affirmative adherence $\implies$ change complies with canon statute and passes review (`score >= 0.5`).
+- **`docket` (High Colorability):** Affirmative jurisdiction $\implies$ canon opened as an active Case.
+- **`admit` (High Admissibility):** Affirmative relevance $\implies$ file/hunk admitted as an Exhibit for that Case.
+- **`audit` (High Compliance):** Affirmative adherence $\implies$ change complies with canon statute and passes review (`score >= 0.5`).
 
 ---
 
-## 5. The Seven Pipeline Stages
+## 5. The Caseload Pipeline Nodes
 
-| Stage | Subcommand | Engine / Tier | Cost / Latency | Gate Rule |
+| Node / Verb | Track | Engine / Tier | Cost / Latency | Gate Rule |
 | :--- | :--- | :--- | :--- | :--- |
-| **Branch A: Filing Track** | | | | |
-| 1 | `intake` | Deterministic | 0 tokens, ~5ms | Parsed context; fail fast (code 2) on corrupted input |
-| 2 | `discover` | Deterministic | 0 tokens, ~8ms | Matches > 0; short-circuits (exit 0) on 0 candidates |
-| 3 | `validate` | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
-| **Branch B: Environment Track** | | | | |
-| 4 | `configure` | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
-| **Diagnostic Leaf** | | | | |
-| — | `probe` | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
-| **Adjudication Spine** | | | | |
-| 5 | `docket` | Flash-Lite AI | ~400ms, low $ | `colorabilityScore >= 0.5`; exits 0 if docket empty |
-| 6 | `admit` | Flash-Lite AI | ~600ms, low $ | `admissibilityScore >= 0.5`; exits 0 if no exhibits |
-| 7 | `audit` | Pro Reasoning | ~2.5s, targeted | `complianceScore >= 0.5` $\implies$ pass (0), else fail (1) |
+| `intake` | Branch A (Filing) | Deterministic | 0 tokens, ~5ms | Parsed context; fail fast (code 2) on corrupted input |
+| `discover` | Branch A (Filing) | Deterministic | 0 tokens, ~8ms | Matches > 0; short-circuits (exit 0) on 0 candidates |
+| `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
+| `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
+| `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
+| `docket` | Cascade Spine | Flash-Lite AI | ~400ms, low $ | `colorabilityScore >= 0.5`; exits 0 if docket empty |
+| `admit` | Cascade Spine | Flash-Lite AI | ~600ms, low $ | `admissibilityScore >= 0.5`; exits 0 if no exhibits |
+| `audit` | Cascade Spine | Pro Reasoning | ~2.5s, targeted | `complianceScore >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -189,10 +185,10 @@ flowchart TD
 | Pipeline Step | Canons / Cases in Flight | Target Exhibits | Model Tier | Token Cost | Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
-| **Post-Stage 2 (`discover`)** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **Post-Stage 5 (`docket`)** | 3 active Cases | 6 touched files | `gemini-3.5-flash-lite` | ~1,200 tokens | ~420ms |
-| **Post-Stage 6 (`admit`)** | 3 active Cases | 5 admitted hunks | `gemini-3.5-flash-lite` | ~1,800 tokens | ~610ms |
-| **Stage 7 (`audit`)** | 3 trials | 5 exhibits | `gemini-3.8-pro` | ~4,500 tokens | ~2,400ms |
+| **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
+| **`docket` Gate** | 3 active Cases | 6 touched files | `gemini-3.5-flash-lite` | ~1,200 tokens | ~420ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | `gemini-3.5-flash-lite` | ~1,800 tokens | ~610ms |
+| **`audit` Adjudication** | 3 trials | 5 exhibits | `gemini-3.8-pro` | ~4,500 tokens | ~2,400ms |
 | **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~7,500 tokens** | **< 3.5s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
@@ -348,28 +344,28 @@ export interface Caseload {
   /** Schema specification version */
   readonly version: '1.0';
 
-  /** Stage 1: Change diffs (FileArtifacts), target paths, and PR/commit metadata */
+  /** Intake: Change diffs (FileArtifacts), target paths, and PR/commit metadata */
   readonly intake?: CaseloadIntake | undefined;
 
-  /** Stage 2: Target paths, candidate canons, and trigger intersections */
+  /** Discovery: Target paths, candidate canons, and trigger intersections */
   readonly discovery?: CaseloadDiscovery | undefined;
 
-  /** Stage 3: Candidate canons syntax and frontmatter validation */
+  /** Validation: Candidate canons syntax and frontmatter validation */
   readonly validation?: CaseloadValidation | undefined;
 
-  /** Stage 4: Verified configuration and model settings */
+  /** Configuration: Verified configuration and model settings */
   readonly config?: CaseloadConfig | undefined;
 
-  /** Diagnostic Leaf: Live provider connectivity probe results */
+  /** Probe (Diagnostic Leaf): Live provider connectivity probe results */
   readonly probe?: CaseloadProbe | undefined;
 
-  /** Stage 5: Macro triage assessments (Active Cases on Docket) */
+  /** Docket (Macro Triage): Macro triage assessments (Active Cases on Docket) */
   readonly docket?: CaseloadDocket | undefined;
 
-  /** Stage 6: Micro triage evidence admissibility (Admitted Exhibits per Case) */
+  /** Admissibility (Micro Triage): Micro triage evidence admissibility (Admitted Exhibits per Case) */
   readonly evidence?: CaseloadEvidence | undefined;
 
-  /** Stage 7: Substantive verdicts and line annotations */
+  /** Audit (Adjudication): Substantive verdicts and line annotations */
   readonly verdict?: CaseloadVerdict | undefined;
 }
 ```

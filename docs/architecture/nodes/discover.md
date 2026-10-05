@@ -1,7 +1,6 @@
-# Stage 2: Candidate Identification (`discover`)
+# Candidate Identification (`discover`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 2  
 **Core Domain Engine:** `@canon-clerk/core`  
 **Driving Adapters:** `@canon-clerk/cli` (`discover`, `check-triggers`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 

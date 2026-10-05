@@ -4,7 +4,7 @@ Welcome! This document provides orientation, architectural anchors, and operatio
 
 ## 1. Project Overview
 
-**Canon Clerk** is an automated review gate that enforces _canons_—standard engineering rule packs and repository-specific invariants authored as Markdown files (with optional YAML frontmatter). Evaluation is orchestrated across a **Seven-Stage Caseload DAG** (`intake` → `discover` → `validate` on Branch A; `configure` on Branch B; converging at `docket` → `admit` → `audit`). See [SPEC.md](SPEC.md) for the formal canon specification and [docs/architecture.md](docs/architecture.md) (with [overview](docs/architecture/overview.md)) for the Caseload pipeline architecture.
+**Canon Clerk** is an automated review gate that enforces _canons_—standard engineering rule packs and repository-specific invariants authored as Markdown files (with optional YAML frontmatter). Evaluation is orchestrated across the **Caseload DAG** (`intake` → `discover` → `validate` on Branch A; `configure` on Branch B; converging at `docket` → `admit` → `audit`, with diagnostic `probe`). See [SPEC.md](SPEC.md) for the formal canon specification and [docs/architecture.md](docs/architecture.md) (with [overview](docs/architecture/overview.md)) for the Caseload pipeline architecture.
 
 > **Canon:** *(n)*. A source code or repository change rule that is: **semantic**, **atomic**, **falsifiable**, **bounded**, **grounded**, **salient**, and **correctable**.
 

@@ -1,7 +1,6 @@
-# Stage 5: Docket Canons (`docket`)
+# Macro Jurisdiction Triage (`docket`)
 
 **Status:** Authoritative Architectural Standard  
-**Stage:** 5  
 **Core Domain Engine:** `@canon-clerk/core`  
 **Driving Adapters:** `@canon-clerk/cli` (`docket`, `docket-canons`, `color`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
@@ -24,7 +23,7 @@
   - `validate` (Branch A: validated candidate canons in `caseload.discovery` and `caseload.validation`).
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** `intake`, `discover`.
-- **Pruned from Execution:** `probe`, Stages 6–7.
+- **Pruned from Execution:** `probe`, downstream adjudication nodes (`admit`, `audit`).
 
 ---
 
