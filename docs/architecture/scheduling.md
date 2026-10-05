@@ -69,7 +69,7 @@ To uphold this guarantee, the scheduler enforces the **Guarded / Lazy Scheduling
 ```mermaid
 flowchart TD
     Start["Invoke Converged Target (e.g. audit)"] --> S1["intake<br/>(Ingest diffs & file paths)"]
-    S1 --> S2["discover<br/>(Evaluate triggers: intersection)"]
+    S1 --> S2["discover<br/>(Check requires: preconditions & match triggers:)"]
     S2 --> Check{"Candidate Canons > 0?"}
     
     Check -- "No (0 Matches)" --> ShortCircuit["Short-Circuit Exit 0<br/>(PR touches un-governed files)<br/><b>0 Tokens · ~15ms · 0 Credentials</b>"]
@@ -85,7 +85,7 @@ flowchart TD
 ```
 
 ### Sequential Invariant Guarantees:
-1. **`intake` and `discover` execute first.** If zero candidate canons match the modified paths, Canon Clerk immediately logs `0 candidate canons matched` and exits with code `0`.
+1. **`intake` and `discover` execute first.** If zero candidate canons match the modified paths and state preconditions, Canon Clerk immediately logs `0 candidate canons matched` and exits with code `0`.
 2. **Branch B (`configure`) is never evaluated if candidates count is zero.** Fork pull requests, documentation updates, and changes to un-governed directories succeed in ~15ms without a configured `GEMINI_API_KEY`.
 3. **`validate` evaluates candidate syntax before credentials are checked.** If a canon contains YAML or markdown errors, the runner fails fast with exit code `1` before loading provider credentials.
 4. **`configure` resolves JIT** only when valid candidate canons exist and heuristic screening is imminent.

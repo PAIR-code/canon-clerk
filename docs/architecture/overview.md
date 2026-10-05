@@ -37,7 +37,7 @@ When invoked, a subcommand executes only the **transitive dependency closure** r
 The DAG consists of **Two Feeder Branches** that converge at `docket`, followed by the **Adjudication Spine**, with an auxiliary diagnostic leaf for provider health:
 
 1. **Branch A: The Filing Track (`intake` $\longrightarrow$ `discover` $\longrightarrow$ `validate`):**  
-   Ingests in-flight diffs or target paths, matches candidate canon triggers, and validates candidate canon ASTs and schemas. Completely local, deterministic, and requires 0 tokens and zero API credentials.
+   Ingests in-flight diffs or target paths, verifies state preconditions (`requires:`), matches candidate canon triggers, and validates candidate canon ASTs and schemas. Completely local, deterministic, and requires 0 tokens and zero API credentials.
 2. **Branch B: The Environment Track (`configure`):**  
    Resolves provider credentials (`GEMINI_API_KEY`), model specifiers, reasoning budgets, and workspace boundaries. Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
 3. **Diagnostic Leaf (`probe`):**  
@@ -49,7 +49,7 @@ The DAG consists of **Two Feeder Branches** that converge at `docket`, followed 
 flowchart TD
     subgraph BranchA ["Branch A: The Filing (Deterministic · 100% Local · 0 Tokens · No Credentials)"]
         InFlight["In-Flight Change<br/>(Target Paths, Globs, or Diff Stream)"] --> S1["intake<br/>(Parse diffs, target paths/globs, & PR metadata → FileArtifacts)"]
-        S1 --> S2["discover<br/>(Enumerate target paths & match candidate canon triggers)"]
+        S1 --> S2["discover<br/>(Check requires: preconditions, match triggers, & prune exhibits)"]
         S2 --> S3["validate<br/>(AST & schema pre-flight of candidate canons)"]
     end
 
@@ -126,7 +126,7 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 
 ### The Court Clerkship Taxonomy
 - **The Caseload:** The cumulative lifecycle container for the evaluation run.
-- **Candidate Canons:** Rules whose `triggers:` or `inspect:` planes match in-flight exhibits during `discover`.
+- **Candidate Canons:** Rules whose declared `requires:` state preconditions match the Target File Tree, and whose `triggers:` or `inspect:` planes match in-flight exhibits during `discover` (subject to monorepo Scope Containment).
 - **Cases:** Canons that pass macro triage during `docket` and enter the Active Docket.
 - **Exhibits (The Unified Evidence Lifecycle):**
   - **Tendered Exhibits (`intake`):** Raw filing inputs, including literal text metadata (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), diff streams (`diff`), and target file discovery directives.
@@ -147,7 +147,7 @@ All three heuristic metrics share an identical polarity convention: **a higher s
 | Node / Verb | Track | Engine / Tier | Cost / Latency | Gate Rule |
 | :--- | :--- | :--- | :--- | :--- |
 | `intake` | Branch A (Filing) | Deterministic | 0 tokens, ~5ms | Parsed context; fail fast (code 2) on corrupted input |
-| `discover` | Branch A (Filing) | Deterministic | 0 tokens, ~8ms | Matches > 0; short-circuits (exit 0) on 0 candidates |
+| `discover` | Branch A (Filing) | Deterministic | 0 tokens, ~8ms | Matches > 0; verifies `requires:` & `triggers:`; short-circuits (exit 0) on 0 candidates |
 | `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
 | `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
@@ -163,7 +163,7 @@ The Caseload Pipeline functions as an aggressive filter funnel, eliminating the 
 
 ```mermaid
 flowchart TD
-    C100["100 Canons in Repository"] --> G2{"discover Gate<br/>(0 triggers matched?)"}
+    C100["100 Canons in Repository"] --> G2{"discover Gate<br/>(requires & triggers matched?)"}
     G2 -- "0 Matches" --> Exit0["Exit 0<br/>(0 tokens · ~8ms · Zero Credentials)"]
     G2 -- "Triggers Matched" --> C20["20 Candidate Canons"]
     

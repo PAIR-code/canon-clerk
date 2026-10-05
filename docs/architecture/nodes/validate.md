@@ -72,7 +72,8 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 1. **Candidate Intake:** Extracts `candidateCanons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
 2. **AST Parsing via `@canon-clerk/schema`:** Parses Markdown AST and YAML frontmatter blocks.
 3. **Static Rule Verification:**
-   - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `inspect`, `tags`, `references`).
+   - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `requires`, `inspect`, `tags`, `references`).
+   - **Scope Containment Verification:** Enforces that scoped canons located in `<scope>/.canons/**` do not attempt directory traversal (e.g. `../`) or declare paths superior or external to `<scope>/` in `triggers:`, `requires:`, or `references:`.
    - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
    - **Canon Naming Standard:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`).
    - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.

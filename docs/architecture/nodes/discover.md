@@ -8,16 +8,18 @@
 
 ## 1. Domain Concept & Role (`core`)
 
-`discover` acts as the **Bipartite Relevance Sieve & Dual Pruning Gate** of the pipeline. In the court clerkship taxonomy, it represents the clerk reviewing tendered filings to resolve referenced files and compare all tendered exhibits against the court's codified canons:
+`discover` acts as the **Multi-Plane Relevance Sieve & Dual Pruning Gate** of the pipeline. In the court clerkship taxonomy, it represents the clerk reviewing tendered filings to resolve referenced files, verify state preconditions, enforce monorepo jurisdictional boundaries, and compare all tendered exhibits against the court's codified canons:
 
 1. **Exhibit Materialization:** Resolves exhibit discovery directives (expanding directory recursion roots, matching globs against workspace checkout into concrete file exhibits).
-2. **Two-Sided Mutual Pruning:**
-   - **Prunes Inapplicable Canons:** Canons matching zero in-flight exhibits are dropped $\implies$ `candidateCanons`.
+2. **State Precondition Verification:** Evaluates `requires:` path patterns against the Target File Tree to ensure baseline environment dependencies exist before admitting candidate canons.
+3. **Subordination & Scope Containment:** Enforces monorepo boundaries, ensuring scoped canons evaluate strictly within their enclosing `<scope>/`.
+4. **Two-Sided Mutual Pruning:**
+   - **Prunes Inapplicable Canons:** Canons with unmet `requires` preconditions or zero matching required exhibits are dropped $\implies$ `candidateCanons`.
    - **Prunes Un-inspected Exhibits:** Exhibits not inspected or triggered by any surviving candidate canon are dropped $\implies$ `activeExhibits` (preserving context-window hygiene).
 
 - **Imperative Verb:** `discover`
-- **Court Clerkship Role:** Exhibit materialization, candidate canon identification, and mutual exhibit pruning.
-- **Metric Pair:** N/A (Deterministic bipartite intersection).
+- **Court Clerkship Role:** Exhibit materialization, precondition verification, scope containment, candidate canon identification, and mutual exhibit pruning.
+- **Metric Pair:** N/A (Deterministic multi-plane intersection).
 
 ---
 
@@ -86,17 +88,23 @@ If `candidateCanons.length === 0`:
 2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidateCanons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
 3. **Canon Corpus Enumeration:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`).
-4. **Monorepo Scope Inheritance:** Applies implicit directory scoping:
+4. **Monorepo Subordination & Scope Containment:** Enforces strict boundary encapsulation:
    - Global canons in `.canons/**` apply repository-wide.
-   - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` trigger boundary. If zero modified target files reside in `<scope>/`, the canon is excluded from candidates.
-5. **Bipartite Incidence & Matching (Required vs. Optional Exhibits):**
+   - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` boundary:
+     - Scoped canons are never evaluated against files outside `<scope>/`. If zero modified target files reside in `<scope>/`, the canon is excluded from candidates.
+     - All declared paths and glob patterns in `triggers:`, `requires:`, and `references:` are evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal superior to `<scope>/` (e.g. `../`) is rejected as a validation error.
+     - Scoped canons requiring files outside `<scope>/` must be hoisted to a parent `.canons/` directory.
+5. **State Precondition Verification (`requires:`):** Evaluates declared `requires:` path patterns against the **Target File Tree** representing the final state being tested (PR `HEAD` commit in CI, filesystem working directory in local CLI, or speculative plan in dry-run modes):
+   - All patterns in `requires:` MUST match at least one file present in the Target File Tree. If any pattern matches zero files, the canon is skipped / pruned with a diagnostic notice.
+   - For scoped canons, `requires:` preconditions are evaluated strictly against the Target File Tree within `<scope>/`.
+6. **Bipartite Exhibit Matching (Required vs. Optional Exhibits):**
    - **Required Planes (Default, e.g. `diff`, `pr_body`):** Evaluated strictly. A canon is pruned unless all of its declared required exhibit planes are satisfied in the intake filing (e.g. modified files matching `triggers:` or present metadata).
    - **Optional Planes (`?` Suffix, e.g. `pr_title?`, `pr_body?`):** Evaluated opportunistically. If present on `caseload.intake`, they are retained as active exhibits for the canon; if absent (such as in local CLI diff-only audits), their absence never causes the canon to be pruned.
    - **Default Frontmatter Ergonomics:** Canons with omitted `inspect` frontmatter default to `["diff", "pr_title?", "pr_body?"]`, guaranteeing that standard code rules apply seamlessly in local CLI runs (where `diff` is present but PR metadata is absent) without requiring dummy metadata flags.
-6. **Two-Sided Mutual Pruning & Token Hygiene:**
-   - **Inapplicable Canons Pruned:** Any canon whose required exhibit planes are unsatisfied is dropped $\implies$ `candidateCanons`.
+7. **Two-Sided Mutual Pruning & Token Hygiene:**
+   - **Inapplicable Canons Pruned:** Any canon whose `requires:` preconditions are unmet, or whose `triggers:` match 0 file exhibits, or whose required `inspect:` exhibit planes are unsatisfied is dropped $\implies$ `candidateCanons`.
    - **Un-inspected Exhibits Pruned:** Any tendered exhibit (file path, `pr_title`, `pr_body`, etc.) that is neither triggered nor inspected by any surviving candidate canon is dropped $\implies$ `activeExhibits`. Downstream screening (`docket`) and adjudication (`audit`) will never serialize un-inspected exhibits into model prompts.
-7. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific active exhibits that activated it.
+8. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific active exhibits that activated it.
 
 ---
 
