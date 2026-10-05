@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`docket`, `docket-canons`, `color`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Driving Adapters:** `@canon-clerk/cli` (`docket`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
@@ -102,7 +102,7 @@ If `activeDocket.length === 0`:
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `docket` (aliased as `docket-canons` and `color`):
+The CLI exposes `docket` as an imperative subcommand:
 
 ```bash
 # Execute macro triage against an upstream Caseload:

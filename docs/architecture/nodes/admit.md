@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`admit`, `docket-evidence`, `docket-targets`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Driving Adapters:** `@canon-clerk/cli` (`admit`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
@@ -101,7 +101,7 @@ If all active cases retain zero admitted exhibits:
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `admit` (aliased as `docket-evidence` and `docket-targets`):
+The CLI exposes `admit` as an imperative subcommand:
 
 ```bash
 # Execute evidence triage against an upstream Caseload:

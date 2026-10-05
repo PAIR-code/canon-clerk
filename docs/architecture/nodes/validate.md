@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** `@canon-clerk/core` (with `@canon-clerk/schema`)  
-**Driving Adapters:** `@canon-clerk/cli` (`validate`, `check-canons`, `lint`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Driving Adapters:** `@canon-clerk/cli` (`validate`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
@@ -83,7 +83,7 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `validate` as an imperative subcommand (with `check-canons` as a backward-compatible alias for `--all-canons` mode):
+The CLI exposes `validate` as an imperative subcommand:
 
 ```bash
 # Validate full repository canon corpus (Codex Audit):
@@ -94,9 +94,6 @@ git diff origin/main | canon-clerk validate --diff -
 
 # Validate candidates on an existing Caseload:
 canon-clerk validate --caseload caseload-2.json --json
-
-# Backward-compatible script alias (pre-configured for --all-canons):
-canon-clerk check-canons
 ```
 
 ### Missing Input Source Guard (Naked Invocation)

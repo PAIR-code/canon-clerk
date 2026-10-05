@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
-**Driving Adapters:** `@canon-clerk/cli` (`probe`, `check-health`, `ping`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Driving Adapters:** `@canon-clerk/cli` (`probe`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
@@ -79,7 +79,7 @@ export interface CaseloadProbe {
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `probe` (aliased as `check-health` and `ping`):
+The CLI exposes `probe` as an imperative subcommand:
 
 ```bash
 # Human-readable connectivity and latency check:

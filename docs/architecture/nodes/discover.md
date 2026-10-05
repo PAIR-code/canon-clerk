@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`discover`, `check-triggers`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Driving Adapters:** `@canon-clerk/cli` (`discover`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
@@ -82,7 +82,7 @@ If `candidateCanons.length === 0`:
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `discover` (aliased as `check-triggers`) as an imperative subcommand:
+The CLI exposes `discover` as an imperative subcommand:
 
 ```bash
 # Evaluate discovery on in-flight diff stream:
@@ -95,7 +95,7 @@ canon-clerk discover --all-canons
 canon-clerk discover --caseload caseload-1.json --json
 
 # Predicate mode (-q):
-git diff origin/main | canon-clerk check-triggers -q -
+git diff origin/main | canon-clerk discover -q -
 ```
 
 ### CLI Flags & Options

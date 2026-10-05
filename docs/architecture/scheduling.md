@@ -56,7 +56,7 @@ When an operator or CI workflow executes a subcommand $T$, the runner constructs
 1. **Branch A Independence:** `configure` and `probe` execute with zero knowledge of Git diffs, modified files, or repository canons.
 2. **Branch B Independence:** `intake`, `discover`, and `validate` execute with zero knowledge of AI providers, model configurations, or API credentials.
 3. **Diagnostic Isolation:** `probe` is never scheduled during review cascades (`docket`, `admit`, `audit`), eliminating unnecessary health-check latency prior to screening.
-4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons` (or via the legacy `check-canons` alias), Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidateCanons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
+4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons`, Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidateCanons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
 
 ---
 

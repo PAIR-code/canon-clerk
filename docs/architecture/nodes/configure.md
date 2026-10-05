@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
-**Driving Adapters:** `@canon-clerk/cli` (`configure`, `check-config`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Driving Adapters:** `@canon-clerk/cli` (`configure`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
@@ -72,7 +72,7 @@ export interface CaseloadConfig {
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `configure` (aliased as `check-config` and `config`):
+The CLI exposes `configure` as an imperative subcommand:
 
 ```bash
 # Normalize and print active configuration:
