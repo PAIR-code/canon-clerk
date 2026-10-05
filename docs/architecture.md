@@ -1,86 +1,75 @@
-# Architecture & Evaluation Cascade
+# Architecture & The Caseload Pipeline
 
-**Status:** Living Architectural Framework. For the formal multi-phase cascade specification, see **[Three-Phase Evaluation Cascade](architecture/evaluation-cascade.md)**.
+**Status:** Authoritative Architectural Standard  
+**Domain Concept:** The Caseload DAG Execution Model
 
 ---
 
 ## 1. Overview & Motivation
 
-Canon Clerk is designed to audit pull requests against natural language project invariants without incurring the latency and cost of running large reasoning models over every canon for every commit.
+Canon Clerk is an automated review gate that enforces declarative engineering rule packs (*canons*) without incurring the prohibitive latency and cost of evaluating every rule with deep reasoning models on every commit.
 
-To balance token economics, latency, and audit rigor, Canon Clerk executes audits through a domain-partitioned **Three-Phase Evaluation Cascade: Check → Docket → Audit**:
+Evaluation is orchestrated across a **Seven-Stage Directed Acyclic Graph (DAG)** organized around a central, cumulative state container: **The Caseload**.
 
-```mermaid
-flowchart LR
-    PR[Pull Request] --> P1["Phase 1: Check<br/>(Deterministic · 0 tokens)"]
-    P1 -- "Candidate Canons" --> P2["Phase 2: Docket<br/>(Fast Triage · Fast LLM)"]
-    P2 -- "Docketed Targets" --> P3["Phase 3: Audit<br/>(Adjudication · Reasoning LLM)"]
-    P3 --> Verdict[PR Verdict & Annotations]
+Rather than disjoint subcommands producing disparate outputs, Canon Clerk treats the entire evaluation as a functional state machine where subcommands serve as named **terminal stop points** along the DAG, formulated as crisp, single-word **imperative verbs**:
+
+```text
+       [ intake ]
+           │
+           ▼
+      [ discover ]
+           │
+           ▼
+      [ validate ] ──────┐
+                         ▼
+  [ configure ] ────► [ docket ] ────► [ admit ] ────► [ audit ]
+        │
+        ▼ (diagnostic leaf)
+     [ probe ]
 ```
 
-By cascading from deterministic filters (Phase 1) to lightweight jurisdiction screening (Phase 2) and finally to targeted deep reasoning (Phase 3), Canon Clerk minimizes API costs while maintaining high-fidelity review gates.
+---
+
+## 2. Architectural Documentation Suite
+
+The complete architectural specification is partitioned across the following dedicated documents:
+
+### Core Framework & Execution Model
+- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Two Feeder Branches $\to$ Adjudication Spine topology, the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, TypeScript `Caseload` schema, and telemetry event stream.
+- **[DAG Scheduling & Semantics](architecture/scheduling.md):** Transitive dependency closure calculation, branch pruning, the Guarded/Lazy Scheduling Invariant (zero-credential short-circuits for un-governed changes), telescoping backfill mode, and the static schedule lookup table.
+
+### Node-by-Node Specifications (`docs/architecture/nodes/`)
+Comprehensive documentation for each of the eight imperative verb subcommands:
+
+1. **[intake](architecture/nodes/intake.md):** Stage 1 universal front door parsing diffs, target paths/globs, and PR metadata into `FileArtifact` records (Branch A).
+2. **[discover](architecture/nodes/discover.md):** Stage 2 path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches (Branch A).
+3. **[validate](architecture/nodes/validate.md):** Stage 3 deterministic AST and YAML schema pre-flight linter for candidate canons (Branch A).
+4. **[configure](architecture/nodes/configure.md):** Stage 4 local environment and provider credential normalizer (Branch B).
+5. **[probe](architecture/nodes/probe.md):** Diagnostic leaf measuring live provider reachability and roundtrip endpoint latency.
+6. **[docket](architecture/nodes/docket.md):** Stage 5 macro triage establishing subject-matter jurisdiction (`colorabilityScore >= 0.5`).
+7. **[admit](architecture/nodes/admit.md):** Stage 6 micro triage establishing evidentiary admissibility (`admissibilityScore >= 0.5`).
+8. **[audit](architecture/nodes/audit.md):** Stage 7 single-trial substantive adjudication rendering decrees, evaluating exceptions, and generating line annotations.
 
 ---
 
-## 2. The Three-Phase Cascade
+## 3. The Seven Pipeline Stages at a Glance
 
-See **[Evaluation Cascade Specification](architecture/evaluation-cascade.md)** for the complete state machine, normative AI contracts, and `FileArtifact` data structures.
-
-### Phase 1: Check (Deterministic Intake · 0 Tokens)
-* **Goal:** Instantly verify procedural compliance, syntax/schema validity, and discard canons whose file boundaries do not intersect with PR changes.
-* **Normative AI Contract:** **MUST NOT** use AI. 100% deterministic, local, and offline.
-* **Commands:**
-  * `canon-clerk check-canons`: Validates canon markdown syntax, YAML frontmatter schemas, naming conventions, and structural rules.
-  * `canon-clerk check-triggers`: Evaluates file changes against canon declared `triggers:` globs, enforcing monorepo package boundaries (`<scope>/.canons/` $\implies$ `<scope>/**`).
-
-### Phase 2: Docket (Triage & Jurisdiction · Minimal Tokens)
-* **Goal:** Rapidly determine which candidate canons have a colorable claim against the PR, and docket specific target diff hunks and referenced exhibits.
-* **Normative AI Contract:** **MAY** use AI. **SHOULD** use fast, low-cost triage models (`gemini-3.5-flash-lite`).
-* **Commands:**
-  * `canon-clerk docket-canons`: Evaluates candidate canons against high-level PR metadata and diff statistics in a single aggregate triage call.
-  * `canon-clerk docket-targets`: Resolves specific diff hunks, referenced artifacts, or metadata fields into evidence for each docketed canon.
-
-### Phase 3: Audit (Substantive Adjudication · Targeted Tokens)
-* **Goal:** Deeply analyze docketed exhibits to reach a definitive compliance verdict, evaluate exceptions, and generate actionable remediation instructions.
-* **Normative AI Contract:** **WILL** use AI. **MAY** use frontier reasoning models (`gemini-3.8-pro`).
-* **Commands:**
-  * `canon-clerk audit`: Evaluates docketed targets against the What/When/Why/How tetrad, short-circuits verified `Exception` clauses, and posts line-level code annotations.
+| Stage | Subcommand | Track | Tier | Cost / Latency | Gate Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1** | `intake` | Branch A (Filing) | Local parser | 0 tokens, ~5ms | Parsed context; fails on corrupted stream |
+| **2** | `discover` | Branch A (Filing) | Path matcher | 0 tokens, ~8ms | Matches > 0; short-circuits (exit 0) on 0 candidates |
+| **3** | `validate` | Branch A (Filing) | AST linter | 0 tokens, ~12ms | 0 syntax errors; fails fast (exit 1) on error |
+| **4** | `configure` | Branch B (Env) | Config loader | 0 tokens, <5ms | Valid config; fails fast (exit 2) on missing keys |
+| **—** | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Reachable; fails fast (exit 2) on unreachable |
+| **5** | `docket` | Cascade Spine | Flash-Lite AI | ~400ms, low $ | `colorabilityScore >= 0.5`; exits 0 if empty |
+| **6** | `admit` | Cascade Spine | Flash-Lite AI | ~600ms, low $ | `admissibilityScore >= 0.5`; exits 0 if no exhibits |
+| **7** | `audit` | Cascade Spine | Pro Reasoning | ~2.5s, targeted | `complianceScore >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
-## 3. Directives & Execution Mechanics
+## 4. Spec-Driven Living Specifications
 
-When evaluating canons against pull request diffs, the Deep Auditor enforces the **What / When / Why / How** tetrad using first-class execution directives defined in [SPEC.md](../SPEC.md):
-
-### 3.1 `Exception` (Permissible Deviations / Conditional Pass)
-* **Actor:** Evaluator (Clerk AI).
-* **CI Verdict:** Conditional **`pass`** (GitHub conclusion: `success` 🟢).
-* **Behavior:** When an invariant violation is detected, the Deep Auditor screens declared `Exception` clauses before issuing a failure. Rather than relying on simple comment flags (`// canon-ignore`), the auditor evaluates the **semantic sufficiency** and factual grounding of the author's justification against the diff and PR context. If all criteria of an exception are met, the check short-circuits and resolves to `pass`, appending an audit verification note to the Check Run summary.
-* **Precedence:** Evaluated prior to `Remediation`. If an exception is satisfied, the check passes without requiring contributor remediation.
-
-### 3.2 `Remediation` (Contributor Directive)
-* **Actor:** Contributor (Human or AI agent).
-* **CI Verdict:** **`fail`** (or **`action_required`** for PR metadata/process issues). Both are **blocking**.
-* **Behavior:** The auditor details what the PR author must do to bring the change into compliance (e.g., pointing to required templates, documentation sections, or missing test scenarios).
-
----
-
-## 4. Verdict Matrix & CI Integration
-
-Each canon evaluated by the Deep Auditor completes its GitHub Check Run with one of four conclusions:
-
-| Engine Verdict | GitHub Check Run Conclusion | Blocks Merge? | Scope | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| **`pass`** | `success` 🟢 | No | Both | Canon applies and the PR conforms to the invariant, either directly or via a verified `Exception` clause. |
-| **`fail`** | `failure` 🔴 | **Yes** | **Source Code** | Canon applies, but code violates the invariant and satisfies zero `Exception` clauses. Includes cases where `Remediation` instructions were provided. |
-| **`action_required`** | `action_required` 🟡 | **Yes** | **Metadata & Process** | Canon applies, but PR metadata/process violates the invariant (e.g., missing test plan, invalid PR title). |
-| **`skipped`** | `skipped` ⚪ | No | N/A | Canon determined not to interact with this PR upon deep inspection. *(Safety valve for optimistic Phase 2 docketing).* |
-
----
-
-## 5. Spec-Driven Development
-
-As outlined in [Issue #8](https://github.com/PAIR-code/canon-clerk/issues/8), architectural contracts are codified into formal, machine-verifiable specifications using OpenSpec under [`openspec/specs/`](../openspec/specs/):
+Architectural contracts for individual subsystems are maintained in living specifications under [`openspec/specs/`](../openspec/specs/):
 * [`openspec/specs/schema/spec.md`](../openspec/specs/schema/spec.md): Canonical canon entity representation, AST interfaces, and metadata derivation.
 * [`openspec/specs/canon-discovery/spec.md`](../openspec/specs/canon-discovery/spec.md): Filesystem discovery, path triggers, and canon querying.
 * [`openspec/specs/canon-linter/spec.md`](../openspec/specs/canon-linter/spec.md): Static linting rules, pure evaluation engine, and workspace orchestration.
