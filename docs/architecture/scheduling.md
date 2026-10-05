@@ -56,7 +56,7 @@ When an operator or CI workflow executes a subcommand $T$, the runner constructs
 1. **Branch A Independence:** `configure` and `probe` execute with zero knowledge of Git diffs, modified files, or repository canons.
 2. **Branch B Independence:** `intake`, `discover`, and `validate` execute with zero knowledge of AI providers, model configurations, or API credentials.
 3. **Diagnostic Isolation:** `probe` is never scheduled during review cascades (`docket`, `admit`, `audit`), eliminating unnecessary health-check latency prior to screening.
-4. **Standalone Validation Mode:** When `validate` is invoked without in-flight target arguments or diffs (e.g. `canon-clerk validate` or `canon-clerk check-canons`), it runs in workspace-wide mode, linting all discoverable canons in `.canons/**` without running `intake` or `discover`.
+4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons` (or via the legacy `check-canons` alias), Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidateCanons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
 
 ---
 
@@ -133,12 +133,27 @@ The scheduler determines the node sequence using a deterministic static table. F
 | :--- | :--- | :--- |
 | `canon-clerk intake` | `[intake]` | Skips `intake` if `caseload.intake` present |
 | `canon-clerk discover` | `[intake, discover]` | Skips `intake` if `caseload.intake` present;<br>Skips `discover` if `caseload.discovery` present |
-| `canon-clerk validate` | `[intake, discover, validate]` *(targeted)*<br>OR `[validate]` *(standalone workspace)* | Skips `intake` if `caseload.intake` present;<br>Skips `discover` if `caseload.discovery` present;<br>Skips `validate` if `caseload.validation` present |
+| `canon-clerk validate` | `[intake, discover, validate]` | Skips `intake` if `caseload.intake` present;<br>Skips `discover` if `caseload.discovery` present;<br>Skips `validate` if `caseload.validation` present |
 | `canon-clerk configure` | `[configure]` | Skips `configure` if `caseload.config` present |
 | `canon-clerk probe` | `[configure, probe]` | Skips `configure` if `caseload.config` present;<br>Skips `probe` if `caseload.probe` present |
 | `canon-clerk docket` | `[intake, discover, validate, configure, docket]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`) is already present |
 | `canon-clerk admit` | `[intake, discover, validate, configure, docket, admit]` | Skips any node whose corresponding field is already populated |
 | `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, audit]` | Skips any node whose corresponding field is already populated |
+
+### Missing Input Source Guard vs. Empty Stream Short-Circuit
+The scheduler and CLI enforce strict input handling to distinguish operator error from legitimate no-ops:
+
+1. **Missing Source Guard (Naked Invocation $\implies$ Exit 2):**  
+   When a subcommand requiring filing context or explicit scope (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`) is invoked without file arguments, diff flags (`--diff`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
+
+2. **Empty Stream Short-Circuit (Legitimate No-op $\implies$ Exit 0):**  
+   When an operator explicitly designates an input source (e.g. `git diff origin/main | canon-clerk audit --diff -`) and that source produces zero changes:
+   - `intake` records an empty filing (`diffs: {}`, `targetPaths: []`).
+   - `discover` intersects with empty target paths $\implies$ `candidateCanons: []`.
+   - The runner logs `0 modified files; 0 candidate canons matched` and short-circuits cleanly with **exit code 0**.
+
+3. **The Case or Controversy Invariant:**  
+   The heuristic adjudication spine (`docket`, `admit`, `audit`) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy.
 
 ### Short-Circuit Fast Exit Conditions
 Across the pipeline, four deterministic short-circuit conditions trigger early termination:

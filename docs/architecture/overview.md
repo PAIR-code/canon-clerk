@@ -207,15 +207,21 @@ export interface CaseloadIntake {
   /** PR markdown description or commit body */
   readonly pr_body?: string | undefined;
 
+  /** Scope of intake targets */
+  readonly scope?: 'targeted' | 'all-targets' | undefined;
+
   /** Ingested code modifications keyed by relative repository path */
   readonly diffs: Record<string, FileArtifact>;
 }
 
 export interface CaseloadDiscovery {
+  /** Mode of discovery: trigger-filtered or full corpus */
+  readonly mode?: 'triggered' | 'all-canons' | undefined;
+
   /** Modified target file paths evaluated */
   readonly targetFiles: readonly string[];
 
-  /** Discovered candidate canon paths matching targets */
+  /** Discovered candidate canon paths matching targets (or full corpus) */
   readonly candidateCanons: readonly string[];
 
   /** Map of canon paths to matched target file paths */
@@ -231,7 +237,7 @@ export interface CaseloadValidation {
 }
 
 export interface CaseloadConfig {
-  /** Model specifier for screening stages (e.g. 'google:gemini-3.5-flash-lite') */
+  /** Model specifier for screening nodes (e.g. 'google:gemini-3.5-flash-lite') */
   readonly screenerModel: string;
 
   /** Model specifier for adjudication (e.g. 'google:gemini-3.8-pro') */

@@ -117,15 +117,24 @@ canon-clerk audit --caseload caseload-5.json
 git diff origin/main | canon-clerk audit --diff - --json > final-caseload.json
 ```
 
+### Missing Input Source Guard (Naked Invocation)
+Invoking `canon-clerk audit` naked without a filing source (no diff, no target files, no `--caseload`) fails fast with exit code `2` (Usage Error) and prints actionable guidance:
+```text
+error: No filing source provided for audit.
+  Hint: Pipe a diff via standard input ('--diff -'), specify target files,
+        or pass an upstream caseload ('--caseload <path>').
+```
+Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk audit --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; 0 candidate canons matched; audit pass").
+
 ### CLI Output & Stream Formatting
 - **TTY Progress:** Displays interactive spinners and step execution traces on `stderr`.
 - **Verdict Report:** Emits formatted Markdown or stylish terminal summary to `stdout`.
 - **Telemetry Log:** Optionally redirects event stream via `--log-file <path>`.
 
 ### CLI Exit Codes
-- **0:** All evaluated cases pass (`status: 'pass'`, `complianceScore >= 0.5`).
+- **0:** All evaluated cases pass (`status: 'pass'`, `complianceScore >= 0.5`), or 0 candidate canons matched from diff.
 - **1:** Architectural violation detected (`status: 'fail'`, `complianceScore < 0.5`).
-- **2:** Fatal error, missing credentials, or provider failure.
+- **2:** Fatal error, missing filing source (naked invocation), missing credentials, or provider failure.
 
 ---
 

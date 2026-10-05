@@ -18,10 +18,12 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
-- **Direct Prerequisites:**
-  - Targeted mode: `discover` (validates matched candidate canons from `caseload.discovery`).
-  - Standalone mode: None (validates all canons in `.canons/**`).
-- **Transitive Prerequisites:** `intake` (targeted mode only).
+- **Direct Prerequisites:** `discover` (strictly validates `caseload.discovery.candidateCanons`).
+- **Transitive Prerequisites:** `intake`.
+- **Topological Invariant:** `validate` does not maintain alternate roots or bypass `discover`. Instead, `discover` provides the candidate set:
+  - **Facial Codex Review:** When invoked with `--all-canons`, `discover` populates `candidateCanons` with all repository canons.
+  - **As-Applied Targeted Review:** When invoked with a diff or file paths, `discover` populates `candidateCanons` via trigger glob matching.
+- **Incoming Caseload:** Strictly requires `caseload.discovery` to be present.
 
 ---
 
@@ -30,13 +32,12 @@
 ```ts
 export interface ValidateOptions {
   readonly workspaceRoot: string;
-  readonly canonsToValidate?: readonly string[] | undefined;
   readonly maxWarnings?: number | undefined;
 }
 
 export function executeValidate(
   options: ValidateOptions,
-  caseload?: Caseload | undefined
+  caseload: Caseload
 ): Promise<Caseload>;
 ```
 
@@ -68,9 +69,7 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Target Selection:**
-   - In targeted cascade mode, extracts `candidateCanons` from `caseload.discovery`.
-   - In standalone mode, parses and validates all discoverable canons in the workspace.
+1. **Candidate Intake:** Extracts `candidateCanons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
 2. **AST Parsing via `@canon-clerk/schema`:** Parses Markdown AST and YAML frontmatter blocks.
 3. **Static Rule Verification:**
    - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `inspect`, `tags`, `references`).
@@ -84,30 +83,41 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 
 ## 5. Driving Adapter: CLI (`packages/cli`)
 
-The CLI exposes `validate` (aliased as `check-canons` and `lint`):
+The CLI exposes `validate` as an imperative subcommand (with `check-canons` as a backward-compatible alias for `--all-canons` mode):
 
 ```bash
-# Standalone workspace lint:
-canon-clerk validate
-canon-clerk check-canons
+# Validate full repository canon corpus (Codex Audit):
+canon-clerk validate --all-canons
 
-# Targeted validation within a pipeline:
+# Validate candidate canons triggered by in-flight diff stream:
+git diff origin/main | canon-clerk validate --diff -
+
+# Validate candidates on an existing Caseload:
 canon-clerk validate --caseload caseload-2.json --json
 
-# Lint raw canon Markdown from stdin:
-cat .canons/rule.md | canon-clerk check-canons -
+# Backward-compatible script alias (pre-configured for --all-canons):
+canon-clerk check-canons
+```
+
+### Missing Input Source Guard (Naked Invocation)
+Invoking `canon-clerk validate` naked with zero sources (no diff, no target files, and no `--all-canons` flag) fails fast with exit code `2` (Usage Error) and prints actionable guidance:
+```text
+error: No filing source or canon scope provided for validate.
+  Hint: Pass '--all-canons' to validate the entire repository corpus,
+        or provide a diff ('--diff -') or target files to validate triggered canons.
 ```
 
 ### CLI Flags & Environment
+- `--all-canons`: Validates all canons in `.canons/**` by directing discovery to yield the full corpus.
 - `--max-warnings <n>`: Warning threshold before triggering non-zero exit code.
 - `--format <stylish|json|compact>`: Output formatting choice.
 - `--quiet`: Suppress warnings and non-essential output.
 - `--caseload <path|->`: Ingests upstream Caseload.
 
 ### CLI Exit Codes
-- **0:** All evaluated canons pass static linting.
+- **0:** All evaluated candidate canons pass static linting (or 0 candidate canons matched from diff).
 - **1:** Validation errors detected, or warnings exceed `--max-warnings`.
-- **2:** Usage error or file access failure.
+- **2:** Usage error, missing input source (naked invocation), or file access failure.
 
 ---
 

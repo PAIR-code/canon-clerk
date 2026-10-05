@@ -41,13 +41,13 @@ The complete architectural specification is partitioned across the following ded
 ### Node-by-Node Stage Specifications (`docs/architecture/nodes/`)
 Comprehensive specifications for each of the eight imperative verb stages across domain engine (`core`), CLI (`cli`), and GitHub Action (`action`) adapters:
 
-- **[intake](architecture/nodes/intake.md):** Universal front door parsing diffs, target paths/globs, and PR metadata into `FileArtifact` records (Branch A).
-- **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches (Branch A).
-- **[validate](architecture/nodes/validate.md):** Deterministic AST and YAML schema pre-flight linter for candidate canons (Branch A).
+- **[intake](architecture/nodes/intake.md):** Universal front door parsing diffs, target paths/globs, or whole-repo target scope (`--all-targets`) into `FileArtifact` records (Branch A).
+- **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches, or compiling the full corpus via `--all-canons` (Branch A).
+- **[validate](architecture/nodes/validate.md):** Deterministic AST and YAML schema pre-flight linter for candidate canons or full corpus (Branch A).
 - **[configure](architecture/nodes/configure.md):** Local environment and provider credential normalizer (Branch B).
 - **[probe](architecture/nodes/probe.md):** Diagnostic leaf measuring live provider reachability and roundtrip endpoint latency.
-- **[docket](architecture/nodes/docket.md):** Macro triage establishing subject-matter jurisdiction (`colorabilityScore >= 0.5`).
-- **[admit](architecture/nodes/admit.md):** Micro triage establishing evidentiary admissibility (`admissibilityScore >= 0.5`).
+- **[docket](architecture/nodes/docket.md):** Macro triage establishing subject-matter jurisdiction (`colorabilityScore >= 0.5`) over in-flight changes.
+- **[admit](architecture/nodes/admit.md):** Micro triage establishing evidentiary admissibility (`admissibilityScore >= 0.5`) per active case.
 - **[audit](architecture/nodes/audit.md):** Single-trial substantive adjudication rendering decrees, evaluating exceptions, and generating line annotations.
 
 ---

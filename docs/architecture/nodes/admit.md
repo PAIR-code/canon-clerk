@@ -111,6 +111,15 @@ canon-clerk admit --caseload caseload-4.json --json
 git diff origin/main | canon-clerk admit --diff -
 ```
 
+### Missing Input Source Guard (Naked Invocation)
+Invoking `canon-clerk admit` naked without a filing source (no diff, no target files, no `--caseload`) fails fast with exit code `2` (Usage Error) and prints actionable guidance:
+```text
+error: No filing source provided for admit.
+  Hint: Pipe a diff via standard input ('--diff -'), specify target files,
+        or pass an upstream caseload ('--caseload <path>').
+```
+Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk admit --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; 0 admitted exhibits").
+
 ### CLI Flags & Environment
 - `--threshold <number>`: Admissibility threshold (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
@@ -118,7 +127,7 @@ git diff origin/main | canon-clerk admit --diff -
 
 ### CLI Exit Codes
 - **0:** Exhibits admitted and attached (or zero-evidence short-circuit).
-- **2:** Provider connection error or model response failure.
+- **2:** Usage error, missing filing source (naked invocation), provider connection error, or model response failure.
 
 ---
 

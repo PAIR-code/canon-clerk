@@ -33,6 +33,7 @@ export interface IntakeOptions {
   readonly prBody?: string | undefined;
   readonly targetPaths?: readonly string[] | undefined;
   readonly patchContent?: string | undefined;
+  readonly allTargets?: boolean | undefined;
   readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
 }
 
@@ -53,6 +54,9 @@ export interface CaseloadIntake {
   /** PR markdown description or commit body */
   readonly pr_body?: string | undefined;
 
+  /** Scope of intake targets */
+  readonly scope?: 'targeted' | 'all-targets' | undefined;
+
   /** Ingested code modifications keyed by relative repository path */
   readonly diffs: Record<string, FileArtifact>;
 
@@ -65,15 +69,18 @@ export interface CaseloadIntake {
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Input Normalization:** Resolves supplied target paths or unified diff streams into a consolidated list of modified repository-relative paths.
-2. **Unified Diff Parsing:** If `patchContent` is provided, parses unified diff hunks into immutable `FileArtifact` objects detailing:
+1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), stdin token stream (`-`), `--all-targets`, or an incoming `--caseload`.
+   - **Missing Source Guard (Naked Invocation):** Invoking `canon-clerk intake` with zero sources fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance. The CLI never silently hangs waiting for input on a TTY.
+   - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `targetPaths: []`) and exits `0`.
+2. **Target Scope Normalization:** When `allTargets: true` is passed, resolves all tracked repository files into target paths, tagging `scope: 'all-targets'`. Note the crucial distinction: `--all-targets` operates on the *subject-matter codebase*, whereas `--all-canons` (in `discover`) operates on the *governing rule packs*.
+3. **Unified Diff Parsing:** If `patchContent` is provided, parses unified diff hunks into immutable `FileArtifact` objects detailing:
    - `path`: Normalized repository-relative path.
    - `status`: `'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'unchanged'`.
    - `linesAdded` and `linesDeleted`: Line counts modified.
    - `patch`: Exact diff hunk content.
    - `contentOmissionReason`: Defaults to `'not_requested'` to preserve token hygiene.
-3. **Filesystem Context Verification:** When file paths are supplied without patch deltas, verifies file existence and stat metadata.
-4. **Metadata Merging:** Binds `pr_title`, `pr_body`, and any `linkedIssues` into the intake payload.
+4. **Filesystem Context Verification:** When file paths are supplied without patch deltas, verifies file existence and stat metadata.
+5. **Metadata Merging:** Binds `pr_title`, `pr_body`, and any `linkedIssues` into the intake payload.
 
 ---
 
@@ -92,6 +99,9 @@ git diff origin/main --name-only | canon-clerk intake -
 # Ingest via unified diff stream:
 git diff origin/main | canon-clerk intake --diff -
 
+# Ingest all repository files as target artifacts:
+canon-clerk intake --all-targets
+
 # Ingest upstream caseload and attach intake:
 canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 ```
@@ -99,14 +109,15 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 ### CLI Flags & Environment
 - `-` (Positional): Reads newline-delimited paths from stdin.
 - `--diff <path|->`: Ingests unified diff patch from file or stdin.
+- `--all-targets`: Ingests all repository files as target artifacts (used for full-repo sweeps).
 - `--pr-title <text>`: Ingests PR title text.
 - `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description.
 - `--caseload <path|->`: Ingests existing Caseload JSON.
 - `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
-- **0:** Successful intake.
-- **2:** Usage error, unresolvable paths, or corrupted diff stream.
+- **0:** Successful intake (including an empty filing from a clean diff stream).
+- **2:** Usage error, missing input source (naked invocation), unresolvable paths, or corrupted diff stream.
 
 ---
 

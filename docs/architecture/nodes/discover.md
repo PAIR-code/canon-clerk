@@ -18,9 +18,9 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
-- **Direct Prerequisites:** `intake` (requires parsed target paths or diffs in `caseload.intake`).
+- **Direct Prerequisites:** `intake` (requires parsed target paths, diffs, or scope in `caseload.intake`, OR receives plenary `--all-canons` flag).
 - **Transitive Prerequisites:** None.
-- **Incoming Caseload:** Requires `caseload.intake` to be present.
+- **Incoming Caseload:** Requires `caseload.intake` to be present (unless executing with `--all-canons`).
 
 ---
 
@@ -31,6 +31,7 @@ export interface DiscoverOptions {
   readonly workspaceRoot: string;
   readonly canonGlobs?: readonly string[] | undefined;
   readonly explicitCanonFilter?: readonly string[] | undefined;
+  readonly allCanons?: boolean | undefined;
 }
 
 export function executeDiscover(
@@ -44,10 +45,13 @@ Populates the `.discovery` field on the cumulative `Caseload`:
 
 ```ts
 export interface CaseloadDiscovery {
+  /** Mode of discovery: trigger-filtered or full corpus */
+  readonly mode?: 'triggered' | 'all-canons' | undefined;
+
   /** Modified target file paths evaluated */
   readonly targetFiles: readonly string[];
 
-  /** Discovered candidate canon paths matching targets */
+  /** Discovered candidate canon paths matching targets (or full corpus) */
   readonly candidateCanons: readonly string[];
 
   /** Map of canon paths to matched target file paths */
@@ -65,12 +69,14 @@ If `candidateCanons.length === 0`:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Target Path Extraction:** Extracts all repository-relative file paths from `caseload.intake.diffs` (or target paths).
-2. **Canon Corpus Enumeration:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`).
-3. **Monorepo Scope Inheritance:** Applies implicit directory scoping:
+2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidateCanons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
+   - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
+3. **Canon Corpus Enumeration:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`).
+4. **Monorepo Scope Inheritance:** Applies implicit directory scoping:
    - Global canons in `.canons/**` apply repository-wide.
    - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` trigger boundary. If zero modified target files reside in `<scope>/`, the canon is excluded from candidates.
-4. **Trigger Glob Matching:** Evaluates the declared `triggers:` globs in each canon against the list of modified target paths using picomatch / minimatch semantics.
-5. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific modified files that activated it.
+5. **Trigger Glob Matching:** Evaluates the declared `triggers:` globs in each canon against the list of modified target paths using picomatch / minimatch semantics.
+6. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific modified files that activated it.
 
 ---
 
@@ -82,6 +88,9 @@ The CLI exposes `discover` (aliased as `check-triggers`) as an imperative subcom
 # Evaluate discovery on in-flight diff stream:
 git diff origin/main | canon-clerk discover --diff -
 
+# Enumerate all canons across the repository corpus:
+canon-clerk discover --all-canons
+
 # Evaluate discovery against an upstream Caseload:
 canon-clerk discover --caseload caseload-1.json --json
 
@@ -90,16 +99,17 @@ git diff origin/main | canon-clerk check-triggers -q -
 ```
 
 ### CLI Flags & Options
+- `--all-canons`: Discovers and compiles all repository canons into candidateCanons, bypassing path trigger matching.
 - `-q, --quiet`: Predicate mode. Suppresses stdout and indicates match presence via exit code.
 - `--canon <path|glob>`: Explicitly restrict candidate canons to a specific subset.
 - `--format <stylish|json|compact>`: Formats matched canons and triggering files.
 - `--caseload <path|->`: Ingests upstream Caseload JSON.
 
 ### CLI Exit Codes
-- **0:** Candidate canons matched and discovery attached (or clean execution).
-- **0 (Short-Circuit):** Zero candidate canons matched; logs summary and exits immediately.
+- **0:** Candidate canons matched and discovery attached (or `--all-canons` enumerated).
+- **0 (Short-Circuit):** Zero candidate canons matched from diff stream; logs summary and exits immediately.
 - **1 (Predicate Mode `-q`):** Exits 1 if zero candidate canons matched.
-- **2:** Usage error or invalid glob syntax.
+- **2:** Usage error, missing input source (naked invocation), or invalid glob syntax.
 
 ---
 

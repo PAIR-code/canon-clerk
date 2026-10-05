@@ -23,6 +23,7 @@
   - `validate` (Branch A: validated candidate canons in `caseload.discovery` and `caseload.validation`).
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** `intake`, `discover`.
+- **The Case or Controversy Invariant:** `docket` evaluates the subject-matter jurisdiction of candidate canons *as applied to a change*. It strictly requires an underlying filing (`caseload.intake` with target files, unified diff, or `--all-targets`). Invocations attempting to docket without a filing (e.g. `canon-clerk docket --all-canons` without targets) are rejected as invalid: a court cannot open an active docket of cases without a complaint or controversy.
 - **Pruned from Execution:** `probe`, downstream adjudication nodes (`admit`, `audit`).
 
 ---
@@ -111,6 +112,15 @@ canon-clerk docket --caseload caseload-3.json --json
 git diff origin/main | canon-clerk docket --diff -
 ```
 
+### Missing Input Source Guard (Naked Invocation)
+Invoking `canon-clerk docket` naked without a filing source (no diff, no target files, no `--caseload`) fails fast with exit code `2` (Usage Error) and prints actionable guidance:
+```text
+error: No filing source provided for docket.
+  Hint: Pipe a diff via standard input ('--diff -'), specify target files,
+        or pass an upstream caseload ('--caseload <path>').
+```
+Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk docket --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; active docket empty").
+
 ### CLI Flags & Environment
 - `--threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
@@ -118,7 +128,7 @@ git diff origin/main | canon-clerk docket --diff -
 
 ### CLI Exit Codes
 - **0:** Candidate canons screened and active docket established (or empty docket short-circuit).
-- **2:** Provider connection error, invalid API key, or malformed model response.
+- **2:** Usage error, missing filing source (naked invocation), provider connection error, invalid API key, or malformed model response.
 
 ---
 
