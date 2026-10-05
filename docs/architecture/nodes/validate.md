@@ -1,13 +1,13 @@
 # Stage 3: Canon Rule Linter (`validate`)
 
 **Status:** Authoritative Architectural Standard  
-**Subcommand:** `canon-clerk validate`  
-**Aliases:** `check-canons`, `lint`  
-**Pipeline Track:** Branch A (The Filing Track)
+**Stage:** 3  
+**Core Domain Engine:** `@canon-clerk/core` (with `@canon-clerk/schema`)  
+**Driving Adapters:** `@canon-clerk/cli` (`validate`, `check-canons`, `lint`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
-## 1. Domain Concept & Role
+## 1. Domain Concept & Role (`core`)
 
 `validate` serves as the **Statutory Validity Gate** of the pipeline. In the court clerkship taxonomy, it represents the clerk reviewing submitted legal statutes and citations to verify that the law is correctly codified, has not suffered textual corruption, and conforms to jurisdictional formatting standards before being cited in court.
 
@@ -17,45 +17,31 @@
 
 ---
 
-## 2. Dependencies
+## 2. Dependencies & Prerequisites (`core`)
 
 - **Direct Prerequisites:**
-  - Targeted mode: `discover` (validates matched candidate canons).
+  - Targeted mode: `discover` (validates matched candidate canons from `caseload.discovery`).
   - Standalone mode: None (validates all canons in `.canons/**`).
 - **Transitive Prerequisites:** `intake` (targeted mode only).
-- **Pruned from Execution:** Branch B (`configure`), `probe`, Stages 5–7.
 
 ---
 
-## 3. Specific Inputs
+## 3. Core Functional Contract (`packages/core`)
 
-### Standard Streams & CLI Options
-- Incoming `Caseload` via `--caseload <path|->` (containing `caseload.discovery.candidateCanons`).
-- Raw canon content via `stdin` (`canon-clerk validate -`).
-- `--max-warnings <number>`: Threshold for allowable warnings before failing.
-- `--format <stylish|json|compact>`: Output formatting choice.
-- `--json`: Emits the updated `Caseload` containing the `.validation` block.
+```ts
+export interface ValidateOptions {
+  readonly workspaceRoot: string;
+  readonly canonsToValidate?: readonly string[] | undefined;
+  readonly maxWarnings?: number | undefined;
+}
 
----
+export function executeValidate(
+  options: ValidateOptions,
+  caseload?: Caseload | undefined
+): Promise<Caseload>;
+```
 
-## 4. Process & Logic
-
-1. **Target Selection:**
-   - In targeted cascade execution, extracts `candidateCanons` from `caseload.discovery`.
-   - In standalone mode (e.g. `npm run check-canons`), discovers all workspace canons (`**/.canons/**/*.md`).
-2. **AST Parsing:** Parses Markdown body and optional YAML frontmatter delimiters (`---`).
-3. **Static Rule Verification:**
-   - **Frontmatter Schema:** Validates YAML structure and types (`id`, `title`, `triggers`, `inspect`, `tags`, `references`).
-   - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
-   - **Canon Naming Standard:** Verifies invariant slug naming conventions (`canon-names-must-state-invariants`).
-   - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
-   - **Directive Headers:** Validates `Exception`, `Rationale`, and `Remediation` directive blocks.
-4. **Result Aggregation:** Assembles per-canon diagnostic results (errors, warnings) and computes overall `hasErrors`.
-
----
-
-## 5. Outputs & Caseload Delta
-
+### Caseload Delta
 Populates the `.validation` field on the cumulative `Caseload`:
 
 ```ts
@@ -76,15 +62,64 @@ export interface CaseloadValidation {
 }
 ```
 
-### Caseload Delta
-- `caseload.validation`: Attached with validation results per canon and `hasErrors` flag.
+### Domain Error Invariant
+If `hasErrors === true`, the validation result records the failure diagnostics and signals an immediate abort before loading environment credentials or spending tokens.
 
 ---
 
-## 6. Gate & Error Semantics
+## 4. Process & Domain Logic (`core`)
 
-- **Exit Code 0:** All evaluated canons pass static linting (or warnings are below `--max-warnings`).
-- **Fail-Fast Exit Code 1 (Validation Error):**  
-  **If any candidate canon contains a syntax or schema violation, execution terminates immediately with exit code `1`.**  
-  *Zero AI tokens, zero network requests, and zero model credentials are spent if canons are malformed.*
-- **Exit Code 2 (Usage / Configuration Error):** Invalid CLI options, unresolvable paths, or I/O failure reading files.
+1. **Target Selection:**
+   - In targeted cascade mode, extracts `candidateCanons` from `caseload.discovery`.
+   - In standalone mode, parses and validates all discoverable canons in the workspace.
+2. **AST Parsing via `@canon-clerk/schema`:** Parses Markdown AST and YAML frontmatter blocks.
+3. **Static Rule Verification:**
+   - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `inspect`, `tags`, `references`).
+   - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
+   - **Canon Naming Standard:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`).
+   - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
+   - **Directive Headers:** Validates `Exception`, `Rationale`, and `Remediation` directive blocks.
+4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon.
+
+---
+
+## 5. Driving Adapter: CLI (`packages/cli`)
+
+The CLI exposes `validate` (aliased as `check-canons` and `lint`):
+
+```bash
+# Standalone workspace lint:
+canon-clerk validate
+canon-clerk check-canons
+
+# Targeted validation within a pipeline:
+canon-clerk validate --caseload caseload-2.json --json
+
+# Lint raw canon Markdown from stdin:
+cat .canons/rule.md | canon-clerk check-canons -
+```
+
+### CLI Flags & Environment
+- `--max-warnings <n>`: Warning threshold before triggering non-zero exit code.
+- `--format <stylish|json|compact>`: Output formatting choice.
+- `--quiet`: Suppress warnings and non-essential output.
+- `--caseload <path|->`: Ingests upstream Caseload.
+
+### CLI Exit Codes
+- **0:** All evaluated canons pass static linting.
+- **1:** Validation errors detected, or warnings exceed `--max-warnings`.
+- **2:** Usage error or file access failure.
+
+---
+
+## 6. Driving Adapter: GitHub Action (`packages/action`)
+
+1. **Pre-Flight Validation:** Executes `executeValidate` on all candidate canons identified during `discover`.
+2. **Annotation Generation:** Converts syntax or schema errors into GitHub Actions error annotations (`::error file=path,line=n::message`), pointing PR authors to the exact line of the malformed canon.
+3. **Fail-Fast:** If `hasErrors === true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.
+
+---
+
+## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+
+Integration tests invoke `executeValidate` on fixture canons containing deliberately malformed frontmatter, non-atomic invariants, and invalid RFC 2119 syntax, verifying that AST errors are captured deterministically across test runners.

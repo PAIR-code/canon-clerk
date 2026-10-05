@@ -1,12 +1,13 @@
 # Stage 1: Change & Context Assembly (`intake`)
 
 **Status:** Authoritative Architectural Standard  
-**Subcommand:** `canon-clerk intake`  
-**Pipeline Track:** Branch A (The Filing Track)
+**Stage:** 1  
+**Core Domain Engine:** `@canon-clerk/core`  
+**Driving Adapters:** `@canon-clerk/cli` (`intake`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
-## 1. Domain Concept & Role
+## 1. Domain Concept & Role (`core`)
 
 `intake` serves as the **Universal Front Door** of the Canon Clerk evaluation pipeline. In the court clerkship taxonomy, it represents the formal clerk receiving in-flight filings at the intake counter. It converts raw inputs—file paths, directory trees, patch streams, and pull request metadata—into standardized, immutable `FileArtifact` structures.
 
@@ -16,57 +17,33 @@
 
 ---
 
-## 2. Dependencies
+## 2. Dependencies & Prerequisites (`core`)
 
 - **Direct Prerequisites:** None (Root node of Branch A).
 - **Transitive Prerequisites:** None.
-- **Execution Boundary:** **Zero child-process VCS execution.** Canon Clerk does not run `git` subprocesses internally; the operator or CI script feeds diffs and target paths directly via streams or flags.
+- **Incoming Caseload:** May accept an empty or existing `Caseload` record.
+- **Subprocess Isolation:** **Zero child-process VCS execution.** `@canon-clerk/core` does not run `git` subprocesses internally; driving adapters feed diffs and target paths directly via domain interfaces.
 
 ---
 
-## 3. Specific Inputs
+## 3. Core Functional Contract (`packages/core`)
 
-### Standard Streams & Positional Arguments
-- **Positional Path Arguments:** Direct file paths or globs:
-  ```bash
-  canon-clerk intake packages/cli/src/app.ts
-  canon-clerk intake 'src/**/*.ts'
-  ```
-- **Positional `-` Stream:** Strictly reads newline-delimited file path tokens from `stdin` (xargs-style):
-  ```bash
-  git diff origin/main --name-only | canon-clerk intake -
-  ```
-- **`--diff <path|->` Stream:** Ingests a raw unified diff patch stream:
-  ```bash
-  git diff origin/main | canon-clerk intake --diff -
-  canon-clerk intake --diff pr-42.patch
-  ```
-- **`--caseload <path|->`:** Ingests an existing serialized `Caseload` JSON to fast-forward upstream stages.
+```ts
+export interface IntakeOptions {
+  readonly prTitle?: string | undefined;
+  readonly prBody?: string | undefined;
+  readonly targetPaths?: readonly string[] | undefined;
+  readonly patchContent?: string | undefined;
+  readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
+}
 
-### Metadata Options
-- `--pr-title <string>`: Pull request title or commit subject line.
-- `--pr-body <string>`: Pull request markdown description.
-- `--pr-body-file <path>`: Path to a file containing pull request markdown description.
-- `--gh-pr <path|->`: Ingests GitHub API pull request JSON payload (e.g. from `gh pr view --json ...`).
+export function executeIntake(
+  options: IntakeOptions,
+  caseload?: Caseload | undefined
+): Promise<Caseload>;
+```
 
----
-
-## 4. Process & Logic
-
-1. **Input Normalization:** Resolves positional target arguments, stdin path lists, or unified diffs into a unified list of touched files.
-2. **Unified Diff Parsing:** If `--diff` is provided, parses patch hunks into `FileArtifact` objects detailing:
-   - `path`: Normalized repository-relative path.
-   - `status`: `'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'unchanged'`.
-   - `linesAdded` and `linesDeleted`: Line counts modified.
-   - `patch`: Exact diff hunk content.
-   - `contentOmissionReason`: Defaults to `'not_requested'` to preserve token hygiene.
-3. **Filesystem Context Verification:** When positional paths are supplied without a patch, verifies file existence and stat metadata.
-4. **Metadata Merging:** Binds `pr_title` and `pr_body` into the intake payload.
-
----
-
-## 5. Outputs & Caseload Delta
-
+### Caseload Delta
 Populates the `.intake` field on the cumulative `Caseload`:
 
 ```ts
@@ -79,18 +56,72 @@ export interface CaseloadIntake {
 
   /** Ingested code modifications keyed by relative repository path */
   readonly diffs: Record<string, FileArtifact>;
+
+  /** Optional linked issue context gathered from issue trackers */
+  readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
 }
 ```
 
-### Caseload Delta
-- `caseload.intake`: Populated with parsed PR metadata and `FileArtifact` records for all modified files.
+---
+
+## 4. Process & Domain Logic (`core`)
+
+1. **Input Normalization:** Resolves supplied target paths or unified diff streams into a consolidated list of modified repository-relative paths.
+2. **Unified Diff Parsing:** If `patchContent` is provided, parses unified diff hunks into immutable `FileArtifact` objects detailing:
+   - `path`: Normalized repository-relative path.
+   - `status`: `'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'unchanged'`.
+   - `linesAdded` and `linesDeleted`: Line counts modified.
+   - `patch`: Exact diff hunk content.
+   - `contentOmissionReason`: Defaults to `'not_requested'` to preserve token hygiene.
+3. **Filesystem Context Verification:** When file paths are supplied without patch deltas, verifies file existence and stat metadata.
+4. **Metadata Merging:** Binds `pr_title`, `pr_body`, and any `linkedIssues` into the intake payload.
 
 ---
 
-## 6. Gate & Error Semantics
+## 5. Driving Adapter: CLI (`packages/cli`)
 
-- **Exit Code 0:** Successful intake; parsed files and diffs attached to Caseload.
-- **Exit Code 2 (Usage / Malformed Input):**
-  - Malformed unified diff stream that cannot be parsed.
-  - Target file paths that do not exist or are inaccessible.
-  - Conflicting stdin streams (e.g. attempting to read paths from `-` and diffs from `--diff -` simultaneously).
+The CLI exposes `intake` as an imperative subcommand that adapts terminal arguments and POSIX streams:
+
+```bash
+# Ingest via direct target paths:
+canon-clerk intake packages/cli/src/app.ts
+canon-clerk intake 'src/**/*.ts'
+
+# Ingest via newline-delimited stdin path tokens:
+git diff origin/main --name-only | canon-clerk intake -
+
+# Ingest via unified diff stream:
+git diff origin/main | canon-clerk intake --diff -
+
+# Ingest upstream caseload and attach intake:
+canon-clerk intake --diff pr-42.patch --caseload existing.json --json
+```
+
+### CLI Flags & Environment
+- `-` (Positional): Reads newline-delimited paths from stdin.
+- `--diff <path|->`: Ingests unified diff patch from file or stdin.
+- `--pr-title <text>`: Ingests PR title text.
+- `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description.
+- `--caseload <path|->`: Ingests existing Caseload JSON.
+- `--json`: Emits enriched Caseload JSON to stdout.
+
+### CLI Exit Codes
+- **0:** Successful intake.
+- **2:** Usage error, unresolvable paths, or corrupted diff stream.
+
+---
+
+## 6. Driving Adapter: GitHub Action (`packages/action`)
+
+The GitHub Action runner adapts GitHub Actions workflow events into the `core` intake interface:
+
+1. **Octokit Diff Fetching:** Automatically retrieves the pull request unified diff via the GitHub REST API (`octokit.rest.pulls.get({ mediaType: { format: 'diff' } })`), bypassing the need for a full local Git clone depth.
+2. **PR Context Extraction:** Extracts `pr_title` and `pr_body` directly from the workflow payload (`github.context.payload.pull_request`).
+3. **Linked Issues Resolution:** Inspects the PR body for closing keywords (`Fixes #123`, `Closes #456`) and queries the GitHub API to populate `linkedIssues` with titles and bodies.
+4. **Delegation:** Passes all resolved artifacts directly into `executeIntake(options)`.
+
+---
+
+## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+
+Integration tests programmatically invoke `executeIntake` with static patch fixtures and mock PR descriptions, verifying that diff parsing and `FileArtifact` generation remain bit-for-bit reproducible without spawning shell processes.

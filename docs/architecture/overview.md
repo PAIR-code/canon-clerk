@@ -74,7 +74,47 @@ flowchart TD
 
 ---
 
-## 3. The Architectural Triad: Colorability $\to$ Admissibility $\to$ Compliance
+## 3. Hexagonal Architecture: Driving Adapters vs. Core Domain Processing
+
+Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)** across its workspace packages. The 7-stage DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
+
+```mermaid
+flowchart TD
+    subgraph DrivingAdapters ["Driving Adapters (Ports)"]
+        CLI["packages/cli<br/>(Flags, POSIX stdin Streams, Exit Codes, Spinners)"]
+        Action["packages/action<br/>(Octokit APIs, PR Metadata, Linked Issues, Check Runs)"]
+        Integ["packages/integration-tests-private<br/>(Live Provider Testing, Snapshot Assertions)"]
+    end
+
+    subgraph CoreEngine ["The Caseload Domain Engine"]
+        Core["packages/core<br/>(Functional DAG Node Implementations & Scheduling)"]
+        Config["packages/configuration<br/>(Credential Discovery & probe Provider Diagnostics)"]
+        Schema["packages/schema<br/>(Pure Canon AST & Caseload Types)"]
+    end
+
+    CLI --> Core
+    CLI --> Config
+    Action --> Core
+    Integ --> Core
+    Integ --> Config
+
+    Config --> Core
+    Core --> Schema
+```
+
+### The Domain Packages (The Hexagon Core)
+- **`@canon-clerk/schema` (`packages/schema`):** Zero runtime dependencies. Defines the canonical TypeScript types for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
+- **`@canon-clerk/core` (`packages/core`):** Depends strictly on `schema`. Houses pure functional implementations of all evaluation stages (`executeIntake`, `executeDiscover`, `executeValidate`, `executeDocket`, `executeAdmit`, `executeAudit`), DAG scheduling algorithms, prompt assembly, and trie-constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or GitHub Actions.
+- **`@canon-clerk/configuration` (`packages/configuration`):** Depends on `core`. Discovers workspace and user settings, resolves API credentials, and implements the diagnostic `probe` provider health check.
+
+### The Driving Adapters (The External Ports)
+- **`@canon-clerk/cli` (`packages/cli`):** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for `core` and `configuration`. Formats user-facing terminal progress, spinners, and event streams, and maps domain results to shell exit codes (`0`, `1`, `2`).
+- **`@canon-clerk/action` (`packages/action`):** Driving adapter translating GitHub Actions workflow triggers, Octokit PR payloads (diffs, commit history, linked issues), and posting results as GitHub Check Runs, step summaries, and inline code annotations ([`action-must-delegate-audit-to-core`](../packages/action/.canons/action-must-delegate-audit-to-core.md)).
+- **`@canon-clerk/integration-tests-private` (`packages/integration-tests-private`):** Test driver that feeds real/fixture Caseloads directly into `core` and `configuration` functions against live networked provider services.
+
+---
+
+## 4. The Architectural Triad: Colorability $\to$ Admissibility $\to$ Compliance
 
 Grounding AI evaluation in the cognitive and procedural division of labor of a court clerkship establishes distinct, unambiguous semantics for every heuristic stage:
 
@@ -99,7 +139,7 @@ All three heuristic metrics share an identical polarity convention: **a higher s
 
 ---
 
-## 4. The Seven Pipeline Stages
+## 5. The Seven Pipeline Stages
 
 | Stage | Subcommand | Engine / Tier | Cost / Latency | Gate Rule |
 | :--- | :--- | :--- | :--- | :--- |
@@ -118,7 +158,7 @@ All three heuristic metrics share an identical polarity convention: **a higher s
 
 ---
 
-## 5. The Token & Latency Sieve
+## 6. The Token & Latency Sieve
 
 The Caseload Pipeline functions as an aggressive filter funnel, eliminating the overwhelming majority of candidate pairs before invoking deep reasoning:
 
@@ -159,7 +199,7 @@ flowchart TD
 
 ---
 
-## 6. The Canonical `Caseload` Schema
+## 7. The Canonical `Caseload` Schema
 
 The formal TypeScript data structures defining the cumulative `Caseload`:
 
@@ -425,7 +465,7 @@ export interface Caseload {
 
 ---
 
-## 7. Observability & The Telemetry Event Stream
+## 8. Observability & The Telemetry Event Stream
 
 Canon Clerk strictly separates **substantive evaluation records** from **operational execution telemetry**:
 

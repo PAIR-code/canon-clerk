@@ -1,13 +1,13 @@
 # Stage 6: Docket Evidence (`admit`)
 
 **Status:** Authoritative Architectural Standard  
-**Subcommand:** `canon-clerk admit`  
-**Aliases:** `docket-evidence`, `docket-targets`  
-**Pipeline Track:** Adjudication Spine (Micro Triage)
+**Stage:** 6  
+**Core Domain Engine:** `@canon-clerk/core`  
+**Driving Adapters:** `@canon-clerk/cli` (`admit`, `docket-evidence`, `docket-targets`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
-## 1. Domain Concept & Role
+## 1. Domain Concept & Role (`core`)
 
 `admit` performs **Micro Triage: Evidentiary Relevance Screening** for each active Case on the docket. In the court clerkship taxonomy, it represents the clerk reviewing tendered documents, affidavits, and physical exhibits to formally admit only relevant evidence into the case record prior to trial.
 
@@ -18,55 +18,29 @@
 
 ---
 
-## 2. Dependencies
+## 2. Dependencies & Prerequisites (`core`)
 
-- **Direct Prerequisites:** `docket` (requires active cases on `activeDocket`).
+- **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.activeDocket`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`.
 - **Pruned from Execution:** `probe`, Stage 7 (`audit`).
 
 ---
 
-## 3. Specific Inputs
+## 3. Core Functional Contract (`packages/core`)
 
-### Standard Streams & CLI Options
-- Incoming `Caseload` via `--caseload <path|->` (containing `activeDocket`, `diffs`, `config`).
-- `--threshold <number>`: Admissibility relevance threshold (default: `0.5`).
-- `--json`: Emits enriched Caseload containing the `.evidence` block.
+```ts
+export interface AdmitOptions {
+  readonly threshold?: number | undefined; // default: 0.5
+  readonly screenerModel?: string | undefined;
+}
 
-### Context Supplied per Case
-- Governing canon statute: invariant, full text, and requested `inspect` fields.
-- Target candidates: individual modified files, unified diff hunks, and resolved `references:` files.
+export function executeAdmit(
+  options: AdmitOptions,
+  caseload: Caseload
+): Promise<Caseload>;
+```
 
----
-
-## 4. Process & Logic
-
-1. **Per-Case Evidentiary Review:**  
-   Iterates through each canon listed on `caseload.docket.activeDocket`.
-2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):**  
-   Evaluates each candidate file / diff hunk / reference document against the specific canon's requirements.
-3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**
-   ```json
-   {
-     "exhibits": [
-       {
-         "filePath": "packages/cli/src/commands/docket.ts",
-         "admissibilitySummary": "Contains option definitions for new CLI command.",
-         "admissibilityScore": 0.95
-       }
-     ]
-   }
-   ```
-   Generating `admissibilitySummary` before `admissibilityScore` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Admissibility Threshold (`admissibilityScore >= 0.5`):**
-   - Exhibits scoring $\ge 0.5$ are admitted into evidence for that Case.
-   - Irrelevant diff hunks (e.g. documentation edits or unrelated refactors) are excluded (`admissibilityScore < 0.5`).
-5. **Dismissal of Cases with Zero Exhibits:** If an active Case retains zero admitted exhibits, it is dismissed without trial.
-
----
-
-## 5. Outputs & Caseload Delta
-
+### Caseload Delta
 Populates the `.evidence` field on the cumulative `Caseload`:
 
 ```ts
@@ -95,15 +69,68 @@ export interface CaseloadEvidence {
 }
 ```
 
-### Caseload Delta
-- `caseload.evidence`: Attached with the map of admitted `exhibits` for each active canon.
+### Domain Short-Circuit Invariant
+If all active cases retain zero admitted exhibits:
+- Execution terminates immediately with exit code `0`.
+- Zero substantive trials (`audit`) are scheduled, avoiding reasoning token expenditures.
 
 ---
 
-## 6. Gate & Error Semantics
+## 4. Process & Domain Logic (`core`)
 
-- **The Zero-Evidence Short-Circuit (Exit Code 0):**  
-  **If all active cases retain zero admitted exhibits, execution terminates immediately with exit code `0`.**  
-  *Prevents scheduling reasoning models when no relevant evidence exists in the change.*
-- **Exit Code 0 (Exhibits Admitted):** Proceeds downstream to `audit` or emits evidence Caseload.
-- **Exit Code 2 (Provider / Parse Error):** Provider API error or schema violation.
+1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.activeDocket`.
+2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):** Evaluates candidate target files, diff hunks, and reference documents against the canon's specific requirements.
+3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**
+   ```json
+   {
+     "exhibits": [
+       {
+         "filePath": "packages/cli/src/commands/docket.ts",
+         "admissibilitySummary": "Contains option definitions for new CLI command.",
+         "admissibilityScore": 0.95
+       }
+     ]
+   }
+   ```
+   Generating `admissibilitySummary` before `admissibilityScore` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+4. **Admissibility Threshold (`admissibilityScore >= 0.5`):**
+   - Exhibits scoring $\ge 0.5$ are admitted into evidence for that Case.
+   - Irrelevant diff hunks are excluded (`admissibilityScore < 0.5`).
+5. **Dismissal of Cases with Zero Exhibits:** If an active Case retains zero admitted exhibits, it is dismissed without trial.
+
+---
+
+## 5. Driving Adapter: CLI (`packages/cli`)
+
+The CLI exposes `admit` (aliased as `docket-evidence` and `docket-targets`):
+
+```bash
+# Execute evidence triage against an upstream Caseload:
+canon-clerk admit --caseload caseload-4.json --json
+
+# Run telescoping pipeline stopping at admit:
+git diff origin/main | canon-clerk admit --diff -
+```
+
+### CLI Flags & Environment
+- `--threshold <number>`: Admissibility threshold (default: `0.5`).
+- `--caseload <path|->`: Ingests upstream Caseload.
+- `--json`: Emits enriched Caseload JSON.
+
+### CLI Exit Codes
+- **0:** Exhibits admitted and attached (or zero-evidence short-circuit).
+- **2:** Provider connection error or model response failure.
+
+---
+
+## 6. Driving Adapter: GitHub Action (`packages/action`)
+
+1. **Evidence Screening Step:** Invokes `executeAdmit` with the `Caseload`.
+2. **Exhibit Accounting:** Logs admitted diff hunks and persistent references per case.
+3. **Early Exit:** If zero cases retain admitted evidence, concludes the Check Run as passing without scheduling reasoning models.
+
+---
+
+## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+
+Integration tests invoke `executeAdmit` across multi-file PR fixtures, verifying that peripheral changes (e.g. docs, lockfiles) are cleanly filtered out from active cases governing code conventions.

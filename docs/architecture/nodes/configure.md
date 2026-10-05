@@ -1,13 +1,13 @@
 # Stage 4: Configuration & Environment (`configure`)
 
 **Status:** Authoritative Architectural Standard  
-**Subcommand:** `canon-clerk configure`  
-**Aliases:** `check-config`, `config`  
-**Pipeline Track:** Branch B (The Environment Track)
+**Stage:** 4  
+**Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
+**Driving Adapters:** `@canon-clerk/cli` (`configure`, `check-config`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
-## 1. Domain Concept & Role
+## 1. Domain Concept & Role (`core` / `configuration`)
 
 `configure` serves as the **Operational Environment Normalizer** for Canon Clerk. In the court clerkship taxonomy, it represents the administrative court officer ensuring the courtroom facilities, judicial roster, and bailiff credentials are fully established before the court goes into session.
 
@@ -17,40 +17,31 @@
 
 ---
 
-## 2. Dependencies
+## 2. Dependencies & Prerequisites (`core`)
 
 - **Direct Prerequisites:** None (Root node of Branch B).
 - **Transitive Prerequisites:** None.
-- **Pruned from Execution:** Branch A (`intake`, `discover`, `validate`), `probe`, Stages 5–7.
-- **Independence:** Operates with **zero knowledge** of git diffs, changed files, or repository canons.
+- **Independence:** Resolves environment credentials and models with zero dependencies on diffs or canons.
+- **Lazy Evaluation in Cascades:** When executed within a review cascade (`docket`, `admit`, `audit`), `configure` is evaluated lazily *after* `discover` confirms matching candidate canons, guaranteeing that un-governed PRs pass cleanly without checking credentials.
 
 ---
 
-## 3. Specific Inputs
+## 3. Core Functional Contract (`packages/configuration`)
 
-### Environment Variables & CLI Options
-- `GEMINI_API_KEY`: Google Gemini provider API key.
-- `--screener-model <model>`: Model identifier for macro screening (default: `google:gemini-3.5-flash-lite`).
-- `--auditor-model <model>`: Model identifier for substantive adjudication (default: `google:gemini-3.8-pro`).
-- `--reasoning-budget <tokens>`: Maximum reasoning budget tokens allocated to the adjudication stage.
-- `--cwd <path>`: Explicit workspace root directory.
-- `--caseload <path|->`: Incoming Caseload JSON (retained and enriched with `.config`).
-- `--json`: Emits normalized configuration record or enriched Caseload.
+```ts
+export interface ConfigureOptions {
+  readonly cwd?: string | undefined;
+  readonly env?: Record<string, string | undefined> | undefined;
+  readonly overrides?: Partial<CaseloadConfig> | undefined;
+}
 
----
+export function executeConfigure(
+  options: ConfigureOptions,
+  caseload?: Caseload | undefined
+): Promise<Caseload>;
+```
 
-## 4. Process & Logic
-
-1. **Workspace Boundary Detection:** Locates project root, monorepo packages, and `.canons/` directories.
-2. **Provider Credential Resolution:** Validates that `GEMINI_API_KEY` (or configured provider tokens) is present in the environment or configuration store.
-3. **Model Specifier Normalization:** Resolves model tier aliases into fully-qualified model identifiers with provider namespaces.
-4. **Offline Determinism:** Resolution is completely local and offline (<5ms), expending 0 tokens and making zero network requests.
-5. **JIT Scheduling in Cascade:** When invoked as part of a review cascade (`docket`, `admit`, `audit`), `configure` is evaluated lazily *after* `discover` confirms matching candidate canons, guaranteeing that un-governed PRs pass cleanly without checking for credentials.
-
----
-
-## 5. Outputs & Caseload Delta
-
+### Caseload Delta
 Populates the `.config` field on the cumulative `Caseload`:
 
 ```ts
@@ -69,14 +60,51 @@ export interface CaseloadConfig {
 }
 ```
 
-### Caseload Delta
-- `caseload.config`: Attached with normalized model specifiers, workspace path, and runtime parameters.
+---
+
+## 4. Process & Domain Logic (`configuration`)
+
+1. **Workspace Boundary Detection:** Identifies workspace root, monorepo packages, and configuration files.
+2. **Credential Resolution:** Checks environment variables (`GEMINI_API_KEY`) and secure platform secret stores.
+3. **Model Specifier Normalization:** Resolves model aliases (e.g. `flash-lite` $\implies$ `google:gemini-3.5-flash-lite`, `pro` $\implies$ `google:gemini-3.8-pro`).
+4. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
 
 ---
 
-## 6. Gate & Error Semantics
+## 5. Driving Adapter: CLI (`packages/cli`)
 
-- **Exit Code 0:** Configuration successfully validated and normalized.
-- **Exit Code 2 (Configuration Error):**  
-  **If required provider credentials (`GEMINI_API_KEY`) are missing, or model specifiers are invalid, execution fails fast with exit code `2`.**  
-  *Prevents scheduling AI stages when the underlying environment is unconfigured.*
+The CLI exposes `configure` (aliased as `check-config` and `config`):
+
+```bash
+# Normalize and print active configuration:
+canon-clerk configure --json
+
+# Override model tiers from flags:
+canon-clerk configure --screener-model google:gemini-3.5-flash-lite --auditor-model google:gemini-3.8-pro
+```
+
+### CLI Flags & Environment
+- `GEMINI_API_KEY`: Google Gemini API key.
+- `--screener-model <model>`: Custom screener model specifier.
+- `--auditor-model <model>`: Custom auditor model specifier.
+- `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
+- `--cwd <path>`: Explicit workspace directory.
+- `--caseload <path|->`: Ingests upstream Caseload.
+
+### CLI Exit Codes
+- **0:** Configuration valid and normalized.
+- **2:** Missing provider credentials (`GEMINI_API_KEY`), invalid model identifiers, or unresolvable workspace path.
+
+---
+
+## 6. Driving Adapter: GitHub Action (`packages/action`)
+
+1. **Secret & Input Mapping:** Maps workflow inputs (`api-key`, `screener-model`, `auditor-model`, `reasoning-budget`) and repository secrets into `ConfigureOptions`.
+2. **JIT Invocation:** Evaluates `executeConfigure` only after `executeDiscover` yields $>0$ candidate canons.
+3. **Missing Secret Reporting:** If `GEMINI_API_KEY` is absent on a PR requiring AI adjudication, posts an actionable failure annotation instructing maintainers to configure repository secrets for fork PRs.
+
+---
+
+## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+
+Integration tests invoke `executeConfigure` with test environment variables and scoped credentials, verifying that model configurations resolve properly before executing live network requests.

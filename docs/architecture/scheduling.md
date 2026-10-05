@@ -7,7 +7,9 @@
 
 ## 1. Executive Summary
 
-Canon Clerk's subcommands are named **terminal stop points** along a 7-stage Directed Acyclic Graph (DAG) with an auxiliary diagnostic leaf. Execution is governed by strict dependency closures, lazy branch scheduling, and composable piping semantics.
+Canon Clerk's subcommands and action entry points represent **terminal stop points** along a 7-stage Directed Acyclic Graph (DAG) with an auxiliary diagnostic leaf. 
+
+Under Canon Clerk's Hexagonal Architecture, **DAG scheduling and execution semantics are implemented as pure domain services within `@canon-clerk/core`**. Both the CLI (`@canon-clerk/cli`) and the GitHub Action (`@canon-clerk/action`) delegate to this engine service, ensuring identical closure calculation, pruning, and lazy scheduling behavior regardless of whether an audit is initiated from a local terminal or a remote GitHub Actions runner.
 
 Instead of running a monolithic pipeline that redundantly requires network connectivity and API keys for purely local operations, the scheduler calculates the **transitive dependency closure** for the requested terminus node and prunes unneeded branches.
 

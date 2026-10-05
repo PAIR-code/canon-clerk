@@ -1,13 +1,13 @@
 # Diagnostic Leaf: Connectivity & Health (`probe`)
 
 **Status:** Authoritative Architectural Standard  
-**Subcommand:** `canon-clerk probe`  
-**Aliases:** `check-health`, `ping`  
-**Pipeline Track:** Diagnostic Leaf (Branch B Termination)
+**Stage:** Diagnostic Leaf (Branch B Termination)  
+**Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
+**Driving Adapters:** `@canon-clerk/cli` (`probe`, `check-health`, `ping`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
-## 1. Domain Concept & Role
+## 1. Domain Concept & Role (`core` / `configuration`)
 
 `probe` serves as the **Diagnostic Network Health Check** for configured model endpoints. In the court clerkship taxonomy, it represents testing the teleconferencing equipment and audio-visual communication links before a remote hearing begins.
 
@@ -17,37 +17,28 @@
 
 ---
 
-## 2. Dependencies
+## 2. Dependencies & Prerequisites (`core`)
 
-- **Direct Prerequisites:** `configure` (requires resolved provider credentials and model specifiers).
+- **Direct Prerequisites:** `configure` (requires resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** None.
-- **Pruned from Execution:** Branch A (`intake`, `discover`, `validate`) and the Heuristic Cascade (`docket`, `admit`, `audit`).
-- **Cascade Isolation:** `probe` is **never executed during review cascades** (`canon-clerk audit`). This ensures that evaluation runs do not incur redundant health-check latency prior to screening.
+- **Pruned from Cascades:** `probe` is **never executed during review cascades** (`canon-clerk audit`). This ensures that evaluation runs do not incur redundant health-check latency prior to screening.
 
 ---
 
-## 3. Specific Inputs
+## 3. Core Functional Contract (`packages/configuration`)
 
-### Standard Streams & CLI Options
-- Incoming `Caseload` via `--caseload <path|->` (or auto-resolved via `configure`).
-- `--timeout <ms>`: Network probe timeout (default: 5000ms).
-- `--json`: Emits structured probe results or enriched Caseload.
+```ts
+export interface ProbeOptions {
+  readonly timeoutMs?: number | undefined;
+}
 
----
+export function executeProbe(
+  options: ProbeOptions,
+  caseload: Caseload
+): Promise<Caseload>;
+```
 
-## 4. Process & Logic
-
-1. **Endpoint Resolution:** Reads configured `screenerModel` and `auditorModel` from `caseload.config`.
-2. **Ping Request Assembly:** Constructs lightweight probe requests (0 reasoning tokens, minimum prompt payload) to verify authentication and reachability.
-3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints using `Promise.all`:
-   - Measures roundtrip response latency in milliseconds (`latencyMs`).
-   - Verifies model availability and provider credential validity.
-4. **Result Recording:** Formats latency statistics and connection outcomes.
-
----
-
-## 5. Outputs & Caseload Delta
-
+### Caseload Delta
 Populates the `.probe` field on the cumulative `Caseload`:
 
 ```ts
@@ -74,14 +65,50 @@ export interface CaseloadProbe {
 }
 ```
 
-### Caseload Delta
-- `caseload.probe`: Attached with live connection outcomes and latencies for screener and auditor endpoints.
+---
+
+## 4. Process & Domain Logic (`configuration`)
+
+1. **Endpoint Resolution:** Reads configured `screenerModel` and `auditorModel` from `caseload.config`.
+2. **Ping Request Assembly:** Constructs lightweight probe requests (0 reasoning tokens, minimum prompt payload) to verify authentication and reachability.
+3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints using `Promise.all`:
+   - Measures roundtrip response latency in milliseconds (`latencyMs`).
+   - Verifies model availability and provider credential validity.
+4. **Diagnostic Record:** Attaches endpoint latency and reachability metadata to `Caseload.probe`.
 
 ---
 
-## 6. Gate & Error Semantics
+## 5. Driving Adapter: CLI (`packages/cli`)
 
-- **Exit Code 0:** All configured endpoints are reachable, authenticated, and responsive.
-- **Exit Code 2 (Connectivity / Authentication Error):**  
-  **If provider credentials are rejected (401/403) or endpoints are unreachable (network timeout / 5xx), `probe` terminates with exit code `2`.**  
-  *Provides rapid, isolated diagnostics without executing file parsing or canon discovery.*
+The CLI exposes `probe` (aliased as `check-health` and `ping`):
+
+```bash
+# Human-readable connectivity and latency check:
+canon-clerk probe
+
+# Emit structured JSON probe record:
+canon-clerk probe --json
+```
+
+### CLI Flags & Options
+- `--timeout <ms>`: Request timeout in milliseconds (default: `5000ms`).
+- `--caseload <path|->`: Ingests upstream Caseload.
+- `--json`: Emits enriched Caseload JSON.
+
+### CLI Exit Codes
+- **0:** All configured endpoints are reachable, authenticated, and responsive.
+- **2:** Provider credentials rejected (401/403) or endpoints unreachable (timeout / 5xx).
+
+---
+
+## 6. Driving Adapter: GitHub Action (`packages/action`)
+
+1. **Diagnostic Action Step:** Invoked in dedicated connectivity workflows or self-hosted runner validation actions.
+2. **Summary Emission:** Emits reachability tables and latency metrics to `GITHUB_STEP_SUMMARY`.
+3. **Fail-Fast Gating:** Fails CI pipelines early if remote AI provider endpoints are down or firewall rules block egress.
+
+---
+
+## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+
+Integration tests invoke `executeProbe` against live Gemini endpoints to assert real-world authentication, network latency bounds, and endpoint stability before running deep adjudication test suites.

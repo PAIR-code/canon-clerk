@@ -1,13 +1,13 @@
 # Stage 5: Docket Canons (`docket`)
 
 **Status:** Authoritative Architectural Standard  
-**Subcommand:** `canon-clerk docket`  
-**Aliases:** `docket-canons`, `color`  
-**Pipeline Track:** Adjudication Spine (Convergence Point)
+**Stage:** 5  
+**Core Domain Engine:** `@canon-clerk/core`  
+**Driving Adapters:** `@canon-clerk/cli` (`docket`, `docket-canons`, `color`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
 
 ---
 
-## 1. Domain Concept & Role
+## 1. Domain Concept & Role (`core`)
 
 `docket` performs **Macro Triage: Subject-Matter Jurisdiction Screening** across all candidate canons. In the court clerkship taxonomy, it represents the clerk reviewing petitions against the court's subject-matter jurisdiction to determine whether a claim is legally colorable before opening a formal case file on the active docket.
 
@@ -18,56 +18,31 @@
 
 ---
 
-## 2. Dependencies
+## 2. Dependencies & Prerequisites (`core`)
 
 - **Direct Prerequisites:**
-  - `validate` (Branch A: validated candidate canons).
-  - `configure` (Branch B: resolved provider credentials and model specifiers).
+  - `validate` (Branch A: validated candidate canons in `caseload.discovery` and `caseload.validation`).
+  - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** `intake`, `discover`.
 - **Pruned from Execution:** `probe`, Stages 6–7.
 
 ---
 
-## 3. Specific Inputs
+## 3. Core Functional Contract (`packages/core`)
 
-### Standard Streams & CLI Options
-- Incoming `Caseload` via `--caseload <path|->` (containing `intake`, `discovery`, `validation`, and `config`).
-- `--threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
-- `--json`: Emits enriched Caseload containing the `.docket` block.
+```ts
+export interface DocketOptions {
+  readonly threshold?: number | undefined; // default: 0.5
+  readonly screenerModel?: string | undefined;
+}
 
-### Context Supplied to Screener
-- High-level PR context: `pr_title`, `pr_body`.
-- Diff summary metrics: files changed, lines added/deleted, and touched file paths.
-- Candidate canon summaries: `id`, `title`, and invariant statement.
+export function executeDocket(
+  options: DocketOptions,
+  caseload: Caseload
+): Promise<Caseload>;
+```
 
----
-
-## 4. Process & Logic
-
-1. **Aggregate Single-Turn Screening:**  
-   Unlike trial evaluation which evaluates cases independently, `docket` screens **all candidate canons in a single aggregate prompt turn** using `gemini-3.5-flash-lite`.
-2. **Constrained Grammar Decoding:**  
-   Forces structured JSON output with guaranteed schema keys:
-   ```json
-   {
-     "cases": {
-       ".canons/cli/cli-flags-kebab-case.md": {
-         "colorabilityScore": 0.95,
-         "colorabilitySummary": "PR introduces new command flags in packages/cli.",
-         "status": "docketed"
-       }
-     }
-   }
-   ```
-3. **Threshold Gate (`colorabilityScore >= 0.5`):**
-   - Canons scoring $\ge 0.5$ establish jurisdiction and are entered into `activeDocket`.
-   - Canons scoring $< 0.5$ are marked `dismissed` with summary rationale.
-4. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
-
----
-
-## 5. Outputs & Caseload Delta
-
+### Caseload Delta
 Populates the `.docket` field on the cumulative `Caseload`:
 
 ```ts
@@ -94,15 +69,68 @@ export interface CaseloadDocket {
 }
 ```
 
-### Caseload Delta
-- `caseload.docket`: Attached with jurisdiction assessments for all candidate canons and the `activeDocket` list of active Cases.
+### Domain Short-Circuit Invariant
+If `activeDocket.length === 0`:
+- Execution terminates immediately with exit code `0` (or returns empty active docket).
+- Zero substantive trials (`audit`) are scheduled, avoiding hundreds of thousands of deep-reasoning tokens.
 
 ---
 
-## 6. Gate & Error Semantics
+## 4. Process & Domain Logic (`core`)
 
-- **The Empty Docket Short-Circuit (Exit Code 0):**  
-  **If zero candidate canons achieve `colorabilityScore >= 0.5`, the run terminates immediately with exit code `0`.**  
-  *No substantive trials (`audit`) are scheduled, avoiding hundreds of thousands of deep-reasoning tokens.*
-- **Exit Code 0 (Active Cases Present):** When one or more cases are docketed, proceeds downstream to `admit` or emits docket Caseload.
-- **Exit Code 2 (Provider / Parse Error):** Network connectivity failure or malformed provider response.
+1. **Aggregate Single-Turn Screening:**  
+   Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-3.5-flash-lite`.
+2. **Constrained Grammar Decoding:**  
+   Forces structured JSON output with guaranteed schema keys:
+   ```json
+   {
+     "cases": {
+       ".canons/cli/cli-flags-kebab-case.md": {
+         "colorabilityScore": 0.95,
+         "colorabilitySummary": "PR introduces new command flags in packages/cli.",
+         "status": "docketed"
+       }
+     }
+   }
+   ```
+3. **Threshold Gate (`colorabilityScore >= 0.5`):**
+   - Canons scoring $\ge 0.5$ establish jurisdiction and are entered into `activeDocket`.
+   - Canons scoring $< 0.5$ are marked `dismissed` with summary rationale.
+4. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
+
+---
+
+## 5. Driving Adapter: CLI (`packages/cli`)
+
+The CLI exposes `docket` (aliased as `docket-canons` and `color`):
+
+```bash
+# Execute macro triage against an upstream Caseload:
+canon-clerk docket --caseload caseload-3.json --json
+
+# Run telescoping pipeline stopping at docket:
+git diff origin/main | canon-clerk docket --diff -
+```
+
+### CLI Flags & Environment
+- `--threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
+- `--caseload <path|->`: Ingests upstream Caseload.
+- `--json`: Emits enriched Caseload JSON.
+
+### CLI Exit Codes
+- **0:** Candidate canons screened and active docket established (or empty docket short-circuit).
+- **2:** Provider connection error, invalid API key, or malformed model response.
+
+---
+
+## 6. Driving Adapter: GitHub Action (`packages/action`)
+
+1. **Macro Screening Step:** Calls `executeDocket` with the cumulative `Caseload`.
+2. **Telemetry Reporting:** Logs screened candidate canons and active docket admissions to workflow step output.
+3. **Early Exit:** If `activeDocket.length === 0`, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.
+
+---
+
+## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+
+Integration tests invoke `executeDocket` against recorded PR fixtures and live Gemini endpoints, verifying that trie-constrained decoding strictly adheres to JSON schemas and produces consistent `colorabilityScore` determinations.

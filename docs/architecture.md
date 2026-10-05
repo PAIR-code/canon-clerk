@@ -35,11 +35,11 @@ Rather than disjoint subcommands producing disparate outputs, Canon Clerk treats
 The complete architectural specification is partitioned across the following dedicated documents:
 
 ### Core Framework & Execution Model
-- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Two Feeder Branches $\to$ Adjudication Spine topology, the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, TypeScript `Caseload` schema, and telemetry event stream.
+- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Hexagonal Architecture (Ports & Adapters across `@canon-clerk/core`, `@canon-clerk/cli`, and `@canon-clerk/action`), Two Feeder Branches $\to$ Adjudication Spine topology, the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, TypeScript `Caseload` schema, and telemetry event stream.
 - **[DAG Scheduling & Semantics](architecture/scheduling.md):** Transitive dependency closure calculation, branch pruning, the Guarded/Lazy Scheduling Invariant (zero-credential short-circuits for un-governed changes), telescoping backfill mode, and the static schedule lookup table.
 
-### Node-by-Node Specifications (`docs/architecture/nodes/`)
-Comprehensive documentation for each of the eight imperative verb subcommands:
+### Node-by-Node Stage Specifications (`docs/architecture/nodes/`)
+Comprehensive specifications for each of the eight imperative verb stages across domain engine (`core`), CLI (`cli`), and GitHub Action (`action`) adapters:
 
 1. **[intake](architecture/nodes/intake.md):** Stage 1 universal front door parsing diffs, target paths/globs, and PR metadata into `FileArtifact` records (Branch A).
 2. **[discover](architecture/nodes/discover.md):** Stage 2 path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches (Branch A).
