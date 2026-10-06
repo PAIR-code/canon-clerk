@@ -50,7 +50,39 @@ export const validFrontmatterTypesRule: CanonLintRule = {
         }
       }
 
-      // 2. Check array of string fields: triggers, inspect, tags, references
+      // 2. Check exists field: string or array of strings
+      if (keyName === 'exists') {
+        if (typeof rawVal !== 'string' && !Array.isArray(rawVal)) {
+          const { line, column } = getNodePosition(context, valNode || item.key);
+          diagnostics.push({
+            code: 'valid-frontmatter-types',
+            severity: 'error',
+            message: `Frontmatter property 'exists' must be a string or an array of strings.`,
+            line,
+            column,
+            remediation: `Format 'exists' as a string or a YAML list of strings (e.g. ['package.json']).`,
+          });
+        } else if (Array.isArray(rawVal)) {
+          const seqNode = isSeq(valNode) ? (valNode as YAMLSeq) : undefined;
+          for (let i = 0; i < rawVal.length; i++) {
+            const el = rawVal[i];
+            const elNode = seqNode?.items[i] as Node | undefined;
+            if (typeof el !== 'string') {
+              const { line, column } = getNodePosition(context, elNode || valNode || item.key);
+              diagnostics.push({
+                code: 'valid-frontmatter-types',
+                severity: 'error',
+                message: `Frontmatter property 'exists' items must be strings.`,
+                line,
+                column,
+                remediation: `Ensure all elements in 'exists' are strings.`,
+              });
+            }
+          }
+        }
+      }
+
+      // 3. Check array of string fields: triggers, inspect, tags, references
       if (ARRAY_FIELDS.has(keyName)) {
         if (!Array.isArray(rawVal)) {
           const { line, column } = getNodePosition(context, valNode || item.key);
@@ -79,16 +111,20 @@ export const validFrontmatterTypesRule: CanonLintRule = {
                 column,
                 remediation: `Ensure all elements in '${keyName}' are strings.`,
               });
-            } else if (keyName === 'inspect' && !VALID_INSPECT_TOKENS.has(el)) {
-              const { line, column } = getNodePosition(context, elNode || valNode || item.key);
-              diagnostics.push({
-                code: 'valid-frontmatter-types',
-                severity: 'error',
-                message: `Invalid inspect token '${el}'. Allowed tokens are: diff, pr_title, pr_body, commit_messages, linked_issues.`,
-                line,
-                column,
-                remediation: 'Use only recognized inspect tokens: diff, pr_title, pr_body, commit_messages, linked_issues.',
-              });
+            } else if (keyName === 'inspect') {
+              const optional = el.endsWith('?');
+              const tokenName = optional ? el.slice(0, -1) : el;
+              if (!VALID_INSPECT_TOKENS.has(tokenName)) {
+                const { line, column } = getNodePosition(context, elNode || valNode || item.key);
+                diagnostics.push({
+                  code: 'valid-frontmatter-types',
+                  severity: 'error',
+                  message: `Invalid inspect token '${el}'. Allowed tokens are: diff, pr_title, pr_body, commit_messages, linked_issues.`,
+                  line,
+                  column,
+                  remediation: 'Use only recognized inspect tokens: diff, pr_title, pr_body, commit_messages, linked_issues (with optional trailing \'?\').',
+                });
+              }
             }
           }
         }

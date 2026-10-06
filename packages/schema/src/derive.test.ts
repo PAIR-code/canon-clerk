@@ -3,6 +3,7 @@ import {
   deriveId,
   deriveTitle,
   deriveTriggers,
+  deriveExists,
   deriveInspect,
   deriveTags,
   deriveReferences,
@@ -93,15 +94,78 @@ describe('deriveTriggers', () => {
   it('defaults to ["**/*"] for global canons without frontmatter triggers', () => {
     expect(deriveTriggers(undefined, undefined)).toEqual(['**/*']);
   });
+
+  it('rejects directory traversal in scoped canons', () => {
+    expect(() => deriveTriggers(['../outside.ts'], 'packages/ui')).toThrow(
+      /attempts directory traversal outside scope 'packages\/ui'/
+    );
+  });
+});
+
+describe('deriveExists', () => {
+  it('defaults to empty array when omitted', () => {
+    expect(deriveExists(undefined)).toEqual([]);
+    expect(deriveExists(null)).toEqual([]);
+    expect(deriveExists([])).toEqual([]);
+  });
+
+  it('coerces scalar string to single-element array', () => {
+    expect(deriveExists('package.json')).toEqual(['package.json']);
+  });
+
+  it('accepts array of globs', () => {
+    expect(deriveExists(['package.json', 'src/**/*.ts'])).toEqual(['package.json', 'src/**/*.ts']);
+  });
+
+  it('automatically prefixes patterns for scoped canons', () => {
+    expect(deriveExists('package.json', 'packages/schema')).toEqual(['packages/schema/package.json']);
+    expect(deriveExists(['src/**/*.ts', '**/*.json'], 'packages/ui')).toEqual([
+      'packages/ui/src/**/*.ts',
+      'packages/ui/**/*.json',
+    ]);
+  });
+
+  it('rejects directory traversal in scoped canons', () => {
+    expect(() => deriveExists('../other/package.json', 'packages/schema')).toThrow(
+      /attempts directory traversal outside scope 'packages\/schema'/
+    );
+  });
 });
 
 describe('deriveInspect', () => {
-  it('uses frontmatter inspect tokens when provided', () => {
-    expect(deriveInspect(['diff', 'linked_issues'])).toEqual(['diff', 'linked_issues']);
+  it('uses frontmatter inspect tokens when provided without riders', () => {
+    expect(deriveInspect(['diff', 'linked_issues'])).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'linked_issues', optional: false },
+    ]);
   });
 
-  it('defaults to diff, pr_title, pr_body when omitted', () => {
-    expect(deriveInspect(undefined)).toEqual(['diff', 'pr_title', 'pr_body']);
+  it('parses optional ? riders on tokens', () => {
+    expect(deriveInspect(['diff', 'pr_title?', 'pr_body?'])).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: true },
+      { token: 'pr_body', optional: true },
+    ]);
+  });
+
+  it('coerces scalar string', () => {
+    expect(deriveInspect('diff')).toEqual([{ token: 'diff', optional: false }]);
+    expect(deriveInspect('pr_title?')).toEqual([{ token: 'pr_title', optional: true }]);
+  });
+
+  it('supports all-optional token edge case', () => {
+    expect(deriveInspect(['diff?', 'pr_title?'])).toEqual([
+      { token: 'diff', optional: true },
+      { token: 'pr_title', optional: true },
+    ]);
+  });
+
+  it('defaults to diff, pr_title?, pr_body? when omitted', () => {
+    expect(deriveInspect(undefined)).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: true },
+      { token: 'pr_body', optional: true },
+    ]);
   });
 });
 
@@ -131,6 +195,12 @@ describe('deriveReferences', () => {
   it('defaults to empty array when omitted', () => {
     expect(deriveReferences(undefined)).toEqual([]);
   });
+
+  it('rejects directory traversal in scoped canons', () => {
+    expect(() => deriveReferences(['../SPEC.md'], 'packages/schema')).toThrow(
+      /attempts directory traversal outside scope 'packages\/schema'/
+    );
+  });
 });
 
 describe('deriveMetadata', () => {
@@ -146,9 +216,30 @@ describe('deriveMetadata', () => {
       id: 'buttons-must-have-aria-labels',
       title: 'Buttons Must Have Aria Labels',
       triggers: ['packages/ui/**'],
-      inspect: ['diff', 'pr_title', 'pr_body'],
+      exists: [],
+      inspect: [
+        { token: 'diff', optional: false },
+        { token: 'pr_title', optional: true },
+        { token: 'pr_body', optional: true },
+      ],
       tags: [],
       references: [],
     });
+  });
+
+  it('derives explicit exists and inspect with riders', () => {
+    const { metadata } = deriveMetadata(
+      {
+        exists: 'package.json',
+        inspect: ['diff', 'pr_title?'],
+      },
+      '# Title'
+    );
+
+    expect(metadata.exists).toEqual(['package.json']);
+    expect(metadata.inspect).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: true },
+    ]);
   });
 });

@@ -9,6 +9,8 @@ id: standard-canon
 title: Standard Canon
 triggers:
   - "**/*.ts"
+exists:
+  - package.json
 inspect:
   - diff
 tags:

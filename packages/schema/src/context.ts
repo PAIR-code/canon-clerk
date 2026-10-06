@@ -1,6 +1,7 @@
 import { parseDocument, LineCounter, type Document } from 'yaml';
 import { tokenizeCanon } from './lexer.js';
 import { CanonParseError } from './errors.js';
+import { deriveScope } from './derive.js';
 import type { RawFrontmatter } from './types/canon.js';
 import type { CanonToken, FrontmatterToken } from './types/tokens.js';
 
@@ -18,6 +19,9 @@ export class RuleContext {
 
   private _fileStemResolved = false;
   private _fileStem?: string | undefined;
+
+  private _scopeResolved = false;
+  private _scope?: string | undefined;
 
   private _tokens?: readonly CanonToken[] | undefined;
   private _frontmatterTokenResolved = false;
@@ -66,6 +70,17 @@ export class RuleContext {
       this._fileStemResolved = true;
     }
     return this._fileStem;
+  }
+
+  /**
+   * Monorepo scope prefix (e.g. 'packages/schema'), derived lazily from filePath.
+   */
+  get scope(): string | undefined {
+    if (!this._scopeResolved) {
+      this._scope = deriveScope(this.filePath);
+      this._scopeResolved = true;
+    }
+    return this._scope;
   }
 
   /**

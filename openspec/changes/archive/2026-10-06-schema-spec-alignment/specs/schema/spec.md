@@ -1,10 +1,6 @@
-# schema Specification
+# Spec Delta: schema
 
-## Purpose
-
-Defines the canonical canon data representations, AST interfaces, lexical tokenization, and deterministic metadata derivation rules governing Canon Clerk.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Canon Domain Entity Schema
 The system SHALL represent parsed canons using a unified, flat `Canon` domain entity containing required machine identifiers (`id`), human-readable titles (`title`), deterministic path activation triggers (`triggers`), state preconditions (`exists: readonly string[]`), context exhibits with token optionality (`inspect: readonly InspectPlane[]`), classification tags (`tags`), grounding file references (`references`), cognitive tetrad attributes, and file provenance metadata.
@@ -64,34 +60,7 @@ The system SHALL derive missing canon metadata per SPEC.md Section 4.2:
 - **WHEN** a canon omits the `inspect` frontmatter field
 - **THEN** `inspect` derives `[{ token: 'diff', optional: false }, { token: 'pr_title', optional: true }, { token: 'pr_body', optional: true }]`
 
-### Requirement: Pure Parsing and Normalization
-The canon parsing and normalization functions in `@canon-clerk/schema` SHALL be pure functions that operate exclusively on in-memory strings and options, with zero dependency on Node.js I/O or filesystem modules.
-
-#### Scenario: In-memory parsing without filesystem access
-- **WHEN** raw markdown text and relative file path metadata are passed to the parser
-- **THEN** the system returns a normalized `Canon` entity without performing filesystem or network operations
-
-### Requirement: Cognitive Directives and Body Content
-The parser SHALL parse the canon body into structured cognitive directives, separating the primary invariant statement (What) from recognized directives: `Exception` (When), `Rationale` (Why), and `Remediation` (How). Discrete `Exception` clauses SHALL be collected into a normalized `exceptions: string[]` array containing zero or more elements, evaluated as independent logical ORs.
-
-#### Scenario: Parsing the complete cognitive tetrad
-- **WHEN** a canon body contains an invariant statement, `Exception:` clause, `Rationale:` clause, and `**Remediation:**` clause
-- **THEN** the parsed canon entity exposes each directive as direct, typed fields (`invariant`, `exceptions`, `rationale`, `remediation`), with `exceptions` containing the single extracted exception clause
-
-#### Scenario: Parsing multiple discrete exception clauses
-- **WHEN** a canon body declares multiple discrete `Exception:` directives
-- **THEN** the parsed canon entity collects each discrete clause into `exceptions: string[]` preserving declaration order
-
-### Requirement: Lexical Tokenization
-The system SHALL provide a pure lexical tokenizer (`tokenizeCanon`) that scans raw canon markdown content into an ordered stream of typed lexical tokens (`CanonToken`) tracking 1-indexed source line numbers, raw source text, and token-specific properties for frontmatter blocks, headings, code blocks, cognitive directives (`Exception`, `Rationale`, `Remediation`), text paragraphs, and blank lines.
-
-#### Scenario: Tokenizing complete canon with frontmatter and directives
-- **WHEN** a canon contains frontmatter, headings, directives, and code blocks
-- **THEN** the lexer emits typed tokens (`frontmatter`, `heading`, `directive`, `code_block`, `text`, `blank_line`) with 1-indexed line numbers and raw text
-
-#### Scenario: Preserving directive trivia and empty values in tokens
-- **WHEN** a canon body contains an empty directive such as `Rationale:    `
-- **THEN** the lexer emits a `directive` token with `name: "rationale"`, `value: ""`, and its exact source line number
+## ADDED Requirements
 
 ### Requirement: Scope Containment and Subordination
 The system SHALL enforce strict monorepo package isolation for scoped canons located in `<scope>/.canons/`. All declared paths and glob patterns in `triggers:`, `exists:`, and `references:` SHALL be evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal outside `<scope>/` (such as `../`) SHALL be rejected during derivation and validation.

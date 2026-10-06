@@ -65,4 +65,31 @@ id: non-matching-id
     expect(diags[0]?.code).toBe('id-matches-filename');
     expect(diags[0]?.severity).toBe('error');
   });
+
+  it('runs the full default catalog on a scoped canon with exists and optional inspect riders', () => {
+    const canon = `---
+id: scoped-rule
+title: Scoped Rule
+triggers:
+  - "src/**/*.ts"
+exists:
+  - "package.json"
+inspect:
+  - diff
+  - pr_title?
+tags:
+  - internal
+references:
+  - "README.md"
+---
+# Scoped Rule
+
+Every component must follow design tokens.`;
+
+    const diags = lintCanon(canon, 'packages/ui/.canons/scoped-rule.md', {
+      rules: [...DEFAULT_RULES],
+    });
+
+    expect(diags).toEqual([]);
+  });
 });

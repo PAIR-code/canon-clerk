@@ -1,29 +1,6 @@
-# canon-linter/frontmatter-rules Specification
+# Spec Delta: canon-linter/frontmatter-rules
 
-## Purpose
-
-Defines frontmatter schema verification, delimiter integrity, recognized key restrictions, property types, and naming convention lint rules for Canon documents.
-
-## Requirements
-
-### Requirement: YAML Frontmatter Syntax and Delimiter Verification
-The static linter SHALL provide a rule (`valid-yaml-frontmatter`, default severity `error`) that verifies canon frontmatter blocks open and close with `---` delimiters and contain valid YAML mapping syntax. Syntax errors MUST report 1-indexed source line and column numbers. Canons without frontmatter MUST produce zero diagnostics.
-
-#### Scenario: Valid frontmatter with proper delimiters
-- **WHEN** linting a canon with properly delimited valid YAML frontmatter
-- **THEN** `valid-yaml-frontmatter` produces zero diagnostics
-
-#### Scenario: Missing terminating delimiter
-- **WHEN** linting a canon starting with `---` that lacks a terminating `---` delimiter
-- **THEN** `valid-yaml-frontmatter` reports an error diagnostic at the unclosed block
-
-#### Scenario: Malformed YAML syntax inside frontmatter
-- **WHEN** linting a canon whose frontmatter contains invalid YAML syntax
-- **THEN** `valid-yaml-frontmatter` reports error diagnostics with 1-indexed line and column coordinates
-
-#### Scenario: Canon omitting frontmatter entirely
-- **WHEN** linting a canon without frontmatter
-- **THEN** `valid-yaml-frontmatter` produces zero diagnostics
+## MODIFIED Requirements
 
 ### Requirement: Frontmatter Schema Key Restriction
 The static linter SHALL provide a rule (`no-unrecognized-keys`, default severity `warning`) that flags any frontmatter keys outside the SPEC.md Section 4.1 schema (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`). Diagnostics MUST report the exact 1-indexed line and column coordinates of unrecognized keys using YAML CST node locations.
@@ -67,49 +44,7 @@ The static linter SHALL provide a rule (`valid-frontmatter-types`, default sever
 - **WHEN** frontmatter specifies an unrecognized token like `unknown_token?`
 - **THEN** `valid-frontmatter-types` reports an error diagnostic targeting that item
 
-### Requirement: Canon ID and Filename Alignment
-The static linter SHALL provide a rule (`id-matches-filename`, default severity `warning`) that verifies explicit frontmatter `id` values match the kebab-case file stem when `filePath` is present on the rule context.
-
-#### Scenario: Explicit ID matches file stem
-- **WHEN** frontmatter `id` matches `context.fileStem` (e.g. `id: prs-must-include-tests` for `prs-must-include-tests.md`)
-- **THEN** `id-matches-filename` produces zero diagnostics
-
-#### Scenario: Explicit ID diverges from file stem
-- **WHEN** frontmatter `id` diverges from `context.fileStem`
-- **THEN** `id-matches-filename` reports a warning diagnostic suggesting alignment
-
-#### Scenario: File path omitted or frontmatter ID omitted
-- **WHEN** either `filePath` is undefined or no explicit frontmatter `id` is specified
-- **THEN** `id-matches-filename` produces zero diagnostics
-
-### Requirement: Affirmative File Stem Naming
-The static linter SHALL provide a rule (`no-negated-file-stems`, default severity `warning`) that flags canon file stems containing negative modal verbs such as `-must-not-`, encouraging affirmative actions or categorical prohibition.
-
-#### Scenario: Affirmative canon file stem
-- **WHEN** a canon file stem uses affirmative phrasing like `canons-must-omit-needless-rationale` or `third-party-apps-are-forbidden`
-- **THEN** `no-negated-file-stems` produces zero diagnostics
-
-#### Scenario: Negated modal in canon file stem
-- **WHEN** a canon file stem contains `-must-not-` (e.g. `prs-must-not-skip-tests`)
-- **THEN** `no-negated-file-stems` reports a warning diagnostic with remediation guidance
-
-### Requirement: Affirmative Frontmatter ID Naming
-The static linter SHALL provide a rule (`no-negated-ids`, default severity `warning`) that flags explicit frontmatter `id` values containing negative modal phrases like `must-not`.
-
-#### Scenario: Affirmative frontmatter ID
-- **WHEN** an explicit frontmatter `id` uses affirmative phrasing
-- **THEN** `no-negated-ids` produces zero diagnostics
-
-#### Scenario: Negated modal in frontmatter ID
-- **WHEN** an explicit frontmatter `id` contains `must-not`
-- **THEN** `no-negated-ids` reports a warning diagnostic with remediation guidance
-
-### Requirement: Frontmatter Rule Catalog Registration
-The static linter SHALL export all frontmatter lint rules individually and as part of a default rule catalog in `@canon-clerk/schema`.
-
-#### Scenario: Accessing default frontmatter rules
-- **WHEN** importing rules from `@canon-clerk/schema`
-- **THEN** all frontmatter lint rules are accessible and executable via `lintCanon`
+## ADDED Requirements
 
 ### Requirement: Scope Containment Lint Rule
 The static linter SHALL provide a rule (`scope-containment`, default severity `error`) checking all declared patterns in `triggers:`, `exists:`, and `references:` within scoped canons. Any pattern attempting directory traversal outside `<scope>/` (e.g. `../`) MUST report an error diagnostic targeting the invalid CST item location.

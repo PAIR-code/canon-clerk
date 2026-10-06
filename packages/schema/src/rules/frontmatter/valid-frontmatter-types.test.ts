@@ -91,12 +91,13 @@ tags:
 inspect:
   - diff
   - invalid_token
+  - another_invalid?
 ---
 # Invariant`;
     const diags = lintCanon(markdown, '.canons/test.md', {
       rules: [validFrontmatterTypesRule],
     });
-    expect(diags).toHaveLength(1);
+    expect(diags).toHaveLength(2);
     expect(diags[0]).toMatchObject({
       code: 'valid-frontmatter-types',
       severity: 'error',
@@ -104,5 +105,52 @@ inspect:
       column: 5,
       message: expect.stringContaining("Invalid inspect token 'invalid_token'"),
     });
+    expect(diags[1]).toMatchObject({
+      code: 'valid-frontmatter-types',
+      severity: 'error',
+      line: 5,
+      column: 5,
+      message: expect.stringContaining("Invalid inspect token 'another_invalid?'"),
+    });
+  });
+
+  it('accepts scalar exists and inspect tokens with ? optional riders', () => {
+    const markdown = `---
+exists: "package.json"
+inspect:
+  - diff
+  - pr_title?
+  - pr_body?
+---
+# Invariant`;
+    const diags = lintCanon(markdown, '.canons/test.md', {
+      rules: [validFrontmatterTypesRule],
+    });
+    expect(diags).toEqual([]);
+  });
+
+  it('flags invalid exists types and non-string exists array items', () => {
+    const markdown1 = `---
+exists: 123
+---
+# Invariant`;
+    const diags1 = lintCanon(markdown1, '.canons/test.md', {
+      rules: [validFrontmatterTypesRule],
+    });
+    expect(diags1).toHaveLength(1);
+    expect(diags1[0]?.message).toBe(
+      "Frontmatter property 'exists' must be a string or an array of strings."
+    );
+
+    const markdown2 = `---
+exists:
+  - 456
+---
+# Invariant`;
+    const diags2 = lintCanon(markdown2, '.canons/test.md', {
+      rules: [validFrontmatterTypesRule],
+    });
+    expect(diags2).toHaveLength(1);
+    expect(diags2[0]?.message).toBe("Frontmatter property 'exists' items must be strings.");
   });
 });
