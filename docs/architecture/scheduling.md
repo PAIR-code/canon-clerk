@@ -69,7 +69,7 @@ To uphold this guarantee, the scheduler enforces the **Guarded / Lazy Scheduling
 ```mermaid
 flowchart TD
     Start["Invoke Converged Target (e.g. audit)"] --> S1["intake<br/>(Ingest diffs & file paths)"]
-    S1 --> S2["discover<br/>(Check requires: preconditions & match triggers:)"]
+    S1 --> S2["discover<br/>(Check exists: preconditions & match triggers:)"]
     S2 --> Check{"Candidate Canons > 0?"}
     
     Check -- "No (0 Matches)" --> ShortCircuit["Short-Circuit Exit 0<br/>(PR touches un-governed files)<br/><b>0 Tokens · ~15ms · 0 Credentials</b>"]
