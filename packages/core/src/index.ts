@@ -11,6 +11,7 @@ export type { Caseload, CaseloadIntake, LinkedIssueContext } from '@canon-clerk/
 export * from './docket-canons.js';
 export * from './probe-classifier.js';
 export * from './probe-runner.js';
+export * from './diff-parser.js';
 
 import pkg from '../package.json' with { type: 'json' };
 

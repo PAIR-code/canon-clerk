@@ -85,5 +85,11 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(typeof core.classifyProbeError).toBe('function');
     expect(typeof core.getMissingCredentialsHint).toBe('function');
   });
+
+  it('re-exports in-memory and streaming unified diff parser routines', () => {
+    expect(typeof core.parseUnifiedDiff).toBe('function');
+    expect(typeof core.parseUnifiedDiffStream).toBe('function');
+    expect(typeof core.tokenizeDiff).toBe('function');
+  });
 });
 
