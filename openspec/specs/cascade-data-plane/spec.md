@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Defines the shared data plane abstractions (`FileArtifact` and `ColorabilityAssessment`) used across the Docket and Audit phases of Canon Clerk's evaluation cascade to represent code modifications, persistent reference files, and screening colorability verdicts.
+Defines the shared data plane abstractions (`FileArtifact`, `ColorabilityAssessment`, and `Caseload` state container) used across Canon Clerk's evaluation cascade to represent code modifications, persistent reference files, screening colorability verdicts, and cumulative evaluation state.
 
 ## Requirements
 
 ### Requirement: File Artifact Domain Abstraction
-The system SHALL define the `FileArtifact` interface representing unified diffs, full file contents, line change counts, and file status across active changes and reference documents.
+The system SHALL define the `FileArtifact` interface in `@canon-clerk/schema` representing unified diffs, full file contents, line change counts, and file status across active changes and reference documents.
 
 #### Scenario: Populating unified diff for modified change
 - **WHEN** creating a `FileArtifact` representing a modified source file with patch content
@@ -53,3 +53,32 @@ The system SHALL define a `ColorabilityAssessment` interface structuring screeni
 #### Scenario: Representing active docket jurisdiction
 - **WHEN** a screening model evaluates an exhibit against a canon and determines jurisdiction
 - **THEN** the assessment contains a non-empty `colorabilitySummary` and a `colorabilityScore` between 0.0 and 1.0
+
+### Requirement: Baseline Caseload State Container Abstraction
+The system SHALL define the canonical `Caseload` state container in `@canon-clerk/schema` with required schema specification version `'1.0'` and optional stage properties (`intake`, `discovery`, `validation`, `config`, `probe`, `docket`, `evidence`, `verdict`).
+
+#### Scenario: Instantiating a baseline Caseload
+- **WHEN** initializing a new evaluation run state container
+- **THEN** the Caseload has version `'1.0'` and undefined evaluation stage properties
+
+#### Scenario: Retaining completed stage properties
+- **WHEN** a Caseload enriches state across pipeline stages
+- **THEN** existing stage properties are preserved immutably
+
+### Requirement: Filing Intake Caseload State Contract
+The system SHALL define the `CaseloadIntake` interface in `@canon-clerk/schema` recording `diffs` (keyed by relative POSIX paths to `FileArtifact`), optional target discovery paths (`targetPaths`), scope (`'targeted' | 'all-targets'`), PR metadata (`pr_title`, `pr_body`), and optional linked issue contexts.
+
+#### Scenario: Representing targeted diff intake state
+- **WHEN** populating intake state from a pull request diff
+- **THEN** the intake state records keyed FileArtifact diffs, PR title, body, and target scope
+
+#### Scenario: Representing explicit target path directives
+- **WHEN** populating intake state from explicit path directives without diffs
+- **THEN** the intake state records target paths and empty diffs map
+
+### Requirement: Schema Re-export from Core Engine
+The system SHALL re-export all data plane and Caseload interfaces from `@canon-clerk/core`, preserving backward-compatible import surfaces while maintaining runtime validation factories within the core engine.
+
+#### Scenario: Importing FileArtifact from core
+- **WHEN** consumer code imports `FileArtifact` or `ColorabilityAssessment` from `@canon-clerk/core`
+- **THEN** the types resolve identically to their `@canon-clerk/schema` definitions
