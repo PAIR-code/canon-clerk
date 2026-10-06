@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CascadeDiagnostics, ModelTierDiagnostics } from '@canon-clerk/configuration';
-import { createModelClient } from '@canon-clerk/core';
-import { executeCascadeProbes, probeTier } from './probe-runner.js';
+import type { ModelConfig } from './model-config.js';
+import { createModelClient } from './client.js';
+import { probeTier } from './probe-runner.js';
 
-vi.mock('@canon-clerk/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@canon-clerk/core')>();
+vi.mock('./client.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./client.js')>();
   return {
     ...actual,
     createModelClient: vi.fn(),
@@ -12,21 +12,16 @@ vi.mock('@canon-clerk/core', async (importOriginal) => {
 });
 
 describe('probeTier', () => {
-  const baseTierDiag: ModelTierDiagnostics = {
-    tier: 'screener',
+  const baseConfig: ModelConfig = {
     provider: 'google',
     model: 'google:gemini-3.5-flash-lite',
     modelName: 'gemini-3.5-flash-lite',
-    hasKey: false,
-    sources: { model: 'default' },
-    warnings: [],
   };
 
   it('short-circuits at 0ms when API key is missing (non-ollama)', async () => {
     const result = await probeTier({
       tier: 'screener',
-      tierDiag: baseTierDiag,
-      env: {},
+      config: baseConfig,
     });
 
     expect(result.ok).toBe(false);
@@ -37,22 +32,18 @@ describe('probeTier', () => {
   });
 
   it('returns ok: true when model generation succeeds', async () => {
-    const tierDiagWithKey: ModelTierDiagnostics = {
-      ...baseTierDiag,
-      hasKey: true,
-      maskedKey: '...1234',
+    const configWithKey: ModelConfig = {
+      ...baseConfig,
+      apiKey: 'valid-key',
     };
 
     vi.mocked(createModelClient).mockReturnValueOnce({
       generateStructuredJson: vi.fn().mockResolvedValueOnce({ ok: true }),
-    });
+    } as any);
 
     const result = await probeTier({
       tier: 'screener',
-      tierDiag: tierDiagWithKey,
-      env: {
-        GEMINI_API_KEY: 'valid-key',
-      },
+      config: configWithKey,
       timeoutMs: 1000,
     });
 
@@ -62,10 +53,9 @@ describe('probeTier', () => {
   });
 
   it('streams thoughts, invokes onThought, and captures telemetry when streamStructured is supported', async () => {
-    const tierDiagWithKey: ModelTierDiagnostics = {
-      ...baseTierDiag,
-      hasKey: true,
-      maskedKey: '...1234',
+    const configWithKey: ModelConfig = {
+      ...baseConfig,
+      apiKey: 'valid-key',
     };
 
     const streamedThoughts: string[] = [];
@@ -84,16 +74,13 @@ describe('probeTier', () => {
     vi.mocked(createModelClient).mockReturnValueOnce({
       streamStructured: vi.fn().mockImplementation(mockStream),
       generateStructuredJson: vi.fn(),
-    });
+    } as any);
 
     const onThought = vi.fn((delta, tier) => streamedThoughts.push(`${tier}:${delta}`));
 
     const result = await probeTier({
       tier: 'screener',
-      tierDiag: tierDiagWithKey,
-      env: {
-        GEMINI_API_KEY: 'valid-key',
-      },
+      config: configWithKey,
       timeoutMs: 1000,
       onThought,
     });
@@ -109,10 +96,9 @@ describe('probeTier', () => {
   });
 
   it('reports thoughtChunks: 0 when streamStructured yields zero thought events', async () => {
-    const tierDiagWithKey: ModelTierDiagnostics = {
-      ...baseTierDiag,
-      hasKey: true,
-      maskedKey: '...1234',
+    const configWithKey: ModelConfig = {
+      ...baseConfig,
+      apiKey: 'valid-key',
     };
 
     async function* mockStreamWithoutThoughts() {
@@ -129,14 +115,11 @@ describe('probeTier', () => {
     vi.mocked(createModelClient).mockReturnValueOnce({
       streamStructured: vi.fn().mockImplementation(mockStreamWithoutThoughts),
       generateStructuredJson: vi.fn(),
-    });
+    } as any);
 
     const result = await probeTier({
       tier: 'screener',
-      tierDiag: tierDiagWithKey,
-      env: {
-        GEMINI_API_KEY: 'valid-key',
-      },
+      config: configWithKey,
       timeoutMs: 1000,
     });
 
@@ -147,10 +130,9 @@ describe('probeTier', () => {
   });
 
   it('falls back to generateStructured when streamStructured is not available', async () => {
-    const tierDiagWithKey: ModelTierDiagnostics = {
-      ...baseTierDiag,
-      hasKey: true,
-      maskedKey: '...1234',
+    const configWithKey: ModelConfig = {
+      ...baseConfig,
+      apiKey: 'valid-key',
     };
 
     vi.mocked(createModelClient).mockReturnValueOnce({
@@ -159,14 +141,11 @@ describe('probeTier', () => {
         resolvedModel: 'gemini-3.5-flash-lite-fallback',
       }),
       generateStructuredJson: vi.fn(),
-    });
+    } as any);
 
     const result = await probeTier({
       tier: 'screener',
-      tierDiag: tierDiagWithKey,
-      env: {
-        GEMINI_API_KEY: 'valid-key',
-      },
+      config: configWithKey,
       timeoutMs: 1000,
     });
 
@@ -176,10 +155,9 @@ describe('probeTier', () => {
   });
 
   it('catches and classifies thrown generation errors', async () => {
-    const tierDiagWithKey: ModelTierDiagnostics = {
-      ...baseTierDiag,
-      hasKey: true,
-      maskedKey: '...1234',
+    const configWithKey: ModelConfig = {
+      ...baseConfig,
+      apiKey: 'valid-key',
     };
 
     const mockError = new Error('API key not valid. Please pass a valid API key.');
@@ -187,14 +165,11 @@ describe('probeTier', () => {
 
     vi.mocked(createModelClient).mockReturnValueOnce({
       generateStructuredJson: vi.fn().mockRejectedValueOnce(mockError),
-    });
+    } as any);
 
     const result = await probeTier({
       tier: 'screener',
-      tierDiag: tierDiagWithKey,
-      env: {
-        GEMINI_API_KEY: 'bad-key',
-      },
+      config: configWithKey,
       timeoutMs: 1000,
     });
 
@@ -202,62 +177,5 @@ describe('probeTier', () => {
     expect(result.category).toBe('authentication');
     expect(result.error).toContain('API key not valid');
     expect(result.hint).toContain('CANON_CLERK_SCREENER_API_KEY');
-  });
-});
-
-describe('executeCascadeProbes', () => {
-  const mockDiagnostics: CascadeDiagnostics = {
-    store: {
-      path: '/path/to/store',
-      exists: true,
-      modeOctal: '0o600',
-      isSecure: true,
-    },
-    tiers: {
-      screener: {
-        tier: 'screener',
-        provider: 'google',
-        model: 'google:gemini-3.5-flash-lite',
-        modelName: 'gemini-3.5-flash-lite',
-        hasKey: false,
-        sources: { model: 'default' },
-        warnings: [],
-      },
-      auditor: {
-        tier: 'auditor',
-        provider: 'google',
-        model: 'google:gemini-3.8-flash',
-        modelName: 'gemini-3.8-flash',
-        hasKey: false,
-        sources: { model: 'default' },
-        warnings: [],
-      },
-    },
-    warnings: [],
-    errors: [],
-    valid: true,
-  };
-
-  it('probes both tiers by default and marks outcome as failed on missing keys', async () => {
-    const outcome = await executeCascadeProbes({
-      diagnostics: mockDiagnostics,
-      env: {},
-    });
-
-    expect(outcome.probeFailed).toBe(true);
-    expect(outcome.diagnostics.valid).toBe(false);
-    expect(outcome.diagnostics.tiers.screener.probe?.category).toBe('missing_credentials');
-    expect(outcome.diagnostics.tiers.auditor.probe?.category).toBe('missing_credentials');
-  });
-
-  it('filters probing to targetTier when specified', async () => {
-    const outcome = await executeCascadeProbes({
-      diagnostics: mockDiagnostics,
-      targetTier: 'screener',
-      env: {},
-    });
-
-    expect(outcome.diagnostics.tiers.screener.probe).toBeDefined();
-    expect(outcome.diagnostics.tiers.auditor.probe).toBeUndefined();
   });
 });

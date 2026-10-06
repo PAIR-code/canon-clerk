@@ -79,5 +79,11 @@ describe('@canon-clerk/core public barrel API', () => {
     expect(typeof core.normalizeAssessmentsMap).toBe('function');
     expect(typeof core.createDocketCanonsSchema).toBe('function');
   });
+
+  it('re-exports probe runner and classifier diagnostics routines', () => {
+    expect(typeof core.probeTier).toBe('function');
+    expect(typeof core.classifyProbeError).toBe('function');
+    expect(typeof core.getMissingCredentialsHint).toBe('function');
+  });
 });
 

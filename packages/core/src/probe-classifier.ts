@@ -1,5 +1,15 @@
-import type { ModelTier } from '@canon-clerk/core';
-import type { ProbeFailureCategory } from '@canon-clerk/configuration';
+import type { ModelTier } from './model-config.js';
+
+export type ProbeFailureCategory =
+  | 'missing_credentials'
+  | 'authentication'
+  | 'authorization'
+  | 'model_not_found'
+  | 'rate_limited'
+  | 'bad_request'
+  | 'network_error'
+  | 'timeout'
+  | 'unknown';
 
 export interface ClassifiedProbeError {
   readonly category: ProbeFailureCategory;
