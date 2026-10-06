@@ -2,12 +2,12 @@
 
 > Canon Clerk is an open specification and emerging semantic linter for software architecture, engineering conventions, and project tenets.
 
-Canon Clerk addresses the asymmetric cognitive tax placed on maintainers by AI code generators: generative coding tools accelerate code production, generating pull requests that pass static tests and AST linters, but quietly violate unwritten architectural tenets and project conventions. Canon Clerk formalizes these rules into zero-friction Markdown files stored in `.canons/` and audits changes using an efficient Three-Phase Evaluation Cascade.
+Canon Clerk addresses the asymmetric cognitive tax placed on maintainers by AI code generators: generative coding tools accelerate code production, generating pull requests that pass static tests and AST linters, but quietly violate unwritten architectural tenets and project conventions. Canon Clerk formalizes these rules into zero-friction Markdown files stored in `.canons/` and audits changes using the Caseload DAG execution model.
 
 Key architectural concepts:
 - **Dual Pillars:** The project encompasses both the **Canon Standard** (an open specification for declarative, natural-language architectural invariants) and the **Clerk Runner** (the CI review gate and CLI engine that executes multi-stage LLM evaluation).
 - **Core Platform:** Canon Clerk is an automated review engine and specification platform, not a shell utility or script collection; helper scripts in `.agents/skills/` are auxiliary automation tools for AI coding assistants.
-- **Evaluation Cascade:** Audits execute across three sequential phases: **Phase 1: Check** (deterministic trigger matching and canon linting, 0 tokens), **Phase 2: Docket** (relevance screening), and **Phase 3: Audit** (deep semantic audit and verdict generation).
+- **Caseload Pipeline:** Audits execute across the Caseload DAG: Branch A filing (`intake` → `discover` → `validate`), Branch B environment (`configure`), and the adjudication spine (`docket` → `admit` → `audit`), plus diagnostic `probe`.
 
 ## The Canon Standard
 
@@ -21,8 +21,10 @@ Key architectural concepts:
 
 ## The Clerk Runner
 
-- [Three-Phase Evaluation Cascade](docs/architecture/evaluation-cascade.md): Formal architectural specification of the Three-Phase Evaluation Cascade (Check → Docket → Audit), verb contracts, and FileArtifact abstraction.
-- [Architecture Overview](docs/architecture.md): High-level system architecture, engine interfaces, and GitHub Check Run integration.
+- [Caseload DAG Architecture](docs/architecture.md): Entry point and index to the Caseload DAG architectural documentation suite, execution mechanics, and pipeline stages.
+- [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload TypeScript schema, and event stream.
+- [DAG Scheduling & Execution](docs/architecture/scheduling.md): Transitive dependency closure calculation, branch pruning, guarded lazy scheduling, and static schedule lookup table.
+- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all eight imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit).
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
 - [Workspace Packages](packages/): TypeScript monorepo packages comprising schema definitions, core evaluation engine, CLI tooling, and GitHub Action runner.
 - [Living Specifications](openspec/specs/): Formal architectural specifications and interface contracts for the evaluation engine, CLI, and GitHub Action.

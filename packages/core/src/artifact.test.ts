@@ -37,17 +37,17 @@ describe('FileArtifact and createFileArtifact builder', () => {
 
     it('creates a reference grounding file artifact with full content and omitted patch', () => {
       const artifact = createFileArtifact({
-        path: 'docs/architecture/evaluation-cascade.md',
+        path: 'docs/architecture/overview.md',
         status: 'unchanged',
-        content: '# Evaluation Cascade Architecture\n...',
+        content: '# Caseload Pipeline Architecture\n...',
         patchOmissionReason: 'unchanged',
       });
 
-      expect(artifact.path).toBe('docs/architecture/evaluation-cascade.md');
+      expect(artifact.path).toBe('docs/architecture/overview.md');
       expect(artifact.status).toBe('unchanged');
       expect(artifact.linesAdded).toBe(0);
       expect(artifact.linesDeleted).toBe(0);
-      expect(artifact.content).toBe('# Evaluation Cascade Architecture\n...');
+      expect(artifact.content).toBe('# Caseload Pipeline Architecture\n...');
       expect(artifact.contentOmissionReason).toBeUndefined();
       expect(artifact.patch).toBeUndefined();
       expect(artifact.patchOmissionReason).toBe('unchanged');
