@@ -35,4 +35,35 @@ describe('@canon-clerk/schema entrypoint', () => {
     expect(err.name).toBe('CanonParseError');
     expect(err.filePath).toBe('test.md');
   });
+
+  it('exports data plane constants as frozen arrays', () => {
+    expect(schema.FILE_CHANGE_STATUSES).toEqual([
+      'added',
+      'modified',
+      'deleted',
+      'renamed',
+      'copied',
+      'unchanged',
+    ]);
+    expect(Object.isFrozen(schema.FILE_CHANGE_STATUSES)).toBe(true);
+
+    expect(schema.PATCH_OMISSION_REASONS).toEqual([
+      'unchanged',
+      'binary',
+      'oversized',
+      'not_requested',
+    ]);
+    expect(Object.isFrozen(schema.PATCH_OMISSION_REASONS)).toBe(true);
+
+    expect(schema.CONTENT_OMISSION_REASONS).toEqual([
+      'not_requested',
+      'binary',
+      'oversized',
+      'deleted',
+    ]);
+    expect(Object.isFrozen(schema.CONTENT_OMISSION_REASONS)).toBe(true);
+
+    expect(schema.ASSESSMENT_PROVENANCES).toEqual(['result', 'missing', 'duplicate']);
+    expect(Object.isFrozen(schema.ASSESSMENT_PROVENANCES)).toBe(true);
+  });
 });

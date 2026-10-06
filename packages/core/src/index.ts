@@ -7,6 +7,7 @@ export * from './scope.js';
 export * from './triggers.js';
 export * from './model-config.js';
 export * from './artifact.js';
+export type { Caseload, CaseloadIntake, LinkedIssueContext } from '@canon-clerk/schema';
 export * from './docket-canons.js';
 export * from './probe-classifier.js';
 export * from './probe-runner.js';
