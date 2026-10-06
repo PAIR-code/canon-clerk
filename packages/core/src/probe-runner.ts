@@ -1,67 +1,56 @@
 import { z } from 'zod';
-import { createModelClient, type ModelTier } from '@canon-clerk/core';
-import { resolveModelConfig } from './resolver.js';
-import type {
-  CascadeDiagnostics,
-  ModelTierDiagnostics,
-  ModelTierProbeResult,
-} from './diagnostics.js';
+import { createModelClient } from './client.js';
+import type { ModelConfig, ModelTier } from './model-config.js';
 import {
   classifyProbeError,
   getMissingCredentialsHint,
+  type ProbeFailureCategory,
 } from './probe-classifier.js';
+
+export interface ModelTierProbeResult {
+  readonly ok: boolean;
+  readonly durationMs: number;
+  readonly timeToFirstThoughtMs?: number | undefined;
+  readonly timeToFirstTokenMs?: number | undefined;
+  readonly thoughtTokens?: number | undefined;
+  readonly thoughtChunks?: number | undefined;
+  readonly resolvedModel?: string | undefined;
+  readonly message?: string | undefined;
+  readonly category?: ProbeFailureCategory | undefined;
+  readonly error?: string | undefined;
+  readonly hint?: string | undefined;
+}
 
 export interface ProbeTierOptions {
   readonly tier: ModelTier;
-  readonly tierDiag: ModelTierDiagnostics;
-  readonly env: Record<string, string | undefined>;
-  readonly configDir?: string | undefined;
+  readonly config: ModelConfig;
   readonly timeoutMs?: number | undefined;
   readonly onThought?: ((delta: string, tier: ModelTier) => void) | undefined;
-}
-
-export interface ExecuteCascadeProbesOptions {
-  readonly diagnostics: CascadeDiagnostics;
-  readonly targetTier?: ModelTier | undefined;
-  readonly env: Record<string, string | undefined>;
-  readonly configDir?: string | undefined;
-  readonly timeoutMs?: number | undefined;
-  readonly onThought?: ((delta: string, tier: ModelTier) => void) | undefined;
-}
-
-export interface CascadeProbeOutcome {
-  readonly diagnostics: CascadeDiagnostics;
-  readonly probeFailed: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
 /**
  * Actively exercises a single model tier endpoint with a minimal structured query
- * to verify remote reachability, authentication, authorization, and decoding.
+ * using a pre-resolved, normalized ModelConfig to verify remote reachability,
+ * authentication, authorization, and decoding.
  */
 export async function probeTier(options: ProbeTierOptions): Promise<ModelTierProbeResult> {
-  const { tier, tierDiag, env, configDir, timeoutMs = DEFAULT_TIMEOUT_MS, onThought } = options;
+  const { tier, config, timeoutMs = DEFAULT_TIMEOUT_MS, onThought } = options;
 
   // 1. Pre-flight short circuit: fail immediately without network call if credentials missing
-  if (!tierDiag.hasKey && tierDiag.provider !== 'ollama') {
+  if (!config.apiKey && config.provider !== 'ollama') {
     return {
       ok: false,
       durationMs: 0,
       category: 'missing_credentials',
-      error: `Missing API key for provider '${tierDiag.provider}'`,
-      hint: getMissingCredentialsHint(tier, tierDiag.provider),
+      error: `Missing API key for provider '${config.provider}'`,
+      hint: getMissingCredentialsHint(tier, config.provider),
     };
   }
 
-  const modelConfig = resolveModelConfig({
-    tier,
-    env,
-    configDir,
-  });
-
   const schema = z.object({ ok: z.boolean() });
-  const client = createModelClient(modelConfig);
+  const client = createModelClient(config);
 
   const startTime = Date.now();
   let timeToFirstThoughtMs: number | undefined;
@@ -130,7 +119,7 @@ export async function probeTier(options: ProbeTierOptions): Promise<ModelTierPro
     };
   } catch (err) {
     const durationMs = Date.now() - startTime;
-    const classified = classifyProbeError(err, tier, tierDiag.provider);
+    const classified = classifyProbeError(err, tier, config.provider);
     return {
       ok: false,
       durationMs,
@@ -142,51 +131,4 @@ export async function probeTier(options: ProbeTierOptions): Promise<ModelTierPro
       hint: classified.hint,
     };
   }
-}
-
-/**
- * Orchestrates probe execution across all active cascade tiers,
- * returning updated diagnostics with probe results and overall validity.
- */
-export async function executeCascadeProbes(
-  options: ExecuteCascadeProbesOptions
-): Promise<CascadeProbeOutcome> {
-  const { diagnostics, targetTier, env, configDir, timeoutMs, onThought } = options;
-
-  const tiersToProbe: ModelTier[] = targetTier
-    ? [targetTier]
-    : ['screener', 'auditor'];
-
-  const probedTiers = { ...diagnostics.tiers };
-  let probeFailed = false;
-
-  for (const tier of tiersToProbe) {
-    const tierDiag = diagnostics.tiers[tier];
-    const probeResult = await probeTier({
-      tier,
-      tierDiag,
-      env,
-      configDir,
-      timeoutMs,
-      onThought,
-    });
-
-    if (!probeResult.ok) {
-      probeFailed = true;
-    }
-
-    probedTiers[tier] = {
-      ...tierDiag,
-      probe: probeResult,
-    };
-  }
-
-  return {
-    diagnostics: {
-      ...diagnostics,
-      tiers: probedTiers,
-      valid: diagnostics.valid && !probeFailed,
-    },
-    probeFailed,
-  };
 }

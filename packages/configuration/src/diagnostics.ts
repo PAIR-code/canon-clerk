@@ -5,6 +5,8 @@ import {
   type CascadeModelConfig,
   type ModelConfig,
   type ModelTier,
+  type ModelTierProbeResult,
+  type ProbeFailureCategory,
 } from '@canon-clerk/core';
 import {
   getStoredCredential as defaultGetStoredCredential,
@@ -17,6 +19,8 @@ import type {
   ResolveModelConfigOptions,
 } from './resolver.js';
 
+export type { ModelTierProbeResult, ProbeFailureCategory };
+
 export interface ModelPropertySources {
   readonly model: string;
   readonly effort?: string | undefined;
@@ -24,30 +28,6 @@ export interface ModelPropertySources {
   readonly baseURL?: string | undefined;
 }
 
-export type ProbeFailureCategory =
-  | 'missing_credentials'
-  | 'authentication'
-  | 'authorization'
-  | 'bad_request'
-  | 'model_not_found'
-  | 'rate_limited'
-  | 'network_error'
-  | 'timeout'
-  | 'unknown';
-
-export interface ModelTierProbeResult {
-  readonly ok: boolean;
-  readonly durationMs?: number | undefined;
-  readonly timeToFirstThoughtMs?: number | undefined;
-  readonly timeToFirstTokenMs?: number | undefined;
-  readonly thoughtTokens?: number | undefined;
-  readonly thoughtChunks?: number | undefined;
-  readonly category?: ProbeFailureCategory | undefined;
-  readonly resolvedModel?: string | undefined;
-  readonly message?: string | undefined;
-  readonly error?: string | undefined;
-  readonly hint?: string | undefined;
-}
 
 export interface ModelTierDiagnostics {
   readonly tier: ModelTier;

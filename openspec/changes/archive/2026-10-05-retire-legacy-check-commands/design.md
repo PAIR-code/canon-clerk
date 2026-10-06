@@ -23,10 +23,13 @@ Before introducing the new Caseload DAG nodes (`intake`, `discover`, `validate`,
 
 ## Decisions
 
-### 1. Relocate Probe Logic to `@canon-clerk/configuration`
-- **Decision:** Move `probe-classifier.ts` and `probe-runner.ts` directly into `@canon-clerk/configuration/src/` and re-export them from `packages/configuration/src/index.ts`.
-- **Rationale:** Probing model endpoints and classifying network/auth/quota failures is environment and configuration diagnostics domain logic. Presentation adapters in `packages/cli` should only wrap and render, not house core probing logic. Moving these modules to `@canon-clerk/configuration` makes them available to both the upcoming `probe` DAG node and future consumers.
-- **Alternatives Considered:** Leaving them in `packages/cli` or moving them to `@canon-clerk/core`. Core is focused on DAG primitives and engine evaluation, whereas provider diagnostics and credential verification belong in `@canon-clerk/configuration`.
+### 1. Relocate Probe Logic to `@canon-clerk/core` (Receiving Normalized Config)
+- **Decision:** Relocate `probe-classifier.ts` and `probe-runner.ts` into `@canon-clerk/core/src/` and re-export them from `packages/core/src/index.ts`. `probeTier` accepts a normalized `ModelConfig` produced by `@canon-clerk/configuration`.
+- **Rationale:** Probing model endpoints and classifying network/auth/quota failures requires live model client creation and network execution (`createModelClient`). Placing probe routines in `@canon-clerk/configuration` would either create a circular dependency with `@canon-clerk/core` or force `@canon-clerk/configuration` to take on network dependencies. To adhere to clean hexagonal boundaries:
+  - `@canon-clerk/configuration` is responsible strictly for configuration *performance* (host inspection, environment reading, cascading file walks). It is 100% offline, deterministic, and zero-network.
+  - `@canon-clerk/core` owns the configuration *schema* (`ModelConfig`) and model transport/execution. `probeTier` accepts a normalized configuration and performs the probe.
+  - `@canon-clerk/integration-tests-private` provides the integration test exercising `resolveModelConfig` alongside `probeTier`.
+- **Alternatives Considered:** Moving probe logic to `@canon-clerk/configuration` (rejected due to circular dependency on `core`'s model client and violating offline purity of configuration).
 
 ### 2. Complete Removal of Legacy Formatters
 - **Decision:** Delete `packages/cli/src/formatters/` entirely.

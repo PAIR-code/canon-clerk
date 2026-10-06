@@ -8,6 +8,8 @@ export * from './triggers.js';
 export * from './model-config.js';
 export * from './artifact.js';
 export * from './docket-canons.js';
+export * from './probe-classifier.js';
+export * from './probe-runner.js';
 
 import pkg from '../package.json' with { type: 'json' };
 

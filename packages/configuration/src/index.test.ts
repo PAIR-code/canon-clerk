@@ -2,17 +2,13 @@ import { describe, expect, it } from 'vitest';
 import pkg from '../package.json' with { type: 'json' };
 import {
   CONFIGURATION_VERSION,
-  classifyProbeError,
   createCredentialStore,
   deleteStoredCredential,
-  executeCascadeProbes,
   getCredentialFilePath,
-  getMissingCredentialsHint,
   getStoredCredential,
   getStoredProviderConfig,
   getStoredTierConfig,
   inspectCredentialStore,
-  probeTier,
   resolveCascadeModelConfig,
   resolveModelConfig,
   setStoredCredential,
@@ -38,12 +34,5 @@ describe('@canon-clerk/configuration barrel API', () => {
   it('re-exports cascade configuration resolvers', () => {
     expect(typeof resolveModelConfig).toBe('function');
     expect(typeof resolveCascadeModelConfig).toBe('function');
-  });
-
-  it('re-exports probe classifier and probe runner', () => {
-    expect(typeof classifyProbeError).toBe('function');
-    expect(typeof getMissingCredentialsHint).toBe('function');
-    expect(typeof probeTier).toBe('function');
-    expect(typeof executeCascadeProbes).toBe('function');
   });
 });

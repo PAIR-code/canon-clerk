@@ -6,7 +6,7 @@ With the adoption of the Caseload DAG pipeline architecture (PR #197 / #196 / #1
 Before implementing the new Caseload DAG pipeline nodes, the repository must undergo Phase 1: Removal & Salvage. This greenfield pruning excises obsolete presentation-layer CLI commands and formats, while relocating reusable domain logic (specifically probe classifier and probe runner routines) from `packages/cli` into `@canon-clerk/configuration` to adhere to hexagonal architecture boundaries.
 
 ## What Changes
-1. **Salvage Domain Logic:** Move `probe-classifier.*` and `probe-runner.*` from `packages/cli/src/commands/` to `packages/configuration/src/`, re-exporting them from `@canon-clerk/configuration`.
+1. **Salvage Domain Logic:** Move `probe-classifier.*` and `probe-runner.*` from `packages/cli/src/commands/` to `packages/core/src/`, re-exporting them from `@canon-clerk/core`. Probe execution takes a normalized `ModelConfig` and performs network diagnostics.
 2. **Remove Retired CLI Commands:** Delete `check-canons.*`, `check-triggers.*`, and `check-config.*` alongside unit and integration tests, as well as the entire `packages/cli/src/formatters/` directory.
 3. **Prune CLI Router:** Simplify `packages/cli/src/app.ts` to a bare Commander program with version (`-v, --version`), help (`-h, --help`), POSIX signal handling (`SIGINT` -> 130, `SIGTERM` -> 143), and standard exit codes.
 4. **Root Workflow Hygiene:** Remove obsolete `check-canons` and `precheck-canons` scripts from the root `package.json`, updating the `check` script.
@@ -22,6 +22,7 @@ Before implementing the new Caseload DAG pipeline nodes, the repository must und
 - `cli/check-config`: Retired in favor of upcoming Caseload DAG `configure` and `probe` nodes.
 
 ## Impact
-- **`@canon-clerk/configuration`**: Now exports `classifyProbeError`, `getMissingCredentialsHint`, `probeTier`, `executeCascadeProbes`, and associated types.
+- **`@canon-clerk/core`**: Now exports `classifyProbeError`, `getMissingCredentialsHint`, `probeTier`, and associated types.
+- **`@canon-clerk/configuration`**: Remains purely offline, deterministic, and zero-network (no zod / external network dependencies).
 - **`packages/cli`**: Stripped of legacy `check-*` subcommands and formatters; exports only base app and version utilities.
 - **Root `package.json`**: Pruned `check-canons` invocation.

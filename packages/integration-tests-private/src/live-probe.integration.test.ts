@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { z } from 'zod';
 import { resolveModelConfig } from '@canon-clerk/configuration';
-import { createModelClient, type ModelTier } from '@canon-clerk/core';
+import { probeTier, type ModelTier } from '@canon-clerk/core';
 
 export function formatMissingCredentialsRemediation(
   provider: string = 'google',
@@ -38,12 +37,12 @@ export function formatMissingCredentialsRemediation(
   ].join('\n');
 }
 
-describe('Live Model Connectivity Smoke Test (Integration)', () => {
+describe('Model Endpoint Probe Integration (@canon-clerk/configuration + @canon-clerk/core)', () => {
   const skipFlag = process.env.CANON_CLERK_SKIP_LIVE_TESTS;
   const shouldSkip = skipFlag === '1' || skipFlag === 'true';
 
   test.skipIf(shouldSkip)(
-    'connects to live model endpoint via @canon-clerk/configuration and @canon-clerk/core',
+    'exercises live model probe using normalized config from configuration in core probeTier',
     async () => {
       const tier: ModelTier = 'screener';
       const modelConfig = resolveModelConfig({ tier });
@@ -52,33 +51,22 @@ describe('Live Model Connectivity Smoke Test (Integration)', () => {
         throw new Error(formatMissingCredentialsRemediation(modelConfig.provider, tier));
       }
 
-      const client = createModelClient(modelConfig);
-      const schema = z.object({ ok: z.boolean() });
-
-      const result = await client.generateStructuredJson({
-        prompt: 'Respond with a JSON object containing "ok": true to verify connectivity.',
-        schema,
-        temperature: 0,
-        signal: AbortSignal.timeout(15000),
+      const result = await probeTier({
+        tier,
+        config: modelConfig,
+        timeoutMs: 15000,
       });
 
       expect(result).toBeDefined();
       expect(result.ok).toBe(true);
+      expect(result.message).toBe('Reachable (OK)');
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
     },
     30000
   );
 
-  describe('Ergonomic Contract & Remediation Diagnostics', () => {
-    test('formats actionable remediation when credentials are missing', () => {
-      const msg = formatMissingCredentialsRemediation('google', 'screener');
-      expect(msg).toContain('config.json');
-      expect(msg).toContain('GEMINI_API_KEY');
-      expect(msg).toContain('CANON_CLERK_SCREENER_API_KEY');
-      expect(msg).toContain('https://aistudio.google.com/apikey');
-      expect(msg).toContain('CANON_CLERK_SKIP_LIVE_TESTS=1');
-    });
-
-    test('fails by default if configuration lacks API key', () => {
+  describe('Configuration Normalization & Probe Short-Circuit Contract', () => {
+    test('short-circuits at 0ms with category missing_credentials when API key is missing', async () => {
       const mockEnv: Record<string, string | undefined> = {};
       const config = resolveModelConfig({
         tier: 'screener',
@@ -89,11 +77,45 @@ describe('Live Model Connectivity Smoke Test (Integration)', () => {
       });
 
       expect(config.apiKey).toBeUndefined();
-      expect(() => {
-        if (!config.apiKey && config.provider !== 'ollama') {
-          throw new Error(formatMissingCredentialsRemediation(config.provider, 'screener'));
-        }
-      }).toThrowError(/Live integration tests require valid API credentials/);
+
+      const result = await probeTier({
+        tier: 'screener',
+        config,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.durationMs).toBe(0);
+      expect(result.category).toBe('missing_credentials');
+      expect(result.error).toContain("Missing API key for provider 'google'");
+      expect(result.hint).toContain('CANON_CLERK_SCREENER_API_KEY');
+    });
+
+    test('short-circuits for auditor tier when auditor API key is missing', async () => {
+      const config = resolveModelConfig({
+        tier: 'auditor',
+        env: {},
+        configDir: '/nonexistent-test-dir',
+        getStoredCredential: () => undefined,
+        getStoredTierConfig: () => undefined,
+      });
+
+      const result = await probeTier({
+        tier: 'auditor',
+        config,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.category).toBe('missing_credentials');
+      expect(result.hint).toContain('CANON_CLERK_AUDITOR_API_KEY');
+    });
+
+    test('formats actionable remediation when credentials are missing', () => {
+      const msg = formatMissingCredentialsRemediation('google', 'screener');
+      expect(msg).toContain('config.json');
+      expect(msg).toContain('GEMINI_API_KEY');
+      expect(msg).toContain('CANON_CLERK_SCREENER_API_KEY');
+      expect(msg).toContain('https://aistudio.google.com/apikey');
+      expect(msg).toContain('CANON_CLERK_SKIP_LIVE_TESTS=1');
     });
 
     test('respects CANON_CLERK_SKIP_LIVE_TESTS bypass condition', () => {
