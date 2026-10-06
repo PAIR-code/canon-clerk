@@ -111,14 +111,21 @@ if [ -f "${TARGET_DIR}/package.json" ]; then
   fi
 
   if [ -n "$SEED_SOURCE" ]; then
-    echo "Seeding node_modules from main worktree..."
-    cp -a "${SEED_SOURCE}/node_modules" "${TARGET_DIR}/node_modules"
+    echo "Seeding node_modules from main worktree (hardlinks)..."
+    if ! cp -al "${SEED_SOURCE}/node_modules" "${TARGET_DIR}/node_modules" 2>/dev/null; then
+      echo "Notice: Hardlink copy failed (e.g. cross-device link), falling back to physical copy..."
+      rm -rf "${TARGET_DIR}/node_modules"
+      cp -a "${SEED_SOURCE}/node_modules" "${TARGET_DIR}/node_modules"
+    fi
     for pkg_nm in "${SEED_SOURCE}"/packages/*/node_modules; do
       if [ -d "$pkg_nm" ]; then
         rel_pkg="${pkg_nm#${SEED_SOURCE}/}"
         target_pkg_nm="${TARGET_DIR}/${rel_pkg}"
         mkdir -p "$(dirname "$target_pkg_nm")"
-        cp -a "$pkg_nm" "$target_pkg_nm"
+        if ! cp -al "$pkg_nm" "$target_pkg_nm" 2>/dev/null; then
+          rm -rf "$target_pkg_nm"
+          cp -a "$pkg_nm" "$target_pkg_nm"
+        fi
       fi
     done
   else
