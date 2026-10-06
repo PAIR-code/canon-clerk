@@ -7,6 +7,8 @@ import {
   idMatchesFilenameRule,
   noNegatedFileStemsRule,
   noNegatedIdsRule,
+  scopeContainmentRule,
+  existsPatternsRule,
 } from './frontmatter/index.js';
 
 export * from './frontmatter/index.js';

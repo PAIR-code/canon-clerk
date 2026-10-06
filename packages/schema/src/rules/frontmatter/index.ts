@@ -5,6 +5,8 @@ import { validFrontmatterTypesRule } from './valid-frontmatter-types.js';
 import { idMatchesFilenameRule } from './id-matches-filename.js';
 import { noNegatedFileStemsRule } from './no-negated-file-stems.js';
 import { noNegatedIdsRule } from './no-negated-ids.js';
+import { scopeContainmentRule } from './scope-containment.js';
+import { existsPatternsRule } from './exists-patterns.js';
 
 export {
   validYamlFrontmatterRule,
@@ -13,6 +15,8 @@ export {
   idMatchesFilenameRule,
   noNegatedFileStemsRule,
   noNegatedIdsRule,
+  scopeContainmentRule,
+  existsPatternsRule,
 };
 
 /**
@@ -25,4 +29,6 @@ export const FRONTMATTER_RULES: readonly CanonLintRule[] = Object.freeze([
   idMatchesFilenameRule,
   noNegatedFileStemsRule,
   noNegatedIdsRule,
+  scopeContainmentRule,
+  existsPatternsRule,
 ]);

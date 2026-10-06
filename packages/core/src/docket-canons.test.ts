@@ -24,7 +24,11 @@ function createMockCanon(overrides: Partial<Canon> = {}): Canon {
     id: 'test-canon-id',
     title: 'Test Canon Title',
     triggers: ['packages/core/**/*.ts'],
-    inspect: ['diff', 'pr_title'],
+    exists: [],
+    inspect: [
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: false },
+    ],
     tags: ['testing'],
     references: ['README.md'],
     invariant: 'Code must follow architectural invariants.',

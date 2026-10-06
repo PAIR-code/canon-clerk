@@ -36,7 +36,11 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
     expect(canon.filePath).toBe('packages/ui/.canons/brand-iconography-must-isolate-subject-from-canvas.md');
     expect(canon.scope).toBe('packages/ui');
     expect(canon.triggers).toEqual(['assets/**/*.svg']);
-    expect(canon.inspect).toEqual(['diff', 'pr_title']);
+    expect(canon.exists).toEqual([]);
+    expect(canon.inspect).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: false },
+    ]);
     expect(canon.tags).toEqual(['visual-identity', 'branding']);
     expect(canon.references).toEqual(['SPEC.md']);
 
@@ -75,7 +79,12 @@ Rationale: In GitHub's theme engine, transparent SVGs render against dynamic can
     expect(canon.filePath).toBe('.canons/prs-must-include-tests.md');
     expect(canon.scope).toBeUndefined();
     expect(canon.triggers).toEqual(['**/*']);
-    expect(canon.inspect).toEqual(['diff', 'pr_title', 'pr_body']);
+    expect(canon.exists).toEqual([]);
+    expect(canon.inspect).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: true },
+      { token: 'pr_body', optional: true },
+    ]);
     expect(canon.tags).toEqual([]);
     expect(canon.references).toEqual([]);
     expect(canon.invariant).toBe('All pull requests MUST include automated unit tests.');
@@ -120,6 +129,32 @@ Tags must be normalized.`;
 
     expect(canon.title).toBe('PRs Must Include Tests');
     expect(canon.invariant).toBe('PRs Must Include Tests');
+  });
+
+  it('parses explicit exists preconditions and inspect optional riders', () => {
+    const raw = `---
+id: scoped-rule
+exists:
+  - "package.json"
+inspect:
+  - diff
+  - pr_title?
+  - commit_messages?
+---
+# Scoped Rule
+
+Body text.`;
+
+    const canon = parseCanon(raw, {
+      filePath: 'packages/core/.canons/scoped-rule.md',
+    });
+
+    expect(canon.exists).toEqual(['packages/core/package.json']);
+    expect(canon.inspect).toEqual([
+      { token: 'diff', optional: false },
+      { token: 'pr_title', optional: true },
+      { token: 'commit_messages', optional: true },
+    ]);
   });
 
   it('propagates CanonParseError on malformed frontmatter', () => {

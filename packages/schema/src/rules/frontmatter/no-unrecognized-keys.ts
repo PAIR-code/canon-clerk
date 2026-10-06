@@ -7,6 +7,7 @@ const RECOGNIZED_KEYS = new Set([
   'id',
   'title',
   'triggers',
+  'exists',
   'inspect',
   'tags',
   'references',
@@ -33,7 +34,7 @@ export const noUnrecognizedKeysRule: CanonLintRule = {
         diagnostics.push({
           code: 'no-unrecognized-keys',
           severity: 'warning',
-          message: `Unrecognized frontmatter key '${keyName}'. Allowed keys are: id, title, triggers, inspect, tags, references.`,
+          message: `Unrecognized frontmatter key '${keyName}'. Allowed keys are: id, title, triggers, exists, inspect, tags, references.`,
           line,
           column,
           remediation: `Remove '${keyName}' or migrate its content into canon body directives.`,
