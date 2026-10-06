@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import {
-  resolveModelConfig,
-  type CascadeDiagnostics,
-  type ModelTierDiagnostics,
-  type ModelTierProbeResult,
-} from '@canon-clerk/configuration';
 import { createModelClient, type ModelTier } from '@canon-clerk/core';
+import { resolveModelConfig } from './resolver.js';
+import type {
+  CascadeDiagnostics,
+  ModelTierDiagnostics,
+  ModelTierProbeResult,
+} from './diagnostics.js';
 import {
   classifyProbeError,
   getMissingCredentialsHint,

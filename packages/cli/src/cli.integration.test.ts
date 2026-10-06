@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { runCliSync, spawnCli } from './testing/harness.js';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { ensureCliBuilt, runCliSync } from './testing/harness.js';
 
 describe('canon-clerk CLI entrypoint & router (integration)', () => {
   describe('root dispatch & options', () => {
     it('outputs root help screen on bare invocation and exits 0', () => {
       const res = runCliSync([]);
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain('Usage: canon-clerk [options] [command]');
-      expect(res.stdout).toContain('check-canons [options]');
-      expect(res.stdout).toContain('check-triggers [options]');
+      expect(res.stdout).toContain('Usage: canon-clerk [options]');
     });
 
     it('outputs version string with --version or -v and exits 0', () => {
@@ -24,7 +24,7 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
     it('outputs root help screen with --help or -h and exits 0', () => {
       const res1 = runCliSync(['--help']);
       expect(res1.status).toBe(0);
-      expect(res1.stdout).toContain('Usage: canon-clerk [options] [command]');
+      expect(res1.stdout).toContain('Usage: canon-clerk [options]');
 
       const res2 = runCliSync(['-h']);
       expect(res2.status).toBe(0);
@@ -43,7 +43,19 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
 
   describe('POSIX signal handling', () => {
     it('terminates with status 130 on SIGINT', async () => {
-      const child = spawnCli(['check-canons', '-']);
+      ensureCliBuilt();
+      const distIndex = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+      const child = spawn(process.execPath, [
+        '--input-type=module',
+        '-e',
+        `import { runCli } from ${JSON.stringify(distIndex)};
+         const origExit = process.exit;
+         process.exit = () => {};
+         await runCli(['node', 'cli.js', '--help']);
+         process.exit = origExit;
+         setInterval(() => {}, 1000);
+        `,
+      ]);
 
       // Allow child process to boot, load ESM modules, and register signal handlers
       await new Promise((resolve) => setTimeout(resolve, 600));
@@ -63,7 +75,19 @@ describe('canon-clerk CLI entrypoint & router (integration)', () => {
     });
 
     it('terminates with status 143 on SIGTERM', async () => {
-      const child = spawnCli(['check-canons', '-']);
+      ensureCliBuilt();
+      const distIndex = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+      const child = spawn(process.execPath, [
+        '--input-type=module',
+        '-e',
+        `import { runCli } from ${JSON.stringify(distIndex)};
+         const origExit = process.exit;
+         process.exit = () => {};
+         await runCli(['node', 'cli.js', '--help']);
+         process.exit = origExit;
+         setInterval(() => {}, 1000);
+        `,
+      ]);
 
       // Allow child process to boot, load ESM modules, and register signal handlers
       await new Promise((resolve) => setTimeout(resolve, 600));

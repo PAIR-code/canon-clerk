@@ -1,5 +1,5 @@
 import type { ModelTier } from '@canon-clerk/core';
-import type { ProbeFailureCategory } from '@canon-clerk/configuration';
+import type { ProbeFailureCategory } from './diagnostics.js';
 
 export interface ClassifiedProbeError {
   readonly category: ProbeFailureCategory;

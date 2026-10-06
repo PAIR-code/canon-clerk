@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CascadeDiagnostics, ModelTierDiagnostics } from '@canon-clerk/configuration';
+import type { CascadeDiagnostics, ModelTierDiagnostics } from './diagnostics.js';
 import { createModelClient } from '@canon-clerk/core';
 import { executeCascadeProbes, probeTier } from './probe-runner.js';
 

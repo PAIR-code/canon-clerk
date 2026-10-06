@@ -22,7 +22,8 @@
   "dependencies": {
     "@canon-clerk/core": "*",
     "conf": "^15.1.0",
-    "env-paths": "^3.0.0"
+    "env-paths": "^3.0.0",
+    "zod": "^4.6.5"
   },
   "license": "Apache-2.0"
 }

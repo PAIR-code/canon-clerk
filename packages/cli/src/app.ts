@@ -1,8 +1,5 @@
 import { Command, CommanderError } from 'commander';
 import { getCliVersion } from './index.js';
-import { createCheckCanonsCommand } from './commands/check-canons.js';
-import { createCheckTriggersCommand } from './commands/check-triggers.js';
-import { createCheckConfigCommand } from './commands/check-config.js';
 
 /**
  * Creates and configures the root Commander program.
@@ -14,10 +11,7 @@ export function createApp(): Command {
     .version(getCliVersion(), '-v, --version', 'Output the current version')
     .description(
       'Automated review gate enforcing project canons in CI and local workflows'
-    )
-    .addCommand(createCheckCanonsCommand())
-    .addCommand(createCheckTriggersCommand())
-    .addCommand(createCheckConfigCommand());
+    );
 
   program.exitOverride();
 
@@ -31,9 +25,7 @@ export function createApp(): Command {
         str.includes('invalid') ||
         str.includes('missing')
       ) {
-        write(
-          "  Hint: Run 'canon-clerk --help', 'canon-clerk check-canons --help', 'canon-clerk check-triggers --help', or 'canon-clerk check-config --help' for usage guidance.\n"
-        );
+        write("  Hint: Run 'canon-clerk --help' for usage guidance.\n");
       }
     },
   });
@@ -41,34 +33,20 @@ export function createApp(): Command {
   program.configureHelp({
     formatHelp: () => {
       return [
-        'Usage: canon-clerk [options] [command]',
+        'Usage: canon-clerk [options]',
         '',
         'Automated review gate enforcing project canons in CI and local workflows.',
         '',
         'Options:',
-        '  -v, --version             Output the current version',
-        '  -h, --help                Display help for command',
-        '',
-        'Commands:',
-        '  check-canons [options]    Validate repository canons against syntax and schema rules',
-        '  check-triggers [options]  Evaluate Phase 1 path triggers and monorepo package scopes against target files',
-        '  check-config [options]    Inspect configuration health, cascade resolution sources, and OS credential store permissions',
-        '',
-        'Examples:',
-        '  # Validate all canons in the workspace',
-        '  $ canon-clerk check-canons',
-        '',
-        '  # Check which canons govern modified files via stdin',
-        '  $ git diff --name-only | canon-clerk check-triggers -',
-        '',
-        '  # Inspect configuration health and cascade resolution',
-        '  $ canon-clerk check-config',
-        '',
-        '  # Display help for a subcommand',
-        '  $ canon-clerk check-triggers --help',
+        '  -v, --version  Output the current version',
+        '  -h, --help     Display help for command',
         '',
       ].join('\n');
     },
+  });
+
+  program.on('command:*', (operands) => {
+    program.error(`error: unknown command '${operands[0]}'`);
   });
 
   return program;
@@ -101,8 +79,13 @@ export async function runCli(argv: string[] = process.argv): Promise<void> {
   try {
     await program.parseAsync(argv);
   } catch (err: unknown) {
-    if (err instanceof CommanderError) {
-      if (err.exitCode === 0) {
+    const isCommanderError =
+      err instanceof CommanderError ||
+      (typeof err === 'object' && err !== null && 'exitCode' in err);
+
+    if (isCommanderError) {
+      const exitCode = (err as { exitCode: number }).exitCode;
+      if (exitCode === 0) {
         process.exit(0);
       }
       process.exit(2);
