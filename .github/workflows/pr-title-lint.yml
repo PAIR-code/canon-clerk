@@ -48,5 +48,5 @@ jobs:
             readme
           requireScope: false
           # Conventional Commits regex pattern supporting optional scopes and breaking change indicator (!)
-          headerPattern: '^(\w+)(?:\(([\w\$\.\-\*\s]+)\))?\!?:\s([^\n\r]+)$'
+          headerPattern: '^(\w+)(?:\(([\w\$\.\-\*\s,]+)\))?\!?:\s([^\n\r]+)$'
           headerPatternCorrespondence: type,scope,subject
