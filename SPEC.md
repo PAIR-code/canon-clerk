@@ -77,7 +77,7 @@ services/auth/.canons/tokens-must-expire-promptly.md
 ```
 **Scoping Rule:** A canon located in `<scope>/.canons/` automatically inherits an implicit path boundary of `<scope>/**`. Implementations MUST NOT evaluate a scoped canon against files outside its assigned `<scope>/`.
 
-**Subordination & Scope Containment:** A scoped canon MUST NOT refer to or in any way depend on files superior or external to its assigned `<scope>/`. All declared paths and glob patterns in `triggers:`, `requires:`, and `references:` MUST be evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal outside `<scope>/` (e.g. using `../`) MUST be rejected during validation as a schema error. If, to be functional, a canon requires accessing or inspecting files superior to its scope, that canon file MUST be hoisted to the relevant parent directory's `.canons/` directory (or the repository root), and narrowed via path prefixes in its `triggers`, `requires`, and `references` as needed.
+**Subordination & Scope Containment:** A scoped canon MUST NOT refer to or in any way depend on files superior or external to its assigned `<scope>/`. All declared paths and glob patterns in `triggers:`, `exists:`, and `references:` MUST be evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal outside `<scope>/` (e.g. using `../`) MUST be rejected during validation as a schema error. If, to be functional, a canon requires accessing or inspecting files superior to its scope, that canon file MUST be hoisted to the relevant parent directory's `.canons/` directory (or the repository root), and narrowed via path prefixes in its `triggers`, `exists`, and `references` as needed.
 
 ---
 
@@ -91,7 +91,7 @@ All YAML frontmatter fields are _optional_. Default / Resolution Order describes
 | **`id`** | `string` | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
 | **`triggers`** | `string[]` | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs defining the pull request file modifications that activate this canon for evaluation. |
-| **`requires`** | `string[]` | 1. Frontmatter `requires:`<br>2. `[]` (empty list) | Path globs of files that MUST exist in the target state (PR `HEAD`, local workspace, or speculative plan) for this canon to run; missing matches skip evaluation. |
+| **`exists`** | `string[]` | 1. Frontmatter `exists:`<br>2. `[]` (empty list) | Path globs of files that MUST exist in the target state (PR `HEAD`, local workspace, or speculative plan) for this canon to run; missing matches skip evaluation. |
 | **`inspect`** | `string[]` | 1. Frontmatter `inspect:`<br>2. `["diff", "pr_title?", "pr_body?"]` | Context elements prepared at intake and supplied during evaluation (supports `?` optional rider). |
 | **`tags`** | `string[]` | 1. Frontmatter `tags:`<br>2. `[]` (empty list) | Categorical labels used for topical organization, cataloging, and selective filtering. |
 | **`references`** | `string[]` | 1. Frontmatter `references:`<br>2. `[]` (empty list) | Path globs of persistent repository files read from disk and injected as grounding context. |
@@ -161,14 +161,14 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * *Example:* `tags: [Architecture, "API Design", core_module]` -> `["architecture", "api-design", "core-module"]`.
    * **Deduplication:** Implementations MUST deduplicate tags while preserving declaration order.
 
-6. **`requires` Derivation (State Preconditions):**
+6. **`exists` Derivation (State Preconditions):**
    * If omitted, defaults to an empty list: `[]`.
    * **Scalar Coercion:** A single string MUST be coerced to a single-element list.
    * **Resolution Target:** Evaluated against the **Target File Tree** representing the final state being tested:
      * **CI / Pull Request Context:** The repository tree at the commit being evaluated (`HEAD`).
      * **Local Working Tree Context:** The active filesystem working directory (including uncommitted and untracked changes).
      * **Speculative / Plan Context:** Implementations supporting dry-run or planning modes MAY project hypothetical or staged file paths into the target file tree prior to matching.
-   * **Condition:** All patterns in `requires` MUST match at least one file present in the Target File Tree. If any pattern matches zero files:
+   * **Condition:** All patterns in `exists` MUST match at least one file present in the Target File Tree. If any pattern matches zero files:
      * Implementations MUST skip evaluation of the canon.
      * Implementations SHOULD emit a diagnostic notice indicating the unmet precondition.
    * **Scoped Canons & Scope Containment:** In accordance with [Section 3.3](#33-scoped-canons-monorepo-packages), preconditions for scoped canons MUST be evaluated strictly against the Target File Tree within `<scope>/`. Patterns MUST NOT attempt directory traversal outside `<scope>/`.
