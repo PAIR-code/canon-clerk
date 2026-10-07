@@ -1,8 +1,8 @@
 # Evidence Admissibility Triage (`admit`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`admit`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`admit`), GitHub Action
 
 ---
 
@@ -12,60 +12,75 @@
 
 - **Imperative Verb:** `admit`
 - **Court Clerkship Role:** Micro triage establishing evidentiary admissibility.
-- **Metric Pair:** `admissibilityScore` (number [0.0, 1.0]) and `admissibilitySummary` (string rationale).
+- **Metric Pair:** `admissibility_score` (number [0.0, 1.0]) and `admissibility_summary` (string rationale).
 - **Core Question:** *"For an active Case, is this candidate exhibit (diff hunk, PR title, PR body, or reference document) admissible as relevant evidence?"*
 
 ---
 
 ## 2. Dependencies & Prerequisites (`core`)
 
-- **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.activeDocket`).
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Docket["docket (or --caseload)<br/><code>.docket</code>"]
+        Params["Stage Flags<br/><i>(--admit-threshold, --screener-model)</i>"]
+    end
+
+    Docket --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
+    Params --> Admit
+
+    Admit --> Audit["audit (Substantive Adjudication)<br/><i>(Pipeline Cascade)</i><br/><code>.verdict</code>"]
+    Admit -. "standalone CLI" .-> AdmitReport["Evidence Manifest<br/><i>(Admitted file exhibits, Exit 0)</i>"]
+    Admit -. "zero exhibits admitted" .-> ZeroExhibits["Fast Exit (No Evidence 0)<br/><i>Prunes audit trials</i>"]
+
+    style Admit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style AdmitReport stroke-dasharray: 5 5
+    style ZeroExhibits stroke-dasharray: 5 5
+```
+
+- **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.active_docket`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`.
 - **Pruned from Execution:** `probe`, `audit`.
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
-```ts
-export interface AdmitOptions {
-  readonly threshold?: number | undefined; // default: 0.5
-  readonly screenerModel?: string | undefined;
-}
+```text
+struct AdmitOptions:
+  threshold?: Float // default: 0.5
+  screener_model?: String
 
-export function executeAdmit(
+function execute_admit(
   options: AdmitOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.evidence` field on the cumulative `Caseload`:
 
-```ts
-export interface AdmittedExhibit {
-  /** Repository-relative path to admitted file or exhibit */
-  readonly filePath: string;
+```text
+struct AdmittedExhibit:
+  // Repository-relative path to admitted file or exhibit
+  file_path: String
 
-  /** Relevance score of exhibit to governing canon [0.0, 1.0] */
-  readonly admissibilityScore: number;
+  // Relevance score of exhibit to governing canon [0.0, 1.0]
+  admissibility_score: Float
 
-  /** Rationale for admitting exhibit into evidence */
-  readonly admissibilitySummary: string;
-}
+  // Rationale for admitting exhibit into evidence
+  admissibility_summary: String
 
-export interface CanonEvidenceExhibits {
-  /** Canon file path governing these exhibits */
-  readonly canonPath: string;
+struct CanonEvidenceExhibits:
+  // Canon file path governing these exhibits
+  canon_path: String
 
-  /** Admitted evidence exhibits */
-  readonly exhibits: readonly AdmittedExhibit[];
-}
+  // Admitted evidence exhibits
+  exhibits: List[AdmittedExhibit]
 
-export interface CaseloadEvidence {
-  /** Admitted exhibits keyed by canon path */
-  readonly exhibits: Record<string, CanonEvidenceExhibits>;
-}
+struct CaseloadEvidence:
+  // Admitted exhibits keyed by canon path
+  exhibits: Map[String, CanonEvidenceExhibits]
 ```
 
 ### Domain Short-Circuit Invariant
@@ -77,29 +92,29 @@ If all active cases retain zero admitted exhibits:
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.activeDocket`.
-2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):** Evaluates candidate exhibits—including code diff hunks, PR title, PR body, commit messages, and reference documents—against the canon's specific requirements, as declared by its `inspect:` frontmatter.
+1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.active_docket`.
+2. **Fast Heuristic Screening (`gemini-flash-lite-latest`):** Evaluates candidate exhibits—including code diff hunks, PR title, PR body, commit messages, and reference documents—against the canon's specific requirements, as declared by its `inspect:` frontmatter.
 3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**
    ```json
    {
      "exhibits": [
        {
-         "filePath": "packages/cli/src/commands/docket.ts",
-         "admissibilitySummary": "Contains option definitions for new CLI command.",
-         "admissibilityScore": 0.95
+         "file_path": "src/commands/docket.rs",
+         "admissibility_summary": "Contains option definitions for new CLI command.",
+         "admissibility_score": 0.95
        }
      ]
    }
    ```
-   Generating `admissibilitySummary` before `admissibilityScore` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Admissibility Threshold (`admissibilityScore >= 0.5`):**
+   Generating `admissibility_summary` before `admissibility_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+4. **Admissibility Threshold (`admissibility_score >= --admit-threshold`, default: `0.5`):**
    - Exhibits scoring $\ge 0.5$ are admitted into evidence for that Case.
-   - Irrelevant diff hunks are excluded (`admissibilityScore < 0.5`).
+   - Irrelevant diff hunks are excluded (`admissibility_score < 0.5`).
 5. **Dismissal of Cases with Zero Exhibits:** If an active Case retains zero admitted exhibits, it is dismissed without trial.
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `admit` as an imperative subcommand:
 
@@ -121,7 +136,8 @@ error: No filing source provided for admit.
 Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk admit --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; 0 admitted exhibits").
 
 ### CLI Flags & Environment
-- `--threshold <number>`: Admissibility threshold (default: `0.5`).
+- `--admit-threshold <number>`: Admissibility threshold (default: `0.5`).
+- `--docket-threshold <number>`: Upstream jurisdiction screening threshold in telescoping mode (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
 - `--json`: Emits enriched Caseload JSON.
 
@@ -131,14 +147,8 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Evidence Screening Step:** Invokes `executeAdmit` with the `Caseload`.
 2. **Exhibit Accounting:** Logs admitted diff hunks and persistent references per case.
 3. **Early Exit:** If zero cases retain admitted evidence, concludes the Check Run as passing without scheduling reasoning models.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests invoke `executeAdmit` across multi-file PR fixtures, verifying that peripheral changes (e.g. docs, lockfiles) are cleanly filtered out from active cases governing code conventions.

@@ -12,7 +12,7 @@
 
 - name: "type: spec"
   color: "D4C5F9"
-  description: "Architecture contracts, OpenSpec, and canon specifications (non-releasing)."
+  description: "Living architecture contracts, SPEC.md, and canon specifications (non-releasing)."
 
 - name: "type: chore"
   color: "CFD3D7"
@@ -32,7 +32,7 @@
 
 - name: "type: test"
   color: "FEF2C0"
-  description: "Test suite, Vitest fixtures, and test infrastructure."
+  description: "Test suite, fixtures, and test infrastructure."
 
 - name: "type: refactor"
   color: "BFD4F2"
@@ -45,11 +45,11 @@
 
 - name: "scope: schema"
   color: "1D76DB"
-  description: "Canon schema definitions, AST interfaces, parser, and static linter (@canon-clerk/schema)."
+  description: "Canon schema definitions, AST interfaces, parser, and static linter."
 
 - name: "scope: configuration"
   color: "1D76DB"
-  description: "Configuration discovery, cascade resolution, and OS credential store (@canon-clerk/configuration)."
+  description: "Configuration discovery, cascade resolution, and OS credential store."
 
 - name: "scope: cli"
   color: "006B75"

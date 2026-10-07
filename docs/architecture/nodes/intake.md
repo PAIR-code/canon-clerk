@@ -1,8 +1,8 @@
 # Filing Intake (`intake`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`intake`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`intake`), GitHub Action
 
 ---
 
@@ -18,55 +18,72 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Sources["Filing Sources<br/><i>(Diffs, paths, PR metadata)</i>"]
+        Params["Stage Flags<br/><i>(--all-targets, --intent, --pr-title)</i>"]
+    end
+
+    Sources --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
+    Params --> Intake
+
+    Intake --> Discover["discover<br/><i>(Pipeline Cascade)</i><br/><code>.discovery</code>"]
+    Intake -. "standalone CLI" .-> IntakeReport["Filing Report / JSON<br/><i>(Tendered exhibits, Exit 0)</i>"]
+    Intake -. "naked invocation" .-> UsageError["Usage Error<br/><i>(Missing source guidance, Exit 2)</i>"]
+
+    style Intake fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style IntakeReport stroke-dasharray: 5 5
+    style UsageError stroke-dasharray: 5 5
+```
+
 - **Direct Prerequisites:** None (Root node of Branch A).
 - **Transitive Prerequisites:** None.
 - **Incoming Caseload:** May accept an empty or existing `Caseload` record.
-- **Subprocess Isolation:** **Zero child-process VCS execution.** `@canon-clerk/core` does not run `git` subprocesses internally; driving adapters feed diffs and target paths directly via domain interfaces.
+- **Subprocess Isolation:** **Zero child-process VCS execution.** The core domain engine does not run `git` subprocesses internally; driving adapters feed diffs and target paths directly via domain interfaces.
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
-```ts
-export interface IntakeOptions {
-  readonly prTitle?: string | undefined;
-  readonly prBody?: string | undefined;
-  readonly intent?: string | undefined;
-  readonly targetPaths?: readonly string[] | undefined;
-  readonly patchContent?: string | undefined;
-  readonly allTargets?: boolean | undefined;
-  readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
-}
+```text
+struct IntakeOptions:
+  pr_title?: String
+  pr_body?: String
+  intent?: String
+  target_paths?: List[String]
+  patch_content?: String
+  all_targets?: Boolean
+  linked_issues?: List[LinkedIssueContext]
 
-export function executeIntake(
+function execute_intake(
   options: IntakeOptions,
-  caseload?: Caseload | undefined
-): Promise<Caseload>;
+  caseload?: Caseload
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.intake` field on the cumulative `Caseload`:
 
-```ts
-export interface CaseloadIntake {
-  /** PR title or commit subject */
-  readonly pr_title?: string | undefined;
+```text
+struct CaseloadIntake:
+  // PR title or commit subject
+  pr_title?: String
 
-  /** PR markdown description or commit body */
-  readonly pr_body?: string | undefined;
+  // PR markdown description or commit body
+  pr_body?: String
 
-  /** Design intent or prospective plan description */
-  readonly intent?: string | undefined;
+  // Design intent or prospective plan description
+  intent?: String
 
-  /** Scope of intake targets */
-  readonly scope?: 'targeted' | 'all-targets' | undefined;
+  // Scope of intake targets
+  scope?: "targeted" | "all-targets"
 
-  /** Ingested code modifications keyed by relative repository path */
-  readonly diffs: Record<string, FileArtifact>;
+  // Ingested code modifications keyed by relative repository path
+  diffs: Map[String, FileArtifact]
 
-  /** Optional linked issue context gathered from issue trackers */
-  readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
-}
+  // Optional linked issue context gathered from issue trackers
+  linked_issues?: List[LinkedIssueContext]
 ```
 
 ---
@@ -85,17 +102,17 @@ export interface CaseloadIntake {
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `intake` as an imperative subcommand that adapts terminal arguments and POSIX streams:
 
 ```bash
 # Ingest via direct target paths:
-canon-clerk intake packages/cli/src/app.ts
+canon-clerk intake src/main.rs
 canon-clerk intake 'src/**/*.ts'
 
 # Ingest via prospective design intent:
-canon-clerk intake --intent "Implement round-robin auth provider rotation" packages/auth/src
+canon-clerk intake --intent "Implement round-robin auth provider rotation" src/auth
 
 # Ingest via newline-delimited stdin path tokens:
 git diff origin/main --name-only | canon-clerk intake -
@@ -126,7 +143,7 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 The GitHub Action runner adapts GitHub Actions workflow events into the `core` intake interface:
 
@@ -134,9 +151,3 @@ The GitHub Action runner adapts GitHub Actions workflow events into the `core` i
 2. **PR Context Extraction:** Extracts `pr_title` and `pr_body` directly from the workflow payload (`github.context.payload.pull_request`).
 3. **Linked Issues Resolution:** Inspects the PR body for closing keywords (`Fixes #123`, `Closes #456`) and queries the GitHub API to populate `linkedIssues` with titles and bodies.
 4. **Delegation:** Passes all resolved artifacts directly into `executeIntake(options)`.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests programmatically invoke `executeIntake` with static patch fixtures and mock PR descriptions, verifying that diff parsing and `FileArtifact` generation remain bit-for-bit reproducible without spawning shell processes.

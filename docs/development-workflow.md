@@ -61,7 +61,7 @@ All branches and worktree directories follow the convention:
 Prompt your assistant:
 > *"Start working on issue #18"* or *"Scaffold a worktree for issue #18 github-pr"*
 
-**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch, seeds dependencies, builds packages, and runs smoke tests), and sets its working directory context to the newly created worktree.
+**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch and sets up the worktree), and sets its working directory context to the newly created worktree.
 
 #### Under the Hood & Manual Fallback
 Under the hood, the assistant runs the companion script:
@@ -74,7 +74,6 @@ If you are working without an AI assistant, you can run the script above directl
 git fetch upstream --prune
 git worktree add -b <issue-number>-<slug> <issue-number>-<slug> upstream/main
 cd <issue-number>-<slug>
-npm install
 ```
 
 ---
@@ -143,101 +142,35 @@ When you or your AI assistant encounter an unrelated bug, missing configuration,
 1. **Shunt it (Recommended):** Immediately file a new tracking issue documenting the problem, discovery context, and proposed fix. Keep your current branch and PR strictly focused on its original mandate.
 2. **Upstream Chase (Deliberate Expansion):** If the out-of-band change is genuinely coupled or strictly necessary for the current task to land, deliberately expand the mandate by updating the motivating Issue text and PR description *before* committing the change.
 
-### Fast Iteration & Development
+### Doc-Driven Architecture (DDA)
 
-To test the CLI binary while iterating on code without running a manual build step:
+Canon Clerk employs **Doc-Driven Architecture (DDA)** to specify architectural contracts, DAG schemas, CLI flags, exit codes, and engine behaviors before writing code.
 
-```bash
-npm run cli -- <args>
-```
+The living system architecture resides directly under [`docs/architecture/`](architecture/overview.md) (with formal canon syntax in [`SPEC.md`](../SPEC.md)). Rather than relying on external SDD tooling or separate specification silos, the documentation itself serves as the authoritative, executable design standard.
 
-The `npm run cli` script leverages `precli` to automatically rebuild `@canon-clerk/cli` incrementally before invoking `./packages/cli/dist/cli.js`.
+#### The DDA Progression
 
-For focused testing and development of individual packages:
-- `npm run dev`: Run `tsup` build in watch mode
-- `npm test`: Run the Vitest test suite
-- `npm run typecheck`: Run TypeScript typechecking across workspaces
-
-### Pre-Push Verification (`npm run check`)
-
-Before pushing branches or opening PRs, run the comprehensive shift-left validation suite:
-
-```bash
-npm run check
-```
-
-This single command deterministically executes the local equivalent of the CI pipeline across all monorepo workspaces, running independent verification lanes concurrently to complete in <8 seconds:
-- `npm run lint:lockfile`: Audits `package-lock.json` against untrusted registry URLs.
-- `npm run lint:specs`: Validates living specifications and active change proposals (`openspec validate --all --strict`).
-- `npm run typecheck`: Runs static typechecking across all workspaces (`tsc --noEmit`).
-- `npm run build`: Bundles distribution packages with `tsup` in a consolidated monorepo build process.
-- `npm test`: Runs all unit and integration tests via `vitest`.
-
-### Dependency Management & Lockfile Integrity
-
-Canon Clerk strictly validates package provenance and lockfile integrity via `lockfile-lint` (`--allowed-hosts npm`). All dependencies in `package-lock.json` must resolve from the official npm registry (`https://registry.npmjs.org/`).
-
-- **Canonical Registry Pinning:** The repository root `.npmrc` explicitly pins `registry=https://registry.npmjs.org/` and `omit-lockfile-registry-resolved=true`. This ensures local installations override ambient user or system configurations (such as caching proxies or internal mirrors) to generate clean, compliant lockfiles.
-- **Troubleshooting Proxy / Mirror Environments:** If working in an environment where an ambient caching proxy lags behind upstream npm (causing `E404 Not Found` errors on newly published packages or native bindings), you can explicitly enforce direct registry resolution when installing packages:
-  ```bash
-  npm install <package> --registry https://registry.npmjs.org
-  ```
-
-### Spec-Driven Development (SDD) with OpenSpec
-
-Canon Clerk employs **Spec-Driven Development (SDD)** via OpenSpec to specify architectural contracts, CLI flags, exit codes, and engine behaviors before writing code.
-
-Living specifications reside in `openspec/specs/` (e.g. `core`, `cli`, `action`), while active change proposals live in `openspec/changes/<change-name>/`.
-
-#### The SDD Progression
-
-1. **Design / Propose:**
-   - Author a change proposal containing `proposal.md`, `specs/<capability>/spec.md` (deltas with `## ADDED/MODIFIED/REMOVED Requirements` and `#### Scenario:` blocks), `design.md`, and `tasks.md`.
-   - Commit using the `spec(<surface>):` prefix.
-2. **Verify / TDD:**
-   - Author unit or conformance tests reflecting the spec requirements in `packages/<package>/src/*.test.ts`.
-3. **Implement:**
-   - Write code fulfilling the specification in `packages/<package>/src/` using `feat(<surface>):` or `fix(<surface>):`.
-4. **Baseline & Archive:**
-   - Archive the change using `openspec-archive-change` (or sync deltas via `openspec-sync-specs`), promoting changes into living specs under `openspec/specs/`.
+1. **Spec First (Design Phase):**
+   - Author or edit the relevant architectural documents under `docs/architecture/` (e.g. `overview.md`, `nodes/<stage>.md`, `scheduling.md`).
+   - Define pseudo-structs, stage-prefixed CLI flags, localized Mermaid dataflows, and exit code contracts.
+   - Commit using `spec(<surface>):` or `docs(architecture):`.
+2. **Diff Analysis & Planning:**
+   - Inspect the git diff against `upstream/main` to identify all contract shifts across models, flags, and domain logic.
+   - Draft an implementation tasklist organized into progressive milestones (domain models, adapters, tests, integration).
+3. **Verify / TDD & Implement:**
+   - Author unit, DAG scheduling, and conformance tests matching the documented specification.
+   - Write code fulfilling the architectural contract using `feat(<surface>):` or `fix(<surface>):`.
+4. **Baseline & Push:**
+   - Verify that all tests pass, exit codes adhere to the documented contract, and code matches the docs 1:1.
 
 #### Directing Your AI Assistant (Recommended)
 
 Prompt your assistant:
-> *"Propose a new spec for CLI streaming output"*  
-> *"Sync specs from the active change"*  
-> *"Apply the tasks from change cli-streaming"*  
-> *"Archive change cli-streaming"*
+> *"Plan implementation based on the architecture diff"*  
+> *"Draft a tasklist matching the updated configure node spec"*  
+> *"Implement tasks from the doc-driven plan"*  
 
-**What happens:** The assistant activates the appropriate OpenSpec skill in `.agents/skills/`:
-- `openspec-propose`: Drafts proposal, spec deltas, design, and implementation tasks.
-- `openspec-explore`: Explores problem space and codebase patterns.
-- `openspec-apply-change`: Executes implementation tasks step-by-step.
-- `openspec-sync-specs`: Semantically merges spec deltas into main specs without archiving.
-- `openspec-archive-change`: Completes tasks and promotes deltas into `openspec/specs/`.
-- `openspec-update-change`: Updates existing change artifacts.
-
-#### Under the Hood & Manual Fallback
-
-You can run the OpenSpec CLI via npm scripts (`npm run opsx -- ...` or `npm run openspec -- ...`):
-```bash
-# Validate all specs and active changes:
-npm run opsx -- validate --all --strict
-# (or via the dedicated linter script:)
-npm run lint:specs
-
-# Create a new change proposal:
-npm run opsx -- new change <change-name>
-
-# Check status of an in-flight change:
-npm run opsx -- status --change <change-name>
-
-# Archive a completed change into living specs:
-npm run opsx -- archive <change-name>
-```
-
-> [!NOTE]
-> Always invoke OpenSpec through `npm run opsx -- <command>` or `npm run openspec -- <command>`. Running `npx openspec` fails because the package is scoped as `@fission-ai/openspec`, and bare `openspec` is not guaranteed to be present in `$PATH`.
+**What happens:** The assistant activates the `doc-driven-change` skill in `.agents/skills/doc-driven-change/` to inspect the documentation diff against `upstream/main`, structure a progressive task breakdown, and implement the change against the documented contracts.
 
 
 ---

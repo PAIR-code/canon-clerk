@@ -1,8 +1,8 @@
 # Macro Jurisdiction Triage (`docket`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`docket`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`docket`), GitHub Action
 
 ---
 
@@ -12,12 +12,33 @@
 
 - **Imperative Verb:** `docket`
 - **Court Clerkship Role:** Macro triage establishing subject-matter jurisdiction.
-- **Metric Pair:** `colorabilityScore` (number [0.0, 1.0]) and `colorabilitySummary` (string rationale).
+- **Metric Pair:** `colorability_score` (number [0.0, 1.0]) and `colorability_summary` (string rationale).
 - **Core Question:** *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"*
 
 ---
 
 ## 2. Dependencies & Prerequisites (`core`)
+
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Validate["validate (Branch A)<br/><code>.validation</code>"]
+        Config["configure (Branch B)<br/><code>.config</code>"]
+        Params["Stage Flags<br/><i>(--docket-threshold, --screener-model)</i>"]
+    end
+
+    Validate --> Docket["docket<br/><b>(Current Node)</b><br/><code>.docket</code>"]
+    Config --> Docket
+    Params --> Docket
+
+    Docket --> Admit["admit (Micro Triage)<br/><i>(Pipeline Cascade)</i><br/><code>.evidence</code>"]
+    Docket -. "standalone CLI" .-> DocketReport["Active Docket Report<br/><i>(Colorability scores, Exit 0)</i>"]
+    Docket -. "active_docket is empty" .-> ZeroCases["Fast Exit (Zero Trials 0)<br/><i>Prunes admit & audit</i>"]
+
+    style Docket fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style DocketReport stroke-dasharray: 5 5
+    style ZeroCases stroke-dasharray: 5 5
+```
 
 - **Direct Prerequisites:**
   - `validate` (Branch A: validated candidate canons in `caseload.discovery` and `caseload.validation`).
@@ -28,49 +49,46 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
-```ts
-export interface DocketOptions {
-  readonly threshold?: number | undefined; // default: 0.5
-  readonly screenerModel?: string | undefined;
-}
+```text
+struct DocketOptions:
+  threshold?: Float // default: 0.5
+  screener_model?: String
 
-export function executeDocket(
+function execute_docket(
   options: DocketOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.docket` field on the cumulative `Caseload`:
 
-```ts
-export interface ColorabilityAssessment {
-  /** Numerical score indicating colorable subject-matter jurisdiction [0.0, 1.0] */
-  readonly colorabilityScore: number;
+```text
+struct ColorabilityAssessment:
+  // Numerical score indicating colorable subject-matter jurisdiction [0.0, 1.0]
+  colorability_score: Float
 
-  /** Reasoning justifying whether jurisdiction applies to the PR context */
-  readonly colorabilitySummary: string;
+  // Reasoning justifying whether jurisdiction applies to the PR context
+  colorability_summary: String
 
-  /** Status outcome */
-  readonly status: 'docketed' | 'dismissed';
-}
+  // Status outcome
+  colorability_status: "docketed" | "dismissed"
 
-export interface CaseloadDocket {
-  /** Colorability assessments keyed by canon path */
-  readonly cases: Record<string, ColorabilityAssessment>;
+struct CaseloadDocket:
+  // Colorability assessments keyed by canon path
+  cases: Map[String, ColorabilityAssessment]
 
-  /** List of canon paths admitted onto the Active Docket */
-  readonly activeDocket: readonly string[];
+  // List of canon paths admitted onto the Active Docket
+  active_docket: List[String]
 
-  /** Optional diagnostic anomalies manifest */
-  readonly anomalies?: DocketAnomaliesManifest | undefined;
-}
+  // Optional diagnostic anomalies manifest
+  anomalies?: DocketAnomaliesManifest
 ```
 
 ### Domain Short-Circuit Invariant
-If `activeDocket.length === 0`:
+If `active_docket` is empty:
 - Execution terminates immediately with exit code `0` (or returns empty active docket).
 - Zero substantive trials (`audit`) are scheduled, avoiding hundreds of thousands of deep-reasoning tokens.
 
@@ -79,28 +97,28 @@ If `activeDocket.length === 0`:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Aggregate Single-Turn Screening:**  
-   Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-3.5-flash-lite`.
-2. **Constrained Grammar Decoding:**  
-   Forces structured JSON output with guaranteed schema keys:
+   Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-flash-lite-latest`.
+2. **Constrained Grammar Decoding (Reason-First):**  
+   Forces structured JSON output with guaranteed schema keys, generating `colorability_summary` before `colorability_score` to provide a chain-of-thought scratchpad that anchors reproducible probability distributions:
    ```json
    {
      "cases": {
        ".canons/cli/cli-flags-kebab-case.md": {
-         "colorabilityScore": 0.95,
-         "colorabilitySummary": "PR introduces new command flags in packages/cli.",
-         "status": "docketed"
+         "colorability_summary": "PR introduces new command flags in CLI.",
+         "colorability_score": 0.95
        }
      }
    }
    ```
-3. **Threshold Gate (`colorabilityScore >= 0.5`):**
-   - Canons scoring $\ge 0.5$ establish jurisdiction and are entered into `activeDocket`.
-   - Canons scoring $< 0.5$ are marked `dismissed` with summary rationale.
+3. **Deterministic Threshold Gating (`colorability_score >= --docket-threshold`, default: `0.5`):**  
+   The core domain engine deterministically evaluates the continuous score against the threshold to assign `colorability_status`:
+   - Canons scoring $\ge 0.5$ establish jurisdiction, are marked `colorability_status: "docketed"`, and are entered into `active_docket`.
+   - Canons scoring $< 0.5$ are marked `colorability_status: "dismissed"`.
 4. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `docket` as an imperative subcommand:
 
@@ -122,7 +140,7 @@ error: No filing source provided for docket.
 Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk docket --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; active docket empty").
 
 ### CLI Flags & Environment
-- `--threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
+- `--docket-threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
 - `--json`: Emits enriched Caseload JSON.
 
@@ -132,14 +150,8 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Macro Screening Step:** Calls `executeDocket` with the cumulative `Caseload`.
 2. **Telemetry Reporting:** Logs screened candidate canons and active docket admissions to workflow step output.
-3. **Early Exit:** If `activeDocket.length === 0`, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests invoke `executeDocket` against recorded PR fixtures and live Gemini endpoints, verifying that trie-constrained decoding strictly adheres to JSON schemas and produces consistent `colorabilityScore` determinations.
+3. **Early Exit:** If `active_docket` is empty, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.

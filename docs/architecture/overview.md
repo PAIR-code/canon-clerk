@@ -40,7 +40,7 @@ The DAG consists of **Two Feeder Branches** that converge at `docket` (for dispu
 1. **Branch A: The Filing Track (`intake` $\longrightarrow$ `discover` $\longrightarrow$ `validate`):**  
    Ingests in-flight diffs, target paths, or prospective design intent, verifies state preconditions (`exists:`), matches candidate canon triggers, and validates candidate canon ASTs and schemas. Completely local, deterministic, and requires 0 tokens and zero API credentials.
 2. **Branch B: The Environment Track (`configure`):**  
-   Resolves provider credentials (`GEMINI_API_KEY`), model specifiers, reasoning budgets, and workspace boundaries. Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
+   Resolves provider credentials (`GEMINI_API_KEY`), model specifiers, and reasoning budgets. Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
 3. **Diagnostic Leaf (`probe`):**  
    An auxiliary termination node depending strictly on `configure`. Executes live provider connectivity and latency tests without triggering an audit run.
 4. **The Heuristic Cascade (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `audit`):**  
@@ -64,7 +64,7 @@ flowchart TD
         S4 -.-> S4_Probe["probe<br/>(Live provider connectivity & latency test)"]
     end
 
-    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · gemini-3.5-flash-lite)"]
+    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · gemini-flash-lite-latest)"]
         S_Apprise["apprise<br/>(Statutory Notice: Candidate canons → Applicable Canons)"]
     end
 
@@ -85,41 +85,37 @@ flowchart TD
 
 ## 3. Hexagonal Architecture: Driving Adapters vs. Core Domain Processing
 
-Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)** across its workspace packages. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
+Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)**. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
 
 ```mermaid
 flowchart TD
     subgraph DrivingAdapters ["Driving Adapters (Ports)"]
-        CLI["packages/cli<br/>(Flags, POSIX stdin Streams, Exit Codes, Spinners)"]
-        Action["packages/action<br/>(Octokit APIs, PR Metadata, Linked Issues, Check Runs)"]
-        Integ["packages/integration-tests-private<br/>(Live Provider Testing, Snapshot Assertions)"]
+        CLI["CLI Adapter<br/>(Flags, POSIX stdin Streams, Exit Codes, Progress)"]
+        Action["CI / GitHub Action<br/>(PR Metadata, Linked Issues, Check Runs, Annotations)"]
     end
 
     subgraph CoreEngine ["The Caseload Domain Engine"]
-        Core["packages/core<br/>(Functional DAG Node Implementations & Scheduling)"]
-        Config["packages/configuration<br/>(Credential Discovery & probe Provider Diagnostics)"]
-        Schema["packages/schema<br/>(Pure Canon AST & Caseload Types)"]
+        Core["Domain Engine<br/>(Functional DAG Node Implementations & Scheduling)"]
+        Config["Configuration & Probe<br/>(Credential Discovery & Provider Diagnostics)"]
+        Schema["Schema Layer<br/>(Canon AST & Caseload Data Model)"]
     end
 
     CLI --> Core
     CLI --> Config
     Action --> Core
-    Integ --> Core
-    Integ --> Config
 
     Config --> Core
     Core --> Schema
 ```
 
-### The Domain Packages (The Hexagon Core)
-- **`@canon-clerk/schema` (`packages/schema`):** Zero runtime dependencies. Defines the canonical TypeScript types for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
-- **`@canon-clerk/core` (`packages/core`):** Depends strictly on `schema`. Houses pure functional implementations of all evaluation stages (`executeIntake`, `executeDiscover`, `executeValidate`, `executeDocket`, `executeAdmit`, `executeAudit`, `executeApprise`), DAG scheduling algorithms, prompt assembly, and trie-constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or GitHub Actions.
-- **`@canon-clerk/configuration` (`packages/configuration`):** Depends on `core`. Discovers workspace and user settings, resolves API credentials, and implements the diagnostic `probe` provider health check.
+### The Domain Engine (The Hexagon Core)
+- **Schema Layer:** Defines the canonical representations for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
+- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or CI environments.
+- **Configuration & Probe:** Resolves runtime environment and API credentials, normalizes model specifiers, and implements the diagnostic `probe` provider health check.
 
 ### The Driving Adapters (The External Ports)
-- **`@canon-clerk/cli` (`packages/cli`):** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for `core` and `configuration`. Formats user-facing terminal progress, spinners, and event streams, and maps domain results to shell exit codes (`0`, `1`, `2`).
-- **`@canon-clerk/action` (`packages/action`):** Driving adapter translating GitHub Actions workflow triggers, Octokit PR payloads (diffs, commit history, linked issues), and posting results as GitHub Check Runs, step summaries, and inline code annotations ([`action-must-delegate-audit-to-core`](../packages/action/.canons/action-must-delegate-audit-to-core.md)).
-- **`@canon-clerk/integration-tests-private` (`packages/integration-tests-private`):** Test driver that feeds real/fixture Caseloads directly into `core` and `configuration` functions against live networked provider services.
+- **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
+- **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations.
 
 ---
 
@@ -129,10 +125,10 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 
 | Node / Imperative Verb | Core Concept | Metric Pair | Question Answered | Gate / Verdict Threshold |
 | :--- | :--- | :--- | :--- | :--- |
-| **`apprise`** | **Statutory Apprisal** *(Procedural Notice)* | `apprisalScore`<br/>`apprisalSummary` | *"Given this prospective design intent and target scope, does this canon have a colorable claim of jurisdiction over the planned work?"* | `score >= 0.5` $\implies$ Marked **Applicable** |
-| **`docket`** | **Colorability** *(Subject-Matter Jurisdiction)* | `colorabilityScore`<br/>`colorabilitySummary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
-| **`admit`** | **Admissibility** *(Relevance of Evidence)* | `admissibilityScore`<br/>`admissibilitySummary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
-| **`audit`** | **Compliance** *(Substantive Merits)* | `complianceScore`<br/>`complianceSummary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
+| **`apprise`** | **Statutory Apprisal** *(Procedural Notice)* | `apprisal_score`<br/>`apprisal_summary` | *"Given this prospective design intent and target scope, does this canon have a colorable claim of jurisdiction over the planned work?"* | `score >= 0.5` $\implies$ Marked **Applicable** |
+| **`docket`** | **Colorability** *(Subject-Matter Jurisdiction)* | `colorability_score`<br/>`colorability_summary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
+| **`admit`** | **Admissibility** *(Relevance of Evidence)* | `admissibility_score`<br/>`admissibility_summary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
+| **`audit`** | **Compliance** *(Substantive Merits)* | `compliance_score`<br/>`compliance_summary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
 
 ### The Court Clerkship Taxonomy
 - **The Caseload:** The cumulative lifecycle container for the evaluation run.
@@ -142,7 +138,7 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 - **Exhibits (The Unified Evidence Lifecycle):**
   - **Tendered Exhibits (`intake`):** Raw filing inputs, including literal text metadata (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), diff streams (`diff`), prospective design intent (`--intent`), and target file discovery directives.
   - **Candidate Exhibits (`discover`):** Materialized exhibits retained after mutual pruning with candidate canons (dropping un-inspected exhibits to preserve token hygiene).
-  - **Admitted Exhibits (`admit`):** Exhibits formally admitted as relevant evidence for a specific Case on the docket (`admissibilityScore >= 0.5`).
+  - **Admitted Exhibits (`admit`):** Exhibits formally admitted as relevant evidence for a specific Case on the docket (`admissibility_score >= 0.5`).
 - **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` per Case against its admitted exhibits.
 
 ### Positive Polarity Consistency
@@ -163,10 +159,10 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 | `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
 | `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
-| `apprise` | Apprisal Track | Flash-Lite AI | ~400ms, low $ | `apprisalScore >= 0.5`; exits 0 if candidates empty |
-| `docket` | Cascade Spine | Flash-Lite AI | ~400ms, low $ | `colorabilityScore >= 0.5`; exits 0 if docket empty |
-| `admit` | Cascade Spine | Flash-Lite AI | ~600ms, low $ | `admissibilityScore >= 0.5`; exits 0 if no exhibits |
-| `audit` | Cascade Spine | Pro Reasoning | ~2.5s, targeted | `complianceScore >= 0.5` $\implies$ pass (0), else fail (1) |
+| `apprise` | Apprisal Track | Flash-Lite AI | ~400ms, low $ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
+| `docket` | Cascade Spine | Flash-Lite AI | ~400ms, low $ | `colorability_score >= 0.5`; exits 0 if docket empty |
+| `admit` | Cascade Spine | Flash-Lite AI | ~600ms, low $ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `audit` | Cascade Spine | Pro Reasoning | ~2.5s, targeted | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -188,13 +184,13 @@ flowchart TD
     S4 --> G5{"docket Gate<br/>(Colorability ≥ 0.5)"}
     
     G5 -- "Dismissed (< 0.5)" --> SievePrune1["Pruned"]
-    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~400ms · gemini-3.5-flash-lite)"]
+    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~400ms · gemini-flash-lite-latest)"]
     
     C3 --> G6{"admit Gate<br/>(Admissibility ≥ 0.5)"}
     G6 -- "Inadmissible (< 0.5)" --> SievePrune2["Pruned"]
-    G6 -- "Admitted (≥ 0.5)" --> E5["5 Admitted Exhibits<br/>(~600ms · gemini-3.5-flash-lite)"]
+    G6 -- "Admitted (≥ 0.5)" --> E5["5 Admitted Exhibits<br/>(~600ms · gemini-flash-lite-latest)"]
     
-    E5 --> G7["audit Adjudication<br/>(1 Trial per Case · gemini-3.8-pro)"]
+    E5 --> G7["audit Adjudication<br/>(1 Trial per Case · gemini-pro-latest)"]
     G7 --> FinalVerdict["Final Verdict & Decree<br/>(~2.5s · ~7,500 total tokens)"]
 ```
 
@@ -202,9 +198,9 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
 | **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **`docket` Gate** | 3 active Cases | 6 touched files | `gemini-3.5-flash-lite` | ~1,200 tokens | ~420ms |
-| **`admit` Gate** | 3 active Cases | 5 admitted hunks | `gemini-3.5-flash-lite` | ~1,800 tokens | ~610ms |
-| **`audit` Adjudication** | 3 trials | 5 exhibits | `gemini-3.8-pro` | ~4,500 tokens | ~2,400ms |
+| **`docket` Gate** | 3 active Cases | 6 touched files | `gemini-flash-lite-latest` | ~1,200 tokens | ~420ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | `gemini-flash-lite-latest` | ~1,800 tokens | ~610ms |
+| **`audit` Adjudication** | 3 trials | 5 exhibits | `gemini-pro-latest` | ~4,500 tokens | ~2,400ms |
 | **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~7,500 tokens** | **< 3.5s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
@@ -215,42 +211,41 @@ flowchart TD
 
 The `Caseload` is the central, immutable data envelope flowing through the pipeline. Rather than passing disjoint arguments between commands, each stage reads accumulated upstream state and enriches its own dedicated namespace on the shared `Caseload` object.
 
-The formal TypeScript types are maintained in `@canon-clerk/schema` ([`packages/schema`](../../packages/schema) and [`openspec/specs/schema/spec.md`](../../openspec/specs/schema/spec.md)), and granular payload schemas are specified in each node's architectural document.
+The formal Caseload domain models and granular payload schemas are specified in each node's architectural document.
 
 ### The Top-Level `Caseload` Envelope
 
-```ts
-export interface Caseload {
-  /** Schema specification version */
-  readonly version: '1.0';
+```text
+struct Caseload:
+  // Schema specification version
+  version: "1.0"
 
-  /** Intake: Change diffs (FileArtifacts), target paths, prospective intent, or PR metadata */
-  readonly intake?: CaseloadIntake | undefined;
+  // Intake: Change diffs (FileArtifacts), target paths, prospective intent, or PR metadata
+  intake?: CaseloadIntake
 
-  /** Discovery: Matched target paths, candidate canons, and trigger intersections */
-  readonly discovery?: CaseloadDiscovery | undefined;
+  // Discovery: Matched target paths, candidate canons, and trigger intersections
+  discovery?: CaseloadDiscovery
 
-  /** Validation: Candidate canons syntax and frontmatter AST validation results */
-  readonly validation?: CaseloadValidation | undefined;
+  // Validation: Candidate canons syntax and frontmatter AST validation results
+  validation?: CaseloadValidation
 
-  /** Configuration: Resolved workspace paths, provider credentials, and model specifiers */
-  readonly config?: CaseloadConfig | undefined;
+  // Configuration: Provider credentials, runtime options, and model specifiers
+  config?: CaseloadConfig
 
-  /** Probe (Diagnostic Leaf): Live provider connectivity and latency test results */
-  readonly probe?: CaseloadProbe | undefined;
+  // Probe (Diagnostic Leaf): Live provider connectivity and latency test results
+  probe?: CaseloadProbe
 
-  /** Apprisal (Statutory Notice): Prospective applicability assessments against design intent */
-  readonly apprisal?: CaseloadApprisal | undefined;
+  // Apprisal (Statutory Notice): Prospective applicability assessments against design intent
+  apprisal?: CaseloadApprisal
 
-  /** Docket (Macro Triage): Colorability assessments and active cases admitted to docket */
-  readonly docket?: CaseloadDocket | undefined;
+  // Docket (Macro Triage): Colorability assessments and active cases admitted to docket
+  docket?: CaseloadDocket
 
-  /** Evidence (Micro Triage): Admitted exhibits and relevance scores per active case */
-  readonly evidence?: CaseloadEvidence | undefined;
+  // Evidence (Micro Triage): Admitted exhibits and relevance scores per active case
+  evidence?: CaseloadEvidence
 
-  /** Verdict (Adjudication): Substantive compliance decrees and line annotations */
-  readonly verdict?: CaseloadVerdict | undefined;
-}
+  // Verdict (Adjudication): Substantive compliance decrees and line annotations
+  verdict?: CaseloadVerdict
 ```
 
 ### Stage Payloads & Authoritative Specifications
@@ -262,9 +257,9 @@ Each pipeline stage owns a dedicated, non-overlapping field on the cumulative `C
 | `.intake` | `intake` | Branch A (Filing) | Tendered exhibits: diff hunks, target paths, PR metadata, or intent queries | [`nodes/intake.md`](nodes/intake.md#caseload-delta) |
 | `.discovery` | `discover` | Branch A (Filing) | Candidate canons matching path triggers & target file intersections | [`nodes/discover.md`](nodes/discover.md#caseload-delta) |
 | `.validation` | `validate` | Branch A (Filing) | Deterministic AST linting and frontmatter schema validation results | [`nodes/validate.md`](nodes/validate.md#caseload-delta) |
-| `.config` | `configure` | Branch B (Env) | Workspace root, resolved screener/auditor model specifiers, reasoning budget | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
+| `.config` | `configure` | Branch B (Env) | Resolved screener/auditor model specifiers, reasoning budget, provider runtime options | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
 | `.probe` | `probe` | Diagnostic Leaf | Live endpoint reachability, roundtrip latency (ms), and resolved models | [`nodes/probe.md`](nodes/probe.md#caseload-delta) |
-| `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisalScore`, `apprisalSummary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
+| `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisal_score`, `apprisal_summary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
 | `.docket` | `docket` | Dispute Spine | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |
 | `.evidence` | `admit` | Dispute Spine | Micro triage evidence admissibility: admitted file exhibits per active case | [`nodes/admit.md`](nodes/admit.md#caseload-delta) |
 | `.verdict` | `audit` | Dispute Spine | Final substantive adjudications, compliance scores, decrees, and line annotations | [`nodes/audit.md`](nodes/audit.md#caseload-delta) |
@@ -280,12 +275,12 @@ Canon Clerk strictly separates **substantive evaluation records** from **operati
 - **Substantive Record (`Caseload`):** Represents solely substantive findings. Identical inputs evaluated at temperature 0 produce bit-for-bit identical `caseload.json` files, enabling clean git diffs, content-addressable cache keys, and regression snapshot tests.
 - **Event Logging (`stderr` / `--log-file`):** Operational metrics (wall-clock milliseconds, token usage, time-to-first-token/thought) and streaming intermediate chunks (thought deltas) are emitted via an **Event Stream**:
 
-```ts
-export type CaseloadEvent =
-  | { type: 'stage:start'; stage: PipelineStage; timestamp: string }
-  | { type: 'thought'; stage: PipelineStage; delta: string }
-  | { type: 'stage:finish'; stage: PipelineStage; durationMs: number; usage?: ModelUsage }
-  | { type: 'pipeline:finish'; totalDurationMs: number; totalTokens?: ModelUsage };
+```text
+enum CaseloadEvent:
+  StageStart    { stage: PipelineStage, timestamp: String }
+  Thought       { stage: PipelineStage, delta: String }
+  StageFinish   { stage: PipelineStage, duration_ms: Integer, usage?: ModelUsage }
+  PipelineFinish { total_duration_ms: Integer, total_tokens?: ModelUsage }
 ```
 
 Interactive CLI runs format this stream to `stderr` for spinners and terminal progress indicators, while automated CI pipelines capture it in workflow logs or write it via `--log-file <path>`.

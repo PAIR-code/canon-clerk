@@ -16,18 +16,16 @@ Key architectural concepts:
 - [Canon Authoring Canons](.canons/canon-authoring/): Reusable, project-agnostic exemplars tagged `canon-authoring` codifying canon-authoring invariants (naming, atomicity, falsifiability, semantic scope, succinctness, and directive contracts).
 - [README Authoring Canons](.canons/readme-authoring/): Reusable, project-agnostic exemplars tagged `readme-authoring` codifying landing documentation invariants (orientation, feature parity, roadmap omission, responsive hero banners, and architecture shunting).
 - [Visual Identity Canons](.canons/visual-identity/): Reusable exemplars tagged `visual-identity` codifying brand iconography isolation and alpha transparency.
-- [OpenSpec Canons](.canons/openspec/): Reusable exemplars tagged `openspec` codifying Spec-Driven Development invariants for features and bug fixes.
+- [OpenSpec Canons](.canons/openspec/): Reference canon pack tagged `openspec` codifying Spec-Driven Development invariants for external projects using OpenSpec.
 - [Dogfood Canons](.canons/internal/): Internal project governance policies tagged `internal` enforced in CI on this repository.
 
 ## The Clerk Runner
 
 - [Caseload DAG Architecture](docs/architecture.md): Entry point and index to the Caseload DAG architectural documentation suite, execution mechanics, and pipeline stages.
-- [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload TypeScript schema, and event stream.
+- [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload schema, and event stream.
 - [DAG Scheduling & Execution](docs/architecture/scheduling.md): Transitive dependency closure calculation, branch pruning, guarded lazy scheduling, and static schedule lookup table.
-- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all eight imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit).
+- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit, apprise).
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
-- [Workspace Packages](packages/): TypeScript monorepo packages comprising schema definitions, core evaluation engine, CLI tooling, and GitHub Action runner.
-- [Living Specifications](openspec/specs/): Formal architectural specifications and interface contracts for the evaluation engine, CLI, and GitHub Action.
 
 ## Agent & Contributor Orientation
 
@@ -37,6 +35,6 @@ Key architectural concepts:
 
 ## Optional
 
-- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, Node.js toolchain, and GitHub CLI configuration.
+- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, and GitHub CLI configuration.
 - [Contributing Guide](docs/contributing.md): Contribution policies, Google Contributor License Agreement (CLA), and squash-merge expectations.
 - [Project Readme](README.md): Human-oriented project homepage, architectural problem statement, progressive disclosure tiers, and overview.

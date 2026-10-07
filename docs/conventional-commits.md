@@ -22,18 +22,18 @@ GitHub labels in `PAIR-code/canon-clerk` directly mirror this matrix, enabling s
 
 | Surface | Recommended Type & Scope | SemVer Impact | Description & Example |
 | :--- | :--- | :--- | :--- |
-| **Specifications (OpenSpec / RFCs)** | `spec(<surface>):` | None (Non-releasing) | Architectural contracts and OpenSpec files.<br>`spec(cli): define plugin hooks interface`<br>`spec(canons): define Exception and Remediation semantics` |
+| **Specifications (Architecture / SPEC.md)** | `spec(<surface>):` | None (Non-releasing) | Living architecture contracts and specification documents.<br>`spec(cli): define plugin hooks interface`<br>`spec(canons): define Exception and Remediation semantics` |
 | **Core Auditor Engine** | `feat(core):`, `fix(core):` | Minor / Patch | Core analysis, prompt assembly, and screening logic.<br>`feat(core): support inline **Remediation:** markers` |
-| **Canon Schema & Linter** | `feat(schema):`, `fix(schema):`, `spec(schema):` | Minor / Patch | Canon schema definitions, AST interfaces, parser, and static linter (`@canon-clerk/schema`).<br>`feat(schema): introduce token-based static linting engine` |
-| **Configuration Package** | `feat(configuration):`, `fix(configuration):`, `spec(configuration):` | Minor / Patch | Workspace-piercing configuration discovery, cascade resolution, and OS credential store (`@canon-clerk/configuration`).<br>`feat(configuration): add lone-key provider auto-inference` |
+| **Canon Schema & Linter** | `feat(schema):`, `fix(schema):`, `spec(schema):` | Minor / Patch | Canon schema definitions, AST interfaces, parser, and static linter.<br>`feat(schema): introduce token-based static linting engine` |
+| **Configuration Package** | `feat(configuration):`, `fix(configuration):`, `spec(configuration):` | Minor / Patch | Workspace-piercing configuration discovery, cascade resolution, and OS credential store.<br>`feat(configuration): add lone-key provider auto-inference` |
 | **CLI Package** | `feat(cli):`, `fix(cli):` | Minor / Patch | CLI binary, arguments, flags, and local execution.<br>`feat(cli): add --quiet flag and json output` |
 | **GitHub Action Package** | `feat(action):`, `fix(action):` | Minor / Patch | Action entrypoint, inputs, and Check Run posting.<br>`fix(action): handle empty diffs gracefully` |
 | **Dogfood Canons & Canon Spec** | `chore(canons):`, `spec(canons):` | None | Canon specification ([`SPEC.md`](../SPEC.md)) and dogfood canons ([`.canons/`](../.canons/)).<br>`chore(canons): require manual test plan for ui` |
 | **AI Agent Guidelines (`AGENTS.md`, `.agents/`)** | `chore(agents):` | None | Instructions, skills, and tools for AI coding assistants.<br>`chore(agents): add worktree navigation instructions` |
-| **Formal Specifications (`specs/`)** | `spec(spec):`, `chore(spec):` | None | Formal system specifications and architecture contracts.<br>`spec(spec): introduce OpenSpec workflow` |
+| **Formal Specifications (`SPEC.md` / `docs/architecture/`)** | `spec(spec):`, `chore(spec):` | None | Formal system specifications and architecture contracts.<br>`spec(spec): define Caseload envelope schema` |
 | **External Dependencies** | `chore(deps):`, `build(deps):`, `build(deps-dev):` | None | External runtime and development dependency updates and version bumps.<br>`build(deps-dev): bump vite from 7.0.6 to 7.3.6` |
 | **Landing & Root Documentation** | `docs(readme):` | None | Top-level project `README.md` and repository landing documentation.<br>`docs(readme): introduce dual-pillar declarative lead` |
-| **Local Tooling & Config** | `build:` / `test:` | None | `tsconfig`, `package.json`, `vitest`, linters.<br>`build: configure vitest and strict typescript` |
+| **Local Tooling & Config** | `build:` / `test:` | None | Build configuration, test harnesses, and linters.<br>`build: configure linter and test harness` |
 | **Remote CI/CD (`.github/workflows/`)** | `ci:` / `ci(action):` | None | GitHub Actions workflows and release automation.<br>`ci: add PR title linting workflow` |
 | **Public Documentation (`docs/`)** | `docs:` / `docs(<surface>):` | None | User guides, onboarding, and tutorials.<br>`docs: add development-setup guide` |
 
@@ -53,7 +53,7 @@ Repository labels are codified declaratively in [`.github/labels.yml`](../.githu
 | :--- | :--- | :--- |
 | `type: feat` | `#0E8A16` (Green) | New user-facing functionality (triggers SemVer minor release). |
 | `type: fix` | `#D93F0B` (Red) | Bug fix (triggers SemVer patch release). |
-| `type: spec` | `#D4C5F9` (Lavender) | Architecture contracts, OpenSpec, and canon specifications (non-releasing). |
+| `type: spec` | `#D4C5F9` (Lavender) | Living architecture contracts, SPEC.md, and canon specifications (non-releasing). |
 | `type: chore` | `#CFD3D7` (Light Gray) | Repository housekeeping, maintenance, and internal tooling. |
 | `type: docs` | `#0075CA` (Blue) | Documentation guides, onboarding, and tutorials. |
 | `type: ci` | `#5319E7` (Purple) | GitHub Actions workflows and CI automation. |
@@ -68,8 +68,8 @@ Standardized strictly on **`scope: canons`** (collapsing the deprecated `canon` 
 | Label | Color | Description |
 | :--- | :--- | :--- |
 | `scope: core` | `#1D76DB` (Blue) | Core Auditor Engine, prompt assembly, and screening logic. |
-| `scope: schema` | `#1D76DB` (Blue) | Canon schema definitions, AST interfaces, parser, and static linter (`@canon-clerk/schema`). |
-| `scope: configuration` | `#1D76DB` (Blue) | Configuration discovery, cascade resolution, and OS credential store (`@canon-clerk/configuration`). |
+| `scope: schema` | `#1D76DB` (Blue) | Canon schema definitions, AST interfaces, parser, and static linter. |
+| `scope: configuration` | `#1D76DB` (Blue) | Configuration discovery, cascade resolution, and OS credential store. |
 | `scope: cli` | `#006B75` (Teal) | CLI binary and command-line execution. |
 | `scope: action` | `#0E8A16` (Dark Green) | GitHub Action entrypoint and Check Run posting. |
 | `scope: canons` | `#FBCA04` (Yellow) | Canon specification ([`SPEC.md`](../SPEC.md)) and dogfood canons ([`.canons/`](../.canons/)). |
@@ -91,12 +91,12 @@ Standardized strictly on **`scope: canons`** (collapsing the deprecated `canon` 
 
 ---
 
-## 4. OpenSpec & Spec-Driven Development (SDD) Lifecycle
+## 4. Doc-Driven Architecture (DDA) Lifecycle
 
-Introducing `spec` as a first-class Conventional Commit type affords a structured SDD progression:
+Introducing `spec` as a first-class Conventional Commit type affords a structured Doc-Driven Architecture progression:
 
-1. **Spec Proposal (Design Phase):**
-   - Author or revise architecture contracts under `specs/` or `openspec/` using `spec(<surface>):`.
+1. **Spec First (Design Phase):**
+   - Author or revise architecture contracts under `docs/architecture/` or `SPEC.md` using `spec(<surface>):`.
    - These commits document architectural decisions and appear under a dedicated **"Specifications"** section in changelogs, but do not bump package SemVer versions.
 2. **Implementation (Code Phase):**
    - Write tests and code fulfilling the specification using `test(<surface>):`, `feat(<surface>):`, or `fix(<surface>):`, referencing the spec in the commit description.

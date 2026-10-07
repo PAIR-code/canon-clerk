@@ -1,8 +1,8 @@
 # Diagnostic Health Check (`probe`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
-**Driving Adapters:** `@canon-clerk/cli` (`probe`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`probe`), GitHub Action
 
 ---
 
@@ -12,11 +12,28 @@
 
 - **Imperative Verb:** `probe`
 - **Court Clerkship Role:** Live connectivity and latency verification of provider endpoints.
-- **Metric Pair:** N/A (Live connectivity probe; reports `status` and `latencyMs`).
+- **Metric Pair:** N/A (Live connectivity probe; reports `status` and `latency_ms`).
 
 ---
 
 ## 2. Dependencies & Prerequisites (`core`)
+
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Config["configure (or --caseload)<br/><code>.config</code>"]
+        Params["Stage Flags<br/><i>(--timeout)</i>"]
+    end
+
+    Config --> Probe["probe<br/><b>(Current Node)</b><br/><code>.probe</code>"]
+    Params --> Probe
+
+    Probe --> Report["Diagnostic Health Report<br/><i>(Endpoint latency & reachability, Exit 0)</i>"]
+    Probe -. "connectivity failure" .-> Failure["Connection Error<br/><i>(Unreachable / bad key, Exit 1)</i>"]
+
+    style Probe fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style Failure stroke-dasharray: 5 5
+```
 
 - **Direct Prerequisites:** `configure` (requires resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** None.
@@ -24,60 +41,57 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/configuration`)
+## 3. Core Functional Contract
 
-```ts
-export interface ProbeOptions {
-  readonly timeoutMs?: number | undefined;
-}
+```text
+struct ProbeOptions:
+  timeout_ms?: Integer
 
-export function executeProbe(
+function execute_probe(
   options: ProbeOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.probe` field on the cumulative `Caseload`:
 
-```ts
-export interface ProbeEndpointResult {
-  /** Connection outcome */
-  readonly status: 'ok' | 'error';
+```text
+struct ProbeEndpointResult:
+  // Connection outcome
+  status: "ok" | "error"
 
-  /** Roundtrip response latency in milliseconds */
-  readonly latencyMs: number;
+  // Roundtrip response latency in milliseconds
+  latency_ms: Integer
 
-  /** Resolved model identifier probed */
-  readonly model: string;
+  // Resolved model identifier probed
+  model: String
 
-  /** Error message if connectivity failed */
-  readonly error?: string | undefined;
-}
+  // Error message if connectivity failed
+  error?: String
 
-export interface CaseloadProbe {
-  /** Screener model endpoint probe result */
-  readonly screener: ProbeEndpointResult;
+struct CaseloadProbe:
+  // Screener model endpoint probe result
+  screener: ProbeEndpointResult
 
-  /** Auditor model endpoint probe result */
-  readonly auditor: ProbeEndpointResult;
-}
+  // Auditor model endpoint probe result
+  auditor: ProbeEndpointResult
 ```
 
 ---
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Endpoint Resolution:** Reads configured `screenerModel` and `auditorModel` from `caseload.config`.
+1. **Endpoint Resolution:** Reads configured `screener_model` and `auditor_model` from `caseload.config`.
 2. **Ping Request Assembly:** Constructs lightweight probe requests (0 reasoning tokens, minimum prompt payload) to verify authentication and reachability.
-3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints using `Promise.all`:
-   - Measures roundtrip response latency in milliseconds (`latencyMs`).
+3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints in parallel:
+   - Measures roundtrip response latency in milliseconds (`latency_ms`).
    - Verifies model availability and provider credential validity.
 4. **Diagnostic Record:** Attaches endpoint latency and reachability metadata to `Caseload.probe`.
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `probe` as an imperative subcommand:
 
@@ -100,14 +114,8 @@ canon-clerk probe --json
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Diagnostic Action Step:** Invoked in dedicated connectivity workflows or self-hosted runner validation actions.
 2. **Summary Emission:** Emits reachability tables and latency metrics to `GITHUB_STEP_SUMMARY`.
 3. **Fail-Fast Gating:** Fails CI pipelines early if remote AI provider endpoints are down or firewall rules block egress.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests invoke `executeProbe` against live Gemini endpoints to assert real-world authentication, network latency bounds, and endpoint stability before running deep adjudication test suites.

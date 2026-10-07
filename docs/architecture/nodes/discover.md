@@ -1,8 +1,8 @@
 # Candidate Identification (`discover`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`discover`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`discover`), GitHub Action
 
 ---
 
@@ -14,8 +14,8 @@
 2. **State Precondition Verification:** Evaluates `exists:` path patterns against the Target File Tree to ensure baseline environment dependencies exist before admitting candidate canons.
 3. **Subordination & Scope Containment:** Enforces monorepo boundaries, ensuring scoped canons evaluate strictly within their enclosing `<scope>/`.
 4. **Two-Sided Mutual Pruning:**
-   - **Prunes Inapplicable Canons:** Canons with unmet `exists` preconditions or zero matching required exhibits are dropped $\implies$ `candidateCanons`.
-   - **Prunes Un-inspected Exhibits:** Exhibits not inspected or triggered by any surviving candidate canon are dropped $\implies$ `activeExhibits` (preserving context-window hygiene).
+   - **Prunes Inapplicable Canons:** Canons with unmet `exists` preconditions or zero matching required exhibits are dropped $\implies$ `candidate_canons`.
+   - **Prunes Un-inspected Exhibits:** Exhibits not inspected or triggered by any surviving candidate canon are dropped $\implies$ `active_exhibits` (preserving context-window hygiene).
 
 - **Imperative Verb:** `discover`
 - **Court Clerkship Role:** Exhibit materialization, precondition verification, scope containment, candidate canon identification, and mutual exhibit pruning.
@@ -25,59 +25,77 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Intake["intake (or --caseload)<br/><code>.intake</code>"]
+        Params["Stage Flags<br/><i>(--all-canons, --canons, --filter)</i>"]
+    end
+
+    Intake --> Discover["discover<br/><b>(Current Node)</b><br/><code>.discovery</code>"]
+    Params --> Discover
+
+    Discover --> Validate["validate<br/><i>(Pipeline Cascade)</i><br/><code>.validation</code>"]
+    Discover -. "standalone CLI" .-> DiscoveryReport["Discovered Canons Table<br/><i>(Matched triggers & exhibits, Exit 0)</i>"]
+    Discover -. "candidate_canons is empty" .-> FastExit["Fast Exit (No-op 0)<br/><i>Prunes validate, docket, admit, audit</i>"]
+
+    style Discover fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style DiscoveryReport stroke-dasharray: 5 5
+    style FastExit stroke-dasharray: 5 5
+```
+
 - **Direct Prerequisites:** `intake` (requires parsed target paths, diffs, or scope in `caseload.intake`, OR receives plenary `--all-canons` flag).
 - **Transitive Prerequisites:** None.
 - **Incoming Caseload:** Requires `caseload.intake` to be present (unless executing with `--all-canons`).
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
-```ts
-export interface DiscoverOptions {
-  readonly workspaceRoot: string;
-  readonly canonGlobs?: readonly string[] | undefined;
-  readonly explicitCanonFilter?: readonly string[] | undefined;
-  readonly allCanons?: boolean | undefined;
-}
+```text
+struct DiscoverOptions:
+  workspace_root: String
+  canon_globs?: List[String]
+  explicit_canon_filter?: List[String]
+  all_canons?: Boolean
 
-export function executeDiscover(
+function execute_discover(
   options: DiscoverOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.discovery` field on the cumulative `Caseload`:
 
-```ts
-export interface CaseloadDiscovery {
-  /** Mode of discovery: trigger-filtered or full corpus */
-  readonly mode?: 'triggered' | 'all-canons' | undefined;
+```text
+struct ActiveExhibits:
+  files: List[String]
+  pr_title?: Boolean
+  pr_body?: Boolean
+  commit_messages?: Boolean
+  linked_issues?: Boolean
 
-  /** Modified target file paths evaluated */
-  readonly targetFiles: readonly string[];
+struct CaseloadDiscovery:
+  // Mode of discovery: trigger-filtered or full corpus
+  mode?: "triggered" | "all-canons"
 
-  /** Discovered candidate canon paths matching targets (or full corpus) */
-  readonly candidateCanons: readonly string[];
+  // Modified target file paths evaluated
+  target_files: List[String]
 
-  /** Materialized active exhibits retained after mutual pruning with candidate canons */
-  readonly activeExhibits: {
-    readonly files: readonly string[];
-    readonly prTitle?: boolean | undefined;
-    readonly prBody?: boolean | undefined;
-    readonly commitMessages?: boolean | undefined;
-    readonly linkedIssues?: boolean | undefined;
-  };
+  // Discovered candidate canon paths matching targets (or full corpus)
+  candidate_canons: List[String]
 
-  /** Map of canon paths to matched target file paths and inspected planes */
-  readonly triggersJoin: Record<string, readonly string[]>;
-}
+  // Materialized active exhibits retained after mutual pruning with candidate canons
+  active_exhibits: ActiveExhibits
+
+  // Map of canon paths to matched target file paths and inspected planes
+  triggers_join: Map[String, List[String]]
 ```
 
 ### Domain Short-Circuit Invariant
-If `candidateCanons.length === 0`:
-- The core engine sets `candidateCanons: []` and returns the enriched Caseload.
+If `candidate_canons` is empty:
+- The core engine sets `candidate_canons: []` and returns the enriched Caseload.
 - Downstream execution ceases immediately, returning a clean success state without evaluating configuration or spending tokens.
 
 ---
@@ -85,7 +103,7 @@ If `candidateCanons.length === 0`:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Exhibit Materialization:** Resolves exhibit discovery directives from `caseload.intake` (e.g. expanding directory recursion roots and matching target glob patterns against workspace checkout into concrete file exhibits).
-2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidateCanons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
+2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidate_canons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
 3. **Canon Corpus Enumeration:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`).
 4. **Monorepo Subordination & Scope Containment:** Enforces strict boundary encapsulation:
@@ -102,13 +120,13 @@ If `candidateCanons.length === 0`:
    - **Optional Planes (`?` Suffix, e.g. `pr_title?`, `pr_body?`):** Evaluated opportunistically. If present on `caseload.intake`, they are retained as active exhibits for the canon; if absent (such as in local CLI diff-only audits), their absence never causes the canon to be pruned.
    - **Default Frontmatter Ergonomics:** Canons with omitted `inspect` frontmatter default to `["diff", "pr_title?", "pr_body?"]`, guaranteeing that standard code rules apply seamlessly in local CLI runs (where `diff` is present but PR metadata is absent) without requiring dummy metadata flags.
 7. **Two-Sided Mutual Pruning & Token Hygiene:**
-   - **Inapplicable Canons Pruned:** Any canon whose `exists:` preconditions are unmet, or whose `triggers:` match 0 file exhibits, or whose required `inspect:` exhibit planes are unsatisfied is dropped $\implies$ `candidateCanons`.
-   - **Un-inspected Exhibits Pruned:** Any tendered exhibit (file path, `pr_title`, `pr_body`, etc.) that is neither triggered nor inspected by any surviving candidate canon is dropped $\implies$ `activeExhibits`. Downstream screening (`docket`) and adjudication (`audit`) will never serialize un-inspected exhibits into model prompts.
-8. **Join Calculation:** Computes `triggersJoin` mapping each candidate canon to the specific active exhibits that activated it.
+   - **Inapplicable Canons Pruned:** Any canon whose `exists:` preconditions are unmet, or whose `triggers:` match 0 file exhibits, or whose required `inspect:` exhibit planes are unsatisfied is dropped $\implies$ `candidate_canons`.
+   - **Un-inspected Exhibits Pruned:** Any tendered exhibit (file path, `pr_title`, `pr_body`, etc.) that is neither triggered nor inspected by any surviving candidate canon is dropped $\implies$ `active_exhibits`. Downstream screening (`docket`) and adjudication (`audit`) will never serialize un-inspected exhibits into model prompts.
+8. **Join Calculation:** Computes `triggers_join` mapping each candidate canon to the specific active exhibits that activated it.
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `discover` as an imperative subcommand:
 
@@ -127,7 +145,7 @@ git diff origin/main | canon-clerk discover -q -
 ```
 
 ### CLI Flags & Options
-- `--all-canons`: Discovers and compiles all repository canons into candidateCanons, bypassing path trigger matching.
+- `--all-canons`: Discovers and compiles all repository canons into candidate_canons, bypassing path trigger matching.
 - `-q, --quiet`: Predicate mode. Suppresses stdout and indicates match presence via exit code.
 - `--canon <path|glob>`: Explicitly restrict candidate canons to a specific subset.
 - `--format <stylish|json|compact>`: Formats matched canons and triggering files.
@@ -141,14 +159,8 @@ git diff origin/main | canon-clerk discover -q -
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Automated Candidate Check:** Calls `executeDiscover` with the Caseload produced by `executeIntake`.
-2. **Fast-Pass Evaluation:** If `candidateCanons.length === 0`, the action records a successful, neutral Check Run conclusion (`neutral` or `success`), logs that no governed files were touched, and terminates cleanly in <2 seconds without requiring `GEMINI_API_KEY`.
+2. **Fast-Pass Evaluation:** If `candidate_canons` is empty, the action records a successful, neutral Check Run conclusion (`neutral` or `success`), logs that no governed files were touched, and terminates cleanly in <2 seconds without requiring `GEMINI_API_KEY`.
 3. **Step Summary:** Emits a Markdown table of matched canons and triggering files into `GITHUB_STEP_SUMMARY`.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests invoke `executeDiscover` directly against simulated monorepo directory layouts, asserting that scope inheritance (`packages/cli/.canons/` $\implies$ `packages/cli/**`) and complex glob patterns match accurately across OS platforms.

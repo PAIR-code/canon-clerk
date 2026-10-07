@@ -3,6 +3,8 @@ triggers:
   - "openspec/changes/**/design.md"
   - "openspec/changes/**/specs/**"
   - "openspec/specs/**"
+exists:
+  - "openspec/**"
 inspect:
   - diff
 tags:

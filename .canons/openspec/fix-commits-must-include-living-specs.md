@@ -1,6 +1,9 @@
 ---
 triggers:
   - "**/src/**"
+  - "openspec/**"
+exists:
+  - "openspec/**"
 inspect:
   - diff
   - pr_title

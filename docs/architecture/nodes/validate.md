@@ -1,8 +1,8 @@
 # Statutory Rule Linter (`validate`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core` (with `@canon-clerk/schema`)  
-**Driving Adapters:** `@canon-clerk/cli` (`validate`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`validate`), GitHub Action
 
 ---
 
@@ -18,59 +18,76 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
-- **Direct Prerequisites:** `discover` (strictly validates `caseload.discovery.candidateCanons`).
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Discover["discover (or --caseload)<br/><code>.discovery</code>"]
+        Params["Stage Flags<br/><i>(--max-warnings)</i>"]
+    end
+
+    Discover --> Validate["validate<br/><b>(Current Node)</b><br/><code>.validation</code>"]
+    Params --> Validate
+
+    Validate --> Docket["docket<br/><i>(Adjudication Path)</i><br/><code>.docket</code>"]
+    Validate --> Apprise["apprise<br/><i>(Apprisal Path)</i><br/><code>.apprisal</code>"]
+    Validate -. "standalone CLI" .-> ValidReport["Validation Report<br/><i>(Clean AST & schemas, Exit 0)</i>"]
+    Validate -. "has_errors == true" .-> Abort["Diagnostics & Abort<br/><i>(Exit 1, blocks token spend)</i>"]
+
+    style Validate fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style ValidReport stroke-dasharray: 5 5
+    style Abort stroke-dasharray: 5 5
+```
+
+- **Direct Prerequisites:** `discover` (strictly validates `caseload.discovery.candidate_canons`).
 - **Transitive Prerequisites:** `intake`.
 - **Topological Invariant:** `validate` does not maintain alternate roots or bypass `discover`. Instead, `discover` provides the candidate set:
-  - **Facial Codex Review:** When invoked with `--all-canons`, `discover` populates `candidateCanons` with all repository canons.
-  - **As-Applied Targeted Review:** When invoked with a diff or file paths, `discover` populates `candidateCanons` via trigger glob matching.
+  - **Facial Codex Review:** When invoked with `--all-canons`, `discover` populates `candidate_canons` with all repository canons.
+  - **As-Applied Targeted Review:** When invoked with a diff or file paths, `discover` populates `candidate_canons` via trigger glob matching.
 - **Incoming Caseload:** Strictly requires `caseload.discovery` to be present.
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
-```ts
-export interface ValidateOptions {
-  readonly workspaceRoot: string;
-  readonly maxWarnings?: number | undefined;
-}
+```text
+struct ValidateOptions:
+  workspace_root: String
+  max_warnings?: Integer
 
-export function executeValidate(
+function execute_validate(
   options: ValidateOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.validation` field on the cumulative `Caseload`:
 
-```ts
-export interface ValidatedCanonMetadata {
-  readonly result: 'pass' | 'fail';
-  readonly warningCount: number;
-  readonly warnings: readonly string[];
-  readonly errorCount: number;
-  readonly errors: readonly string[];
-}
+```text
+struct ValidatedCanonMetadata:
+  result: "pass" | "fail"
+  warning_count: Integer
+  warnings: List[String]
+  error_count: Integer
+  errors: List[String]
 
-export interface CaseloadValidation {
-  /** Map of canon paths to AST/schema validation metadata */
-  readonly results: Record<string, ValidatedCanonMetadata>;
+struct CaseloadValidation:
+  // Map of canon paths to AST/schema validation metadata
+  results: Map[String, ValidatedCanonMetadata]
 
-  /** True if any candidate canon contains lint errors */
-  readonly hasErrors: boolean;
-}
+  // True if any candidate canon contains lint errors
+  has_errors: Boolean
 ```
 
 ### Domain Error Invariant
-If `hasErrors === true`, the validation result records the failure diagnostics and signals an immediate abort before loading environment credentials or spending tokens.
+If `has_errors == true`, the validation result records the failure diagnostics and signals an immediate abort before loading environment credentials or spending tokens.
 
 ---
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Candidate Intake:** Extracts `candidateCanons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
-2. **AST Parsing via `@canon-clerk/schema`:** Parses Markdown AST and YAML frontmatter blocks.
+1. **Candidate Intake:** Extracts `candidate_canons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
+2. **AST Parsing:** Parses Markdown AST and YAML frontmatter blocks.
 3. **Static Rule Verification:**
    - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`).
    - **Scope Containment Verification:** Enforces that scoped canons located in `<scope>/.canons/**` do not attempt directory traversal (e.g. `../`) or declare paths superior or external to `<scope>/` in `triggers:`, `exists:`, or `references:`.
@@ -82,7 +99,7 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `validate` as an imperative subcommand:
 
@@ -119,14 +136,8 @@ error: No filing source or canon scope provided for validate.
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Pre-Flight Validation:** Executes `executeValidate` on all candidate canons identified during `discover`.
 2. **Annotation Generation:** Converts syntax or schema errors into GitHub Actions error annotations (`::error file=path,line=n::message`), pointing PR authors to the exact line of the malformed canon.
-3. **Fail-Fast:** If `hasErrors === true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests invoke `executeValidate` on fixture canons containing deliberately malformed frontmatter, non-atomic invariants, and invalid RFC 2119 syntax, verifying that AST errors are captured deterministically across test runners.
+3. **Fail-Fast:** If `has_errors == true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.

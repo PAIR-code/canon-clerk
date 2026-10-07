@@ -1,8 +1,8 @@
 # Judicial Adjudication (`audit`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`audit`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`audit`), GitHub Action
 
 ---
 
@@ -12,12 +12,29 @@
 
 - **Imperative Verb:** `audit`
 - **Court Clerkship Role:** Judicial trial and decree rendering.
-- **Metric Pair:** `complianceScore` (number [0.0, 1.0]) and `complianceSummary` (string decree).
+- **Metric Pair:** `compliance_score` (number [0.0, 1.0]) and `compliance_summary` (string decree).
 - **Core Question:** *"Given the admitted exhibits and governing invariant/exceptions, does the evidence comply with canon statute?"*
 
 ---
 
 ## 2. Dependencies & Prerequisites (`core`)
+
+```mermaid
+flowchart LR
+    subgraph Inputs["Inputs"]
+        Admit["admit (or --caseload)<br/><code>.evidence</code>"]
+        Params["Stage Flags<br/><i>(--auditor-model, --reasoning-budget)</i>"]
+    end
+
+    Admit --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
+    Params --> Audit
+
+    Audit --> Compliant["Compliant Review Gate<br/><i>(Verdict decree, Exit 0)</i>"]
+    Audit -. "statute violation" .-> Violation["Violation Decree<br/><i>(Line annotations, Exit 1)</i>"]
+
+    style Audit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style Violation stroke-dasharray: 5 5
+```
 
 - **Direct Prerequisites:** `admit` (requires admitted exhibits in `caseload.evidence`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`, `docket`.
@@ -25,62 +42,58 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
-```ts
-export interface AuditOptions {
-  readonly auditorModel?: string | undefined;
-  readonly reasoningBudget?: number | undefined;
-}
+```text
+struct AuditOptions:
+  auditor_model?: String
+  reasoning_budget?: Integer
 
-export function executeAudit(
+function execute_audit(
   options: AuditOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.verdict` field on the cumulative `Caseload`:
 
-```ts
-export interface CodeAnnotation {
-  readonly path: string;
-  readonly startLine: number;
-  readonly endLine: number;
-  readonly startColumn?: number | undefined;
-  readonly endColumn?: number | undefined;
-  readonly annotationLevel: 'failure' | 'warning' | 'notice';
-  readonly message: string;
-  readonly title?: string | undefined;
-}
+```text
+struct CodeAnnotation:
+  path: String
+  start_line: Integer
+  end_line: Integer
+  start_column?: Integer
+  end_column?: Integer
+  annotation_level: "failure" | "warning" | "notice"
+  message: String
+  title?: String
 
-export interface CanonAdjudication {
-  /** Canon file path evaluated */
-  readonly canonPath: string;
+struct CanonAdjudication:
+  // Canon file path evaluated
+  canon_path: String
 
-  /** Compliance score indicating statute adherence [0.0, 1.0] */
-  readonly complianceScore: number;
+  // Compliance score indicating statute adherence [0.0, 1.0]
+  compliance_score: Float
 
-  /** Substantive decree explaining compliance or violation */
-  readonly complianceSummary: string;
+  // Substantive decree explaining compliance or violation
+  compliance_summary: String
 
-  /** Verdict status */
-  readonly status: 'pass' | 'fail';
+  // Verdict status
+  status: "pass" | "fail"
 
-  /** Line-level code annotations */
-  readonly annotations: readonly CodeAnnotation[];
-}
+  // Line-level code annotations
+  annotations: List[CodeAnnotation]
 
-export interface CaseloadVerdict {
-  /** Overall review gate outcome */
-  readonly status: 'pass' | 'fail';
+struct CaseloadVerdict:
+  // Overall review gate outcome
+  status: "pass" | "fail"
 
-  /** High-level verdict summary */
-  readonly summary: string;
+  // High-level verdict summary
+  summary: String
 
-  /** Substantive adjudications per active case */
-  readonly adjudications: readonly CanonAdjudication[];
-}
+  // Substantive adjudications per active case
+  adjudications: List[CanonAdjudication]
 ```
 
 ---
@@ -91,18 +104,30 @@ export interface CaseloadVerdict {
    Each active case is evaluated in an **independent, isolated trial**:
    - **Isolation:** Prevents cross-canon hallucination; Canon A's exceptions never bleed into Canon B's evaluation.
    - **Bounded Token Footprint:** Prompts only contain the governing canon and its admitted exhibits.
-   - **Concurrency:** Independent trials execute concurrently across model calls using `Promise.all`.
-2. **Frontier Reasoning Model Tier (`gemini-3.8-pro`):**  
+   - **Concurrency:** Independent trials execute concurrently across model calls in parallel.
+2. **Frontier Reasoning Model Tier (`gemini-pro-latest`):**  
    Evaluates substantive compliance with extended thinking/reasoning enabled.
 3. **The Four-Step Judicial Decision Tree:**
-   - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `complianceScore = 1.0`, status `pass`.
-   - **Step 2 (Exception Screening):** If a violation is found, evaluates declared `Exception` clauses. If an exception's criteria are semantically satisfied $\implies$ short-circuits to conditional `pass` (`complianceScore >= 0.5`), documenting the matched exception.
-   - **Step 3 (Remediation Formulation):** If no exception applies $\implies$ violation stands (`complianceScore < 0.5`, status `fail`), and formulates actionable contributor remediation (How).
+   - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `compliance_score = 1.0`.
+   - **Step 2 (Exception Screening):** If a violation is found, evaluates declared `Exception` clauses. If an exception's criteria are semantically satisfied $\implies$ short-circuits to conditional `pass` (`compliance_score >= 0.5`), documenting the matched exception.
+   - **Step 3 (Remediation Formulation):** If no exception applies $\implies$ violation stands (`compliance_score < 0.5`), and formulates actionable contributor remediation (How).
    - **Step 4 (Line Annotations):** Emits precise file, line, and column coordinates for each violation.
+4. **Constrained Decoding Schema (Reason-First):**  
+   Enforces structured JSON output generating `compliance_summary` before `compliance_score`:
+   ```json
+   {
+     "compliance_summary": "The added command flags adhere strictly to kebab-case formatting.",
+     "compliance_score": 1.0,
+     "annotations": []
+   }
+   ```
+   Generating `compliance_summary` before `compliance_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+5. **Deterministic Status Evaluation:**  
+   The core domain engine deterministically assigns case `status = if compliance_score >= 0.5 { "pass" } else { "fail" }`, and aggregates overall `caseload.verdict.status` (`"pass"` if all cases pass, else `"fail"`).
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `audit` as its flagship evaluation command:
 
@@ -131,14 +156,24 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - **Verdict Report:** Emits formatted Markdown or stylish terminal summary to `stdout`.
 - **Telemetry Log:** Optionally redirects event stream via `--log-file <path>`.
 
+### CLI Flags & Environment
+- `--diff <path|->`: In-flight patch stream.
+- `--caseload <path|->`: Ingests upstream Caseload.
+- `--docket-threshold <number>`: Upstream jurisdiction screening threshold in telescoping mode (default: `0.5`).
+- `--admit-threshold <number>`: Upstream evidence admissibility threshold in telescoping mode (default: `0.5`).
+- `--auditor-model <model>`: Custom reasoning model specifier.
+- `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
+- `--log-file <path>`: Telemetry event stream destination.
+- `--json`: Emits enriched Caseload JSON.
+
 ### CLI Exit Codes
-- **0:** All evaluated cases pass (`status: 'pass'`, `complianceScore >= 0.5`), or 0 candidate canons matched from diff.
-- **1:** Architectural violation detected (`status: 'fail'`, `complianceScore < 0.5`).
+- **0:** All evaluated cases pass (`status: 'pass'`, `compliance_score >= 0.5`), or 0 candidate canons matched from diff.
+- **1:** Architectural violation detected (`status: 'fail'`, `compliance_score < 0.5`).
 - **2:** Fatal error, missing filing source (naked invocation), missing credentials, or provider failure.
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Full DAG Invocation:** Drives the complete Caseload pipeline to `executeAudit`.
 2. **GitHub Check Run Creation:**
@@ -148,12 +183,3 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
      - `status: 'fail'` $\implies$ `conclusion: 'failure'` 🔴
 3. **Line-Level GitHub Annotations:** Converts `adjudications[].annotations` into Check Run annotations (`path`, `start_line`, `end_line`, `annotation_level: 'failure'`, `message`), placing visual review flags directly on the PR files diff tab.
 4. **Markdown Step Summary:** Writes an executive decree and per-case breakdown to `$GITHUB_STEP_SUMMARY`.
-
----
-
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
-
-Integration tests invoke `executeAudit` against complex diff scenarios with live Gemini reasoning models, verifying that:
-- Legitimate `Exception` clauses short-circuit to `pass`.
-- Invariant violations generate accurate line annotations and `Remediation` guidance.
-- Decrees are reproducible and deterministic across test runs.
