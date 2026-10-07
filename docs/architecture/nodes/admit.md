@@ -93,7 +93,7 @@ If all active cases retain zero admitted exhibits:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.active_docket`.
-2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):** Evaluates candidate exhibits—including code diff hunks, PR title, PR body, commit messages, and reference documents—against the canon's specific requirements, as declared by its `inspect:` frontmatter.
+2. **Fast Heuristic Screening (`gemini-flash-lite-latest`):** Evaluates candidate exhibits—including code diff hunks, PR title, PR body, commit messages, and reference documents—against the canon's specific requirements, as declared by its `inspect:` frontmatter.
 3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**
    ```json
    {

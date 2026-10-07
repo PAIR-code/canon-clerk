@@ -21,7 +21,7 @@
 ```mermaid
 flowchart LR
     subgraph Inputs["Inputs"]
-        Env["Host Environment<br/><i>(Env vars, secrets, workspace root)</i>"]
+        Env["Host Environment<br/><i>(Env vars, secrets)</i>"]
         Params["Stage Flags<br/><i>(--screener-model, --auditor-model, --reasoning-budget)</i>"]
     end
 
@@ -51,7 +51,6 @@ flowchart LR
 
 ```text
 struct ConfigureOptions:
-  cwd?: String
   env?: Map[String, String]
   overrides?: CaseloadConfigOverrides
 
@@ -66,14 +65,11 @@ Populates the `.config` field on the cumulative `Caseload`:
 
 ```text
 struct CaseloadConfig:
-  // Model specifier for screening nodes (e.g. 'google:gemini-3.5-flash-lite')
+  // Model specifier for screening nodes (default: 'google:gemini-flash-lite-latest')
   screener_model: String
 
-  // Model specifier for adjudication (e.g. 'google:gemini-3.8-pro')
+  // Model specifier for adjudication (default: 'google:gemini-pro-latest')
   auditor_model: String
-
-  // Workspace root directory
-  cwd: String
 
   // Optional reasoning budget in tokens
   reasoning_budget?: Integer
@@ -83,10 +79,9 @@ struct CaseloadConfig:
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Workspace Boundary Detection:** Identifies workspace root, monorepo packages, and configuration files.
-2. **Credential Resolution:** Checks environment variables (`GEMINI_API_KEY`) and secure platform secret stores.
-3. **Model Specifier Normalization:** Resolves model aliases (e.g. `flash-lite` $\implies$ `google:gemini-3.5-flash-lite`, `pro` $\implies$ `google:gemini-3.8-pro`).
-4. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
+1. **Credential Resolution:** Checks environment variables (`GEMINI_API_KEY`) and secure platform secret stores.
+2. **Model Specifier Normalization:** Resolves model aliases (e.g. `flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `pro` $\implies$ `google:gemini-pro-latest`).
+3. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
 
 ---
 
@@ -99,7 +94,7 @@ The CLI exposes `configure` as an imperative subcommand:
 canon-clerk configure --json
 
 # Override model tiers from flags:
-canon-clerk configure --screener-model google:gemini-3.5-flash-lite --auditor-model google:gemini-3.8-pro
+canon-clerk configure --screener-model google:gemini-flash-lite-latest --auditor-model google:gemini-pro-latest
 ```
 
 ### CLI Flags & Environment
@@ -107,17 +102,16 @@ canon-clerk configure --screener-model google:gemini-3.5-flash-lite --auditor-mo
 - `--screener-model <model>`: Custom screener model specifier.
 - `--auditor-model <model>`: Custom auditor model specifier.
 - `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
-- `--cwd <path>`: Explicit workspace directory.
 - `--caseload <path|->`: Ingests upstream Caseload.
 
 ### CLI Exit Codes
 - **0:** Configuration valid and normalized.
-- **2:** Missing provider credentials (`GEMINI_API_KEY`), invalid model identifiers, or unresolvable workspace path.
+- **2:** Missing provider credentials (`GEMINI_API_KEY`) or invalid model identifiers.
 
 ---
 
 ## 6. Driving Adapter: GitHub Action
 
 1. **Secret & Input Mapping:** Maps workflow inputs (`api-key`, `screener-model`, `auditor-model`, `reasoning-budget`) and repository secrets into `ConfigureOptions`.
-2. **JIT Invocation:** Evaluates `executeConfigure` only after `executeDiscover` yields $>0$ candidate canons.
+2. **JIT Invocation:** Evaluates `execute_configure` only after `execute_discover` yields $>0$ candidate canons.
 3. **Missing Secret Reporting:** If `GEMINI_API_KEY` is absent on a PR requiring AI adjudication, posts an actionable failure annotation instructing maintainers to configure repository secrets for fork PRs.

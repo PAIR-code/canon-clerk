@@ -104,7 +104,7 @@ If `caseload.discovery.candidate_canons` is empty:
 
 1. **Candidate Canon Ingestion & Early Exit:**  
    Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths or globs) along with `caseload.intake.intent` (and any piped specification or RFC text). If `candidate_canons` is empty, short-circuits immediately with exit code `0`.
-2. **Aggregate Single-Turn Screening (`gemini-3.5-flash-lite`):**  
+2. **Aggregate Single-Turn Screening (`gemini-flash-lite-latest`):**  
    Evaluates **all candidate canons against the prospective intent in a single aggregate prompt turn** using `caseload.config.screener_model`.
 3. **Constrained Decoding Schema (Reason-First):**  
    Enforces structured JSON output generating `apprisal_summary` before `apprisal_score`:

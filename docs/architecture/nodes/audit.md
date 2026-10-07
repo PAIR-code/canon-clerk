@@ -105,7 +105,7 @@ struct CaseloadVerdict:
    - **Isolation:** Prevents cross-canon hallucination; Canon A's exceptions never bleed into Canon B's evaluation.
    - **Bounded Token Footprint:** Prompts only contain the governing canon and its admitted exhibits.
    - **Concurrency:** Independent trials execute concurrently across model calls in parallel.
-2. **Frontier Reasoning Model Tier (`gemini-3.8-pro`):**  
+2. **Frontier Reasoning Model Tier (`gemini-pro-latest`):**  
    Evaluates substantive compliance with extended thinking/reasoning enabled.
 3. **The Four-Step Judicial Decision Tree:**
    - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `compliance_score = 1.0`.

@@ -97,7 +97,7 @@ If `active_docket` is empty:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Aggregate Single-Turn Screening:**  
-   Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-3.5-flash-lite`.
+   Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-flash-lite-latest`.
 2. **Constrained Grammar Decoding (Reason-First):**  
    Forces structured JSON output with guaranteed schema keys, generating `colorability_summary` before `colorability_score` to provide a chain-of-thought scratchpad that anchors reproducible probability distributions:
    ```json
