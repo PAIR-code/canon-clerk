@@ -29,37 +29,34 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface ValidateOptions {
-  readonly workspaceRoot: string;
-  readonly maxWarnings?: number | undefined;
-}
+```text
+struct ValidateOptions:
+  workspace_root: String
+  max_warnings?: Integer
 
-export function executeValidate(
+function execute_validate(
   options: ValidateOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.validation` field on the cumulative `Caseload`:
 
-```ts
-export interface ValidatedCanonMetadata {
-  readonly result: 'pass' | 'fail';
-  readonly warningCount: number;
-  readonly warnings: readonly string[];
-  readonly errorCount: number;
-  readonly errors: readonly string[];
-}
+```text
+struct ValidatedCanonMetadata:
+  result: "pass" | "fail"
+  warning_count: Integer
+  warnings: List[String]
+  error_count: Integer
+  errors: List[String]
 
-export interface CaseloadValidation {
-  /** Map of canon paths to AST/schema validation metadata */
-  readonly results: Record<string, ValidatedCanonMetadata>;
+struct CaseloadValidation:
+  // Map of canon paths to AST/schema validation metadata
+  results: Map[String, ValidatedCanonMetadata]
 
-  /** True if any candidate canon contains lint errors */
-  readonly hasErrors: boolean;
-}
+  // True if any candidate canon contains lint errors
+  has_errors: Boolean
 ```
 
 ### Domain Error Invariant

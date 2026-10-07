@@ -30,43 +30,40 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface DocketOptions {
-  readonly threshold?: number | undefined; // default: 0.5
-  readonly screenerModel?: string | undefined;
-}
+```text
+struct DocketOptions:
+  threshold?: Float // default: 0.5
+  screener_model?: String
 
-export function executeDocket(
+function execute_docket(
   options: DocketOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.docket` field on the cumulative `Caseload`:
 
-```ts
-export interface ColorabilityAssessment {
-  /** Numerical score indicating colorable subject-matter jurisdiction [0.0, 1.0] */
-  readonly colorabilityScore: number;
+```text
+struct ColorabilityAssessment:
+  // Numerical score indicating colorable subject-matter jurisdiction [0.0, 1.0]
+  colorability_score: Float
 
-  /** Reasoning justifying whether jurisdiction applies to the PR context */
-  readonly colorabilitySummary: string;
+  // Reasoning justifying whether jurisdiction applies to the PR context
+  colorability_summary: String
 
-  /** Status outcome */
-  readonly status: 'docketed' | 'dismissed';
-}
+  // Status outcome
+  status: "docketed" | "dismissed"
 
-export interface CaseloadDocket {
-  /** Colorability assessments keyed by canon path */
-  readonly cases: Record<string, ColorabilityAssessment>;
+struct CaseloadDocket:
+  // Colorability assessments keyed by canon path
+  cases: Map[String, ColorabilityAssessment]
 
-  /** List of canon paths admitted onto the Active Docket */
-  readonly activeDocket: readonly string[];
+  // List of canon paths admitted onto the Active Docket
+  active_docket: List[String]
 
-  /** Optional diagnostic anomalies manifest */
-  readonly anomalies?: DocketAnomaliesManifest | undefined;
-}
+  // Optional diagnostic anomalies manifest
+  anomalies?: DocketAnomaliesManifest
 ```
 
 ### Domain Short-Circuit Invariant

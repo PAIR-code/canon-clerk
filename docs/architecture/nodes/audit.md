@@ -27,60 +27,56 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface AuditOptions {
-  readonly auditorModel?: string | undefined;
-  readonly reasoningBudget?: number | undefined;
-}
+```text
+struct AuditOptions:
+  auditor_model?: String
+  reasoning_budget?: Integer
 
-export function executeAudit(
+function execute_audit(
   options: AuditOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.verdict` field on the cumulative `Caseload`:
 
-```ts
-export interface CodeAnnotation {
-  readonly path: string;
-  readonly startLine: number;
-  readonly endLine: number;
-  readonly startColumn?: number | undefined;
-  readonly endColumn?: number | undefined;
-  readonly annotationLevel: 'failure' | 'warning' | 'notice';
-  readonly message: string;
-  readonly title?: string | undefined;
-}
+```text
+struct CodeAnnotation:
+  path: String
+  start_line: Integer
+  end_line: Integer
+  start_column?: Integer
+  end_column?: Integer
+  annotation_level: "failure" | "warning" | "notice"
+  message: String
+  title?: String
 
-export interface CanonAdjudication {
-  /** Canon file path evaluated */
-  readonly canonPath: string;
+struct CanonAdjudication:
+  // Canon file path evaluated
+  canon_path: String
 
-  /** Compliance score indicating statute adherence [0.0, 1.0] */
-  readonly complianceScore: number;
+  // Compliance score indicating statute adherence [0.0, 1.0]
+  compliance_score: Float
 
-  /** Substantive decree explaining compliance or violation */
-  readonly complianceSummary: string;
+  // Substantive decree explaining compliance or violation
+  compliance_summary: String
 
-  /** Verdict status */
-  readonly status: 'pass' | 'fail';
+  // Verdict status
+  status: "pass" | "fail"
 
-  /** Line-level code annotations */
-  readonly annotations: readonly CodeAnnotation[];
-}
+  // Line-level code annotations
+  annotations: List[CodeAnnotation]
 
-export interface CaseloadVerdict {
-  /** Overall review gate outcome */
-  readonly status: 'pass' | 'fail';
+struct CaseloadVerdict:
+  // Overall review gate outcome
+  status: "pass" | "fail"
 
-  /** High-level verdict summary */
-  readonly summary: string;
+  // High-level verdict summary
+  summary: String
 
-  /** Substantive adjudications per active case */
-  readonly adjudications: readonly CanonAdjudication[];
-}
+  // Substantive adjudications per active case
+  adjudications: List[CanonAdjudication]
 ```
 
 ---
@@ -91,7 +87,7 @@ export interface CaseloadVerdict {
    Each active case is evaluated in an **independent, isolated trial**:
    - **Isolation:** Prevents cross-canon hallucination; Canon A's exceptions never bleed into Canon B's evaluation.
    - **Bounded Token Footprint:** Prompts only contain the governing canon and its admitted exhibits.
-   - **Concurrency:** Independent trials execute concurrently across model calls using `Promise.all`.
+   - **Concurrency:** Independent trials execute concurrently across model calls in parallel.
 2. **Frontier Reasoning Model Tier (`gemini-3.8-pro`):**  
    Evaluates substantive compliance with extended thinking/reasoning enabled.
 3. **The Four-Step Judicial Decision Tree:**

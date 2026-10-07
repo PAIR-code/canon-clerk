@@ -27,46 +27,44 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface IntakeOptions {
-  readonly prTitle?: string | undefined;
-  readonly prBody?: string | undefined;
-  readonly intent?: string | undefined;
-  readonly targetPaths?: readonly string[] | undefined;
-  readonly patchContent?: string | undefined;
-  readonly allTargets?: boolean | undefined;
-  readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
-}
+```text
+struct IntakeOptions:
+  pr_title?: String
+  pr_body?: String
+  intent?: String
+  target_paths?: List[String]
+  patch_content?: String
+  all_targets?: Boolean
+  linked_issues?: List[LinkedIssueContext]
 
-export function executeIntake(
+function execute_intake(
   options: IntakeOptions,
-  caseload?: Caseload | undefined
-): Promise<Caseload>;
+  caseload?: Caseload
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.intake` field on the cumulative `Caseload`:
 
-```ts
-export interface CaseloadIntake {
-  /** PR title or commit subject */
-  readonly pr_title?: string | undefined;
+```text
+struct CaseloadIntake:
+  // PR title or commit subject
+  pr_title?: String
 
-  /** PR markdown description or commit body */
-  readonly pr_body?: string | undefined;
+  // PR markdown description or commit body
+  pr_body?: String
 
-  /** Design intent or prospective plan description */
-  readonly intent?: string | undefined;
+  // Design intent or prospective plan description
+  intent?: String
 
-  /** Scope of intake targets */
-  readonly scope?: 'targeted' | 'all-targets' | undefined;
+  // Scope of intake targets
+  scope?: "targeted" | "all-targets"
 
-  /** Ingested code modifications keyed by relative repository path */
-  readonly diffs: Record<string, FileArtifact>;
+  // Ingested code modifications keyed by relative repository path
+  diffs: Map[String, FileArtifact]
 
-  /** Optional linked issue context gathered from issue trackers */
-  readonly linkedIssues?: readonly LinkedIssueContext[] | undefined;
-}
+  // Optional linked issue context gathered from issue trackers
+  linked_issues?: List[LinkedIssueContext]
 ```
 
 ---

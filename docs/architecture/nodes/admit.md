@@ -27,45 +27,41 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface AdmitOptions {
-  readonly threshold?: number | undefined; // default: 0.5
-  readonly screenerModel?: string | undefined;
-}
+```text
+struct AdmitOptions:
+  threshold?: Float // default: 0.5
+  screener_model?: String
 
-export function executeAdmit(
+function execute_admit(
   options: AdmitOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.evidence` field on the cumulative `Caseload`:
 
-```ts
-export interface AdmittedExhibit {
-  /** Repository-relative path to admitted file or exhibit */
-  readonly filePath: string;
+```text
+struct AdmittedExhibit:
+  // Repository-relative path to admitted file or exhibit
+  file_path: String
 
-  /** Relevance score of exhibit to governing canon [0.0, 1.0] */
-  readonly admissibilityScore: number;
+  // Relevance score of exhibit to governing canon [0.0, 1.0]
+  admissibility_score: Float
 
-  /** Rationale for admitting exhibit into evidence */
-  readonly admissibilitySummary: string;
-}
+  // Rationale for admitting exhibit into evidence
+  admissibility_summary: String
 
-export interface CanonEvidenceExhibits {
-  /** Canon file path governing these exhibits */
-  readonly canonPath: string;
+struct CanonEvidenceExhibits:
+  // Canon file path governing these exhibits
+  canon_path: String
 
-  /** Admitted evidence exhibits */
-  readonly exhibits: readonly AdmittedExhibit[];
-}
+  // Admitted evidence exhibits
+  exhibits: List[AdmittedExhibit]
 
-export interface CaseloadEvidence {
-  /** Admitted exhibits keyed by canon path */
-  readonly exhibits: Record<string, CanonEvidenceExhibits>;
-}
+struct CaseloadEvidence:
+  // Admitted exhibits keyed by canon path
+  exhibits: Map[String, CanonEvidenceExhibits]
 ```
 
 ### Domain Short-Circuit Invariant

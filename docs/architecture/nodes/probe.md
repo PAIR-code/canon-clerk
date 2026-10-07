@@ -26,42 +26,39 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface ProbeOptions {
-  readonly timeoutMs?: number | undefined;
-}
+```text
+struct ProbeOptions:
+  timeout_ms?: Integer
 
-export function executeProbe(
+function execute_probe(
   options: ProbeOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.probe` field on the cumulative `Caseload`:
 
-```ts
-export interface ProbeEndpointResult {
-  /** Connection outcome */
-  readonly status: 'ok' | 'error';
+```text
+struct ProbeEndpointResult:
+  // Connection outcome
+  status: "ok" | "error"
 
-  /** Roundtrip response latency in milliseconds */
-  readonly latencyMs: number;
+  // Roundtrip response latency in milliseconds
+  latency_ms: Integer
 
-  /** Resolved model identifier probed */
-  readonly model: string;
+  // Resolved model identifier probed
+  model: String
 
-  /** Error message if connectivity failed */
-  readonly error?: string | undefined;
-}
+  // Error message if connectivity failed
+  error?: String
 
-export interface CaseloadProbe {
-  /** Screener model endpoint probe result */
-  readonly screener: ProbeEndpointResult;
+struct CaseloadProbe:
+  // Screener model endpoint probe result
+  screener: ProbeEndpointResult
 
-  /** Auditor model endpoint probe result */
-  readonly auditor: ProbeEndpointResult;
-}
+  // Auditor model endpoint probe result
+  auditor: ProbeEndpointResult
 ```
 
 ---
@@ -70,7 +67,7 @@ export interface CaseloadProbe {
 
 1. **Endpoint Resolution:** Reads configured `screenerModel` and `auditorModel` from `caseload.config`.
 2. **Ping Request Assembly:** Constructs lightweight probe requests (0 reasoning tokens, minimum prompt payload) to verify authentication and reachability.
-3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints using `Promise.all`:
+3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints in parallel:
    - Measures roundtrip response latency in milliseconds (`latencyMs`).
    - Verifies model availability and provider credential validity.
 4. **Diagnostic Record:** Attaches endpoint latency and reachability metadata to `Caseload.probe`.

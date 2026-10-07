@@ -33,46 +33,45 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface DiscoverOptions {
-  readonly workspaceRoot: string;
-  readonly canonGlobs?: readonly string[] | undefined;
-  readonly explicitCanonFilter?: readonly string[] | undefined;
-  readonly allCanons?: boolean | undefined;
-}
+```text
+struct DiscoverOptions:
+  workspace_root: String
+  canon_globs?: List[String]
+  explicit_canon_filter?: List[String]
+  all_canons?: Boolean
 
-export function executeDiscover(
+function execute_discover(
   options: DiscoverOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.discovery` field on the cumulative `Caseload`:
 
-```ts
-export interface CaseloadDiscovery {
-  /** Mode of discovery: trigger-filtered or full corpus */
-  readonly mode?: 'triggered' | 'all-canons' | undefined;
+```text
+struct ActiveExhibits:
+  files: List[String]
+  pr_title?: Boolean
+  pr_body?: Boolean
+  commit_messages?: Boolean
+  linked_issues?: Boolean
 
-  /** Modified target file paths evaluated */
-  readonly targetFiles: readonly string[];
+struct CaseloadDiscovery:
+  // Mode of discovery: trigger-filtered or full corpus
+  mode?: "triggered" | "all-canons"
 
-  /** Discovered candidate canon paths matching targets (or full corpus) */
-  readonly candidateCanons: readonly string[];
+  // Modified target file paths evaluated
+  target_files: List[String]
 
-  /** Materialized active exhibits retained after mutual pruning with candidate canons */
-  readonly activeExhibits: {
-    readonly files: readonly string[];
-    readonly prTitle?: boolean | undefined;
-    readonly prBody?: boolean | undefined;
-    readonly commitMessages?: boolean | undefined;
-    readonly linkedIssues?: boolean | undefined;
-  };
+  // Discovered candidate canon paths matching targets (or full corpus)
+  candidate_canons: List[String]
 
-  /** Map of canon paths to matched target file paths and inspected planes */
-  readonly triggersJoin: Record<string, readonly string[]>;
-}
+  // Materialized active exhibits retained after mutual pruning with candidate canons
+  active_exhibits: ActiveExhibits
+
+  // Map of canon paths to matched target file paths and inspected planes
+  triggers_join: Map[String, List[String]]
 ```
 
 ### Domain Short-Circuit Invariant

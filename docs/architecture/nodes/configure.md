@@ -27,36 +27,34 @@
 
 ## 3. Core Functional Contract
 
-```ts
-export interface ConfigureOptions {
-  readonly cwd?: string | undefined;
-  readonly env?: Record<string, string | undefined> | undefined;
-  readonly overrides?: Partial<CaseloadConfig> | undefined;
-}
+```text
+struct ConfigureOptions:
+  cwd?: String
+  env?: Map[String, String]
+  overrides?: CaseloadConfigOverrides
 
-export function executeConfigure(
+function execute_configure(
   options: ConfigureOptions,
-  caseload?: Caseload | undefined
-): Promise<Caseload>;
+  caseload?: Caseload
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.config` field on the cumulative `Caseload`:
 
-```ts
-export interface CaseloadConfig {
-  /** Model specifier for screening nodes (e.g. 'google:gemini-3.5-flash-lite') */
-  readonly screenerModel: string;
+```text
+struct CaseloadConfig:
+  // Model specifier for screening nodes (e.g. 'google:gemini-3.5-flash-lite')
+  screener_model: String
 
-  /** Model specifier for adjudication (e.g. 'google:gemini-3.8-pro') */
-  readonly auditorModel: string;
+  // Model specifier for adjudication (e.g. 'google:gemini-3.8-pro')
+  auditor_model: String
 
-  /** Workspace root directory */
-  readonly cwd: string;
+  // Workspace root directory
+  cwd: String
 
-  /** Optional reasoning budget in tokens */
-  readonly reasoningBudget?: number | undefined;
-}
+  // Optional reasoning budget in tokens
+  reasoning_budget?: Integer
 ```
 
 ---

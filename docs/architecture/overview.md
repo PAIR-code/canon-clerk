@@ -219,38 +219,37 @@ The formal Caseload domain models and granular payload schemas are specified in 
 
 ### The Top-Level `Caseload` Envelope
 
-```ts
-export interface Caseload {
-  /** Schema specification version */
-  readonly version: '1.0';
+```text
+struct Caseload:
+  // Schema specification version
+  version: "1.0"
 
-  /** Intake: Change diffs (FileArtifacts), target paths, prospective intent, or PR metadata */
-  readonly intake?: CaseloadIntake | undefined;
+  // Intake: Change diffs (FileArtifacts), target paths, prospective intent, or PR metadata
+  intake?: CaseloadIntake
 
-  /** Discovery: Matched target paths, candidate canons, and trigger intersections */
-  readonly discovery?: CaseloadDiscovery | undefined;
+  // Discovery: Matched target paths, candidate canons, and trigger intersections
+  discovery?: CaseloadDiscovery
 
-  /** Validation: Candidate canons syntax and frontmatter AST validation results */
-  readonly validation?: CaseloadValidation | undefined;
+  // Validation: Candidate canons syntax and frontmatter AST validation results
+  validation?: CaseloadValidation
 
-  /** Configuration: Resolved workspace paths, provider credentials, and model specifiers */
-  readonly config?: CaseloadConfig | undefined;
+  // Configuration: Resolved workspace paths, provider credentials, and model specifiers
+  config?: CaseloadConfig
 
-  /** Probe (Diagnostic Leaf): Live provider connectivity and latency test results */
-  readonly probe?: CaseloadProbe | undefined;
+  // Probe (Diagnostic Leaf): Live provider connectivity and latency test results
+  probe?: CaseloadProbe
 
-  /** Apprisal (Statutory Notice): Prospective applicability assessments against design intent */
-  readonly apprisal?: CaseloadApprisal | undefined;
+  // Apprisal (Statutory Notice): Prospective applicability assessments against design intent
+  apprisal?: CaseloadApprisal
 
-  /** Docket (Macro Triage): Colorability assessments and active cases admitted to docket */
-  readonly docket?: CaseloadDocket | undefined;
+  // Docket (Macro Triage): Colorability assessments and active cases admitted to docket
+  docket?: CaseloadDocket
 
-  /** Evidence (Micro Triage): Admitted exhibits and relevance scores per active case */
-  readonly evidence?: CaseloadEvidence | undefined;
+  // Evidence (Micro Triage): Admitted exhibits and relevance scores per active case
+  evidence?: CaseloadEvidence
 
-  /** Verdict (Adjudication): Substantive compliance decrees and line annotations */
-  readonly verdict?: CaseloadVerdict | undefined;
-}
+  // Verdict (Adjudication): Substantive compliance decrees and line annotations
+  verdict?: CaseloadVerdict
 ```
 
 ### Stage Payloads & Authoritative Specifications
@@ -280,12 +279,12 @@ Canon Clerk strictly separates **substantive evaluation records** from **operati
 - **Substantive Record (`Caseload`):** Represents solely substantive findings. Identical inputs evaluated at temperature 0 produce bit-for-bit identical `caseload.json` files, enabling clean git diffs, content-addressable cache keys, and regression snapshot tests.
 - **Event Logging (`stderr` / `--log-file`):** Operational metrics (wall-clock milliseconds, token usage, time-to-first-token/thought) and streaming intermediate chunks (thought deltas) are emitted via an **Event Stream**:
 
-```ts
-export type CaseloadEvent =
-  | { type: 'stage:start'; stage: PipelineStage; timestamp: string }
-  | { type: 'thought'; stage: PipelineStage; delta: string }
-  | { type: 'stage:finish'; stage: PipelineStage; durationMs: number; usage?: ModelUsage }
-  | { type: 'pipeline:finish'; totalDurationMs: number; totalTokens?: ModelUsage };
+```text
+enum CaseloadEvent:
+  StageStart    { stage: PipelineStage, timestamp: String }
+  Thought       { stage: PipelineStage, delta: String }
+  StageFinish   { stage: PipelineStage, duration_ms: Integer, usage?: ModelUsage }
+  PipelineFinish { total_duration_ms: Integer, total_tokens?: ModelUsage }
 ```
 
 Interactive CLI runs format this stream to `stderr` for spinners and terminal progress indicators, while automated CI pipelines capture it in workflow logs or write it via `--log-file <path>`.

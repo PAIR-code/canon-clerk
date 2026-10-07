@@ -34,46 +34,43 @@ In the court clerkship taxonomy, `apprise` represents the court exercising its *
 
 ## 3. Core Functional Contract
 
-```ts
-export interface AppriseOptions {
-  /** Minimum apprisal salience threshold [0.0, 1.0] to designate status as 'applicable' (default: 0.5) */
-  readonly threshold?: number | undefined;
+```text
+struct AppriseOptions:
+  // Minimum apprisal salience threshold [0.0, 1.0] to designate status as 'applicable' (default: 0.5)
+  threshold?: Float
 
-  /** Optional screener model override (defaults to caseload.config.screenerModel or 'google:gemini-3.5-flash-lite') */
-  readonly screenerModel?: string | undefined;
+  // Optional screener model override
+  screener_model?: String
 
-  /** Injectable ModelClient for unit testing or custom provider overrides */
-  readonly client?: ModelClient | undefined;
+  // Injectable ModelClient for testing or provider overrides
+  client?: ModelClient
 
-  /** Cancellation and timeout signal */
-  readonly signal?: AbortSignal | undefined;
-}
+  // Cancellation and timeout token
+  cancel_token?: CancellationToken
 
-export function executeApprise(
+function execute_apprise(
   options: AppriseOptions,
   caseload: Caseload
-): Promise<Caseload>;
+) -> Caseload
 ```
 
 ### Caseload Delta
 Populates the `.apprisal` field on the cumulative `Caseload`:
 
-```ts
-export interface ApprisalAssessment {
-  /** Relevance score indicating prospective jurisdiction over the stated intent [0.0, 1.0] */
-  readonly apprisalScore: number;
+```text
+struct ApprisalAssessment:
+  // Relevance score indicating prospective jurisdiction over stated intent [0.0, 1.0]
+  apprisal_score: Float
 
-  /** Rationale explaining why this canon governs (or does not govern) the prospective intent */
-  readonly apprisalSummary: string;
+  // Rationale explaining why this canon governs (or does not govern) prospective intent
+  apprisal_summary: String
 
-  /** Status outcome */
-  readonly status: 'applicable' | 'dismissed';
-}
+  // Status outcome
+  status: "applicable" | "dismissed"
 
-export interface CaseloadApprisal {
-  /** Apprisal assessments keyed by canon path */
-  readonly assessments: Record<string, ApprisalAssessment>;
-}
+struct CaseloadApprisal:
+  // Apprisal assessments keyed by canon path
+  assessments: Map[String, ApprisalAssessment]
 ```
 
 ### Domain Short-Circuit Invariant
