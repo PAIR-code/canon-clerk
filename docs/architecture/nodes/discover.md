@@ -150,6 +150,8 @@ git diff origin/main | canon-clerk discover -q -
 - `--canon <path|glob>`: Explicitly restrict candidate canons to a specific subset.
 - `--format <stylish|json|compact>`: Formats matched canons and triggering files.
 - `--caseload <path|->`: Ingests upstream Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Candidate canons matched and discovery attached (or `--all-canons` enumerated).

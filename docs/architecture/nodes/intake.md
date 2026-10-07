@@ -135,6 +135,7 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 - `--pr-title <text>`: Ingests PR title text.
 - `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description.
 - `--caseload <path|->`: Ingests existing Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
 - `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes

@@ -139,7 +139,8 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - `--admit-threshold <number>`: Admissibility threshold (default: `0.5`).
 - `--docket-threshold <number>`: Upstream jurisdiction screening threshold in telescoping mode (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Exhibits admitted and attached (or zero-evidence short-circuit).

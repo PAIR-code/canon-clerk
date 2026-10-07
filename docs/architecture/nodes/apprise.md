@@ -163,7 +163,8 @@ Conversely, if prospective target paths yield zero candidate canons in `discover
 - `--apprise-threshold <number>`: Prospective applicability threshold (default: `0.5`).
 - `--intent <text>`: Prospective architectural intent statement.
 - `--caseload <path|->`: Ingests upstream Caseload.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Output Modes
 - **Default (Terminal / Stylish):** Renders a structured Markdown apprisal report on `stdout` listing applicable canons alongside their `apprisal_summary` rationales.

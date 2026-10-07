@@ -171,7 +171,8 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
 - `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
 - `--log-file <path>`: Telemetry event stream destination.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout (ideal for CI workflow artifact archiving).
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** All evaluated cases pass (`status: 'pass'`, `compliance_score >= 0.5`), or 0 candidate canons matched from diff.

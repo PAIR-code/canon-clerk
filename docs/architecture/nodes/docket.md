@@ -142,7 +142,8 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 ### CLI Flags & Environment
 - `--docket-threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Candidate canons screened and active docket established (or empty docket short-circuit).

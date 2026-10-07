@@ -146,6 +146,8 @@ error: No filing source or canon scope provided for validate.
 - `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
 - `--quiet`: Suppress warnings and non-essential output.
 - `--caseload <path|->`: Ingests upstream Caseload.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout (ideal for CI workflow artifact archiving).
+- `--json`: Emits cumulative `Caseload` JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** All evaluated candidate canons pass static linting (or 0 candidate canons matched from diff).

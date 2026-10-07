@@ -113,7 +113,23 @@ flowchart TD
 
 ### The Driving Adapter (The CLI Boundary)
 - **CLI Binary:** The sole driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
-- **CI / GitHub Integration:** CI runners invoke the native CLI binary directly. When executing in CI environments (or when passed `--format github`), the CLI emits native GitHub Actions workflow command annotations (`::error file=...::`) and writes Markdown summaries to `$GITHUB_STEP_SUMMARY` without requiring a separate Action codebase.
+- **CI / GitHub Integration (Tripartite Output Model):** CI runners invoke the native CLI binary directly without requiring a separate Action codebase. The CLI natively satisfies three output tiers in GitHub Actions:
+  1. **Inline Diff Annotations:** Emits native workflow command annotations (`::error file=...::`, `::warning file=...::`) for all `CodeAnnotation`s on `stdout`/`stderr`, pinpointing line violations directly on the PR *Files changed* diff.
+  2. **Run Summary:** Appends the rendered Markdown Funnel Receipt and stage verdict report to `$GITHUB_STEP_SUMMARY`.
+  3. **Caseload Artifact Archival:** Supports `--output-caseload <path>` to write the full-fidelity cumulative `Caseload` JSON to disk independently of stdout. This allows workflows to upload `caseload.json` via `actions/upload-artifact` (`if: always()`) for post-run failure forensics, compliance auditing, or multi-job workflow chaining:
+     ```yaml
+     - name: Run Canon Clerk Gate
+       run: |
+         git diff origin/main | canon-clerk audit --diff - --output-caseload caseload.json
+
+     - name: Archive Caseload Record
+       if: always()
+       uses: actions/upload-artifact@v4
+       with:
+         name: canon-clerk-caseload
+         path: caseload.json
+         retention-days: 14
+     ```
 
 ---
 
