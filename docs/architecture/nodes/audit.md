@@ -12,7 +12,7 @@
 
 - **Imperative Verb:** `audit`
 - **Court Clerkship Role:** Judicial trial and decree rendering.
-- **Metric Pair:** `complianceScore` (number [0.0, 1.0]) and `complianceSummary` (string decree).
+- **Metric Pair:** `compliance_score` (number [0.0, 1.0]) and `compliance_summary` (string decree).
 - **Core Question:** *"Given the admitted exhibits and governing invariant/exceptions, does the evidence comply with canon statute?"*
 
 ---
@@ -108,9 +108,9 @@ struct CaseloadVerdict:
 2. **Frontier Reasoning Model Tier (`gemini-3.8-pro`):**  
    Evaluates substantive compliance with extended thinking/reasoning enabled.
 3. **The Four-Step Judicial Decision Tree:**
-   - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `complianceScore = 1.0`, status `pass`.
-   - **Step 2 (Exception Screening):** If a violation is found, evaluates declared `Exception` clauses. If an exception's criteria are semantically satisfied $\implies$ short-circuits to conditional `pass` (`complianceScore >= 0.5`), documenting the matched exception.
-   - **Step 3 (Remediation Formulation):** If no exception applies $\implies$ violation stands (`complianceScore < 0.5`, status `fail`), and formulates actionable contributor remediation (How).
+   - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `compliance_score = 1.0`, status `pass`.
+   - **Step 2 (Exception Screening):** If a violation is found, evaluates declared `Exception` clauses. If an exception's criteria are semantically satisfied $\implies$ short-circuits to conditional `pass` (`compliance_score >= 0.5`), documenting the matched exception.
+   - **Step 3 (Remediation Formulation):** If no exception applies $\implies$ violation stands (`compliance_score < 0.5`, status `fail`), and formulates actionable contributor remediation (How).
    - **Step 4 (Line Annotations):** Emits precise file, line, and column coordinates for each violation.
 
 ---
@@ -145,8 +145,8 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - **Telemetry Log:** Optionally redirects event stream via `--log-file <path>`.
 
 ### CLI Exit Codes
-- **0:** All evaluated cases pass (`status: 'pass'`, `complianceScore >= 0.5`), or 0 candidate canons matched from diff.
-- **1:** Architectural violation detected (`status: 'fail'`, `complianceScore < 0.5`).
+- **0:** All evaluated cases pass (`status: 'pass'`, `compliance_score >= 0.5`), or 0 candidate canons matched from diff.
+- **1:** Architectural violation detected (`status: 'fail'`, `compliance_score < 0.5`).
 - **2:** Fatal error, missing filing source (naked invocation), missing credentials, or provider failure.
 
 ---

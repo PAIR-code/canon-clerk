@@ -57,7 +57,7 @@ When an operator or CI workflow executes a subcommand $T$, the runner constructs
 1. **Branch A Independence:** `configure` and `probe` execute with zero knowledge of Git diffs, modified files, or repository canons.
 2. **Branch B Independence:** `intake`, `discover`, and `validate` execute with zero knowledge of AI providers, model configurations, or API credentials.
 3. **Diagnostic Isolation:** `probe` is never scheduled during review cascades (`docket`, `admit`, `audit`), eliminating unnecessary health-check latency prior to screening.
-4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons`, Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidateCanons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
+4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons`, Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidate_canons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
 
 ---
 
@@ -150,8 +150,8 @@ The scheduler and CLI enforce strict input handling to distinguish operator erro
 
 2. **Empty Stream Short-Circuit (Legitimate No-op $\implies$ Exit 0):**  
    When an operator explicitly designates an input source (e.g. `git diff origin/main | canon-clerk audit --diff -`) and that source produces zero changes:
-   - `intake` records an empty filing (`diffs: {}`, `targetPaths: []`).
-   - `discover` intersects with empty target paths $\implies$ `candidateCanons: []`.
+   - `intake` records an empty filing (`diffs: {}`, `target_paths: []`).
+   - `discover` intersects with empty target paths $\implies$ `candidate_canons: []`.
    - The runner logs `0 modified files; 0 candidate canons matched` and short-circuits cleanly with **exit code 0**.
 
 3. **The Case or Controversy Invariant:**  
@@ -159,11 +159,11 @@ The scheduler and CLI enforce strict input handling to distinguish operator erro
 
 ### Short-Circuit Fast Exit Conditions
 Across the pipeline, five deterministic short-circuit conditions trigger early termination:
-1. **At `discover`:** If `candidateCanons.length === 0` $\implies$ Exit `0` immediately (`intake` and `discovery` attached to emitted Caseload; downstream nodes skipped).
-2. **At `validate`:** If `validation.hasErrors === true` $\implies$ Exit `1` immediately (malformed canon syntax; zero tokens spent).
-3. **At `docket`:** If `activeDocket.length === 0` $\implies$ Exit `0` immediately (all candidate canons dismissed at macro screening; zero trials scheduled).
+1. **At `discover`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (`intake` and `discovery` attached to emitted Caseload; downstream nodes skipped).
+2. **At `validate`:** If `validation.has_errors == true` $\implies$ Exit `1` immediately (malformed canon syntax; zero tokens spent).
+3. **At `docket`:** If `active_docket` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at macro screening; zero trials scheduled).
 4. **At `admit`:** If all active cases retain zero admitted exhibits $\implies$ Exit `0` immediately (no admissible evidence; zero trials scheduled).
-5. **At `apprise`:** If `candidateCanons.length === 0` $\implies$ Exit `0` immediately (all candidate canons dismissed at discovery; empty apprisal brief attached to emitted Caseload).
+5. **At `apprise`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at discovery; empty apprisal brief attached to emitted Caseload).
 
 ---
 

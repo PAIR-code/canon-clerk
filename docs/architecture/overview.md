@@ -125,10 +125,10 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 
 | Node / Imperative Verb | Core Concept | Metric Pair | Question Answered | Gate / Verdict Threshold |
 | :--- | :--- | :--- | :--- | :--- |
-| **`apprise`** | **Statutory Apprisal** *(Procedural Notice)* | `apprisalScore`<br/>`apprisalSummary` | *"Given this prospective design intent and target scope, does this canon have a colorable claim of jurisdiction over the planned work?"* | `score >= 0.5` $\implies$ Marked **Applicable** |
-| **`docket`** | **Colorability** *(Subject-Matter Jurisdiction)* | `colorabilityScore`<br/>`colorabilitySummary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
-| **`admit`** | **Admissibility** *(Relevance of Evidence)* | `admissibilityScore`<br/>`admissibilitySummary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
-| **`audit`** | **Compliance** *(Substantive Merits)* | `complianceScore`<br/>`complianceSummary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
+| **`apprise`** | **Statutory Apprisal** *(Procedural Notice)* | `apprisal_score`<br/>`apprisal_summary` | *"Given this prospective design intent and target scope, does this canon have a colorable claim of jurisdiction over the planned work?"* | `score >= 0.5` $\implies$ Marked **Applicable** |
+| **`docket`** | **Colorability** *(Subject-Matter Jurisdiction)* | `colorability_score`<br/>`colorability_summary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
+| **`admit`** | **Admissibility** *(Relevance of Evidence)* | `admissibility_score`<br/>`admissibility_summary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
+| **`audit`** | **Compliance** *(Substantive Merits)* | `compliance_score`<br/>`compliance_summary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
 
 ### The Court Clerkship Taxonomy
 - **The Caseload:** The cumulative lifecycle container for the evaluation run.
@@ -138,7 +138,7 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 - **Exhibits (The Unified Evidence Lifecycle):**
   - **Tendered Exhibits (`intake`):** Raw filing inputs, including literal text metadata (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), diff streams (`diff`), prospective design intent (`--intent`), and target file discovery directives.
   - **Candidate Exhibits (`discover`):** Materialized exhibits retained after mutual pruning with candidate canons (dropping un-inspected exhibits to preserve token hygiene).
-  - **Admitted Exhibits (`admit`):** Exhibits formally admitted as relevant evidence for a specific Case on the docket (`admissibilityScore >= 0.5`).
+  - **Admitted Exhibits (`admit`):** Exhibits formally admitted as relevant evidence for a specific Case on the docket (`admissibility_score >= 0.5`).
 - **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` per Case against its admitted exhibits.
 
 ### Positive Polarity Consistency
@@ -159,10 +159,10 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 | `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
 | `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
-| `apprise` | Apprisal Track | Flash-Lite AI | ~400ms, low $ | `apprisalScore >= 0.5`; exits 0 if candidates empty |
-| `docket` | Cascade Spine | Flash-Lite AI | ~400ms, low $ | `colorabilityScore >= 0.5`; exits 0 if docket empty |
-| `admit` | Cascade Spine | Flash-Lite AI | ~600ms, low $ | `admissibilityScore >= 0.5`; exits 0 if no exhibits |
-| `audit` | Cascade Spine | Pro Reasoning | ~2.5s, targeted | `complianceScore >= 0.5` $\implies$ pass (0), else fail (1) |
+| `apprise` | Apprisal Track | Flash-Lite AI | ~400ms, low $ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
+| `docket` | Cascade Spine | Flash-Lite AI | ~400ms, low $ | `colorability_score >= 0.5`; exits 0 if docket empty |
+| `admit` | Cascade Spine | Flash-Lite AI | ~600ms, low $ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `audit` | Cascade Spine | Pro Reasoning | ~2.5s, targeted | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -259,7 +259,7 @@ Each pipeline stage owns a dedicated, non-overlapping field on the cumulative `C
 | `.validation` | `validate` | Branch A (Filing) | Deterministic AST linting and frontmatter schema validation results | [`nodes/validate.md`](nodes/validate.md#caseload-delta) |
 | `.config` | `configure` | Branch B (Env) | Workspace root, resolved screener/auditor model specifiers, reasoning budget | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
 | `.probe` | `probe` | Diagnostic Leaf | Live endpoint reachability, roundtrip latency (ms), and resolved models | [`nodes/probe.md`](nodes/probe.md#caseload-delta) |
-| `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisalScore`, `apprisalSummary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
+| `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisal_score`, `apprisal_summary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
 | `.docket` | `docket` | Dispute Spine | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |
 | `.evidence` | `admit` | Dispute Spine | Micro triage evidence admissibility: admitted file exhibits per active case | [`nodes/admit.md`](nodes/admit.md#caseload-delta) |
 | `.verdict` | `audit` | Dispute Spine | Final substantive adjudications, compliance scores, decrees, and line annotations | [`nodes/audit.md`](nodes/audit.md#caseload-delta) |

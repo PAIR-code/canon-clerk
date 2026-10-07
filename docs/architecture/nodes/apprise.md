@@ -14,7 +14,7 @@ In the court clerkship taxonomy, `apprise` represents the court exercising its *
 
 - **Imperative Verb:** `apprise`
 - **Court Clerkship Role:** Statutory apprisal, procedural notice, and jurisdictional applicability determination.
-- **Metric Pair:** `apprisalScore` (number [0.0, 1.0]) and `apprisalSummary` (string rationale justifying prospective jurisdiction).
+- **Metric Pair:** `apprisal_score` (number [0.0, 1.0]) and `apprisal_summary` (string rationale justifying prospective jurisdiction).
 - **Core Question:** *"Given this prospective design intent and target scope, does this canon have a colorable claim of jurisdiction over the planned work?"*
 
 ---
@@ -41,7 +41,7 @@ flowchart LR
 ```
 
 - **Direct Prerequisites:**
-  - `validate` (Branch A: validated candidate canons in `caseload.discovery.candidateCanons` and `caseload.validation`).
+  - `validate` (Branch A: validated candidate canons in `caseload.discovery.candidate_canons` and `caseload.validation`).
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** `intake`, `discover`.
 - **Branch Independence & Pruning:**
@@ -85,7 +85,7 @@ struct ApprisalAssessment:
   apprisal_summary: String
 
   // Status outcome
-  status: "applicable" | "dismissed"
+  apprisal_status: "applicable" | "dismissed"
 
 struct CaseloadApprisal:
   // Apprisal assessments keyed by canon path
@@ -93,7 +93,7 @@ struct CaseloadApprisal:
 ```
 
 ### Domain Short-Circuit Invariant
-If `caseload.discovery.candidateCanons.length === 0`:
+If `caseload.discovery.candidate_canons` is empty:
 - Execution terminates immediately with exit code `0`.
 - An empty apprisal container (`assessments: {}`) is attached to `caseload.apprisal`.
 - Zero AI model calls are dispatched, preserving tokens and execution latency.
@@ -103,31 +103,31 @@ If `caseload.discovery.candidateCanons.length === 0`:
 ## 4. Process & Domain Logic (`core`)
 
 1. **Candidate Canon Ingestion & Early Exit:**  
-   Extracts `candidateCanons` from `caseload.discovery` (resolved from prospective target paths or globs) along with `caseload.intake.intent` (and any piped specification or RFC text). If `candidateCanons.length === 0`, short-circuits immediately with exit code `0`.
+   Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths or globs) along with `caseload.intake.intent` (and any piped specification or RFC text). If `candidate_canons` is empty, short-circuits immediately with exit code `0`.
 2. **Aggregate Single-Turn Screening (`gemini-3.5-flash-lite`):**  
-   Evaluates **all candidate canons against the prospective intent in a single aggregate prompt turn** using `caseload.config.screenerModel`.
+   Evaluates **all candidate canons against the prospective intent in a single aggregate prompt turn** using `caseload.config.screener_model`.
 3. **Constrained Decoding Schema (Reason-First):**  
-   Enforces structured JSON output generating `apprisalSummary` before `apprisalScore`:
+   Enforces structured JSON output generating `apprisal_summary` before `apprisal_score`:
    ```json
    {
      "assessments": {
        ".canons/auth/cacheing-layers-must-have-configurable-expiry.md": {
-         "apprisalSummary": "Proposed round-robin dispatch introduces a dynamically updated provider cache, which must define explicit expiration policies.",
-         "apprisalScore": 0.92,
-         "status": "applicable"
+         "apprisal_summary": "Proposed round-robin dispatch introduces a dynamically updated provider cache, which must define explicit expiration policies.",
+         "apprisal_score": 0.92,
+         "apprisal_status": "applicable"
        },
        ".canons/auth/database-migrations-must-include-rollback-instructions.md": {
-         "apprisalSummary": "The planned refactor only modifies in-memory provider dispatch and does not alter database schemas or migrations.",
-         "apprisalScore": 0.05,
-         "status": "dismissed"
+         "apprisal_summary": "The planned refactor only modifies in-memory provider dispatch and does not alter database schemas or migrations.",
+         "apprisal_score": 0.05,
+         "apprisal_status": "dismissed"
        }
      }
    }
    ```
-   Generating `apprisalSummary` before `apprisalScore` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Threshold Gate (`apprisalScore >= threshold`, default: `0.5`):**  
-   - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `status: 'applicable'`.
-   - Canons scoring $< 0.5$ are marked `status: 'dismissed'` with summary rationale.
+   Generating `apprisal_summary` before `apprisal_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+4. **Threshold Gate (`apprisal_score >= threshold`, default: `0.5`):**  
+   - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: 'applicable'`.
+   - Canons scoring $< 0.5$ are marked `apprisal_status: 'dismissed'` with summary rationale.
 5. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
 
 ---
@@ -161,7 +161,7 @@ error: No design intent or target paths provided for apprise.
 Conversely, if prospective target paths yield zero candidate canons in `discover`, the command short-circuits cleanly with exit code `0` ("0 canons triggered by prospective target scope; no applicable constraints").
 
 ### CLI Output Modes
-- **Default (Terminal / Stylish):** Renders a structured Markdown apprisal report on `stdout` listing applicable canons alongside their `apprisalSummary` rationales.
+- **Default (Terminal / Stylish):** Renders a structured Markdown apprisal report on `stdout` listing applicable canons alongside their `apprisal_summary` rationales.
 - **`--json`:** Emits the cumulative `Caseload` JSON containing the fully populated `.apprisal` container.
 
 ### CLI Exit Codes

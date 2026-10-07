@@ -31,18 +31,18 @@ flowchart LR
     Validate --> Docket["docket<br/><i>(Adjudication Path)</i><br/><code>.docket</code>"]
     Validate --> Apprise["apprise<br/><i>(Apprisal Path)</i><br/><code>.apprisal</code>"]
     Validate -. "standalone CLI" .-> ValidReport["Validation Report<br/><i>(Clean AST & schemas, Exit 0)</i>"]
-    Validate -. "hasErrors == true" .-> Abort["Diagnostics & Abort<br/><i>(Exit 1, blocks token spend)</i>"]
+    Validate -. "has_errors == true" .-> Abort["Diagnostics & Abort<br/><i>(Exit 1, blocks token spend)</i>"]
 
     style Validate fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style ValidReport stroke-dasharray: 5 5
     style Abort stroke-dasharray: 5 5
 ```
 
-- **Direct Prerequisites:** `discover` (strictly validates `caseload.discovery.candidateCanons`).
+- **Direct Prerequisites:** `discover` (strictly validates `caseload.discovery.candidate_canons`).
 - **Transitive Prerequisites:** `intake`.
 - **Topological Invariant:** `validate` does not maintain alternate roots or bypass `discover`. Instead, `discover` provides the candidate set:
-  - **Facial Codex Review:** When invoked with `--all-canons`, `discover` populates `candidateCanons` with all repository canons.
-  - **As-Applied Targeted Review:** When invoked with a diff or file paths, `discover` populates `candidateCanons` via trigger glob matching.
+  - **Facial Codex Review:** When invoked with `--all-canons`, `discover` populates `candidate_canons` with all repository canons.
+  - **As-Applied Targeted Review:** When invoked with a diff or file paths, `discover` populates `candidate_canons` via trigger glob matching.
 - **Incoming Caseload:** Strictly requires `caseload.discovery` to be present.
 
 ---
@@ -80,13 +80,13 @@ struct CaseloadValidation:
 ```
 
 ### Domain Error Invariant
-If `hasErrors === true`, the validation result records the failure diagnostics and signals an immediate abort before loading environment credentials or spending tokens.
+If `has_errors == true`, the validation result records the failure diagnostics and signals an immediate abort before loading environment credentials or spending tokens.
 
 ---
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Candidate Intake:** Extracts `candidateCanons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
+1. **Candidate Intake:** Extracts `candidate_canons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
 2. **AST Parsing:** Parses Markdown AST and YAML frontmatter blocks.
 3. **Static Rule Verification:**
    - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`).
@@ -140,4 +140,4 @@ error: No filing source or canon scope provided for validate.
 
 1. **Pre-Flight Validation:** Executes `executeValidate` on all candidate canons identified during `discover`.
 2. **Annotation Generation:** Converts syntax or schema errors into GitHub Actions error annotations (`::error file=path,line=n::message`), pointing PR authors to the exact line of the malformed canon.
-3. **Fail-Fast:** If `hasErrors === true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.
+3. **Fail-Fast:** If `has_errors == true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.

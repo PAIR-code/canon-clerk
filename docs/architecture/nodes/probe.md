@@ -12,7 +12,7 @@
 
 - **Imperative Verb:** `probe`
 - **Court Clerkship Role:** Live connectivity and latency verification of provider endpoints.
-- **Metric Pair:** N/A (Live connectivity probe; reports `status` and `latencyMs`).
+- **Metric Pair:** N/A (Live connectivity probe; reports `status` and `latency_ms`).
 
 ---
 
@@ -82,10 +82,10 @@ struct CaseloadProbe:
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Endpoint Resolution:** Reads configured `screenerModel` and `auditorModel` from `caseload.config`.
+1. **Endpoint Resolution:** Reads configured `screener_model` and `auditor_model` from `caseload.config`.
 2. **Ping Request Assembly:** Constructs lightweight probe requests (0 reasoning tokens, minimum prompt payload) to verify authentication and reachability.
 3. **Concurrent Probe:** Concurrently sends probe requests to both endpoints in parallel:
-   - Measures roundtrip response latency in milliseconds (`latencyMs`).
+   - Measures roundtrip response latency in milliseconds (`latency_ms`).
    - Verifies model availability and provider credential validity.
 4. **Diagnostic Record:** Attaches endpoint latency and reachability metadata to `Caseload.probe`.
 

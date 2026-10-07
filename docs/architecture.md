@@ -44,8 +44,8 @@ Comprehensive specifications for each of the nine imperative verb stages across 
 - **[validate](architecture/nodes/validate.md):** Deterministic AST and YAML schema pre-flight linter for candidate canons or full corpus (Branch A).
 - **[configure](architecture/nodes/configure.md):** Local environment and provider credential normalizer (Branch B).
 - **[probe](architecture/nodes/probe.md):** Diagnostic leaf measuring live provider reachability and roundtrip endpoint latency.
-- **[docket](architecture/nodes/docket.md):** Macro triage establishing subject-matter jurisdiction (`colorabilityScore >= 0.5`) over in-flight changes.
-- **[admit](architecture/nodes/admit.md):** Micro triage establishing evidentiary admissibility (`admissibilityScore >= 0.5`) per active case (Contentious Track).
+- **[docket](architecture/nodes/docket.md):** Macro triage establishing subject-matter jurisdiction (`colorability_score >= 0.5`) over in-flight changes.
+- **[admit](architecture/nodes/admit.md):** Micro triage establishing evidentiary admissibility (`admissibility_score >= 0.5`) per active case (Contentious Track).
 - **[audit](architecture/nodes/audit.md):** Single-trial substantive adjudication rendering decrees, evaluating exceptions, and generating line annotations (Contentious Track).
 - **[apprise](architecture/nodes/apprise.md):** Prospective design-time procedural notice identifying governing canons intersecting prospective intent (Apprisal Track).
 
@@ -60,9 +60,9 @@ Comprehensive specifications for each of the nine imperative verb stages across 
 | `validate` | Branch A (Filing) | AST linter | 0 tokens, ~12ms | 0 syntax errors; fails fast (exit 1) on error |
 | `configure` | Branch B (Env) | Config loader | 0 tokens, <5ms | Valid config; fails fast (exit 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Reachable; fails fast (exit 2) on unreachable |
-| `docket` | Macro Triage Spine | Flash-Lite AI | ~400ms, low $ | `colorabilityScore >= 0.5`; exits 0 if empty |
-| `admit` | Contentious Track | Flash-Lite AI | ~600ms, low $ | `admissibilityScore >= 0.5`; exits 0 if no exhibits |
-| `audit` | Contentious Track | Pro Reasoning | ~2.5s, targeted | `complianceScore >= 0.5` $\implies$ pass (0), else fail (1) |
+| `docket` | Macro Triage Spine | Flash-Lite AI | ~400ms, low $ | `colorability_score >= 0.5`; exits 0 if empty |
+| `admit` | Contentious Track | Flash-Lite AI | ~600ms, low $ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `audit` | Contentious Track | Pro Reasoning | ~2.5s, targeted | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 | `apprise` | Apprisal Track | Flash-Lite AI | ~400ms, low $ | Determines prospective governing canons; exits 0 |
 
 ---

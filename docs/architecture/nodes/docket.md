@@ -12,7 +12,7 @@
 
 - **Imperative Verb:** `docket`
 - **Court Clerkship Role:** Macro triage establishing subject-matter jurisdiction.
-- **Metric Pair:** `colorabilityScore` (number [0.0, 1.0]) and `colorabilitySummary` (string rationale).
+- **Metric Pair:** `colorability_score` (number [0.0, 1.0]) and `colorability_summary` (string rationale).
 - **Core Question:** *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"*
 
 ---
@@ -33,7 +33,7 @@ flowchart LR
 
     Docket --> Admit["admit (Micro Triage)<br/><i>(Pipeline Cascade)</i><br/><code>.evidence</code>"]
     Docket -. "standalone CLI" .-> DocketReport["Active Docket Report<br/><i>(Colorability scores, Exit 0)</i>"]
-    Docket -. "activeDocket is empty" .-> ZeroCases["Fast Exit (Zero Trials 0)<br/><i>Prunes admit & audit</i>"]
+    Docket -. "active_docket is empty" .-> ZeroCases["Fast Exit (Zero Trials 0)<br/><i>Prunes admit & audit</i>"]
 
     style Docket fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style DocketReport stroke-dasharray: 5 5
@@ -74,7 +74,7 @@ struct ColorabilityAssessment:
   colorability_summary: String
 
   // Status outcome
-  status: "docketed" | "dismissed"
+  colorability_status: "docketed" | "dismissed"
 
 struct CaseloadDocket:
   // Colorability assessments keyed by canon path
@@ -88,7 +88,7 @@ struct CaseloadDocket:
 ```
 
 ### Domain Short-Circuit Invariant
-If `activeDocket.length === 0`:
+If `active_docket` is empty:
 - Execution terminates immediately with exit code `0` (or returns empty active docket).
 - Zero substantive trials (`audit`) are scheduled, avoiding hundreds of thousands of deep-reasoning tokens.
 
@@ -104,15 +104,15 @@ If `activeDocket.length === 0`:
    {
      "cases": {
        ".canons/cli/cli-flags-kebab-case.md": {
-         "colorabilityScore": 0.95,
-         "colorabilitySummary": "PR introduces new command flags in CLI.",
-         "status": "docketed"
+         "colorability_score": 0.95,
+         "colorability_summary": "PR introduces new command flags in CLI.",
+         "colorability_status": "docketed"
        }
      }
    }
    ```
-3. **Threshold Gate (`colorabilityScore >= 0.5`):**
-   - Canons scoring $\ge 0.5$ establish jurisdiction and are entered into `activeDocket`.
+3. **Threshold Gate (`colorability_score >= 0.5`):**
+   - Canons scoring $\ge 0.5$ establish jurisdiction and are entered into `active_docket`.
    - Canons scoring $< 0.5$ are marked `dismissed` with summary rationale.
 4. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
 
@@ -154,4 +154,4 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 1. **Macro Screening Step:** Calls `executeDocket` with the cumulative `Caseload`.
 2. **Telemetry Reporting:** Logs screened candidate canons and active docket admissions to workflow step output.
-3. **Early Exit:** If `activeDocket.length === 0`, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.
+3. **Early Exit:** If `active_docket` is empty, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.

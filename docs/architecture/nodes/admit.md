@@ -12,7 +12,7 @@
 
 - **Imperative Verb:** `admit`
 - **Court Clerkship Role:** Micro triage establishing evidentiary admissibility.
-- **Metric Pair:** `admissibilityScore` (number [0.0, 1.0]) and `admissibilitySummary` (string rationale).
+- **Metric Pair:** `admissibility_score` (number [0.0, 1.0]) and `admissibility_summary` (string rationale).
 - **Core Question:** *"For an active Case, is this candidate exhibit (diff hunk, PR title, PR body, or reference document) admissible as relevant evidence?"*
 
 ---
@@ -38,7 +38,7 @@ flowchart LR
     style ZeroExhibits stroke-dasharray: 5 5
 ```
 
-- **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.activeDocket`).
+- **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.active_docket`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`.
 - **Pruned from Execution:** `probe`, `audit`.
 
@@ -92,24 +92,24 @@ If all active cases retain zero admitted exhibits:
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.activeDocket`.
+1. **Per-Case Evidentiary Review:** Iterates through each canon on `caseload.docket.active_docket`.
 2. **Fast Heuristic Screening (`gemini-3.5-flash-lite`):** Evaluates candidate exhibits—including code diff hunks, PR title, PR body, commit messages, and reference documents—against the canon's specific requirements, as declared by its `inspect:` frontmatter.
 3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**
    ```json
    {
      "exhibits": [
        {
-         "filePath": "src/commands/docket.rs",
-         "admissibilitySummary": "Contains option definitions for new CLI command.",
-         "admissibilityScore": 0.95
+         "file_path": "src/commands/docket.rs",
+         "admissibility_summary": "Contains option definitions for new CLI command.",
+         "admissibility_score": 0.95
        }
      ]
    }
    ```
-   Generating `admissibilitySummary` before `admissibilityScore` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Admissibility Threshold (`admissibilityScore >= 0.5`):**
+   Generating `admissibility_summary` before `admissibility_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+4. **Admissibility Threshold (`admissibility_score >= 0.5`):**
    - Exhibits scoring $\ge 0.5$ are admitted into evidence for that Case.
-   - Irrelevant diff hunks are excluded (`admissibilityScore < 0.5`).
+   - Irrelevant diff hunks are excluded (`admissibility_score < 0.5`).
 5. **Dismissal of Cases with Zero Exhibits:** If an active Case retains zero admitted exhibits, it is dismissed without trial.
 
 ---
