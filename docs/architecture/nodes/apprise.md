@@ -30,9 +30,12 @@ flowchart LR
 
     Validate --> Apprise["apprise<br/><b>(Current Node)</b><br/><code>.apprisal</code>"]
     Config --> Apprise
-    Apprise --> Notice["Statutory Notice Report<br/><i>(Applicable canons & statutory advice)</i>"]
+
+    Apprise --> Notice["Statutory Notice Report<br/><i>(Applicable canons & guidance, Exit 0)</i>"]
+    Apprise -. "zero candidates" .-> EmptyNotice["Fast Exit (No-op 0)<br/><i>Empty apprisal assessment</i>"]
 
     style Apprise fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style EmptyNotice stroke-dasharray: 5 5
 ```
 
 - **Direct Prerequisites:**

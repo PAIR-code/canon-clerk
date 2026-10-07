@@ -28,10 +28,13 @@ flowchart LR
 
     Validate --> Docket["docket<br/><b>(Current Node)</b><br/><code>.docket</code>"]
     Config --> Docket
-    Docket --> Admit["admit (Micro Triage)<br/><code>.evidence</code>"]
-    Docket -. "activeDocket is empty" .-> ZeroCases["Fast Exit (Zero Trials)<br/><i>Prunes admit & audit</i>"]
+
+    Docket --> Admit["admit (Micro Triage)<br/><i>(Pipeline Cascade)</i><br/><code>.evidence</code>"]
+    Docket -. "standalone CLI" .-> DocketReport["Active Docket Report<br/><i>(Colorability scores, Exit 0)</i>"]
+    Docket -. "activeDocket is empty" .-> ZeroCases["Fast Exit (Zero Trials 0)<br/><i>Prunes admit & audit</i>"]
 
     style Docket fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style DocketReport stroke-dasharray: 5 5
     style ZeroCases stroke-dasharray: 5 5
 ```
 

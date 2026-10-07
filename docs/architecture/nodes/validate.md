@@ -21,11 +21,13 @@
 ```mermaid
 flowchart LR
     Discover["discover<br/><code>.discovery</code>"] --> Validate["validate<br/><b>(Current Node)</b><br/><code>.validation</code>"]
-    Validate --> Docket["docket (Dispute Track)<br/><code>.docket</code>"]
-    Validate --> Apprise["apprise (Apprisal Track)<br/><code>.apprisal</code>"]
-    Validate -. "hasErrors == true" .-> Abort["Immediate Abort (Exit 1)<br/><i>Blocks LLM token expenditure</i>"]
+
+    Validate --> Next["docket / apprise<br/><i>(Pipeline Cascade)</i>"]
+    Validate -. "standalone CLI" .-> ValidReport["Validation Report<br/><i>(Clean AST & schemas, Exit 0)</i>"]
+    Validate -. "hasErrors == true" .-> Abort["Diagnostics & Abort<br/><i>(Exit 1, blocks token spend)</i>"]
 
     style Validate fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style ValidReport stroke-dasharray: 5 5
     style Abort stroke-dasharray: 5 5
 ```
 

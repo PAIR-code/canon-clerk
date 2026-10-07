@@ -22,10 +22,13 @@
 ```mermaid
 flowchart LR
     Docket["docket<br/><code>.docket</code>"] --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
-    Admit --> Audit["audit (Substantive Adjudication)<br/><code>.verdict</code>"]
-    Admit -. "zero exhibits admitted" .-> ZeroExhibits["Fast Exit (No Evidence)<br/><i>Prunes audit trials</i>"]
+
+    Admit --> Audit["audit (Substantive Adjudication)<br/><i>(Pipeline Cascade)</i><br/><code>.verdict</code>"]
+    Admit -. "standalone CLI" .-> AdmitReport["Evidence Manifest<br/><i>(Admitted file exhibits, Exit 0)</i>"]
+    Admit -. "zero exhibits admitted" .-> ZeroExhibits["Fast Exit (No Evidence 0)<br/><i>Prunes audit trials</i>"]
 
     style Admit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style AdmitReport stroke-dasharray: 5 5
     style ZeroExhibits stroke-dasharray: 5 5
 ```
 

@@ -28,10 +28,13 @@
 ```mermaid
 flowchart LR
     Intake["intake<br/><code>.intake</code>"] --> Discover["discover<br/><b>(Current Node)</b><br/><code>.discovery</code>"]
-    Discover --> Validate["validate<br/><code>.validation</code>"]
+
+    Discover --> Validate["validate<br/><i>(Pipeline Cascade)</i><br/><code>.validation</code>"]
+    Discover -. "standalone CLI" .-> DiscoveryReport["Discovered Canons Table<br/><i>(Matched triggers & exhibits, Exit 0)</i>"]
     Discover -. "candidateCanons is empty" .-> FastExit["Fast Exit (No-op 0)<br/><i>Prunes validate, docket, admit, audit</i>"]
 
     style Discover fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style DiscoveryReport stroke-dasharray: 5 5
     style FastExit stroke-dasharray: 5 5
 ```
 

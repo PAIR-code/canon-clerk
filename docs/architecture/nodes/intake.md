@@ -20,10 +20,15 @@
 
 ```mermaid
 flowchart LR
-    Inputs["External Filing Sources<br/><i>(Diffs, target paths, PR metadata, or intent)</i>"] --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
-    Intake --> Discover["discover<br/><code>.discovery</code>"]
+    Inputs["External Filing Sources<br/><i>(Diffs, paths, PR metadata, intent)</i>"] --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
+
+    Intake --> Discover["discover<br/><i>(Pipeline Cascade)</i><br/><code>.discovery</code>"]
+    Intake -. "standalone CLI" .-> IntakeReport["Filing Report / JSON<br/><i>(Tendered exhibits, Exit 0)</i>"]
+    Intake -. "naked invocation" .-> UsageError["Usage Error<br/><i>(Missing source guidance, Exit 2)</i>"]
 
     style Intake fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style IntakeReport stroke-dasharray: 5 5
+    style UsageError stroke-dasharray: 5 5
 ```
 
 - **Direct Prerequisites:** None (Root node of Branch A).

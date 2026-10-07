@@ -22,9 +22,12 @@
 ```mermaid
 flowchart LR
     Admit["admit<br/><code>.evidence</code>"] --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
-    Audit --> Verdict["Final Caseload Record<br/><i>(Decrees, line annotations, pass/fail exit code)</i>"]
+
+    Audit --> Compliant["Compliant Review Gate<br/><i>(Verdict decree, Exit 0)</i>"]
+    Audit -. "statute violation" .-> Violation["Violation Decree<br/><i>(Line annotations, Exit 1)</i>"]
 
     style Audit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style Violation stroke-dasharray: 5 5
 ```
 
 - **Direct Prerequisites:** `admit` (requires admitted exhibits in `caseload.evidence`).

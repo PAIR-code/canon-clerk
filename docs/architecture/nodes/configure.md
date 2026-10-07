@@ -20,11 +20,15 @@
 
 ```mermaid
 flowchart LR
-    Env["Host Environment & Workspace<br/><i>(Env vars, CLI flags, credential stores)</i>"] --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
-    Config --> Docket["docket / apprise<br/><i>(Converges with Branch A)</i>"]
+    Env["Host Environment & Workspace<br/><i>(Env vars, CLI flags, secrets)</i>"] --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
+
+    Config --> Cascade["docket / apprise<br/><i>(Pipeline Cascade: Branch B)</i>"]
+    Config -. "standalone CLI" .-> ConfigReport["Resolved Configuration<br/><i>(Model specifiers & root, Exit 0)</i>"]
     Config -. "diagnostic probe" .-> Probe["probe<br/><code>.probe</code>"]
 
     style Config fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style ConfigReport stroke-dasharray: 5 5
+    style Probe stroke-dasharray: 5 5
 ```
 
 - **Direct Prerequisites:** None (Root node of Branch B).
