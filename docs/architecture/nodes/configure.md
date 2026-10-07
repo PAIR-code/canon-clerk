@@ -28,13 +28,16 @@ flowchart LR
     Env --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
     Params --> Config
 
-    Config --> Cascade["docket / apprise<br/><i>(Pipeline Cascade: Branch B)</i>"]
-    Config -. "standalone CLI" .-> ConfigReport["Resolved Configuration<br/><i>(Model specifiers & root, Exit 0)</i>"]
-    Config -. "diagnostic probe" .-> Probe["probe<br/><code>.probe</code>"]
+    Config --> Docket["docket<br/><i>(Adjudication Path)</i><br/><code>.docket</code>"]
+    Config --> Apprise["apprise<br/><i>(Apprisal Path)</i><br/><code>.apprisal</code>"]
+    Config -. "diagnostic probe" .-> Probe["probe<br/><i>(Diagnostic Path)</i><br/><code>.probe</code>"]
+    Config -. "standalone CLI" .-> ConfigReport["Resolved Configuration<br/><i>(Terminus Happy Path, Exit 0)</i>"]
+    Config -. "missing key / bad flags" .-> Error["Configuration Error<br/><i>(Exit 2, Abort)</i>"]
 
     style Config fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style ConfigReport stroke-dasharray: 5 5
     style Probe stroke-dasharray: 5 5
+    style Error stroke-dasharray: 5 5
 ```
 
 - **Direct Prerequisites:** None (Root node of Branch B).
