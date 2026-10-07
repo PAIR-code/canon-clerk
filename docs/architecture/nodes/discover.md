@@ -1,8 +1,8 @@
 # Candidate Identification (`discover`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`discover`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`discover`), GitHub Action, Integration Tests
 
 ---
 
@@ -31,7 +31,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface DiscoverOptions {
@@ -108,7 +108,7 @@ If `candidateCanons.length === 0`:
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `discover` as an imperative subcommand:
 
@@ -141,7 +141,7 @@ git diff origin/main | canon-clerk discover -q -
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Automated Candidate Check:** Calls `executeDiscover` with the Caseload produced by `executeIntake`.
 2. **Fast-Pass Evaluation:** If `candidateCanons.length === 0`, the action records a successful, neutral Check Run conclusion (`neutral` or `success`), logs that no governed files were touched, and terminates cleanly in <2 seconds without requiring `GEMINI_API_KEY`.
@@ -149,6 +149,6 @@ git diff origin/main | canon-clerk discover -q -
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
-Integration tests invoke `executeDiscover` directly against simulated monorepo directory layouts, asserting that scope inheritance (`packages/cli/.canons/` $\implies$ `packages/cli/**`) and complex glob patterns match accurately across OS platforms.
+Integration tests invoke `executeDiscover` directly against simulated monorepo directory layouts, asserting that scope inheritance (`.canons/cli/` $\implies$ `src/cli/**`) and complex glob patterns match accurately across OS platforms.

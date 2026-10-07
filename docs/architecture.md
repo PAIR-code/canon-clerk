@@ -33,11 +33,11 @@ flowchart TD
 The complete architectural specification is partitioned across the following dedicated documents:
 
 ### Core Framework & Execution Model
-- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Hexagonal Architecture (Ports & Adapters across `@canon-clerk/core`, `@canon-clerk/cli`, and `@canon-clerk/action`), Two Feeder Branches $\to$ Dual Adjudication/Apprisal Spines (Contentious Dispute Resolution vs. Statutory Apprisal), the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, TypeScript `Caseload` schema, and telemetry event stream.
+- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Hexagonal Architecture (Ports & Adapters across domain engine, CLI, and CI integration), Two Feeder Branches $\to$ Dual Adjudication/Apprisal Spines (Contentious Dispute Resolution vs. Statutory Apprisal), the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, `Caseload` schema, and telemetry event stream.
 - **[DAG Scheduling & Semantics](architecture/scheduling.md):** Transitive dependency closure calculation, branch pruning, the Guarded/Lazy Scheduling Invariant (zero-credential short-circuits for un-governed changes), telescoping backfill mode, and the static schedule lookup table.
 
 ### Node-by-Node Stage Specifications (`docs/architecture/nodes/`)
-Comprehensive specifications for each of the nine imperative verb stages across domain engine (`core`), CLI (`cli`), and GitHub Action (`action`) adapters:
+Comprehensive specifications for each of the nine imperative verb stages across domain engine, CLI, and CI adapters:
 
 - **[intake](architecture/nodes/intake.md):** Universal front door parsing diffs, target paths/globs, prospective intent queries, or whole-repo target scope (`--all-targets`) into `FileArtifact` records (Branch A).
 - **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches, or compiling the full corpus via `--all-canons` (Branch A).
@@ -67,11 +67,7 @@ Comprehensive specifications for each of the nine imperative verb stages across 
 
 ---
 
-## 4. Spec-Driven Living Specifications
+## 4. Spec-Driven Architecture
 
-Architectural contracts for individual subsystems are maintained in living specifications under [`openspec/specs/`](../openspec/specs/):
-* [`openspec/specs/schema/spec.md`](../openspec/specs/schema/spec.md): Canonical canon entity representation, AST interfaces, and metadata derivation.
-* [`openspec/specs/canon-discovery/spec.md`](../openspec/specs/canon-discovery/spec.md): Filesystem discovery, path triggers, and canon querying.
-* [`openspec/specs/canon-linter/spec.md`](../openspec/specs/canon-linter/spec.md): Static linting rules, pure evaluation engine, and workspace orchestration.
-* [`openspec/specs/cli/spec.md`](../openspec/specs/cli/spec.md): CLI commands, flags, output formats, and exit code conventions.
-* [`openspec/specs/action/spec.md`](../openspec/specs/action/spec.md): GitHub Action inputs, outputs, and Check Run API contracts.
+Architectural contracts for individual subsystems and capabilities are managed via OpenSpec under [`openspec/`](../openspec/).
+

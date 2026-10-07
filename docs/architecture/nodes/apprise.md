@@ -1,8 +1,8 @@
 # Statutory Apprisal (`apprise`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`apprise`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`apprise`), GitHub Action, Integration Tests
 
 ---
 
@@ -32,7 +32,7 @@ In the court clerkship taxonomy, `apprise` represents the court exercising its *
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface AppriseOptions {
@@ -95,12 +95,12 @@ If `caseload.discovery.candidateCanons.length === 0`:
    ```json
    {
      "assessments": {
-       "packages/auth/.canons/cacheing-layers-must-have-configurable-expiry.md": {
+       ".canons/auth/cacheing-layers-must-have-configurable-expiry.md": {
          "apprisalSummary": "Proposed round-robin dispatch introduces a dynamically updated provider cache, which must define explicit expiration policies.",
          "apprisalScore": 0.92,
          "status": "applicable"
        },
-       "packages/auth/.canons/database-migrations-must-include-rollback-instructions.md": {
+       ".canons/auth/database-migrations-must-include-rollback-instructions.md": {
          "apprisalSummary": "The planned refactor only modifies in-memory provider dispatch and does not alter database schemas or migrations.",
          "apprisalScore": 0.05,
          "status": "dismissed"
@@ -116,22 +116,22 @@ If `caseload.discovery.candidateCanons.length === 0`:
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `apprise` as the primary entry point for design-time and pre-flight planning:
 
 ```bash
 # 1. Inline design intent with prospective target paths:
-canon-clerk apprise --intent "Refactor authentication to round-robin between providers" "packages/auth/src" "packages/app/src/frontend"
+canon-clerk apprise --intent "Refactor authentication to round-robin between providers" "src/auth" "src/frontend"
 
 # 2. Piping an OpenSpec proposal or design RFC from standard input:
-cat openspec/changes/provider-rotation/proposal.md | canon-clerk apprise packages/auth/src --intent -
+canon-clerk apprise src/auth --intent "Rotate provider"
 
 # 3. Running against an upstream Caseload file:
 canon-clerk apprise --caseload upstream-discovery.json
 
 # 4. Machine-readable JSON output for AI Agent prompt injection:
-canon-clerk apprise --intent "Add Kafka event bus" packages/events/src --json
+canon-clerk apprise --intent "Add Kafka event bus" src/events --json
 ```
 
 ### Missing Input Source Guard (Naked Invocation)
@@ -154,7 +154,7 @@ Conversely, if prospective target paths yield zero candidate canons in `discover
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 In CI and pull request automation, `apprise` is utilized in **Pre-Implementation & Draft PR Workflows**:
 1. **Draft PR Guidance:** When an author opens a Draft PR or an issue with an architectural specification, the action runs `executeApprise` against the PR description and modified paths.
@@ -163,7 +163,7 @@ In CI and pull request automation, `apprise` is utilized in **Pre-Implementation
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeApprise` against simulated design intents, verifying that:
 - Prospective intent queries accurately identify applicable canons and reject inapplicable rules.

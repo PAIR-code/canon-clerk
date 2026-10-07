@@ -1,8 +1,8 @@
 # Judicial Adjudication (`audit`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`audit`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`audit`), GitHub Action, Integration Tests
 
 ---
 
@@ -25,7 +25,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface AuditOptions {
@@ -102,7 +102,7 @@ export interface CaseloadVerdict {
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `audit` as its flagship evaluation command:
 
@@ -138,7 +138,7 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Full DAG Invocation:** Drives the complete Caseload pipeline to `executeAudit`.
 2. **GitHub Check Run Creation:**
@@ -151,7 +151,7 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeAudit` against complex diff scenarios with live Gemini reasoning models, verifying that:
 - Legitimate `Exception` clauses short-circuit to `pass`.

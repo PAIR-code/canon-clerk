@@ -1,8 +1,8 @@
 # Diagnostic Health Check (`probe`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
-**Driving Adapters:** `@canon-clerk/cli` (`probe`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`probe`), GitHub Action, Integration Tests
 
 ---
 
@@ -24,7 +24,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/configuration`)
+## 3. Core Functional Contract
 
 ```ts
 export interface ProbeOptions {
@@ -77,7 +77,7 @@ export interface CaseloadProbe {
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `probe` as an imperative subcommand:
 
@@ -100,7 +100,7 @@ canon-clerk probe --json
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Diagnostic Action Step:** Invoked in dedicated connectivity workflows or self-hosted runner validation actions.
 2. **Summary Emission:** Emits reachability tables and latency metrics to `GITHUB_STEP_SUMMARY`.
@@ -108,6 +108,6 @@ canon-clerk probe --json
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeProbe` against live Gemini endpoints to assert real-world authentication, network latency bounds, and endpoint stability before running deep adjudication test suites.

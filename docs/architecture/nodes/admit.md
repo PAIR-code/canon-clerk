@@ -1,8 +1,8 @@
 # Evidence Admissibility Triage (`admit`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`admit`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`admit`), GitHub Action, Integration Tests
 
 ---
 
@@ -25,7 +25,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface AdmitOptions {
@@ -84,7 +84,7 @@ If all active cases retain zero admitted exhibits:
    {
      "exhibits": [
        {
-         "filePath": "packages/cli/src/commands/docket.ts",
+         "filePath": "src/commands/docket.rs",
          "admissibilitySummary": "Contains option definitions for new CLI command.",
          "admissibilityScore": 0.95
        }
@@ -99,7 +99,7 @@ If all active cases retain zero admitted exhibits:
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `admit` as an imperative subcommand:
 
@@ -131,7 +131,7 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Evidence Screening Step:** Invokes `executeAdmit` with the `Caseload`.
 2. **Exhibit Accounting:** Logs admitted diff hunks and persistent references per case.
@@ -139,6 +139,6 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeAdmit` across multi-file PR fixtures, verifying that peripheral changes (e.g. docs, lockfiles) are cleanly filtered out from active cases governing code conventions.

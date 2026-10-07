@@ -33,7 +33,7 @@ GitHub labels in `PAIR-code/canon-clerk` directly mirror this matrix, enabling s
 | **Formal Specifications (`specs/`)** | `spec(spec):`, `chore(spec):` | None | Formal system specifications and architecture contracts.<br>`spec(spec): introduce OpenSpec workflow` |
 | **External Dependencies** | `chore(deps):`, `build(deps):`, `build(deps-dev):` | None | External runtime and development dependency updates and version bumps.<br>`build(deps-dev): bump vite from 7.0.6 to 7.3.6` |
 | **Landing & Root Documentation** | `docs(readme):` | None | Top-level project `README.md` and repository landing documentation.<br>`docs(readme): introduce dual-pillar declarative lead` |
-| **Local Tooling & Config** | `build:` / `test:` | None | `tsconfig`, `package.json`, `vitest`, linters.<br>`build: configure vitest and strict typescript` |
+| **Local Tooling & Config** | `build:` / `test:` | None | Build configuration, test harnesses, and linters.<br>`build: configure linter and test harness` |
 | **Remote CI/CD (`.github/workflows/`)** | `ci:` / `ci(action):` | None | GitHub Actions workflows and release automation.<br>`ci: add PR title linting workflow` |
 | **Public Documentation (`docs/`)** | `docs:` / `docs(<surface>):` | None | User guides, onboarding, and tutorials.<br>`docs: add development-setup guide` |
 

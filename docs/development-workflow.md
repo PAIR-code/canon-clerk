@@ -61,7 +61,7 @@ All branches and worktree directories follow the convention:
 Prompt your assistant:
 > *"Start working on issue #18"* or *"Scaffold a worktree for issue #18 github-pr"*
 
-**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch, seeds dependencies, builds packages, and runs smoke tests), and sets its working directory context to the newly created worktree.
+**What happens:** Your assistant consults [`AGENTS.md`](../AGENTS.md), activates the `git-worktree` skill, runs the scaffolding helper (which creates the branch and sets up the worktree), and sets its working directory context to the newly created worktree.
 
 #### Under the Hood & Manual Fallback
 Under the hood, the assistant runs the companion script:
@@ -74,7 +74,6 @@ If you are working without an AI assistant, you can run the script above directl
 git fetch upstream --prune
 git worktree add -b <issue-number>-<slug> <issue-number>-<slug> upstream/main
 cd <issue-number>-<slug>
-npm install
 ```
 
 ---
@@ -195,9 +194,9 @@ Living specifications reside in `openspec/specs/` (e.g. `core`, `cli`, `action`)
    - Author a change proposal containing `proposal.md`, `specs/<capability>/spec.md` (deltas with `## ADDED/MODIFIED/REMOVED Requirements` and `#### Scenario:` blocks), `design.md`, and `tasks.md`.
    - Commit using the `spec(<surface>):` prefix.
 2. **Verify / TDD:**
-   - Author unit or conformance tests reflecting the spec requirements in `packages/<package>/src/*.test.ts`.
+   - Author unit or conformance tests reflecting the spec requirements.
 3. **Implement:**
-   - Write code fulfilling the specification in `packages/<package>/src/` using `feat(<surface>):` or `fix(<surface>):`.
+   - Write code fulfilling the specification using `feat(<surface>):` or `fix(<surface>):`.
 4. **Baseline & Archive:**
    - Archive the change using `openspec-archive-change` (or sync deltas via `openspec-sync-specs`), promoting changes into living specs under `openspec/specs/`.
 
@@ -219,25 +218,20 @@ Prompt your assistant:
 
 #### Under the Hood & Manual Fallback
 
-You can run the OpenSpec CLI via npm scripts (`npm run opsx -- ...` or `npm run openspec -- ...`):
+You can run the OpenSpec CLI commands directly:
 ```bash
 # Validate all specs and active changes:
-npm run opsx -- validate --all --strict
-# (or via the dedicated linter script:)
-npm run lint:specs
+openspec validate --all --strict
 
 # Create a new change proposal:
-npm run opsx -- new change <change-name>
+openspec new change <change-name>
 
 # Check status of an in-flight change:
-npm run opsx -- status --change <change-name>
+openspec status --change <change-name>
 
 # Archive a completed change into living specs:
-npm run opsx -- archive <change-name>
+openspec archive <change-name>
 ```
-
-> [!NOTE]
-> Always invoke OpenSpec through `npm run opsx -- <command>` or `npm run openspec -- <command>`. Running `npx openspec` fails because the package is scoped as `@fission-ai/openspec`, and bare `openspec` is not guaranteed to be present in `$PATH`.
 
 
 ---

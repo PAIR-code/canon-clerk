@@ -1,8 +1,8 @@
 # Configuration & Environment (`configure`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/configuration` (with `@canon-clerk/core`)  
-**Driving Adapters:** `@canon-clerk/cli` (`configure`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`configure`), GitHub Action, Integration Tests
 
 ---
 
@@ -25,7 +25,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/configuration`)
+## 3. Core Functional Contract
 
 ```ts
 export interface ConfigureOptions {
@@ -70,7 +70,7 @@ export interface CaseloadConfig {
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `configure` as an imperative subcommand:
 
@@ -96,7 +96,7 @@ canon-clerk configure --screener-model google:gemini-3.5-flash-lite --auditor-mo
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Secret & Input Mapping:** Maps workflow inputs (`api-key`, `screener-model`, `auditor-model`, `reasoning-budget`) and repository secrets into `ConfigureOptions`.
 2. **JIT Invocation:** Evaluates `executeConfigure` only after `executeDiscover` yields $>0$ candidate canons.
@@ -104,6 +104,6 @@ canon-clerk configure --screener-model google:gemini-3.5-flash-lite --auditor-mo
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeConfigure` with test environment variables and scoped credentials, verifying that model configurations resolve properly before executing live network requests.

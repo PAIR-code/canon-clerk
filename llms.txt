@@ -22,12 +22,11 @@ Key architectural concepts:
 ## The Clerk Runner
 
 - [Caseload DAG Architecture](docs/architecture.md): Entry point and index to the Caseload DAG architectural documentation suite, execution mechanics, and pipeline stages.
-- [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload TypeScript schema, and event stream.
+- [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload schema, and event stream.
 - [DAG Scheduling & Execution](docs/architecture/scheduling.md): Transitive dependency closure calculation, branch pruning, guarded lazy scheduling, and static schedule lookup table.
-- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all eight imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit).
+- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit, apprise).
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
-- [Workspace Packages](packages/): TypeScript monorepo packages comprising schema definitions, core evaluation engine, CLI tooling, and GitHub Action runner.
-- [Living Specifications](openspec/specs/): Formal architectural specifications and interface contracts for the evaluation engine, CLI, and GitHub Action.
+- [Living Specifications](openspec/): Spec-driven capability specifications and architecture contracts.
 
 ## Agent & Contributor Orientation
 
@@ -37,6 +36,6 @@ Key architectural concepts:
 
 ## Optional
 
-- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, Node.js toolchain, and GitHub CLI configuration.
+- [Development Setup](docs/development-setup.md): Guide to local machine onboarding, bare Git clone setup, triangular worktrees, and GitHub CLI configuration.
 - [Contributing Guide](docs/contributing.md): Contribution policies, Google Contributor License Agreement (CLA), and squash-merge expectations.
 - [Project Readme](README.md): Human-oriented project homepage, architectural problem statement, progressive disclosure tiers, and overview.

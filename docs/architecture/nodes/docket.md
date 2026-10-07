@@ -1,8 +1,8 @@
 # Macro Jurisdiction Triage (`docket`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`docket`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`docket`), GitHub Action, Integration Tests
 
 ---
 
@@ -28,7 +28,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface DocketOptions {
@@ -87,7 +87,7 @@ If `activeDocket.length === 0`:
      "cases": {
        ".canons/cli/cli-flags-kebab-case.md": {
          "colorabilityScore": 0.95,
-         "colorabilitySummary": "PR introduces new command flags in packages/cli.",
+         "colorabilitySummary": "PR introduces new command flags in CLI.",
          "status": "docketed"
        }
      }
@@ -100,7 +100,7 @@ If `activeDocket.length === 0`:
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `docket` as an imperative subcommand:
 
@@ -132,7 +132,7 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Macro Screening Step:** Calls `executeDocket` with the cumulative `Caseload`.
 2. **Telemetry Reporting:** Logs screened candidate canons and active docket admissions to workflow step output.
@@ -140,6 +140,6 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeDocket` against recorded PR fixtures and live Gemini endpoints, verifying that trie-constrained decoding strictly adheres to JSON schemas and produces consistent `colorabilityScore` determinations.

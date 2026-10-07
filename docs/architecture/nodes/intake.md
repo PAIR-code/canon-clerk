@@ -1,8 +1,8 @@
 # Filing Intake (`intake`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core`  
-**Driving Adapters:** `@canon-clerk/cli` (`intake`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`intake`), GitHub Action, Integration Tests
 
 ---
 
@@ -21,11 +21,11 @@
 - **Direct Prerequisites:** None (Root node of Branch A).
 - **Transitive Prerequisites:** None.
 - **Incoming Caseload:** May accept an empty or existing `Caseload` record.
-- **Subprocess Isolation:** **Zero child-process VCS execution.** `@canon-clerk/core` does not run `git` subprocesses internally; driving adapters feed diffs and target paths directly via domain interfaces.
+- **Subprocess Isolation:** **Zero child-process VCS execution.** The core domain engine does not run `git` subprocesses internally; driving adapters feed diffs and target paths directly via domain interfaces.
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface IntakeOptions {
@@ -85,17 +85,17 @@ export interface CaseloadIntake {
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `intake` as an imperative subcommand that adapts terminal arguments and POSIX streams:
 
 ```bash
 # Ingest via direct target paths:
-canon-clerk intake packages/cli/src/app.ts
+canon-clerk intake src/main.rs
 canon-clerk intake 'src/**/*.ts'
 
 # Ingest via prospective design intent:
-canon-clerk intake --intent "Implement round-robin auth provider rotation" packages/auth/src
+canon-clerk intake --intent "Implement round-robin auth provider rotation" src/auth
 
 # Ingest via newline-delimited stdin path tokens:
 git diff origin/main --name-only | canon-clerk intake -
@@ -126,7 +126,7 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 The GitHub Action runner adapts GitHub Actions workflow events into the `core` intake interface:
 
@@ -137,6 +137,6 @@ The GitHub Action runner adapts GitHub Actions workflow events into the `core` i
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests programmatically invoke `executeIntake` with static patch fixtures and mock PR descriptions, verifying that diff parsing and `FileArtifact` generation remain bit-for-bit reproducible without spawning shell processes.

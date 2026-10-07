@@ -1,8 +1,8 @@
 # Statutory Rule Linter (`validate`)
 
 **Status:** Authoritative Architectural Standard  
-**Core Domain Engine:** `@canon-clerk/core` (with `@canon-clerk/schema`)  
-**Driving Adapters:** `@canon-clerk/cli` (`validate`), `@canon-clerk/action`, `@canon-clerk/integration-tests-private`
+**Core Domain Engine:** Caseload Domain Engine  
+**Driving Adapters:** CLI (`validate`), GitHub Action, Integration Tests
 
 ---
 
@@ -27,7 +27,7 @@
 
 ---
 
-## 3. Core Functional Contract (`packages/core`)
+## 3. Core Functional Contract
 
 ```ts
 export interface ValidateOptions {
@@ -70,7 +70,7 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 ## 4. Process & Domain Logic (`core`)
 
 1. **Candidate Intake:** Extracts `candidateCanons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
-2. **AST Parsing via `@canon-clerk/schema`:** Parses Markdown AST and YAML frontmatter blocks.
+2. **AST Parsing:** Parses Markdown AST and YAML frontmatter blocks.
 3. **Static Rule Verification:**
    - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`).
    - **Scope Containment Verification:** Enforces that scoped canons located in `<scope>/.canons/**` do not attempt directory traversal (e.g. `../`) or declare paths superior or external to `<scope>/` in `triggers:`, `exists:`, or `references:`.
@@ -82,7 +82,7 @@ If `hasErrors === true`, the validation result records the failure diagnostics a
 
 ---
 
-## 5. Driving Adapter: CLI (`packages/cli`)
+## 5. Driving Adapter: CLI
 
 The CLI exposes `validate` as an imperative subcommand:
 
@@ -119,7 +119,7 @@ error: No filing source or canon scope provided for validate.
 
 ---
 
-## 6. Driving Adapter: GitHub Action (`packages/action`)
+## 6. Driving Adapter: GitHub Action
 
 1. **Pre-Flight Validation:** Executes `executeValidate` on all candidate canons identified during `discover`.
 2. **Annotation Generation:** Converts syntax or schema errors into GitHub Actions error annotations (`::error file=path,line=n::message`), pointing PR authors to the exact line of the malformed canon.
@@ -127,6 +127,6 @@ error: No filing source or canon scope provided for validate.
 
 ---
 
-## 7. Driving Adapter: Integration Tests (`packages/integration-tests-private`)
+## 7. Driving Adapter: Integration Tests
 
 Integration tests invoke `executeValidate` on fixture canons containing deliberately malformed frontmatter, non-atomic invariants, and invalid RFC 2119 syntax, verifying that AST errors are captured deterministically across test runners.

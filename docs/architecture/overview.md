@@ -85,20 +85,20 @@ flowchart TD
 
 ## 3. Hexagonal Architecture: Driving Adapters vs. Core Domain Processing
 
-Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)** across its workspace packages. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
+Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)**. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
 
 ```mermaid
 flowchart TD
     subgraph DrivingAdapters ["Driving Adapters (Ports)"]
-        CLI["packages/cli<br/>(Flags, POSIX stdin Streams, Exit Codes, Spinners)"]
-        Action["packages/action<br/>(Octokit APIs, PR Metadata, Linked Issues, Check Runs)"]
-        Integ["packages/integration-tests-private<br/>(Live Provider Testing, Snapshot Assertions)"]
+        CLI["CLI Adapter<br/>(Flags, POSIX stdin Streams, Exit Codes, Progress)"]
+        Action["CI / GitHub Action<br/>(PR Metadata, Linked Issues, Check Runs, Annotations)"]
+        Integ["Integration Test Driver<br/>(Live Provider Testing, Fixture Assertions)"]
     end
 
     subgraph CoreEngine ["The Caseload Domain Engine"]
-        Core["packages/core<br/>(Functional DAG Node Implementations & Scheduling)"]
-        Config["packages/configuration<br/>(Credential Discovery & probe Provider Diagnostics)"]
-        Schema["packages/schema<br/>(Pure Canon AST & Caseload Types)"]
+        Core["Domain Engine<br/>(Functional DAG Node Implementations & Scheduling)"]
+        Config["Configuration & Probe<br/>(Credential Discovery & Provider Diagnostics)"]
+        Schema["Schema Layer<br/>(Canon AST & Caseload Data Model)"]
     end
 
     CLI --> Core
@@ -111,15 +111,15 @@ flowchart TD
     Core --> Schema
 ```
 
-### The Domain Packages (The Hexagon Core)
-- **`@canon-clerk/schema` (`packages/schema`):** Zero runtime dependencies. Defines the canonical TypeScript types for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
-- **`@canon-clerk/core` (`packages/core`):** Depends strictly on `schema`. Houses pure functional implementations of all evaluation stages (`executeIntake`, `executeDiscover`, `executeValidate`, `executeDocket`, `executeAdmit`, `executeAudit`, `executeApprise`), DAG scheduling algorithms, prompt assembly, and trie-constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or GitHub Actions.
-- **`@canon-clerk/configuration` (`packages/configuration`):** Depends on `core`. Discovers workspace and user settings, resolves API credentials, and implements the diagnostic `probe` provider health check.
+### The Domain Engine (The Hexagon Core)
+- **Schema Layer:** Defines the canonical representations for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
+- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or CI environments.
+- **Configuration & Probe:** Discovers workspace and user settings, resolves API credentials, and implements the diagnostic `probe` provider health check.
 
 ### The Driving Adapters (The External Ports)
-- **`@canon-clerk/cli` (`packages/cli`):** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for `core` and `configuration`. Formats user-facing terminal progress, spinners, and event streams, and maps domain results to shell exit codes (`0`, `1`, `2`).
-- **`@canon-clerk/action` (`packages/action`):** Driving adapter translating GitHub Actions workflow triggers, Octokit PR payloads (diffs, commit history, linked issues), and posting results as GitHub Check Runs, step summaries, and inline code annotations ([`action-must-delegate-audit-to-core`](../packages/action/.canons/action-must-delegate-audit-to-core.md)).
-- **`@canon-clerk/integration-tests-private` (`packages/integration-tests-private`):** Test driver that feeds real/fixture Caseloads directly into `core` and `configuration` functions against live networked provider services.
+- **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, and event streams, and maps domain results to shell exit codes (`0`, `1`, `2`).
+- **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations ([`action-must-delegate-audit-to-core`](../../.canons/action/action-must-delegate-audit-to-core.md)).
+- **Integration Test Driver:** Test driver that feeds real/fixture Caseloads directly into engine and configuration functions against live networked provider services.
 
 ---
 
@@ -215,7 +215,7 @@ flowchart TD
 
 The `Caseload` is the central, immutable data envelope flowing through the pipeline. Rather than passing disjoint arguments between commands, each stage reads accumulated upstream state and enriches its own dedicated namespace on the shared `Caseload` object.
 
-The formal TypeScript types are maintained in `@canon-clerk/schema` ([`packages/schema`](../../packages/schema) and [`openspec/specs/schema/spec.md`](../../openspec/specs/schema/spec.md)), and granular payload schemas are specified in each node's architectural document.
+The formal Caseload domain models and granular payload schemas are specified in each node's architectural document.
 
 ### The Top-Level `Caseload` Envelope
 
