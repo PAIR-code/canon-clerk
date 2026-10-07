@@ -24,7 +24,7 @@ flowchart LR
     subgraph Inputs["Inputs"]
         Validate["validate (Branch A)<br/><code>.validation</code>"]
         Config["configure (Branch B)<br/><code>.config</code>"]
-        Params["Stage Flags<br/><i>(--threshold, --screener-model)</i>"]
+        Params["Stage Flags<br/><i>(--docket-threshold, --screener-model)</i>"]
     end
 
     Validate --> Docket["docket<br/><b>(Current Node)</b><br/><code>.docket</code>"]
@@ -110,7 +110,7 @@ If `active_docket` is empty:
      }
    }
    ```
-3. **Deterministic Threshold Gating (`colorability_score >= threshold`, default: `0.5`):**  
+3. **Deterministic Threshold Gating (`colorability_score >= --docket-threshold`, default: `0.5`):**  
    The core domain engine deterministically evaluates the continuous score against the threshold to assign `colorability_status`:
    - Canons scoring $\ge 0.5$ establish jurisdiction, are marked `colorability_status: "docketed"`, and are entered into `active_docket`.
    - Canons scoring $< 0.5$ are marked `colorability_status: "dismissed"`.
@@ -140,7 +140,7 @@ error: No filing source provided for docket.
 Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk docket --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; active docket empty").
 
 ### CLI Flags & Environment
-- `--threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
+- `--docket-threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
 - `--json`: Emits enriched Caseload JSON.
 

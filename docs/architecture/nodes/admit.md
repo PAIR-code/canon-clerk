@@ -23,7 +23,7 @@
 flowchart LR
     subgraph Inputs["Inputs"]
         Docket["docket (or --caseload)<br/><code>.docket</code>"]
-        Params["Stage Flags<br/><i>(--threshold, --screener-model)</i>"]
+        Params["Stage Flags<br/><i>(--admit-threshold, --screener-model)</i>"]
     end
 
     Docket --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
@@ -107,7 +107,7 @@ If all active cases retain zero admitted exhibits:
    }
    ```
    Generating `admissibility_summary` before `admissibility_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Admissibility Threshold (`admissibility_score >= 0.5`):**
+4. **Admissibility Threshold (`admissibility_score >= --admit-threshold`, default: `0.5`):**
    - Exhibits scoring $\ge 0.5$ are admitted into evidence for that Case.
    - Irrelevant diff hunks are excluded (`admissibility_score < 0.5`).
 5. **Dismissal of Cases with Zero Exhibits:** If an active Case retains zero admitted exhibits, it is dismissed without trial.
@@ -136,7 +136,8 @@ error: No filing source provided for admit.
 Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk admit --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; 0 admitted exhibits").
 
 ### CLI Flags & Environment
-- `--threshold <number>`: Admissibility threshold (default: `0.5`).
+- `--admit-threshold <number>`: Admissibility threshold (default: `0.5`).
+- `--docket-threshold <number>`: Upstream jurisdiction screening threshold in telescoping mode (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
 - `--json`: Emits enriched Caseload JSON.
 

@@ -156,6 +156,16 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - **Verdict Report:** Emits formatted Markdown or stylish terminal summary to `stdout`.
 - **Telemetry Log:** Optionally redirects event stream via `--log-file <path>`.
 
+### CLI Flags & Environment
+- `--diff <path|->`: In-flight patch stream.
+- `--caseload <path|->`: Ingests upstream Caseload.
+- `--docket-threshold <number>`: Upstream jurisdiction screening threshold in telescoping mode (default: `0.5`).
+- `--admit-threshold <number>`: Upstream evidence admissibility threshold in telescoping mode (default: `0.5`).
+- `--auditor-model <model>`: Custom reasoning model specifier.
+- `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
+- `--log-file <path>`: Telemetry event stream destination.
+- `--json`: Emits enriched Caseload JSON.
+
 ### CLI Exit Codes
 - **0:** All evaluated cases pass (`status: 'pass'`, `compliance_score >= 0.5`), or 0 candidate canons matched from diff.
 - **1:** Architectural violation detected (`status: 'fail'`, `compliance_score < 0.5`).

@@ -26,7 +26,7 @@ flowchart LR
     subgraph Inputs["Inputs"]
         Validate["validate (Branch A)<br/><code>.validation</code>"]
         Config["configure (Branch B)<br/><code>.config</code>"]
-        Params["Stage Flags<br/><i>(--threshold, --intent, --screener-model)</i>"]
+        Params["Stage Flags<br/><i>(--apprise-threshold, --intent, --screener-model)</i>"]
     end
 
     Validate --> Apprise["apprise<br/><b>(Current Node)</b><br/><code>.apprisal</code>"]
@@ -123,7 +123,7 @@ If `caseload.discovery.candidate_canons` is empty:
    }
    ```
    Generating `apprisal_summary` before `apprisal_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Deterministic Threshold Gating (`apprisal_score >= threshold`, default: `0.5`):**  
+4. **Deterministic Threshold Gating (`apprisal_score >= --apprise-threshold`, default: `0.5`):**  
    The core domain engine deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
    - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: "applicable"`.
    - Canons scoring $< 0.5$ are marked `apprisal_status: "dismissed"`.
@@ -158,6 +158,12 @@ error: No design intent or target paths provided for apprise.
 ```
 
 Conversely, if prospective target paths yield zero candidate canons in `discover`, the command short-circuits cleanly with exit code `0` ("0 canons triggered by prospective target scope; no applicable constraints").
+
+### CLI Flags & Environment
+- `--apprise-threshold <number>`: Prospective applicability threshold (default: `0.5`).
+- `--intent <text>`: Prospective architectural intent statement.
+- `--caseload <path|->`: Ingests upstream Caseload.
+- `--json`: Emits enriched Caseload JSON.
 
 ### CLI Output Modes
 - **Default (Terminal / Stylish):** Renders a structured Markdown apprisal report on `stdout` listing applicable canons alongside their `apprisal_summary` rationales.

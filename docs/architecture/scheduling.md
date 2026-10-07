@@ -124,6 +124,22 @@ canon-clerk admit --caseload caseload-5.json --json > caseload-6.json
 canon-clerk audit --caseload caseload-6.json
 ```
 
+### Pattern C: The Stage-Prefixed Flag Scoping Contract
+To prevent cross-stage parameter leakage in telescoping cascades, all stage-specific tuning parameters use **explicit stage-prefixed flags**:
+- `--docket-threshold <float>` (sets `docket`'s colorability threshold, default: `0.5`)
+- `--admit-threshold <float>` (sets `admit`'s admissibility threshold, default: `0.5`)
+- `--apprise-threshold <float>` (sets `apprise`'s apprisal threshold, default: `0.5`)
+
+#### Scoping & Validation Invariants:
+1. **Transitive Acceptance:** A subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure.
+   - `canon-clerk audit` accepts `--docket-threshold` and `--admit-threshold` because `docket` and `admit` precede `audit`.
+   - `canon-clerk admit` accepts `--docket-threshold` and `--admit-threshold`.
+   - `canon-clerk docket` accepts `--docket-threshold`.
+   - `canon-clerk apprise` accepts `--apprise-threshold`.
+2. **Strict Rejection (Exit 2):** Any subcommand whose closure does NOT execute a stage rejects that stage's flags with exit code `2` (Usage Error). For example:
+   - `canon-clerk discover --admit-threshold 0.7` $\implies$ Exit `2` (unexpected flag; prevents dead-letter configuration).
+3. **No Unqualified `--threshold`:** The ambiguous generic flag `--threshold` is disallowed. Invoking `--threshold` fails fast with exit code `2`, directing the operator to the stage-prefixed alternatives.
+
 ---
 
 ## 5. Static Schedule Lookup Table
