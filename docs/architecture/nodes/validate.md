@@ -28,7 +28,8 @@ flowchart LR
     Discover --> Validate["validate<br/><b>(Current Node)</b><br/><code>.validation</code>"]
     Params --> Validate
 
-    Validate --> Next["docket / apprise<br/><i>(Pipeline Cascade)</i>"]
+    Validate --> Docket["docket<br/><i>(Adjudication Path)</i><br/><code>.docket</code>"]
+    Validate --> Apprise["apprise<br/><i>(Apprisal Path)</i><br/><code>.apprisal</code>"]
     Validate -. "standalone CLI" .-> ValidReport["Validation Report<br/><i>(Clean AST & schemas, Exit 0)</i>"]
     Validate -. "hasErrors == true" .-> Abort["Diagnostics & Abort<br/><i>(Exit 1, blocks token spend)</i>"]
 
