@@ -117,7 +117,7 @@ flowchart TD
 - **Configuration & Probe:** Discovers workspace and user settings, resolves API credentials, and implements the diagnostic `probe` provider health check.
 
 ### The Driving Adapters (The External Ports)
-- **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, and event streams, and maps domain results to shell exit codes (`0`, `1`, `2`).
+- **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
 - **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations.
 - **Integration Test Driver:** Test driver that feeds real/fixture Caseloads directly into engine and configuration functions against live networked provider services.
 

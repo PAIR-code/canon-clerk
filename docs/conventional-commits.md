@@ -24,8 +24,8 @@ GitHub labels in `PAIR-code/canon-clerk` directly mirror this matrix, enabling s
 | :--- | :--- | :--- | :--- |
 | **Specifications (OpenSpec / RFCs)** | `spec(<surface>):` | None (Non-releasing) | Architectural contracts and OpenSpec files.<br>`spec(cli): define plugin hooks interface`<br>`spec(canons): define Exception and Remediation semantics` |
 | **Core Auditor Engine** | `feat(core):`, `fix(core):` | Minor / Patch | Core analysis, prompt assembly, and screening logic.<br>`feat(core): support inline **Remediation:** markers` |
-| **Canon Schema & Linter** | `feat(schema):`, `fix(schema):`, `spec(schema):` | Minor / Patch | Canon schema definitions, AST interfaces, parser, and static linter (`@canon-clerk/schema`).<br>`feat(schema): introduce token-based static linting engine` |
-| **Configuration Package** | `feat(configuration):`, `fix(configuration):`, `spec(configuration):` | Minor / Patch | Workspace-piercing configuration discovery, cascade resolution, and OS credential store (`@canon-clerk/configuration`).<br>`feat(configuration): add lone-key provider auto-inference` |
+| **Canon Schema & Linter** | `feat(schema):`, `fix(schema):`, `spec(schema):` | Minor / Patch | Canon schema definitions, AST interfaces, parser, and static linter.<br>`feat(schema): introduce token-based static linting engine` |
+| **Configuration Package** | `feat(configuration):`, `fix(configuration):`, `spec(configuration):` | Minor / Patch | Workspace-piercing configuration discovery, cascade resolution, and OS credential store.<br>`feat(configuration): add lone-key provider auto-inference` |
 | **CLI Package** | `feat(cli):`, `fix(cli):` | Minor / Patch | CLI binary, arguments, flags, and local execution.<br>`feat(cli): add --quiet flag and json output` |
 | **GitHub Action Package** | `feat(action):`, `fix(action):` | Minor / Patch | Action entrypoint, inputs, and Check Run posting.<br>`fix(action): handle empty diffs gracefully` |
 | **Dogfood Canons & Canon Spec** | `chore(canons):`, `spec(canons):` | None | Canon specification ([`SPEC.md`](../SPEC.md)) and dogfood canons ([`.canons/`](../.canons/)).<br>`chore(canons): require manual test plan for ui` |
@@ -68,8 +68,8 @@ Standardized strictly on **`scope: canons`** (collapsing the deprecated `canon` 
 | Label | Color | Description |
 | :--- | :--- | :--- |
 | `scope: core` | `#1D76DB` (Blue) | Core Auditor Engine, prompt assembly, and screening logic. |
-| `scope: schema` | `#1D76DB` (Blue) | Canon schema definitions, AST interfaces, parser, and static linter (`@canon-clerk/schema`). |
-| `scope: configuration` | `#1D76DB` (Blue) | Configuration discovery, cascade resolution, and OS credential store (`@canon-clerk/configuration`). |
+| `scope: schema` | `#1D76DB` (Blue) | Canon schema definitions, AST interfaces, parser, and static linter. |
+| `scope: configuration` | `#1D76DB` (Blue) | Configuration discovery, cascade resolution, and OS credential store. |
 | `scope: cli` | `#006B75` (Teal) | CLI binary and command-line execution. |
 | `scope: action` | `#0E8A16` (Dark Green) | GitHub Action entrypoint and Check Run posting. |
 | `scope: canons` | `#FBCA04` (Yellow) | Canon specification ([`SPEC.md`](../SPEC.md)) and dogfood canons ([`.canons/`](../.canons/)). |

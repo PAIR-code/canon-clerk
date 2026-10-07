@@ -9,7 +9,7 @@
 
 Canon Clerk's subcommands and action entry points represent **terminal stop points** along a Directed Acyclic Graph (DAG) with an auxiliary diagnostic leaf. 
 
-Under Canon Clerk's Hexagonal Architecture, **DAG scheduling and execution semantics are implemented as pure domain services within `@canon-clerk/core`**. Both the CLI (`@canon-clerk/cli`) and the GitHub Action (`@canon-clerk/action`) delegate to this engine service, ensuring identical closure calculation, pruning, and lazy scheduling behavior regardless of whether an audit is initiated from a local terminal or a remote GitHub Actions runner.
+Under Canon Clerk's Hexagonal Architecture, **DAG scheduling and execution semantics are implemented as pure domain services within the evaluation engine core**. Both the CLI and the CI / Action adapter delegate to this engine service, ensuring identical closure calculation, pruning, and lazy scheduling behavior regardless of whether an audit is initiated from a local terminal or a remote GitHub Actions runner.
 
 Instead of running a monolithic pipeline that redundantly requires network connectivity and API keys for purely local operations, the scheduler calculates the **transitive dependency closure** for the requested terminus node and prunes unneeded branches.
 
@@ -164,3 +164,51 @@ Across the pipeline, five deterministic short-circuit conditions trigger early t
 3. **At `docket`:** If `activeDocket.length === 0` $\implies$ Exit `0` immediately (all candidate canons dismissed at macro screening; zero trials scheduled).
 4. **At `admit`:** If all active cases retain zero admitted exhibits $\implies$ Exit `0` immediately (no admissible evidence; zero trials scheduled).
 5. **At `apprise`:** If `candidateCanons.length === 0` $\implies$ Exit `0` immediately (all candidate canons dismissed at discovery; empty apprisal brief attached to emitted Caseload).
+
+---
+
+## 6. The Pipeline Funnel Provenance Contract (Terminal Receipts)
+
+To prevent the **"Silent Zero" / "Mysterious Clean Run"** anti-pattern—where an operator or CI runner receives an empty pass (`0 violations found`) without knowing which upstream filter caused the zero—the CLI adapter enforces the **Pipeline Funnel Provenance Contract**.
+
+### The Ergonomic Principle: No Unexplained Zeroes
+A zero-result or clean run can occur at any stage along the DAG:
+1. **At `intake`:** An invalid or un-matched target path produced a null filing.
+2. **At `discover`:** Target paths did not match any canon triggers, or state preconditions (`exists:`) were unmet.
+3. **At `validate`:** Candidate canons failed AST linting (aborts with Exit 1).
+4. **At `docket`:** Canons were dismissed by the screener model as uncolorable for the change.
+5. **At `admit`:** Diff hunks and files failed admissibility thresholds (insufficient relevant evidence).
+6. **At `audit`:** Admitted exhibits were fully compliant with canon statutes.
+
+### The Funnel Receipt Format
+When a multi-stage command runs in human-readable mode (default TTY stdout), the terminal output prints a compact **Pipeline Funnel Receipt** summarizing the operational watermark of every executed ancestor node in the closure:
+
+```text
+Pipeline Provenance:
+  ✓ intake    : 1 target file ingested ('src/parser.rs', 45 diff lines)
+  ✓ discover  : 3 candidate canons matched triggers (14 canons un-triggered)
+  ✓ validate  : 3 candidate canons valid (0 errors, 0 warnings)
+  ✓ docket    : 1 case colorable ('error-messages-must-cite-grammar', 2 dismissed)
+  ⊘ admit     : 0 exhibits admitted (relevance scores below threshold 0.5)
+  ⊘ audit     : 0 trials scheduled (fast-forward: no admissible exhibits)
+
+Verdict: PASS (0 active violations)
+```
+
+### Fast-Exit and Short-Circuit Watermarks
+When an early exit occurs, downstream stages are explicitly marked with `(fast-forward: <reason>)` or `(skipped)`, immediately surfacing the exact filtering stage:
+
+```text
+Pipeline Provenance:
+  ✓ intake    : 1 target file ingested ('docs/faq.md')
+  ⊘ discover  : 0 candidate canons matched triggers (17 canons evaluated)
+  ⊘ validate  : (fast-forward: zero candidate canons)
+  ⊘ docket    : (fast-forward: zero candidate canons)
+  ⊘ admit     : (fast-forward: zero candidate canons)
+  ⊘ audit     : (fast-forward: zero candidate canons)
+
+Verdict: PASS (0 candidate canons governing target files)
+```
+
+### Machine-Readable Provenance (`--json`)
+When invoked with `--json`, the serialized output is the cumulative `Caseload` structure. Because each executed stage preserves its own namespace (`caseload.intake`, `caseload.discovery`, `caseload.docket`, `caseload.evidence`, `caseload.verdict`), programmatic consumers and CI pipelines receive bit-for-bit full provenance across every filter step without specialized flags.
