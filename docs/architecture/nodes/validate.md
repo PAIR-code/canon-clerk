@@ -20,7 +20,13 @@
 
 ```mermaid
 flowchart LR
-    Discover["discover<br/><code>.discovery</code>"] --> Validate["validate<br/><b>(Current Node)</b><br/><code>.validation</code>"]
+    subgraph Inputs["Inputs"]
+        Discover["discover (or --caseload)<br/><code>.discovery</code>"]
+        Params["Stage Flags<br/><i>(--max-warnings)</i>"]
+    end
+
+    Discover --> Validate["validate<br/><b>(Current Node)</b><br/><code>.validation</code>"]
+    Params --> Validate
 
     Validate --> Next["docket / apprise<br/><i>(Pipeline Cascade)</i>"]
     Validate -. "standalone CLI" .-> ValidReport["Validation Report<br/><i>(Clean AST & schemas, Exit 0)</i>"]

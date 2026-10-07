@@ -20,7 +20,13 @@
 
 ```mermaid
 flowchart LR
-    Env["Host Environment & Workspace<br/><i>(Env vars, CLI flags, secrets)</i>"] --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
+    subgraph Inputs["Inputs"]
+        Env["Host Environment<br/><i>(Env vars, secrets, workspace root)</i>"]
+        Params["Stage Flags<br/><i>(--screener-model, --auditor-model, --reasoning-budget)</i>"]
+    end
+
+    Env --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
+    Params --> Config
 
     Config --> Cascade["docket / apprise<br/><i>(Pipeline Cascade: Branch B)</i>"]
     Config -. "standalone CLI" .-> ConfigReport["Resolved Configuration<br/><i>(Model specifiers & root, Exit 0)</i>"]

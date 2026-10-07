@@ -21,7 +21,13 @@
 
 ```mermaid
 flowchart LR
-    Docket["docket<br/><code>.docket</code>"] --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
+    subgraph Inputs["Inputs"]
+        Docket["docket (or --caseload)<br/><code>.docket</code>"]
+        Params["Stage Flags<br/><i>(--threshold, --screener-model)</i>"]
+    end
+
+    Docket --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
+    Params --> Admit
 
     Admit --> Audit["audit (Substantive Adjudication)<br/><i>(Pipeline Cascade)</i><br/><code>.verdict</code>"]
     Admit -. "standalone CLI" .-> AdmitReport["Evidence Manifest<br/><i>(Admitted file exhibits, Exit 0)</i>"]

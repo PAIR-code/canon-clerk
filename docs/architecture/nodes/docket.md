@@ -21,13 +21,15 @@
 
 ```mermaid
 flowchart LR
-    subgraph Upstream["Upstream Convergence"]
+    subgraph Inputs["Inputs"]
         Validate["validate (Branch A)<br/><code>.validation</code>"]
         Config["configure (Branch B)<br/><code>.config</code>"]
+        Params["Stage Flags<br/><i>(--threshold, --screener-model)</i>"]
     end
 
     Validate --> Docket["docket<br/><b>(Current Node)</b><br/><code>.docket</code>"]
     Config --> Docket
+    Params --> Docket
 
     Docket --> Admit["admit (Micro Triage)<br/><i>(Pipeline Cascade)</i><br/><code>.evidence</code>"]
     Docket -. "standalone CLI" .-> DocketReport["Active Docket Report<br/><i>(Colorability scores, Exit 0)</i>"]

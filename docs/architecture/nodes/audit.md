@@ -21,7 +21,13 @@
 
 ```mermaid
 flowchart LR
-    Admit["admit<br/><code>.evidence</code>"] --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
+    subgraph Inputs["Inputs"]
+        Admit["admit (or --caseload)<br/><code>.evidence</code>"]
+        Params["Stage Flags<br/><i>(--auditor-model, --reasoning-budget)</i>"]
+    end
+
+    Admit --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
+    Params --> Audit
 
     Audit --> Compliant["Compliant Review Gate<br/><i>(Verdict decree, Exit 0)</i>"]
     Audit -. "statute violation" .-> Violation["Violation Decree<br/><i>(Line annotations, Exit 1)</i>"]

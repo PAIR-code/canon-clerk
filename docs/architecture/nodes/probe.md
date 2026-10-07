@@ -20,7 +20,13 @@
 
 ```mermaid
 flowchart LR
-    Config["configure<br/><code>.config</code>"] --> Probe["probe<br/><b>(Current Node)</b><br/><code>.probe</code>"]
+    subgraph Inputs["Inputs"]
+        Config["configure (or --caseload)<br/><code>.config</code>"]
+        Params["Stage Flags<br/><i>(--timeout)</i>"]
+    end
+
+    Config --> Probe["probe<br/><b>(Current Node)</b><br/><code>.probe</code>"]
+    Params --> Probe
 
     Probe --> Report["Diagnostic Health Report<br/><i>(Endpoint latency & reachability, Exit 0)</i>"]
     Probe -. "connectivity failure" .-> Failure["Connection Error<br/><i>(Unreachable / bad key, Exit 1)</i>"]

@@ -20,7 +20,13 @@
 
 ```mermaid
 flowchart LR
-    Inputs["External Filing Sources<br/><i>(Diffs, paths, PR metadata, intent)</i>"] --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
+    subgraph Inputs["Inputs"]
+        Sources["Filing Sources<br/><i>(Diffs, paths, PR metadata)</i>"]
+        Params["Stage Flags<br/><i>(--all-targets, --intent, --pr-title)</i>"]
+    end
+
+    Sources --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
+    Params --> Intake
 
     Intake --> Discover["discover<br/><i>(Pipeline Cascade)</i><br/><code>.discovery</code>"]
     Intake -. "standalone CLI" .-> IntakeReport["Filing Report / JSON<br/><i>(Tendered exhibits, Exit 0)</i>"]

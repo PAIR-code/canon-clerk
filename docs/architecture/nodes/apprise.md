@@ -23,13 +23,15 @@ In the court clerkship taxonomy, `apprise` represents the court exercising its *
 
 ```mermaid
 flowchart LR
-    subgraph Upstream["Upstream Prerequisites"]
+    subgraph Inputs["Inputs"]
         Validate["validate (Branch A)<br/><code>.validation</code>"]
         Config["configure (Branch B)<br/><code>.config</code>"]
+        Params["Stage Flags<br/><i>(--threshold, --intent, --screener-model)</i>"]
     end
 
     Validate --> Apprise["apprise<br/><b>(Current Node)</b><br/><code>.apprisal</code>"]
     Config --> Apprise
+    Params --> Apprise
 
     Apprise --> Notice["Statutory Notice Report<br/><i>(Applicable canons & guidance, Exit 0)</i>"]
     Apprise -. "zero candidates" .-> EmptyNotice["Fast Exit (No-op 0)<br/><i>Empty apprisal assessment</i>"]

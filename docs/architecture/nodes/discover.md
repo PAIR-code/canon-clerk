@@ -27,7 +27,13 @@
 
 ```mermaid
 flowchart LR
-    Intake["intake<br/><code>.intake</code>"] --> Discover["discover<br/><b>(Current Node)</b><br/><code>.discovery</code>"]
+    subgraph Inputs["Inputs"]
+        Intake["intake (or --caseload)<br/><code>.intake</code>"]
+        Params["Stage Flags<br/><i>(--all-canons, --canons, --filter)</i>"]
+    end
+
+    Intake --> Discover["discover<br/><b>(Current Node)</b><br/><code>.discovery</code>"]
+    Params --> Discover
 
     Discover --> Validate["validate<br/><i>(Pipeline Cascade)</i><br/><code>.validation</code>"]
     Discover -. "standalone CLI" .-> DiscoveryReport["Discovered Canons Table<br/><i>(Matched triggers & exhibits, Exit 0)</i>"]
