@@ -113,21 +113,20 @@ If `caseload.discovery.candidate_canons` is empty:
      "assessments": {
        ".canons/auth/cacheing-layers-must-have-configurable-expiry.md": {
          "apprisal_summary": "Proposed round-robin dispatch introduces a dynamically updated provider cache, which must define explicit expiration policies.",
-         "apprisal_score": 0.92,
-         "apprisal_status": "applicable"
+         "apprisal_score": 0.92
        },
        ".canons/auth/database-migrations-must-include-rollback-instructions.md": {
          "apprisal_summary": "The planned refactor only modifies in-memory provider dispatch and does not alter database schemas or migrations.",
-         "apprisal_score": 0.05,
-         "apprisal_status": "dismissed"
+         "apprisal_score": 0.05
        }
      }
    }
    ```
    Generating `apprisal_summary` before `apprisal_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
-4. **Threshold Gate (`apprisal_score >= threshold`, default: `0.5`):**  
-   - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: 'applicable'`.
-   - Canons scoring $< 0.5$ are marked `apprisal_status: 'dismissed'` with summary rationale.
+4. **Deterministic Threshold Gating (`apprisal_score >= threshold`, default: `0.5`):**  
+   The core domain engine deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
+   - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: "applicable"`.
+   - Canons scoring $< 0.5$ are marked `apprisal_status: "dismissed"`.
 5. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
 
 ---

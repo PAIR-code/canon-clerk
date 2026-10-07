@@ -108,10 +108,22 @@ struct CaseloadVerdict:
 2. **Frontier Reasoning Model Tier (`gemini-3.8-pro`):**  
    Evaluates substantive compliance with extended thinking/reasoning enabled.
 3. **The Four-Step Judicial Decision Tree:**
-   - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `compliance_score = 1.0`, status `pass`.
+   - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits against the normative invariant (What). If compliant $\implies$ `compliance_score = 1.0`.
    - **Step 2 (Exception Screening):** If a violation is found, evaluates declared `Exception` clauses. If an exception's criteria are semantically satisfied $\implies$ short-circuits to conditional `pass` (`compliance_score >= 0.5`), documenting the matched exception.
-   - **Step 3 (Remediation Formulation):** If no exception applies $\implies$ violation stands (`compliance_score < 0.5`, status `fail`), and formulates actionable contributor remediation (How).
+   - **Step 3 (Remediation Formulation):** If no exception applies $\implies$ violation stands (`compliance_score < 0.5`), and formulates actionable contributor remediation (How).
    - **Step 4 (Line Annotations):** Emits precise file, line, and column coordinates for each violation.
+4. **Constrained Decoding Schema (Reason-First):**  
+   Enforces structured JSON output generating `compliance_summary` before `compliance_score`:
+   ```json
+   {
+     "compliance_summary": "The added command flags adhere strictly to kebab-case formatting.",
+     "compliance_score": 1.0,
+     "annotations": []
+   }
+   ```
+   Generating `compliance_summary` before `compliance_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+5. **Deterministic Status Evaluation:**  
+   The core domain engine deterministically assigns case `status = if compliance_score >= 0.5 { "pass" } else { "fail" }`, and aggregates overall `caseload.verdict.status` (`"pass"` if all cases pass, else `"fail"`).
 
 ---
 

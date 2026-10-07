@@ -98,22 +98,22 @@ If `active_docket` is empty:
 
 1. **Aggregate Single-Turn Screening:**  
    Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-3.5-flash-lite`.
-2. **Constrained Grammar Decoding:**  
-   Forces structured JSON output with guaranteed schema keys:
+2. **Constrained Grammar Decoding (Reason-First):**  
+   Forces structured JSON output with guaranteed schema keys, generating `colorability_summary` before `colorability_score` to provide a chain-of-thought scratchpad that anchors reproducible probability distributions:
    ```json
    {
      "cases": {
        ".canons/cli/cli-flags-kebab-case.md": {
-         "colorability_score": 0.95,
          "colorability_summary": "PR introduces new command flags in CLI.",
-         "colorability_status": "docketed"
+         "colorability_score": 0.95
        }
      }
    }
    ```
-3. **Threshold Gate (`colorability_score >= 0.5`):**
-   - Canons scoring $\ge 0.5$ establish jurisdiction and are entered into `active_docket`.
-   - Canons scoring $< 0.5$ are marked `dismissed` with summary rationale.
+3. **Deterministic Threshold Gating (`colorability_score >= threshold`, default: `0.5`):**  
+   The core domain engine deterministically evaluates the continuous score against the threshold to assign `colorability_status`:
+   - Canons scoring $\ge 0.5$ establish jurisdiction, are marked `colorability_status: "docketed"`, and are entered into `active_docket`.
+   - Canons scoring $< 0.5$ are marked `colorability_status: "dismissed"`.
 4. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
 
 ---
