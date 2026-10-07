@@ -19,6 +19,22 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    subgraph Upstream["Upstream Convergence"]
+        Validate["validate (Branch A)<br/><code>.validation</code>"]
+        Config["configure (Branch B)<br/><code>.config</code>"]
+    end
+
+    Validate --> Docket["docket<br/><b>(Current Node)</b><br/><code>.docket</code>"]
+    Config --> Docket
+    Docket --> Admit["admit (Micro Triage)<br/><code>.evidence</code>"]
+    Docket -. "activeDocket is empty" .-> ZeroCases["Fast Exit (Zero Trials)<br/><i>Prunes admit & audit</i>"]
+
+    style Docket fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style ZeroCases stroke-dasharray: 5 5
+```
+
 - **Direct Prerequisites:**
   - `validate` (Branch A: validated candidate canons in `caseload.discovery` and `caseload.validation`).
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).

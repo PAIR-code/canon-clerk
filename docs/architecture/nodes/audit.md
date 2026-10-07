@@ -19,6 +19,14 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    Admit["admit<br/><code>.evidence</code>"] --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
+    Audit --> Verdict["Final Caseload Record<br/><i>(Decrees, line annotations, pass/fail exit code)</i>"]
+
+    style Audit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+```
+
 - **Direct Prerequisites:** `admit` (requires admitted exhibits in `caseload.evidence`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`, `docket`.
 - **Pruned from Execution:** `probe` (never scheduled during review cascades).

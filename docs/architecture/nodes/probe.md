@@ -18,6 +18,14 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    Config["configure<br/><code>.config</code>"] --> Probe["probe<br/><b>(Current Node)</b><br/><code>.probe</code>"]
+    Probe --> Output["Diagnostic Report<br/><i>(Endpoint latency, model reachability)</i>"]
+
+    style Probe fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+```
+
 - **Direct Prerequisites:** `configure` (requires resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** None.
 - **Pruned from Cascades:** `probe` is **never executed during review cascades** (`canon-clerk audit`). This ensures that evaluation runs do not incur redundant health-check latency prior to screening.

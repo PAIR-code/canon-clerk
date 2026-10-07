@@ -18,6 +18,14 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    Inputs["External Filing Sources<br/><i>(Diffs, target paths, PR metadata, or intent)</i>"] --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
+    Intake --> Discover["discover<br/><code>.discovery</code>"]
+
+    style Intake fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+```
+
 - **Direct Prerequisites:** None (Root node of Branch A).
 - **Transitive Prerequisites:** None.
 - **Incoming Caseload:** May accept an empty or existing `Caseload` record.

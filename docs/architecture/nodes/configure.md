@@ -18,6 +18,15 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    Env["Host Environment & Workspace<br/><i>(Env vars, CLI flags, credential stores)</i>"] --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
+    Config --> Docket["docket / apprise<br/><i>(Converges with Branch A)</i>"]
+    Config -. "diagnostic probe" .-> Probe["probe<br/><code>.probe</code>"]
+
+    style Config fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+```
+
 - **Direct Prerequisites:** None (Root node of Branch B).
 - **Transitive Prerequisites:** None.
 - **Independence:** Resolves environment credentials and models with zero dependencies on diffs or canons.

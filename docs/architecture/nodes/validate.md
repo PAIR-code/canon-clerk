@@ -18,6 +18,17 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    Discover["discover<br/><code>.discovery</code>"] --> Validate["validate<br/><b>(Current Node)</b><br/><code>.validation</code>"]
+    Validate --> Docket["docket (Dispute Track)<br/><code>.docket</code>"]
+    Validate --> Apprise["apprise (Apprisal Track)<br/><code>.apprisal</code>"]
+    Validate -. "hasErrors == true" .-> Abort["Immediate Abort (Exit 1)<br/><i>Blocks LLM token expenditure</i>"]
+
+    style Validate fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style Abort stroke-dasharray: 5 5
+```
+
 - **Direct Prerequisites:** `discover` (strictly validates `caseload.discovery.candidateCanons`).
 - **Transitive Prerequisites:** `intake`.
 - **Topological Invariant:** `validate` does not maintain alternate roots or bypass `discover`. Instead, `discover` provides the candidate set:

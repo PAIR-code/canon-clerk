@@ -19,6 +19,16 @@
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    Docket["docket<br/><code>.docket</code>"] --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
+    Admit --> Audit["audit (Substantive Adjudication)<br/><code>.verdict</code>"]
+    Admit -. "zero exhibits admitted" .-> ZeroExhibits["Fast Exit (No Evidence)<br/><i>Prunes audit trials</i>"]
+
+    style Admit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+    style ZeroExhibits stroke-dasharray: 5 5
+```
+
 - **Direct Prerequisites:** `docket` (requires active cases in `caseload.docket.activeDocket`).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `configure`.
 - **Pruned from Execution:** `probe`, `audit`.

@@ -21,6 +21,20 @@ In the court clerkship taxonomy, `apprise` represents the court exercising its *
 
 ## 2. Dependencies & Prerequisites (`core`)
 
+```mermaid
+flowchart LR
+    subgraph Upstream["Upstream Prerequisites"]
+        Validate["validate (Branch A)<br/><code>.validation</code>"]
+        Config["configure (Branch B)<br/><code>.config</code>"]
+    end
+
+    Validate --> Apprise["apprise<br/><b>(Current Node)</b><br/><code>.apprisal</code>"]
+    Config --> Apprise
+    Apprise --> Notice["Statutory Notice Report<br/><i>(Applicable canons & statutory advice)</i>"]
+
+    style Apprise fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
+```
+
 - **Direct Prerequisites:**
   - `validate` (Branch A: validated candidate canons in `caseload.discovery.candidateCanons` and `caseload.validation`).
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).
