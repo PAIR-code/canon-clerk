@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`audit`), GitHub Action
+**Driving Adapter:** CLI (`audit`)
 
 ---
 
@@ -151,10 +151,16 @@ error: No filing source provided for audit.
 ```
 Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk audit --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; 0 candidate canons matched; audit pass").
 
-### CLI Output & Stream Formatting
+### CLI Output Modes & GitHub Actions Integration
 - **TTY Progress:** Displays interactive spinners and step execution traces on `stderr`.
-- **Verdict Report:** Emits formatted Markdown or stylish terminal summary to `stdout`.
+- **Verdict Report (Terminal / Stylish):** Emits formatted Markdown or stylish terminal summary to `stdout` including the Pipeline Funnel Receipt and case adjudications.
+- **GitHub Actions (CI Mode):** When executing in GitHub Actions (auto-detected via `GITHUB_ACTIONS=true` or `--format github`), emits native GitHub Actions workflow command annotations:
+  ```text
+  ::error file=src/auth.rs,line=42,title=Canon Violation::Cache expiration policy not configured per cacheing-layers canon.
+  ```
+  for each `CodeAnnotation`, and appends the Pipeline Funnel Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY`.
 - **Telemetry Log:** Optionally redirects event stream via `--log-file <path>`.
+- **`--json`:** Emits cumulative `Caseload` JSON containing structured adjudications and annotations.
 
 ### CLI Flags & Environment
 - `--diff <path|->`: In-flight patch stream.
@@ -163,23 +169,12 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - `--admit-threshold <number>`: Upstream evidence admissibility threshold in telescoping mode (default: `0.5`).
 - `--auditor-model <model>`: Custom reasoning model specifier.
 - `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
+- `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
 - `--log-file <path>`: Telemetry event stream destination.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout (ideal for CI workflow artifact archiving).
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** All evaluated cases pass (`status: 'pass'`, `compliance_score >= 0.5`), or 0 candidate canons matched from diff.
 - **1:** Architectural violation detected (`status: 'fail'`, `compliance_score < 0.5`).
 - **2:** Fatal error, missing filing source (naked invocation), missing credentials, or provider failure.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Full DAG Invocation:** Drives the complete Caseload pipeline to `executeAudit`.
-2. **GitHub Check Run Creation:**
-   - Creates a GitHub Check Run (`octokit.rest.checks.create`).
-   - Maps overall status to Check Run conclusion:
-     - `status: 'pass'` $\implies$ `conclusion: 'success'` 🟢
-     - `status: 'fail'` $\implies$ `conclusion: 'failure'` 🔴
-3. **Line-Level GitHub Annotations:** Converts `adjudications[].annotations` into Check Run annotations (`path`, `start_line`, `end_line`, `annotation_level: 'failure'`, `message`), placing visual review flags directly on the PR files diff tab.
-4. **Markdown Step Summary:** Writes an executive decree and per-case breakdown to `$GITHUB_STEP_SUMMARY`.

@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`probe`), GitHub Action
+**Driving Adapter:** CLI (`probe`)
 
 ---
 
@@ -111,11 +111,3 @@ canon-clerk probe --json
 ### CLI Exit Codes
 - **0:** All configured endpoints are reachable, authenticated, and responsive.
 - **2:** Provider credentials rejected (401/403) or endpoints unreachable (timeout / 5xx).
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Diagnostic Action Step:** Invoked in dedicated connectivity workflows or self-hosted runner validation actions.
-2. **Summary Emission:** Emits reachability tables and latency metrics to `GITHUB_STEP_SUMMARY`.
-3. **Fail-Fast Gating:** Fails CI pipelines early if remote AI provider endpoints are down or firewall rules block egress.

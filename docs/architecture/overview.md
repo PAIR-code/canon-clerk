@@ -83,15 +83,14 @@ flowchart TD
 
 ---
 
-## 3. Hexagonal Architecture: Driving Adapters vs. Core Domain Processing
+## 3. Hexagonal Architecture: The CLI Driving Adapter vs. Core Domain Processing
 
-Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)**. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration webhooks.
+Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)**. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration environments.
 
 ```mermaid
 flowchart TD
-    subgraph DrivingAdapters ["Driving Adapters (Ports)"]
-        CLI["CLI Adapter<br/>(Flags, POSIX stdin Streams, Exit Codes, Progress)"]
-        Action["CI / GitHub Action<br/>(PR Metadata, Linked Issues, Check Runs, Annotations)"]
+    subgraph DrivingAdapter ["Driving Adapter (Port)"]
+        CLI["CLI Binary<br/>(Flags, POSIX stdin Streams, Exit Codes, Progress, Output Formatting)"]
     end
 
     subgraph CoreEngine ["The Caseload Domain Engine"]
@@ -102,7 +101,6 @@ flowchart TD
 
     CLI --> Core
     CLI --> Config
-    Action --> Core
 
     Config --> Core
     Core --> Schema
@@ -110,12 +108,28 @@ flowchart TD
 
 ### The Domain Engine (The Hexagon Core)
 - **Schema Layer:** Defines the canonical representations for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
-- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or CI environments.
+- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or external environments.
 - **Configuration & Probe:** Resolves runtime environment and API credentials, normalizes model specifiers, and implements the diagnostic `probe` provider health check.
 
-### The Driving Adapters (The External Ports)
-- **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
-- **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations.
+### The Driving Adapter (The CLI Boundary)
+- **CLI Binary:** The sole driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
+- **CI / GitHub Integration (Tripartite Output Model):** CI runners invoke the native CLI binary directly without requiring a separate Action codebase. The CLI natively satisfies three output tiers in GitHub Actions:
+  1. **Inline Diff Annotations:** Emits native workflow command annotations (`::error file=...::`, `::warning file=...::`) for all `CodeAnnotation`s on `stdout`/`stderr`, pinpointing line violations directly on the PR *Files changed* diff.
+  2. **Run Summary:** Appends the rendered Markdown Funnel Receipt and stage verdict report to `$GITHUB_STEP_SUMMARY`.
+  3. **Caseload Artifact Archival:** Supports `--output-caseload <path>` to write the full-fidelity cumulative `Caseload` JSON to disk independently of stdout. This allows workflows to upload `caseload.json` via `actions/upload-artifact` (`if: always()`) for post-run failure forensics, compliance auditing, or multi-job workflow chaining:
+     ```yaml
+     - name: Run Canon Clerk Gate
+       run: |
+         git diff origin/main | canon-clerk audit --diff - --output-caseload caseload.json
+
+     - name: Archive Caseload Record
+       if: always()
+       uses: actions/upload-artifact@v4
+       with:
+         name: canon-clerk-caseload
+         path: caseload.json
+         retention-days: 14
+     ```
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`docket`), GitHub Action
+**Driving Adapter:** CLI (`docket`)
 
 ---
 
@@ -142,16 +142,9 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 ### CLI Flags & Environment
 - `--docket-threshold <number>`: Jurisdiction screening threshold (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Candidate canons screened and active docket established (or empty docket short-circuit).
 - **2:** Usage error, missing filing source (naked invocation), provider connection error, invalid API key, or malformed model response.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Macro Screening Step:** Calls `executeDocket` with the cumulative `Caseload`.
-2. **Telemetry Reporting:** Logs screened candidate canons and active docket admissions to workflow step output.
-3. **Early Exit:** If `active_docket` is empty, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.

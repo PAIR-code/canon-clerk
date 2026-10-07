@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`admit`), GitHub Action
+**Driving Adapter:** CLI (`admit`)
 
 ---
 
@@ -139,16 +139,9 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - `--admit-threshold <number>`: Admissibility threshold (default: `0.5`).
 - `--docket-threshold <number>`: Upstream jurisdiction screening threshold in telescoping mode (default: `0.5`).
 - `--caseload <path|->`: Ingests upstream Caseload.
-- `--json`: Emits enriched Caseload JSON.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
+- `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Exhibits admitted and attached (or zero-evidence short-circuit).
 - **2:** Usage error, missing filing source (naked invocation), provider connection error, or model response failure.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Evidence Screening Step:** Invokes `executeAdmit` with the `Caseload`.
-2. **Exhibit Accounting:** Logs admitted diff hunks and persistent references per case.
-3. **Early Exit:** If zero cases retain admitted evidence, concludes the Check Run as passing without scheduling reasoning models.

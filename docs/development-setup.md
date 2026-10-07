@@ -6,7 +6,22 @@ Canon Clerk recommends a **triangular Git workflow** combined with **Git worktre
 
 ---
 
-## 1. Forking Canon Clerk
+## 1. Prerequisites: Rust Toolchain
+
+Canon Clerk is implemented in native Rust (Edition 2024). Before setting up the workspace, ensure the standard Rust toolchain is installed:
+
+```bash
+# Install rustup if not already installed
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Update to latest stable Rust toolchain and provision formatters/linters
+rustup update stable
+rustup component add clippy rustfmt
+```
+
+---
+
+## 2. Forking Canon Clerk
 
 Canon Clerk follows the standard open-source contribution model where contributions originate from your personal fork:
 
@@ -20,7 +35,7 @@ In Git terminology:
 
 ---
 
-## 2. Triangular Git Worktree Setup
+## 3. Triangular Git Worktree Setup
 
 ### Architecture Overview
 
@@ -93,7 +108,7 @@ git worktree add -B main main upstream/main
 
 ---
 
-## 3. Setting Up GitHub CLI (`gh`)
+## 4. Setting Up GitHub CLI (`gh`)
 
 The [GitHub CLI](https://cli.github.com/) (`gh`) is recommended for managing issues, pull requests, and reviews directly from your terminal.
 
@@ -126,7 +141,7 @@ Recommended solution: Open a **remote desktop session** in which to run your `gh
 
 ---
 
-## 4. Working with AI Coding Assistants
+## 5. Working with AI Coding Assistants
 
 If you use AI coding assistants (such as Antigravity, Cursor, Claude Code, or Copilot):
 
@@ -137,6 +152,22 @@ If you use AI coding assistants (such as Antigravity, Cursor, Claude Code, or Co
   ln -s ./main/AGENTS.md AGENTS.md
   ln -s ./main/.agents .agents
   ```
+
+---
+
+## 6. Local Verification & Quality Gates
+
+To verify changes locally before pushing or opening a pull request, run the unified check script from inside any worktree:
+
+```bash
+./scripts/check.sh
+```
+
+This executes the identical quality verification pipeline enforced by GitHub Actions CI:
+1. License header validation (`./scripts/check-license.sh`)
+2. Code formatting verification (`cargo fmt --check`)
+3. Strict compiler lints (`cargo clippy --all-targets -- -D warnings`)
+4. Full unit and integration test suites (`cargo test`)
 
 ---
 
