@@ -14,10 +14,9 @@ Revises an active change's planning artifacts (`proposal.md`, `specs/**/*.md`, `
 
 ## Operational Invariants
 
-1. **CLI Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke bare `openspec` or `npx openspec`.
-2. **Planning Boundary:** Revise planning artifacts only. Never edit implementation code in this workflow.
-3. **Artifact Coherence:** An edit to any single artifact (e.g. design) requires cross-checking and updating dependent artifacts (e.g. specs and tasks) to prevent drift.
-4. **Coarse Validation:** Run validation as a post-update hygiene check. Validation does not gate Git commits.
+1. **Planning Boundary:** Revise planning artifacts only. Never edit implementation code in this workflow.
+2. **Artifact Coherence:** An edit to any single artifact (e.g. design) requires cross-checking and updating dependent artifacts (e.g. specs and tasks) to prevent drift.
+3. **Coarse Validation:** Run validation as a post-update hygiene check. Validation does not gate Git commits.
 
 ---
 
@@ -53,7 +52,7 @@ Edit the affected files directly in `openspec/changes/<change-name>/`.
 
 Run coarse validation on the updated change:
 ```bash
-npm run opsx -- validate "<change-name>" --strict
+openspec validate "<change-name>" --strict
 ```
 Address any syntax errors or broken references detected by the validator.
 

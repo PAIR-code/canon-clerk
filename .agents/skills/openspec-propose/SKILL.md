@@ -14,10 +14,9 @@ Scaffolds a new change and drafts all planning artifacts in a single cohesive pa
 
 ## Operational Invariants
 
-1. **CLI Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke bare `openspec` or `npx openspec`.
-2. **High-Capability Staging:** Frontier AI models draft and stage the full 4-artifact planning suite (`proposal.md`, `specs/<capability>/spec.md`, `design.md`, `tasks.md`) directly to disk in one pass. Never perform intermediate CLI roundtrips (`instructions`, `status`, etc.) between individual files.
-3. **Planning Boundary:** Author planning artifacts only. Do not edit project code or begin implementation until the user explicitly requests implementation via the apply workflow.
-4. **Lean on Defaults:** Rely on Canon Clerk's standard `spec-driven` schema and repo-local `openspec/` root. Omit multi-store discovery, custom schema switching, or uninitialized root checks.
+1. **High-Capability Staging:** Frontier AI models draft and stage the full 4-artifact planning suite (`proposal.md`, `specs/<capability>/spec.md`, `design.md`, `tasks.md`) directly to disk in one pass. Never perform intermediate CLI roundtrips (`instructions`, `status`, etc.) between individual files.
+2. **Planning Boundary:** Author planning artifacts only. Do not edit project code or begin implementation until the user explicitly requests implementation via the apply workflow.
+3. **Lean on Defaults:** Rely on Canon Clerk's standard `spec-driven` schema and repo-local `openspec/` root. Omit multi-store discovery, custom schema switching, or uninitialized root checks.
 
 ---
 
@@ -29,7 +28,7 @@ From the user's intent, derive a concise kebab-case change name (e.g. `streamlin
 
 Scaffold the change directory:
 ```bash
-npm run opsx -- new change "<change-name>"
+openspec new change "<change-name>"
 ```
 This generates `openspec/changes/<change-name>/.openspec.yaml`.
 
@@ -136,7 +135,7 @@ Actionable task checklist organized into logical milestones with verification cr
 
 Run coarse validation on the newly staged change:
 ```bash
-npm run opsx -- validate "<change-name>" --strict
+openspec validate "<change-name>" --strict
 ```
 Validation serves as an advisory hygiene check to catch syntax errors or broken references. Address any syntax issues found. Validation does not gate Git commits.
 

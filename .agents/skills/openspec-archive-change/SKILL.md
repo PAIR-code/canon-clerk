@@ -14,10 +14,9 @@ Executes deterministic, low-ceremony archiving of completed OpenSpec changes by 
 
 ## Operational Invariants
 
-1. **CLI Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke bare `openspec` or `npx openspec`.
-2. **Deterministic Archiving:** Follow a clean 4-step sequence: Verify Completion &rarr; Sync Living Specs &rarr; Relocate Directory &rarr; Validate Repository. Omit multi-turn confirmation loops.
-3. **Living Spec Format:** Living specs in `openspec/specs/` must never contain delta operation headers (`## ADDED/MODIFIED/REMOVED Requirements`). All requirements live directly under `## Requirements`.
-4. **Coarse Validation:** Run validation as a post-archive hygiene check. Validation does not gate Git commits.
+1. **Deterministic Archiving:** Follow a clean 4-step sequence: Verify Completion &rarr; Sync Living Specs &rarr; Relocate Directory &rarr; Validate Repository. Omit multi-turn confirmation loops.
+2. **Living Spec Format:** Living specs in `openspec/specs/` must never contain delta operation headers (`## ADDED/MODIFIED/REMOVED Requirements`). All requirements live directly under `## Requirements`.
+3. **Coarse Validation:** Run validation as a post-archive hygiene check. Validation does not gate Git commits.
 
 ---
 
@@ -85,7 +84,7 @@ Intelligently merge delta requirements into the existing living spec:
 
 Run repository-wide validation:
 ```bash
-npm run opsx -- validate --all --strict
+openspec validate --all --strict
 ```
 Verify that all living specs and archived changes satisfy schema and syntax rules. Address any syntax issues found.
 

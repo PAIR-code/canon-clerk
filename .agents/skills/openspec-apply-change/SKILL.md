@@ -14,10 +14,9 @@ Executes implementation tasks from an active OpenSpec change in cohesive batches
 
 ## Operational Invariants
 
-1. **CLI Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke bare `openspec` or `npx openspec`.
-2. **Batch Implementation:** Frontier AI models implement cohesive milestones of tasks directly with accompanying tests, rather than polling for confirmation before every micro-task or bullet point.
-3. **Direct Disk Grounding:** Read planning artifacts (`proposal.md`, `specs/**/*.md`, `design.md`, `tasks.md`) directly from disk under `openspec/changes/<change-name>/`.
-4. **Coarse Validation:** Run validation checks at milestone completions or upon finishing all tasks as an advisory hygiene check. Validation does not gate Git commits.
+1. **Batch Implementation:** Frontier AI models implement cohesive milestones of tasks directly with accompanying tests, rather than polling for confirmation before every micro-task or bullet point.
+2. **Direct Disk Grounding:** Read planning artifacts (`proposal.md`, `specs/**/*.md`, `design.md`, `tasks.md`) directly from disk under `openspec/changes/<change-name>/`.
+3. **Coarse Validation:** Run validation checks at milestone completions or upon finishing all tasks as an advisory hygiene check. Validation does not gate Git commits.
 
 ---
 
@@ -38,7 +37,7 @@ Announce the active change: `"Applying change: <change-name>"`.
 ### 2. Implement Tasks in Cohesive Milestones
 
 1. Identify the next logical milestone or phase in `tasks.md`.
-2. Implement code changes, write/update unit or integration tests, and run test suites (`npm test` or package-specific test script).
+2. Implement code changes, write/update unit or integration tests, and run test suites.
 3. Once tests pass for the milestone, batch-update the completed task checkboxes in `openspec/changes/<change-name>/tasks.md` from `- [ ]` to `- [x]`.
 
 ### 3. Milestone Reporting & Pause Conditions
@@ -53,7 +52,7 @@ Announce the active change: `"Applying change: <change-name>"`.
 
 Run coarse validation:
 ```bash
-npm run opsx -- validate "<change-name>" --strict
+openspec validate "<change-name>" --strict
 ```
 Validation serves as an advisory hygiene check to ensure spec consistency and valid task tracking.
 

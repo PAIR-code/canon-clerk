@@ -22,7 +22,7 @@ Canon Clerk uses a **triangular Git worktree layout**. Depending on how the work
   - When starting work on an issue, scaffold a new worktree using the `git-worktree` skill. 
 
 ### Level B: A Worktree Checkout (Repo Root)
-- **Characteristics:** Contains `.canons/`, `docs/`, `openspec/`, `package.json`, `README.md`, and project files directly in `.`.
+- **Characteristics:** Contains `.canons/`, `docs/`, `openspec/`, `README.md`, and project files directly in `.`.
 - **DIRECTIVES FOR AGENTS:**
   - You are inside an active working branch. Proceed normally with code editing, testing, and Git operations.
-  - **OpenSpec Invariants:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke `npx openspec` or assume bare `openspec` exists in `$PATH`. Canon Clerk adheres to default OpenSpec conventions (`spec-driven` schema, repo-local root); draft and stage planning suites in cohesive batches without CLI micro-polling. Validation serves as an advisory hygiene check and does not gate Git commits.
+  - **OpenSpec Invariants:** Canon Clerk adheres to default OpenSpec conventions (`spec-driven` schema, repo-local root); draft and stage planning suites in cohesive batches without CLI micro-polling. Validation serves as an advisory hygiene check and does not gate Git commits.

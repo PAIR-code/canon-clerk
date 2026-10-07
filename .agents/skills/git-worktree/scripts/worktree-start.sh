@@ -91,54 +91,6 @@ fi
 # Create the worktree and branch
 git -C "$CONTAINER_ROOT" worktree add -b "$BRANCH" "$BRANCH" "${REMOTE}/main"
 
-# Locate main worktree to seed dependencies if available
-MAIN_WORKTREE="$(git -C "$CONTAINER_ROOT" worktree list --porcelain | awk '
-  /^worktree / { wt = substr($0, 10) }
-  /^branch refs\/heads\/main$/ { print wt }
-')"
-
-if [ -z "$MAIN_WORKTREE" ] || [ ! -d "$MAIN_WORKTREE" ]; then
-  MAIN_WORKTREE="${CONTAINER_ROOT}/main"
-fi
-
-# Set up dependencies, build workspace packages, and run smoke tests if package.json exists
-if [ -f "${TARGET_DIR}/package.json" ]; then
-  SEED_SOURCE=""
-  if [ -d "${MAIN_WORKTREE}/node_modules" ]; then
-    SEED_SOURCE="${MAIN_WORKTREE}"
-  elif [ -d "${CONTAINER_ROOT}/main/node_modules" ]; then
-    SEED_SOURCE="${CONTAINER_ROOT}/main"
-  fi
-
-  if [ -n "$SEED_SOURCE" ]; then
-    echo "Seeding node_modules from main worktree (hardlinks)..."
-    if ! cp -al "${SEED_SOURCE}/node_modules" "${TARGET_DIR}/node_modules" 2>/dev/null; then
-      echo "Notice: Hardlink copy failed (e.g. cross-device link), falling back to physical copy..."
-      rm -rf "${TARGET_DIR}/node_modules"
-      cp -a "${SEED_SOURCE}/node_modules" "${TARGET_DIR}/node_modules"
-    fi
-    for pkg_nm in "${SEED_SOURCE}"/packages/*/node_modules; do
-      if [ -d "$pkg_nm" ]; then
-        rel_pkg="${pkg_nm#${SEED_SOURCE}/}"
-        target_pkg_nm="${TARGET_DIR}/${rel_pkg}"
-        mkdir -p "$(dirname "$target_pkg_nm")"
-        if ! cp -al "$pkg_nm" "$target_pkg_nm" 2>/dev/null; then
-          rm -rf "$target_pkg_nm"
-          cp -a "$pkg_nm" "$target_pkg_nm"
-        fi
-      fi
-    done
-  else
-    echo "Installing dependencies via npm ci..."
-    (cd "$TARGET_DIR" && npm ci)
-  fi
-
-  echo "Building workspace packages..."
-  (cd "$TARGET_DIR" && npm run build)
-
-  echo "Running smoke tests..."
-  (cd "$TARGET_DIR" && npm test)
-fi
 
 echo ""
 echo "=== Worktree Created Successfully ==="

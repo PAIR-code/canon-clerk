@@ -14,10 +14,9 @@ Engage as an open-ended, visual thinking partner to explore problem spaces, eval
 
 ## Operational Invariants
 
-1. **CLI Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke bare `openspec` or `npx openspec`.
-2. **Exploration Boundary:** Explore mode is for discovery, architecture, and planning—never for writing or modifying production codebase files.
-3. **Plain ASCII Diagrams:** Use plain ASCII diagrams (`+ - |`, `-->`, `<--`, `^`, `v`, `*`, `x`) to visualize architectures and state flows without rendering artifacts.
-4. **Lean on Defaults:** Standardize on repo-local `openspec/` and standard schemas without store checks.
+1. **Exploration Boundary:** Explore mode is for discovery, architecture, and planning—never for writing or modifying production codebase files.
+2. **Plain ASCII Diagrams:** Use plain ASCII diagrams (`+ - |`, `-->`, `<--`, `^`, `v`, `*`, `x`) to visualize architectures and state flows without rendering artifacts.
+3. **Lean on Defaults:** Standardize on repo-local `openspec/` and standard schemas without store checks.
 
 ---
 
@@ -50,7 +49,7 @@ Engage as an open-ended, visual thinking partner to explore problem spaces, eval
 When architectural thinking crystallizes and the user is ready to formalize a change:
 1. **Scaffold the change directory:**
    ```bash
-   npm run opsx -- new change "<change-name>"
+   openspec new change "<change-name>"
    ```
 2. **Capture insights directly:**
    Batch-stage initial planning artifacts (`proposal.md`, `design.md`, `specs/...`) directly to disk under `openspec/changes/<change-name>/`, or hand off to `/openspec-propose`.

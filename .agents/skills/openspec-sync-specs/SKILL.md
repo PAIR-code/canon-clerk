@@ -13,9 +13,8 @@ Intelligently merges delta specs from an active change into the repository's liv
 
 ## Operational Invariants
 
-1. **CLI Execution Invariant:** Always execute OpenSpec via npm scripts (`npm run opsx -- <command>` or `npm run openspec -- <command>`). Never invoke bare `openspec` or `npx openspec`.
-2. **Living Spec Format:** Living specs in `openspec/specs/` must never contain delta operation headers (`## ADDED/MODIFIED/REMOVED Requirements`). All requirements live directly under a single `## Requirements` section.
-3. **Coarse Validation:** Run validation as a post-sync hygiene check. Validation does not gate Git commits.
+1. **Living Spec Format:** Living specs in `openspec/specs/` must never contain delta operation headers (`## ADDED/MODIFIED/REMOVED Requirements`). All requirements live directly under a single `## Requirements` section.
+2. **Coarse Validation:** Run validation as a post-sync hygiene check. Validation does not gate Git commits.
 
 ---
 
@@ -66,7 +65,7 @@ Intelligently merge delta requirements into the existing living spec:
 
 Run spec validation to confirm syntax and schema hygiene:
 ```bash
-npm run opsx -- validate --specs --strict
+openspec validate --specs --strict
 ```
 Address any syntax issues found.
 
