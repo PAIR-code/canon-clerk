@@ -64,12 +64,21 @@ function execute_validate(
 Populates the `.validation` field on the cumulative `Caseload`:
 
 ```text
+struct CodeAnnotation:
+  path: String
+  start_line: Integer
+  end_line: Integer
+  start_column?: Integer
+  end_column?: Integer
+  annotation_level: "failure" | "warning" | "notice"
+  message: String
+  title?: String
+
 struct ValidatedCanonMetadata:
   result: "pass" | "fail"
   warning_count: Integer
-  warnings: List[String]
   error_count: Integer
-  errors: List[String]
+  diagnostics: List[CodeAnnotation]
 
 struct CaseloadValidation:
   // Map of canon paths to AST/schema validation metadata
@@ -95,7 +104,7 @@ If `has_errors == true`, the validation result records the failure diagnostics a
    - **Canon Naming Standard:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`).
    - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
    - **Directive Headers:** Validates `Exception`, `Rationale`, and `Remediation` directive blocks.
-4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon.
+4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon into precise line-and-column `CodeAnnotation`s (e.g. YAML parse errors, lowercase RFC 2119 keyword locations, unclosed directives).
 
 ---
 
@@ -122,10 +131,19 @@ error: No filing source or canon scope provided for validate.
         or provide a diff ('--diff -') or target files to validate triggered canons.
 ```
 
+### CLI Output Modes & GitHub Actions Integration
+- **Default (Terminal / Stylish):** Emits human-readable lint reports with file paths, line/column coordinates, and error summaries.
+- **GitHub Actions (CI Mode):** When executing in GitHub Actions (auto-detected via `GITHUB_ACTIONS=true` or `--format github`), emits native GitHub Actions workflow command annotations:
+  ```text
+  ::error file=.canons/security/rule.md,line=14,col=5,title=RFC 2119 Violation::Normative keyword 'must' must be uppercase 'MUST'.
+  ```
+  and appends the validation summary to `$GITHUB_STEP_SUMMARY`.
+- **`--json`:** Emits cumulative `Caseload` JSON containing structured `diagnostics` per canon.
+
 ### CLI Flags & Environment
 - `--all-canons`: Validates all canons in `.canons/**` by directing discovery to yield the full corpus.
 - `--max-warnings <n>`: Warning threshold before triggering non-zero exit code.
-- `--format <stylish|json|compact>`: Output formatting choice.
+- `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
 - `--quiet`: Suppress warnings and non-essential output.
 - `--caseload <path|->`: Ingests upstream Caseload.
 

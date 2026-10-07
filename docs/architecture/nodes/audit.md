@@ -151,10 +151,16 @@ error: No filing source provided for audit.
 ```
 Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff origin/main | canon-clerk audit --diff -` on an up-to-date branch), the pipeline cleanly short-circuits with exit code `0` ("0 modified files; 0 candidate canons matched; audit pass").
 
-### CLI Output & Stream Formatting
+### CLI Output Modes & GitHub Actions Integration
 - **TTY Progress:** Displays interactive spinners and step execution traces on `stderr`.
-- **Verdict Report:** Emits formatted Markdown or stylish terminal summary to `stdout`.
+- **Verdict Report (Terminal / Stylish):** Emits formatted Markdown or stylish terminal summary to `stdout` including the Pipeline Funnel Receipt and case adjudications.
+- **GitHub Actions (CI Mode):** When executing in GitHub Actions (auto-detected via `GITHUB_ACTIONS=true` or `--format github`), emits native GitHub Actions workflow command annotations:
+  ```text
+  ::error file=src/auth.rs,line=42,title=Canon Violation::Cache expiration policy not configured per cacheing-layers canon.
+  ```
+  for each `CodeAnnotation`, and appends the Pipeline Funnel Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY`.
 - **Telemetry Log:** Optionally redirects event stream via `--log-file <path>`.
+- **`--json`:** Emits cumulative `Caseload` JSON containing structured adjudications and annotations.
 
 ### CLI Flags & Environment
 - `--diff <path|->`: In-flight patch stream.
@@ -163,6 +169,7 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - `--admit-threshold <number>`: Upstream evidence admissibility threshold in telescoping mode (default: `0.5`).
 - `--auditor-model <model>`: Custom reasoning model specifier.
 - `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
+- `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
 - `--log-file <path>`: Telemetry event stream destination.
 - `--json`: Emits enriched Caseload JSON.
 
