@@ -12,7 +12,7 @@
 
 - name: "type: spec"
   color: "D4C5F9"
-  description: "Architecture contracts, OpenSpec, and canon specifications (non-releasing)."
+  description: "Living architecture contracts, SPEC.md, and canon specifications (non-releasing)."
 
 - name: "type: chore"
   color: "CFD3D7"

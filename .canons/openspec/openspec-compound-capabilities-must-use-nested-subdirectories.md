@@ -1,8 +1,9 @@
 ---
 triggers:
-  - "openspec/specs/**"
   - "openspec/changes/**/specs/**"
-  - "openspec/specs/**/spec.md"
+  - "openspec/specs/**"
+exists:
+  - "openspec/**"
 inspect:
   - diff
 tags:

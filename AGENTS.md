@@ -22,7 +22,11 @@ Canon Clerk uses a **triangular Git worktree layout**. Depending on how the work
   - When starting work on an issue, scaffold a new worktree using the `git-worktree` skill. 
 
 ### Level B: A Worktree Checkout (Repo Root)
-- **Characteristics:** Contains `.canons/`, `docs/`, `openspec/`, `README.md`, and project files directly in `.`.
+- **Characteristics:** Contains `.canons/`, `docs/`, `README.md`, and project files directly in `.`.
 - **DIRECTIVES FOR AGENTS:**
   - You are inside an active working branch. Proceed normally with code editing, testing, and Git operations.
-  - **OpenSpec Invariants:** Canon Clerk adheres to default OpenSpec conventions (`spec-driven` schema, repo-local root); draft and stage planning suites in cohesive batches without CLI micro-polling. Validation serves as an advisory hygiene check and does not gate Git commits.
+  - **Doc-Driven Architecture (DDA):** Canon Clerk follows a Doc-Driven engineering workflow. The living system architecture in `docs/architecture/` (and `SPEC.md`) is the authoritative source of truth. When planning or introducing substantive changes:
+    1. Update the authoritative contracts in `docs/architecture/` first.
+    2. Inspect the spec diff against `upstream/main` to identify affected components and contracts.
+    3. Draft an implementation plan and execute code changes matching the updated architecture.
+    4. Verify compliance via tests and typechecks before committing.

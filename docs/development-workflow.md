@@ -142,56 +142,35 @@ When you or your AI assistant encounter an unrelated bug, missing configuration,
 1. **Shunt it (Recommended):** Immediately file a new tracking issue documenting the problem, discovery context, and proposed fix. Keep your current branch and PR strictly focused on its original mandate.
 2. **Upstream Chase (Deliberate Expansion):** If the out-of-band change is genuinely coupled or strictly necessary for the current task to land, deliberately expand the mandate by updating the motivating Issue text and PR description *before* committing the change.
 
-### Spec-Driven Development (SDD) with OpenSpec
+### Doc-Driven Architecture (DDA)
 
-Canon Clerk employs **Spec-Driven Development (SDD)** via OpenSpec to specify architectural contracts, CLI flags, exit codes, and engine behaviors before writing code.
+Canon Clerk employs **Doc-Driven Architecture (DDA)** to specify architectural contracts, DAG schemas, CLI flags, exit codes, and engine behaviors before writing code.
 
-Living specifications reside in `openspec/specs/` (e.g. `core`, `cli`, `action`), while active change proposals live in `openspec/changes/<change-name>/`.
+The living system architecture resides directly under [`docs/architecture/`](architecture/overview.md) (with formal canon syntax in [`SPEC.md`](../SPEC.md)). Rather than relying on external SDD tooling or separate specification silos, the documentation itself serves as the authoritative, executable design standard.
 
-#### The SDD Progression
+#### The DDA Progression
 
-1. **Design / Propose:**
-   - Author a change proposal containing `proposal.md`, `specs/<capability>/spec.md` (deltas with `## ADDED/MODIFIED/REMOVED Requirements` and `#### Scenario:` blocks), `design.md`, and `tasks.md`.
-   - Commit using the `spec(<surface>):` prefix.
-2. **Verify / TDD:**
-   - Author unit or conformance tests reflecting the spec requirements.
-3. **Implement:**
-   - Write code fulfilling the specification using `feat(<surface>):` or `fix(<surface>):`.
-4. **Baseline & Archive:**
-   - Archive the change using `openspec-archive-change` (or sync deltas via `openspec-sync-specs`), promoting changes into living specs under `openspec/specs/`.
+1. **Spec First (Design Phase):**
+   - Author or edit the relevant architectural documents under `docs/architecture/` (e.g. `overview.md`, `nodes/<stage>.md`, `scheduling.md`).
+   - Define pseudo-structs, stage-prefixed CLI flags, localized Mermaid dataflows, and exit code contracts.
+   - Commit using `spec(<surface>):` or `docs(architecture):`.
+2. **Diff Analysis & Planning:**
+   - Inspect the git diff against `upstream/main` to identify all contract shifts across models, flags, and domain logic.
+   - Draft an implementation tasklist organized into progressive milestones (domain models, adapters, tests, integration).
+3. **Verify / TDD & Implement:**
+   - Author unit, DAG scheduling, and conformance tests matching the documented specification.
+   - Write code fulfilling the architectural contract using `feat(<surface>):` or `fix(<surface>):`.
+4. **Baseline & Push:**
+   - Verify that all tests pass, exit codes adhere to the documented contract, and code matches the docs 1:1.
 
 #### Directing Your AI Assistant (Recommended)
 
 Prompt your assistant:
-> *"Propose a new spec for CLI streaming output"*  
-> *"Sync specs from the active change"*  
-> *"Apply the tasks from change cli-streaming"*  
-> *"Archive change cli-streaming"*
+> *"Plan implementation based on the architecture diff"*  
+> *"Draft a tasklist matching the updated configure node spec"*  
+> *"Implement tasks from the doc-driven plan"*  
 
-**What happens:** The assistant activates the appropriate OpenSpec skill in `.agents/skills/`:
-- `openspec-propose`: Drafts proposal, spec deltas, design, and implementation tasks.
-- `openspec-explore`: Explores problem space and codebase patterns.
-- `openspec-apply-change`: Executes implementation tasks step-by-step.
-- `openspec-sync-specs`: Semantically merges spec deltas into main specs without archiving.
-- `openspec-archive-change`: Completes tasks and promotes deltas into `openspec/specs/`.
-- `openspec-update-change`: Updates existing change artifacts.
-
-#### Under the Hood & Manual Fallback
-
-You can run the OpenSpec CLI commands directly:
-```bash
-# Validate all specs and active changes:
-openspec validate --all --strict
-
-# Create a new change proposal:
-openspec new change <change-name>
-
-# Check status of an in-flight change:
-openspec status --change <change-name>
-
-# Archive a completed change into living specs:
-openspec archive <change-name>
-```
+**What happens:** The assistant activates the `doc-driven-change` skill in `.agents/skills/doc-driven-change/` to inspect the documentation diff against `upstream/main`, structure a progressive task breakdown, and implement the change against the documented contracts.
 
 
 ---

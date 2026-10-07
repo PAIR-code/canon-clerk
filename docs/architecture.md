@@ -67,7 +67,7 @@ Comprehensive specifications for each of the nine imperative verb stages across 
 
 ---
 
-## 4. Spec-Driven Architecture
+## 4. Doc-Driven Architecture
 
-Architectural contracts for individual subsystems and capabilities are managed via OpenSpec under [`openspec/`](../openspec/).
+Architectural contracts for individual subsystems and pipeline stages are maintained directly as living specifications under [`docs/architecture/`](architecture/overview.md). All design decisions, data models, and functional invariants are documented authoritatively before code implementation.
 

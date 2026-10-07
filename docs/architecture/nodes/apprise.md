@@ -139,7 +139,7 @@ The CLI exposes `apprise` as the primary entry point for design-time and pre-fli
 # 1. Inline design intent with prospective target paths:
 canon-clerk apprise --intent "Refactor authentication to round-robin between providers" "src/auth" "src/frontend"
 
-# 2. Piping an OpenSpec proposal or design RFC from standard input:
+# 2. Piping a design proposal or RFC from standard input:
 canon-clerk apprise src/auth --intent "Rotate provider"
 
 # 3. Running against an upstream Caseload file:

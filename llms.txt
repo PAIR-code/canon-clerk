@@ -16,7 +16,7 @@ Key architectural concepts:
 - [Canon Authoring Canons](.canons/canon-authoring/): Reusable, project-agnostic exemplars tagged `canon-authoring` codifying canon-authoring invariants (naming, atomicity, falsifiability, semantic scope, succinctness, and directive contracts).
 - [README Authoring Canons](.canons/readme-authoring/): Reusable, project-agnostic exemplars tagged `readme-authoring` codifying landing documentation invariants (orientation, feature parity, roadmap omission, responsive hero banners, and architecture shunting).
 - [Visual Identity Canons](.canons/visual-identity/): Reusable exemplars tagged `visual-identity` codifying brand iconography isolation and alpha transparency.
-- [OpenSpec Canons](.canons/openspec/): Reusable exemplars tagged `openspec` codifying Spec-Driven Development invariants for features and bug fixes.
+- [OpenSpec Canons](.canons/openspec/): Reference canon pack tagged `openspec` codifying Spec-Driven Development invariants for external projects using OpenSpec.
 - [Dogfood Canons](.canons/internal/): Internal project governance policies tagged `internal` enforced in CI on this repository.
 
 ## The Clerk Runner
@@ -26,7 +26,6 @@ Key architectural concepts:
 - [DAG Scheduling & Execution](docs/architecture/scheduling.md): Transitive dependency closure calculation, branch pruning, guarded lazy scheduling, and static schedule lookup table.
 - [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit, apprise).
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
-- [Living Specifications](openspec/): Spec-driven capability specifications and architecture contracts.
 
 ## Agent & Contributor Orientation
 
