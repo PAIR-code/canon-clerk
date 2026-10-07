@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`probe`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`probe`), GitHub Action
 
 ---
 
@@ -119,9 +119,3 @@ canon-clerk probe --json
 1. **Diagnostic Action Step:** Invoked in dedicated connectivity workflows or self-hosted runner validation actions.
 2. **Summary Emission:** Emits reachability tables and latency metrics to `GITHUB_STEP_SUMMARY`.
 3. **Fail-Fast Gating:** Fails CI pipelines early if remote AI provider endpoints are down or firewall rules block egress.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeProbe` against live Gemini endpoints to assert real-world authentication, network latency bounds, and endpoint stability before running deep adjudication test suites.

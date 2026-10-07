@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`apprise`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`apprise`), GitHub Action
 
 ---
 
@@ -176,13 +176,4 @@ In CI and pull request automation, `apprise` is utilized in **Pre-Implementation
 1. **Draft PR Guidance:** When an author opens a Draft PR or an issue with an architectural specification, the action runs `executeApprise` against the PR description and modified paths.
 2. **Apprisal Comment / Step Summary:** Posts a non-blocking `GITHUB_STEP_SUMMARY` or pull request comment summarizing applicable canons and their applicability rationales, providing notice *before* substantive review.
 3. **Zero-Failure Gate:** As a procedural notice, `apprise` never fails a CI build (`conclusion: 'neutral'` or `'success'`).
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeApprise` against simulated design intents, verifying that:
-- Prospective intent queries accurately identify applicable canons and reject inapplicable rules.
-- `apprisalSummary` rationales and `apprisalScore` distributions are grounded and reproducible.
-- Machine-readable JSON schemas strictly validate across runs without missing fields.
 

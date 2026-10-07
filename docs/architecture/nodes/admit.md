@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`admit`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`admit`), GitHub Action
 
 ---
 
@@ -151,9 +151,3 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 1. **Evidence Screening Step:** Invokes `executeAdmit` with the `Caseload`.
 2. **Exhibit Accounting:** Logs admitted diff hunks and persistent references per case.
 3. **Early Exit:** If zero cases retain admitted evidence, concludes the Check Run as passing without scheduling reasoning models.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeAdmit` across multi-file PR fixtures, verifying that peripheral changes (e.g. docs, lockfiles) are cleanly filtered out from active cases governing code conventions.

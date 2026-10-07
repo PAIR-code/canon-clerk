@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`docket`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`docket`), GitHub Action
 
 ---
 
@@ -155,9 +155,3 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 1. **Macro Screening Step:** Calls `executeDocket` with the cumulative `Caseload`.
 2. **Telemetry Reporting:** Logs screened candidate canons and active docket admissions to workflow step output.
 3. **Early Exit:** If `activeDocket.length === 0`, marks the Check Run successful with a notice that all candidate canons were dismissed at screening, concluding the PR review in <3 seconds.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeDocket` against recorded PR fixtures and live Gemini endpoints, verifying that trie-constrained decoding strictly adheres to JSON schemas and produces consistent `colorabilityScore` determinations.

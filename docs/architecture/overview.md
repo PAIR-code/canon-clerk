@@ -92,7 +92,6 @@ flowchart TD
     subgraph DrivingAdapters ["Driving Adapters (Ports)"]
         CLI["CLI Adapter<br/>(Flags, POSIX stdin Streams, Exit Codes, Progress)"]
         Action["CI / GitHub Action<br/>(PR Metadata, Linked Issues, Check Runs, Annotations)"]
-        Integ["Integration Test Driver<br/>(Live Provider Testing, Fixture Assertions)"]
     end
 
     subgraph CoreEngine ["The Caseload Domain Engine"]
@@ -104,8 +103,6 @@ flowchart TD
     CLI --> Core
     CLI --> Config
     Action --> Core
-    Integ --> Core
-    Integ --> Config
 
     Config --> Core
     Core --> Schema
@@ -119,7 +116,6 @@ flowchart TD
 ### The Driving Adapters (The External Ports)
 - **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
 - **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations.
-- **Integration Test Driver:** Test driver that feeds real/fixture Caseloads directly into engine and configuration functions against live networked provider services.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`discover`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`discover`), GitHub Action
 
 ---
 
@@ -164,9 +164,3 @@ git diff origin/main | canon-clerk discover -q -
 1. **Automated Candidate Check:** Calls `executeDiscover` with the Caseload produced by `executeIntake`.
 2. **Fast-Pass Evaluation:** If `candidateCanons.length === 0`, the action records a successful, neutral Check Run conclusion (`neutral` or `success`), logs that no governed files were touched, and terminates cleanly in <2 seconds without requiring `GEMINI_API_KEY`.
 3. **Step Summary:** Emits a Markdown table of matched canons and triggering files into `GITHUB_STEP_SUMMARY`.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeDiscover` directly against simulated monorepo directory layouts, asserting that scope inheritance (`.canons/cli/` $\implies$ `src/cli/**`) and complex glob patterns match accurately across OS platforms.

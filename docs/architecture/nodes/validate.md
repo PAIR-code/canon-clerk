@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`validate`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`validate`), GitHub Action
 
 ---
 
@@ -140,9 +140,3 @@ error: No filing source or canon scope provided for validate.
 1. **Pre-Flight Validation:** Executes `executeValidate` on all candidate canons identified during `discover`.
 2. **Annotation Generation:** Converts syntax or schema errors into GitHub Actions error annotations (`::error file=path,line=n::message`), pointing PR authors to the exact line of the malformed canon.
 3. **Fail-Fast:** If `hasErrors === true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeValidate` on fixture canons containing deliberately malformed frontmatter, non-atomic invariants, and invalid RFC 2119 syntax, verifying that AST errors are captured deterministically across test runners.

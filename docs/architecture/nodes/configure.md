@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`configure`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`configure`), GitHub Action
 
 ---
 
@@ -118,9 +118,3 @@ canon-clerk configure --screener-model google:gemini-3.5-flash-lite --auditor-mo
 1. **Secret & Input Mapping:** Maps workflow inputs (`api-key`, `screener-model`, `auditor-model`, `reasoning-budget`) and repository secrets into `ConfigureOptions`.
 2. **JIT Invocation:** Evaluates `executeConfigure` only after `executeDiscover` yields $>0$ candidate canons.
 3. **Missing Secret Reporting:** If `GEMINI_API_KEY` is absent on a PR requiring AI adjudication, posts an actionable failure annotation instructing maintainers to configure repository secrets for fork PRs.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests invoke `executeConfigure` with test environment variables and scoped credentials, verifying that model configurations resolve properly before executing live network requests.

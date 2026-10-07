@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`intake`), GitHub Action, Integration Tests
+**Driving Adapters:** CLI (`intake`), GitHub Action
 
 ---
 
@@ -151,9 +151,3 @@ The GitHub Action runner adapts GitHub Actions workflow events into the `core` i
 2. **PR Context Extraction:** Extracts `pr_title` and `pr_body` directly from the workflow payload (`github.context.payload.pull_request`).
 3. **Linked Issues Resolution:** Inspects the PR body for closing keywords (`Fixes #123`, `Closes #456`) and queries the GitHub API to populate `linkedIssues` with titles and bodies.
 4. **Delegation:** Passes all resolved artifacts directly into `executeIntake(options)`.
-
----
-
-## 7. Driving Adapter: Integration Tests
-
-Integration tests programmatically invoke `executeIntake` with static patch fixtures and mock PR descriptions, verifying that diff parsing and `FileArtifact` generation remain bit-for-bit reproducible without spawning shell processes.
