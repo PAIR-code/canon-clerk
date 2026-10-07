@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`validate`), GitHub Action
+**Driving Adapter:** CLI (`validate`)
 
 ---
 
@@ -133,11 +133,3 @@ error: No filing source or canon scope provided for validate.
 - **0:** All evaluated candidate canons pass static linting (or 0 candidate canons matched from diff).
 - **1:** Validation errors detected, or warnings exceed `--max-warnings`.
 - **2:** Usage error, missing input source (naked invocation), or file access failure.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Pre-Flight Validation:** Executes `executeValidate` on all candidate canons identified during `discover`.
-2. **Annotation Generation:** Converts syntax or schema errors into GitHub Actions error annotations (`::error file=path,line=n::message`), pointing PR authors to the exact line of the malformed canon.
-3. **Fail-Fast:** If `has_errors == true`, posts a failing Check Run conclusion and stops the action run before contacting model providers.

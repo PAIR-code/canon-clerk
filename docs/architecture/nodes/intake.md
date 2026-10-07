@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`intake`), GitHub Action
+**Driving Adapter:** CLI (`intake`)
 
 ---
 
@@ -140,14 +140,3 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 ### CLI Exit Codes
 - **0:** Successful intake (including an empty filing from a clean diff stream).
 - **2:** Usage error, missing input source (naked invocation), unresolvable paths, or corrupted diff stream.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-The GitHub Action runner adapts GitHub Actions workflow events into the `core` intake interface:
-
-1. **Octokit Diff Fetching:** Automatically retrieves the pull request unified diff via the GitHub REST API (`octokit.rest.pulls.get({ mediaType: { format: 'diff' } })`), bypassing the need for a full local Git clone depth.
-2. **PR Context Extraction:** Extracts `pr_title` and `pr_body` directly from the workflow payload (`github.context.payload.pull_request`).
-3. **Linked Issues Resolution:** Inspects the PR body for closing keywords (`Fixes #123`, `Closes #456`) and queries the GitHub API to populate `linkedIssues` with titles and bodies.
-4. **Delegation:** Passes all resolved artifacts directly into `executeIntake(options)`.

@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`discover`), GitHub Action
+**Driving Adapter:** CLI (`discover`)
 
 ---
 
@@ -156,11 +156,3 @@ git diff origin/main | canon-clerk discover -q -
 - **0 (Short-Circuit):** Zero candidate canons matched from diff stream; logs summary and exits immediately.
 - **1 (Predicate Mode `-q`):** Exits 1 if zero candidate canons matched.
 - **2:** Usage error, missing input source (naked invocation), or invalid glob syntax.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Automated Candidate Check:** Calls `executeDiscover` with the Caseload produced by `executeIntake`.
-2. **Fast-Pass Evaluation:** If `candidate_canons` is empty, the action records a successful, neutral Check Run conclusion (`neutral` or `success`), logs that no governed files were touched, and terminates cleanly in <2 seconds without requiring `GEMINI_API_KEY`.
-3. **Step Summary:** Emits a Markdown table of matched canons and triggering files into `GITHUB_STEP_SUMMARY`.

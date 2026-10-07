@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`audit`), GitHub Action
+**Driving Adapter:** CLI (`audit`)
 
 ---
 
@@ -170,16 +170,3 @@ Conversely, if an explicitly designated stream yields zero diffs (e.g. `git diff
 - **0:** All evaluated cases pass (`status: 'pass'`, `compliance_score >= 0.5`), or 0 candidate canons matched from diff.
 - **1:** Architectural violation detected (`status: 'fail'`, `compliance_score < 0.5`).
 - **2:** Fatal error, missing filing source (naked invocation), missing credentials, or provider failure.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-1. **Full DAG Invocation:** Drives the complete Caseload pipeline to `executeAudit`.
-2. **GitHub Check Run Creation:**
-   - Creates a GitHub Check Run (`octokit.rest.checks.create`).
-   - Maps overall status to Check Run conclusion:
-     - `status: 'pass'` $\implies$ `conclusion: 'success'` 🟢
-     - `status: 'fail'` $\implies$ `conclusion: 'failure'` 🔴
-3. **Line-Level GitHub Annotations:** Converts `adjudications[].annotations` into Check Run annotations (`path`, `start_line`, `end_line`, `annotation_level: 'failure'`, `message`), placing visual review flags directly on the PR files diff tab.
-4. **Markdown Step Summary:** Writes an executive decree and per-case breakdown to `$GITHUB_STEP_SUMMARY`.

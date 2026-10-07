@@ -2,7 +2,7 @@
 
 **Status:** Authoritative Architectural Standard  
 **Core Domain Engine:** Caseload Domain Engine  
-**Driving Adapters:** CLI (`apprise`), GitHub Action
+**Driving Adapter:** CLI (`apprise`)
 
 ---
 
@@ -172,13 +172,4 @@ Conversely, if prospective target paths yield zero candidate canons in `discover
 ### CLI Exit Codes
 - **0:** Successful statutory apprisal (including clean short-circuits with 0 applicable canons).
 - **2:** Usage error, missing input source (naked invocation), provider connection failure, or invalid arguments.
-
----
-
-## 6. Driving Adapter: GitHub Action
-
-In CI and pull request automation, `apprise` is utilized in **Pre-Implementation & Draft PR Workflows**:
-1. **Draft PR Guidance:** When an author opens a Draft PR or an issue with an architectural specification, the action runs `executeApprise` against the PR description and modified paths.
-2. **Apprisal Comment / Step Summary:** Posts a non-blocking `GITHUB_STEP_SUMMARY` or pull request comment summarizing applicable canons and their applicability rationales, providing notice *before* substantive review.
-3. **Zero-Failure Gate:** As a procedural notice, `apprise` never fails a CI build (`conclusion: 'neutral'` or `'success'`).
 
