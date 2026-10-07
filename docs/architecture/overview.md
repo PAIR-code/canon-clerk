@@ -118,7 +118,7 @@ flowchart TD
 
 ### The Driving Adapters (The External Ports)
 - **CLI Adapter:** Driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, and event streams, and maps domain results to shell exit codes (`0`, `1`, `2`).
-- **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations ([`action-must-delegate-audit-to-core`](../../.canons/action/action-must-delegate-audit-to-core.md)).
+- **CI / Action Adapter:** Driving adapter translating CI workflow triggers, PR payloads (diffs, commit history, linked issues), and posting results as Check Runs, step summaries, and inline code annotations.
 - **Integration Test Driver:** Test driver that feeds real/fixture Caseloads directly into engine and configuration functions against live networked provider services.
 
 ---
