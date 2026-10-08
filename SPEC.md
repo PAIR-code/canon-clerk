@@ -88,7 +88,7 @@ All YAML frontmatter fields are _optional_. Default / Resolution Order describes
 
 | Field | Type | Default / Resolution Order | Description |
 | :--- | :--- | :--- | :--- |
-| **`id`** | `string` | 1. Frontmatter `id:`<br>2. Relative file stem / slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
+| **`id`** | `string` | 1. Frontmatter `id:`<br>2. File stem slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
 | **`title`** | `string` | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
 | **`triggers`** | `string[]` | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs defining the pull request file modifications that activate this canon for evaluation. |
 | **`exists`** | `string[]` | 1. Frontmatter `exists:`<br>2. `[]` (empty list) | Path globs of files that MUST exist in the target state (PR `HEAD`, local workspace, or speculative plan) for this canon to run; missing matches skip evaluation. |
@@ -106,10 +106,11 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * Replace whitespace, slashes (`/`), and underscore characters (`_`) with hyphens (`-`).
      * Strip invalid characters (retaining only lowercase ASCII alphanumeric characters `[a-z0-9]` and hyphens `-`).
      * Collapse consecutive hyphens into a single hyphen, and trim leading and trailing hyphens.
-   * **Implicit ID (Fallback):** If `id` is omitted, derive it from the file's path relative to its enclosing `.canons/` directory by stripping the `.md` extension and applying the normalization pipeline above (treating directory separators `/` as word boundaries).
+   * **Implicit ID (Fallback):** If `id` is omitted, derive it from the canon's file name (excluding directory paths) by stripping the `.md` extension and applying the normalization pipeline above.
    * **Validation:** A derived or explicit `id` MUST NOT be empty.
+   * **Diagnostic Path:** Implementations SHOULD report the path relative to the nearest enclosing `.canons/` directory (e.g. `agent-orientation/agents-md-must-be-unconditional`) in diagnostic outputs, logs, and triage summaries to guide human and AI agent triage.
    * *Example (Implicit):* `.canons/prs-must-include-tests.md` -> `prs-must-include-tests`
-   * *Example (Nested Implicit):* `.canons/auth/tokens-must-expire.md` -> `auth-tokens-must-expire`
+   * *Example (Nested Implicit):* `.canons/auth/tokens-must-expire.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
    * *Example (Explicit):* `id: "Auth: Token Expiry (v2)"` -> `auth-token-expiry-v2`
 
 2. **`title` Derivation:**
@@ -295,5 +296,5 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
 
 1. **Assertive Invariant Slugs (RECOMMENDED):**  
    Canons SHOULD be named using descriptive kebab-case slugs that state the invariant being enforced (e.g., `prs-must-document-new-features.md`, `services-must-maintain-bounded-contexts.md`).
-2. **Collision Resistance:**  
-   Because each canon maps to a distinct file path, collisions are structurally impossible. Implementations SHOULD display each canon's repository-relative path in user interfaces for disambiguation.
+2. **Collision Resistance & Disambiguation:**  
+   Because each canon maps to a distinct file path, collisions on the filesystem are structurally impossible. To disambiguate canons sharing identical names or IDs across disparate directories or monorepo scopes, implementations SHOULD display each canon's enclosing `.canons/`-relative diagnostic path or repository-relative path in user interfaces and reports.
