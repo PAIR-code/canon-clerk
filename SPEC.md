@@ -55,29 +55,37 @@ A nominal canon file that fails to embody these attributes SHOULD still be enfor
 
 ---
 
-## 3. File Discovery & Scoping
+## 3. Sourcing, Discovery & Scoping
 
-### 3.1 Canon Discovery & Scope
-By default, the **scope** of a canon is defined as the parent directory of the nearest `.canons/` directory in its path.
+### 3.1 Sourcing Categories
+Canons evaluate from three primary sourcing tiers:
 
-By default, canon discovery SHOULD search for all Markdown files matching the pattern:
-```text
-**/.canons/**/*.md
-```
-Implementations MAY allow or use a different pattern, for example to accommodate project-specific configuration. 
+1. **Local Workspace Canons:**  
+   Authored directly in the subject repository (e.g. `.canons/agent-orientation/agents-md-must-be-unconditional.md` or `packages/ui/.canons/prs-must-verify-accessibility.md`). Identified by workspace-relative file paths, preserving native IDE link clickability and terminal editor jumps.
+2. **Built-in Standard Canons:**  
+   Core standard canons bundled directly into the `canon-clerk` binary (e.g. `builtin:canon-authoring/canons-must-be-atomic`). Provided out-of-the-box for instant codex validation without requiring downstream repositories to re-author baseline engineering rules.
+3. **Library Canons (Rule Packs):**  
+   External canon rule packs imported or linked via workspace configuration under a unique pack namespace alias (e.g. `security:auth/tokens-must-expire`).
 
-### 3.2 Global Canons
-Canons residing in the repository root's `.canons/` directory are **global** and apply across the entire repository.
+> [!NOTE]
+> **Design Precedent:** The source-qualified identifier syntax (`builtin:<path>` and `<pack-alias>:<path>`) follows standard precedent established by tools such as Bazel repository labels (`@repo//pkg:target`) and ESLint rule plugins (`@scope/plugin/rule-name`). Local rules preserve workspace-relative file paths to guarantee native IDE link clickability and terminal editor jumps.
 
-### 3.3 Scoped Canons (Monorepo Packages)
-Canons MAY reside within subdirectories, such as monorepo packages or services:
-```text
-packages/ui/.canons/prs-must-verify-accessibility.md
-services/auth/.canons/tokens-must-expire-promptly.md
-```
-**Scoping Rule:** A canon located in `<scope>/.canons/` automatically inherits an implicit path boundary of `<scope>/**`. Implementations MUST NOT evaluate a scoped canon against files outside its assigned `<scope>/`.
+### 3.2 Workspace Discovery & Scoping
+Within the local workspace, discovery locates repository canons:
 
-**Subordination & Scope Containment:** A scoped canon MUST NOT refer to or in any way depend on files superior or external to its assigned `<scope>/`. All declared paths and glob patterns in `triggers:`, `exists:`, and `references:` MUST be evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal outside `<scope>/` (e.g. using `../`) MUST be rejected during validation as a schema error. If, to be functional, a canon requires accessing or inspecting files superior to its scope, that canon file MUST be hoisted to the relevant parent directory's `.canons/` directory (or the repository root), and narrowed via path prefixes in its `triggers`, `exists`, and `references` as needed.
+* **Default Discovery Pattern:** By default, canon discovery in the workspace searches for all Markdown files matching:
+  ```text
+  **/.canons/**/*.md
+  ```
+  Implementations MAY allow or use a different pattern, for example to accommodate project-specific configuration.
+* **Global Canons:** Canons residing in the workspace root's `.canons/` directory are **global** and apply across the entire repository.
+* **Scoped Canons (Monorepo Packages):** Canons MAY reside within subdirectories, such as monorepo packages or services:
+  ```text
+  packages/ui/.canons/prs-must-verify-accessibility.md
+  services/auth/.canons/tokens-must-expire-promptly.md
+  ```
+  * **Scoping Rule:** A canon located in `<scope>/.canons/` automatically inherits an implicit path boundary of `<scope>/**`. Implementations MUST NOT evaluate a scoped canon against files outside its assigned `<scope>/`.
+  * **Subordination & Scope Containment:** A scoped canon MUST NOT refer to or in any way depend on files superior or external to its assigned `<scope>/`. All declared paths and glob patterns in `triggers:`, `exists:`, and `references:` MUST be evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal outside `<scope>/` (e.g. using `../`) MUST be rejected during validation as a schema error. If, to be functional, a canon requires accessing or inspecting files superior to its scope, that canon file MUST be hoisted to the relevant parent directory's `.canons/` directory (or the repository root), and narrowed via path prefixes in its `triggers`, `exists`, and `references` as needed.
 
 ---
 
@@ -88,7 +96,7 @@ All YAML frontmatter fields are _optional_. Default / Resolution Order describes
 
 | Field | Type | Default / Resolution Order | Description |
 | :--- | :--- | :--- | :--- |
-| **`id`** | `string` | 1. Frontmatter `id:`<br>2. File stem slug | Machine identifier used in Check Runs, CLI output, and state tracking. |
+| **`id`** | `string` | 1. Frontmatter `id:`<br>2. File stem slug | Machine identifier used in Check Runs, CLI filtering, and state tracking. |
 | **`title`** | `string` | 1. Frontmatter `title:`<br>2. First `# Heading` in body<br>3. `id` value converted to Title Case | Human-readable title displayed in check run summaries and reports. |
 | **`triggers`** | `string[]` | 1. Frontmatter `triggers:`<br>2. `["**/*"]` (all files) | Path globs defining the pull request file modifications that activate this canon for evaluation. |
 | **`exists`** | `string[]` | 1. Frontmatter `exists:`<br>2. `[]` (empty list) | Path globs of files that MUST exist in the target state (PR `HEAD`, local workspace, or speculative plan) for this canon to run; missing matches skip evaluation. |
@@ -108,9 +116,11 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * Collapse consecutive hyphens into a single hyphen, and trim leading and trailing hyphens.
    * **Implicit ID (Fallback):** If `id` is omitted, derive it from the canon's file name (excluding directory paths) by stripping the `.md` extension and applying the normalization pipeline above.
    * **Validation:** A derived or explicit `id` MUST NOT be empty.
-   * **Diagnostic Path:** Implementations SHOULD report the path relative to the nearest enclosing `.canons/` directory (e.g. `agent-orientation/agents-md-must-be-unconditional`) in diagnostic outputs, logs, and triage summaries to guide human and AI agent triage.
-   * *Example (Implicit):* `.canons/prs-must-include-tests.md` -> `prs-must-include-tests`
-   * *Example (Nested Implicit):* `.canons/auth/tokens-must-expire.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
+   * **Diagnostic Path:** Implementations SHOULD report the path relative to the nearest enclosing `.canons/` directory or pack root (e.g. `agent-orientation/agents-md-must-be-unconditional`, `auth/tokens-must-expire`) in diagnostic outputs, logs, and triage summaries to guide human and AI agent triage.
+   * *Example (Local Implicit):* `.canons/prs-must-include-tests.md` -> `prs-must-include-tests`
+   * *Example (Nested Local Implicit):* `.canons/auth/tokens-must-expire.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
+   * *Example (Builtin Implicit):* `builtin:canon-authoring/canons-must-be-atomic.md` -> `canons-must-be-atomic` (diagnostic path: `canon-authoring/canons-must-be-atomic`)
+   * *Example (Pack Implicit):* `security:auth/tokens-must-expire.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
    * *Example (Explicit):* `id: "Auth: Token Expiry (v2)"` -> `auth-token-expiry-v2`
 
 2. **`title` Derivation:**
@@ -292,9 +302,12 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
 
 ---
 
-## 6. File Naming & Numbering Conventions
+## 6. File Naming & Collision Conventions
 
 1. **Assertive Invariant Slugs (RECOMMENDED):**  
    Canons SHOULD be named using descriptive kebab-case slugs that state the invariant being enforced (e.g., `prs-must-document-new-features.md`, `services-must-maintain-bounded-contexts.md`).
 2. **Collision Resistance & Disambiguation:**  
-   Because each canon maps to a distinct file path, collisions on the filesystem are structurally impossible. To disambiguate canons sharing identical names or IDs across disparate directories or monorepo scopes, implementations SHOULD display each canon's enclosing `.canons/`-relative diagnostic path or repository-relative path in user interfaces and reports.
+   Within Canon Clerk, canon identity and uniqueness are governed by their source-qualified reference (workspace-relative path for local canons, `builtin:<path>` for standard rules, or `<pack-alias>:<path>` for library canons):
+   * Within a single directory or pack root, filesystem uniqueness structurally prevents identical paths.
+   * Canons sharing identical filenames or derived `id`s across disparate sources (e.g. `builtin:auth/tokens-must-expire.md` vs local `.canons/auth/tokens-must-expire.md`) or disjoint monorepo scopes (e.g. `packages/auth/.canons/tokens-must-expire.md` vs `packages/billing/.canons/tokens-must-expire.md`) represent distinct statutory authorities and do NOT collide.
+   * In user-facing reports, summaries, and CLI outputs where bare `id`s would be ambiguous within an active evaluation run, implementations SHOULD qualify the display name using the canon's diagnostic path or source-qualified reference (e.g. `auth/tokens-must-expire`, `builtin:canon-authoring/canons-must-be-atomic`, `security:auth/tokens-must-expire`).
