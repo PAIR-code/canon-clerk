@@ -101,7 +101,7 @@ If `has_errors == true`, the validation result records the failure diagnostics a
    - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`).
    - **Scope Containment Verification:** Enforces that scoped canons located in `<scope>/.canons/**` do not attempt directory traversal (e.g. `../`) or declare paths superior or external to `<scope>/` in `triggers:`, `exists:`, or `references:`.
    - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
-   - **Canon Naming Standard:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`).
+   - **Canon Naming & ID Standards:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`), non-empty canonical `id` derivation from file stems, and scope-level `id` uniqueness.
    - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
    - **Directive Headers:** Validates `Exception`, `Rationale`, and `Remediation` directive blocks.
 4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon into precise line-and-column `CodeAnnotation`s (e.g. YAML parse errors, lowercase RFC 2119 keyword locations, unclosed directives).

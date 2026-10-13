@@ -83,13 +83,13 @@ struct CaseloadDiscovery:
   // Modified target file paths evaluated
   target_files: List[String]
 
-  // Discovered candidate canon paths matching targets (or full corpus)
+  // Discovered candidate canon paths or qualified references (e.g. .canons/..., builtin:..., <pack>:...) matching targets (or full corpus)
   candidate_canons: List[String]
 
   // Materialized active exhibits retained after mutual pruning with candidate canons
   active_exhibits: ActiveExhibits
 
-  // Map of canon paths to matched target file paths and inspected planes
+  // Map of canon paths/qualified references to matched target file paths and inspected planes
   triggers_join: Map[String, List[String]]
 ```
 
@@ -105,7 +105,7 @@ If `candidate_canons` is empty:
 1. **Exhibit Materialization:** Resolves exhibit discovery directives from `caseload.intake` (e.g. expanding directory recursion roots and matching target glob patterns against workspace checkout into concrete file exhibits).
 2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidate_canons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
-3. **Canon Corpus Enumeration:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`).
+3. **Canon Corpus Enumeration & Sourcing:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`), retaining their workspace-relative file paths (alongside any active `builtin:<category>/<rule>` or configured pack `<pack-alias>:<path>` rules).
 4. **Monorepo Subordination & Scope Containment:** Enforces strict boundary encapsulation:
    - Global canons in `.canons/**` apply repository-wide.
    - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` boundary:
