@@ -32,6 +32,7 @@ Key architectural concepts:
 - [Agent Guidelines](AGENTS.md): Operational orientation, architectural anchors, and workspace navigation instructions for AI coding assistants.
 - [Development Workflow](docs/development-workflow.md): Complete development guide covering issue claiming, triangular Git worktrees, Conventional Commit matrices, and pull request lifecycles.
 - [Conventional Commit Reference](docs/conventional-commits.md): Normative Conventional Commit matrix, surface-to-prefix mapping, SemVer rules, and GitHub label taxonomy.
+- [Agent Skills](.agents/skills/): Operational runbooks and POSIX shell scripts for AI coding assistants, including `github-triage` for auditing Conventional Commit `type:`/`scope:` label coverage.
 
 ## Optional
 

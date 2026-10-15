@@ -8,14 +8,15 @@ dist/
 *.tsbuildinfo
 
 # Environment variables & local credentials
-.env
-.env.*
+temp_auto_push.bat
 !.env.example
 
 # IDE and OS metadata
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
 *.swp
 *.swo
+.gitignore
+branch_structure.json
+config.bat
