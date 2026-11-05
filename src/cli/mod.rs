@@ -12,9 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{CommandFactory, Parser};
+//! Canon Clerk CLI driving adapter and subcommand router.
+
+pub mod intake;
+
+pub use intake::{IntakeArgs, run_intake};
+
+use clap::{CommandFactory, Parser, Subcommand};
+use std::fmt;
+use std::io;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+const ROOT_EXAMPLES: &str = "\
+Examples:
+  # Ingest a unified diff from standard input into a Caseload filing:
+  git diff origin/main | canon-clerk intake --diff -
+
+  # Ingest explicit target paths or globs:
+  canon-clerk intake src/lib.rs 'src/**/*.rs'";
 
 /// Canon Clerk CLI command-line argument parser.
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
@@ -24,25 +40,78 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
     version = env!("CARGO_PKG_VERSION"),
     about = "Automated review gate enforcing declarative engineering rule packs",
     long_about = "Canon Clerk is an automated review gate that enforces declarative engineering rule packs (canons) and repository-specific invariants.",
-    propagate_version = true
+    after_help = ROOT_EXAMPLES,
+    propagate_version = true,
+    subcommand_negates_reqs = true,
+    args_conflicts_with_subcommands = false
 )]
 pub struct Cli {
-    /// Primary positional operational targets (file paths, directories, or globs)
+    /// Optional Caseload DAG stage subcommand.
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+
+    /// Primary positional operational targets (file paths, directories, or globs).
     #[arg(
         value_name = "TARGETS",
         help = "Target file paths, directories, or globs to evaluate"
     )]
     pub targets: Vec<PathBuf>,
 
-    /// Diagnostic verbose flag with positive polarity
+    /// Diagnostic verbose flag with positive polarity.
     #[arg(
         short = 'v',
         long = "verbose",
+        global = true,
         help_heading = "Logging & Diagnostics",
         help = "Enable verbose diagnostic output"
     )]
     pub verbose: bool,
 }
+
+/// Top-level Caseload DAG stage subcommands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum Commands {
+    /// Universal front door: ingest diffs, target paths, design intent, or PR metadata.
+    Intake(IntakeArgs),
+}
+
+/// Structured CLI error carrying a standardized POSIX exit code (`1` runtime, `2` usage/input).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliError {
+    exit_code: i32,
+    message: String,
+}
+
+impl CliError {
+    /// Constructs a usage or input error that terminates with exit code `2`.
+    pub fn usage(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: 2,
+            message: message.into(),
+        }
+    }
+
+    /// Constructs a runtime execution error that terminates with exit code `1`.
+    pub fn runtime(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: 1,
+            message: message.into(),
+        }
+    }
+
+    /// Returns the shell exit code associated with this error.
+    pub fn exit_code(&self) -> i32 {
+        self.exit_code
+    }
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for CliError {}
 
 impl Cli {
     /// Renders the standardized help screen as a String.
@@ -72,14 +141,27 @@ pub fn init_logging(verbose: bool) {
         .ok();
 }
 
-/// Executes the baseline CLI application logic.
-pub fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+/// Executes the CLI application logic and routes subcommands.
+pub fn run(cli: Cli) -> Result<(), CliError> {
     init_logging(cli.verbose);
 
     tracing::debug!("Initialized Canon Clerk CLI runtime");
 
+    if let Some(command) = &cli.command {
+        match command {
+            Commands::Intake(args) => {
+                let mut stdin = io::stdin().lock();
+                let mut stdout = io::stdout().lock();
+                run_intake(args, &mut stdin, &mut stdout)?;
+                return Ok(());
+            }
+        }
+    }
+
     if cli.targets.is_empty() {
-        Cli::command().print_help()?;
+        Cli::command()
+            .print_help()
+            .map_err(|err| CliError::runtime(err.to_string()))?;
         println!();
         return Ok(());
     }
@@ -95,6 +177,7 @@ mod tests {
     #[test]
     fn test_cli_parse_empty() {
         let cli = Cli::try_parse_from(["canon-clerk"]).expect("parsing empty args should succeed");
+        assert!(cli.command.is_none());
         assert!(cli.targets.is_empty());
         assert!(!cli.verbose);
     }
@@ -107,6 +190,29 @@ mod tests {
         assert_eq!(cli.targets[0], PathBuf::from("src/lib.rs"));
         assert_eq!(cli.targets[1], PathBuf::from("SPEC.md"));
         assert!(!cli.verbose);
+    }
+
+    #[test]
+    fn test_cli_parse_intake_subcommand() {
+        let cli = Cli::try_parse_from([
+            "canon-clerk",
+            "intake",
+            "--diff",
+            "-",
+            "--pr-title",
+            "feat: test",
+            "--json",
+        ])
+        .expect("parsing intake subcommand should succeed");
+
+        match cli.command {
+            Some(Commands::Intake(args)) => {
+                assert_eq!(args.diff.as_deref(), Some("-"));
+                assert_eq!(args.pr_title.as_deref(), Some("feat: test"));
+                assert!(args.json);
+            }
+            None => panic!("expected Intake subcommand"),
+        }
     }
 
     #[test]
@@ -141,6 +247,10 @@ mod tests {
         assert!(
             help.contains("TARGETS"),
             "help screen must document positional TARGETS"
+        );
+        assert!(
+            help.contains("intake"),
+            "help screen must document intake subcommand"
         );
     }
 

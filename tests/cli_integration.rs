@@ -149,6 +149,23 @@ fn test_cli_verbose_diagnostic_emits_to_stderr() {
 }
 
 #[test]
+fn test_cli_subcommand_dispatch_routes_exit_codes() {
+    // Verify top-level binary routes subcommand usage errors to exit code 2
+    let fail_out = Command::new(bin_path())
+        .arg("intake")
+        .output()
+        .expect("failed to execute canon-clerk intake");
+    assert_eq!(fail_out.status.code(), Some(2));
+
+    // Verify top-level binary routes subcommand success to exit code 0
+    let ok_out = Command::new(bin_path())
+        .args(["intake", "src/lib.rs", "--json"])
+        .output()
+        .expect("failed to execute canon-clerk intake src/lib.rs --json");
+    assert_eq!(ok_out.status.code(), Some(0));
+}
+
+#[test]
 fn test_cli_cold_start_latency() {
     // Benchmark repeated executions of --version to measure process cold start latency
     let bin = bin_path();

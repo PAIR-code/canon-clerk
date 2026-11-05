@@ -22,7 +22,7 @@ pub use caseload::{
     CASELOAD_SCHEMA_VERSION, Caseload, CaseloadIntake, ContentOmissionReason, FileArtifact,
     FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason,
 };
-pub use cli::{Cli, init_logging, run};
+pub use cli::{Cli, CliError, Commands, IntakeArgs, init_logging, run, run_intake};
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 
 #[cfg(test)]
