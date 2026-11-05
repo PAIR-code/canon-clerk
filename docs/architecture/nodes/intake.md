@@ -8,7 +8,7 @@
 
 ## 1. Domain Concept & Role (`core`)
 
-`intake` serves as the **Universal Front Door** of the Canon Clerk evaluation pipeline. In the court clerkship taxonomy, it represents the formal clerk receiving in-flight filings at the intake counter. It catalogs the initial **tendered exhibits** (literal metadata such as `pr_title`, `pr_body`, `commit_messages`, `linkedIssues`, and unified patch streams) alongside **exhibit discovery directives** (explicit file paths, directory pointers for recursive traversal, and glob patterns) into standardized, immutable structures on the `Caseload`.
+`intake` serves as the **Universal Front Door** of the Canon Clerk evaluation pipeline. In the court clerkship taxonomy, it represents the formal clerk receiving in-flight filings at the intake counter. It catalogs the initial **tendered exhibits** (literal metadata such as `pr_title`, `pr_body`, `commit_messages`, `linked_issues`, and unified patch streams) alongside **exhibit discovery directives** (explicit file paths, directory pointers for recursive traversal, and glob patterns) into standardized, immutable structures on the `Caseload`.
 
 - **Imperative Verb:** `intake`
 - **Court Clerkship Role:** Filing intake, document receipt, and cataloging of tendered exhibits.
@@ -44,61 +44,32 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct IntakeOptions:
-  pr_title?: String
-  pr_body?: String
-  intent?: String
-  target_paths?: List[String]
-  patch_content?: String
-  all_targets?: Boolean
-  linked_issues?: List[LinkedIssueContext]
-
-function execute_intake(
-  options: IntakeOptions,
-  caseload?: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.intake` field on the cumulative `Caseload`:
+`intake` populates the `.intake` namespace on the cumulative `Caseload` envelope with three categories of filing records:
 
-```text
-struct CaseloadIntake:
-  // PR title or commit subject
-  pr_title?: String
+- **Tendered Metadata Exhibits:** Literal pull request or commit context (`pr_title`, `pr_body`), prospective architectural design `intent`, and optional `linked_issues` context (issue number, title, body, and canonical URL).
+- **Target Scope & Discovery Directives:** Normalized target scope (`"targeted"` vs. `"all-targets"`) and explicit target path, directory, or glob pattern directives (`target_paths`) queued for downstream materialization in `discover`.
+- **Parsed File Exhibits (`diffs`):** In-flight code modifications parsed from unified diff streams into immutable `FileArtifact` records keyed by repository-relative POSIX path. Each artifact captures file change `status` (`"added"`, `"modified"`, `"deleted"`, `"renamed"`, `"copied"`, `"unchanged"`), `previous_path` (when renamed or copied), insertion and deletion counts (`lines_added`, `lines_deleted`), unified hunk `patch` text, and explicit omission rationales.
 
-  // PR markdown description or commit body
-  pr_body?: String
-
-  // Design intent or prospective plan description
-  intent?: String
-
-  // Scope of intake targets
-  scope?: "targeted" | "all-targets"
-
-  // Ingested code modifications keyed by relative repository path
-  diffs: Map[String, FileArtifact]
-
-  // Optional linked issue context gathered from issue trackers
-  linked_issues?: List[LinkedIssueContext]
-```
+### Data Plane Invariants
+1. **Envelope Immutability:** Executing `intake` enriches `.intake` without mutating or discarding any pre-existing sections on an incoming `Caseload`.
+2. **Deterministic Serialization:** Map keys (`diffs`) and directive lists (`target_paths`) are maintained in deterministic lexicographical order so identical filings serialize to bit-for-bit identical `Caseload` JSON.
+3. **Explicit Omission Semantics:** When a `FileArtifact` omits its unified `patch` (e.g. `"unchanged"` for 100%-similarity renames, `"binary"`, `"oversized"`, `"not_requested"`) or full file `content` (`"not_requested"`, `"binary"`, `"oversized"`, `"deleted"`), it records an explicit omission reason (`patch_omission_reason`, `content_omission_reason`) rather than leaving absence ambiguous.
 
 ---
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), stdin token stream (`-`), `--all-targets`, or an incoming `--caseload`.
+1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`), or an incoming `--caseload`.
    - **Missing Source Guard (Naked Invocation):** Invoking `canon-clerk intake` with zero sources fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance. The CLI never silently hangs waiting for input on a TTY.
-   - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `targetPaths: []`) and exits `0`.
+   - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `target_paths: []`) and exits `0`.
 2. **Tendered Exhibits Cataloging:** Captures raw literal exhibits directly from the invocation context:
-   - Metadata exhibits: `pr_title`, `pr_body`, design `intent`, and any `linkedIssues`.
-   - File exhibits: Unified patch hunks parsed into immutable `FileArtifact` objects (`linesAdded`, `linesDeleted`, `patch`, `status`).
-3. **Exhibit Discovery Directives Cataloging:** When file paths, directory pointers, or glob patterns are provided, packages them as directives for downstream resolution in `discover`.
-4. **Target Scope Normalization:** When `allTargets: true` is passed, flags `scope: 'all-targets'` to instruct `discover` to materialize the entire repository codebase as target exhibits. (Note the crucial distinction: `--all-targets` operates on the *subject-matter codebase*, whereas `--all-canons` in `discover` operates on the *governing rule packs*).
-5. **Filesystem Context Verification:** Verifies local file existence and stat metadata for explicitly named file exhibits.
+   - Metadata exhibits: `pr_title`, `pr_body`, design `intent`, and any `linked_issues`.
+   - File exhibits: Unified patch hunks parsed into immutable `FileArtifact` objects (`lines_added`, `lines_deleted`, `patch`, `status`, `previous_path`, and omission reasons).
+3. **Exhibit Discovery Directives Cataloging (Pure In-Memory Handoff):** When file paths, directory pointers, or glob patterns are provided, `intake` normalizes and catalogs them in `target_paths` without probing or statting the workspace filesystem. Workspace file materialization and existence verification belong strictly to `discover`, keeping `intake` 100% pure in memory and supporting prospective (not-yet-existing) target paths alongside `--intent`.
+4. **Target Scope Normalization:** When `--all-targets` (`all_targets: true`) is passed, sets `scope: "all-targets"` to instruct `discover` to materialize the entire repository codebase as target exhibits; otherwise defaults to `scope: "targeted"`. (Note the crucial distinction: `--all-targets` operates on the *subject-matter codebase*, whereas `--all-canons` in `discover` operates on the *governing rule packs*).
 
 ---
 
@@ -140,4 +111,4 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 
 ### CLI Exit Codes
 - **0:** Successful intake (including an empty filing from a clean diff stream).
-- **2:** Usage error, missing input source (naked invocation), unresolvable paths, or corrupted diff stream.
+- **2:** Usage error, missing input source (naked invocation), conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--caseload`), or corrupted diff/JSON stream.
