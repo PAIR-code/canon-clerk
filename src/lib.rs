@@ -14,9 +14,16 @@
 
 //! Canon Clerk: Automated review gate enforcing declarative engineering rule packs.
 
+pub mod caseload;
 pub mod cli;
+pub mod intake;
 
-pub use cli::{Cli, init_logging, run};
+pub use caseload::{
+    CASELOAD_SCHEMA_VERSION, Caseload, CaseloadIntake, ContentOmissionReason, FileArtifact,
+    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason,
+};
+pub use cli::{Cli, CliError, Commands, IntakeArgs, init_logging, run, run_intake};
+pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 
 #[cfg(test)]
 mod tests {
