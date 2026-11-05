@@ -30,3 +30,15 @@ Canon Clerk uses a **triangular Git worktree layout**. Depending on how the work
     2. Inspect the spec diff against `upstream/main` to identify affected components and contracts.
     3. Draft an implementation plan and execute code changes matching the updated architecture.
     4. Verify compliance via tests and typechecks before committing.
+
+## 3. Agent Skills
+
+Reusable agent skills live under `.agents/skills/`. Each skill directory contains a
+`SKILL.md` operational runbook and companion POSIX shell scripts.
+
+| Skill | Directory | Purpose |
+|---|---|---|
+| `git-worktree` | `.agents/skills/git-worktree/` | Scaffold and manage triangular worktrees for issue work. |
+| `github-issues` | `.agents/skills/github-issues/` | List, search, and inspect GitHub issues with TSV/shunt views. |
+| `github-pr` | `.agents/skills/github-pr/` | Inspect pull request status and CI logs. |
+| `github-triage` | `.agents/skills/github-triage/` | Audit and backfill Conventional Commit `type:`/`scope:` labels across open issues and PRs. See [`.agents/skills/github-triage/SKILL.md`](.agents/skills/github-triage/SKILL.md). |
