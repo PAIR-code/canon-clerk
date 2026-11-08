@@ -165,9 +165,10 @@ To verify changes locally before pushing or opening a pull request, run the unif
 
 This executes the identical quality verification pipeline enforced by GitHub Actions CI:
 1. License header validation (`./scripts/check-license.sh`)
-2. Code formatting verification (`cargo fmt --check`)
-3. Strict compiler lints (`cargo clippy --all-targets --all-features -- -D warnings`)
-4. Full unit and integration test suites (`cargo test`)
+2. File size ceiling validation (`./scripts/check-file-size.sh`)
+3. Code formatting verification (`cargo fmt --check`)
+4. Strict compiler lints (`cargo clippy --all-targets --all-features -- -D warnings`)
+5. Full unit and integration test suites (`cargo test`)
 
 ---
 
