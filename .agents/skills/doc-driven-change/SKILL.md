@@ -26,8 +26,8 @@ flowchart LR
 - Author or update architectural specifications under `docs/architecture/` (or `SPEC.md`).
 - Ensure all relevant contracts are explicitly defined:
   - Localized Mermaid dataflow diagrams (inputs, outputs, exit codes).
-  - Caseload delta schemas (e.g., `CaseloadConfig`, `CaseloadDocket`).
-  - Core functional signatures and pseudo-structs.
+  - Conceptual caseload deltas (e.g., `.intake`, `.discovery`, `.config`, `.docket`) and data plane invariants.
+  - Domain logic steps, behavioral invariants, and short-circuit conditions.
   - CLI flags, environment fallbacks, and exit codes (`0`, `1`, `2`).
   - Stage-prefixed threshold scoping and reason-first LLM decoding schemas where applicable.
 - Commit doc-only changes using `spec(<surface>):` or `docs(architecture):`.

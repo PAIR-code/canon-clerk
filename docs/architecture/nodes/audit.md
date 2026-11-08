@@ -42,59 +42,18 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct AuditOptions:
-  auditor_model?: String
-  reasoning_budget?: Integer
-
-function execute_audit(
-  options: AuditOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.verdict` field on the cumulative `Caseload`:
+`audit` populates the `.verdict` namespace on the cumulative `Caseload` envelope with the final judicial decree and per-case trial outcomes:
 
-```text
-struct CodeAnnotation:
-  path: String
-  start_line: Integer
-  end_line: Integer
-  start_column?: Integer
-  end_column?: Integer
-  annotation_level: "failure" | "warning" | "notice"
-  message: String
-  title?: String
+- **Overall Gate Verdict (`status` & `summary`):** Top-level review gate `status` (`"pass"` when all adjudicated cases pass, or `"fail"` if any case fails) accompanied by a synthesized human-readable `summary`.
+- **Per-Case Substantive Adjudications (`adjudications`):** Stably ordered list of trial decrees (`CanonAdjudication`), one per adjudicated case (`canon_path`). Each record captures the model's `compliance_summary` (substantive decree explaining compliance, matched exceptions, or required remediation), continuous `compliance_score` in `[0.0, 1.0]`, deterministically derived case `status` (`"pass"` when `compliance_score >= 0.5`, else `"fail"`), and line-level `annotations`.
+- **Violation Line Annotations (`CodeAnnotation`):** Structured source locations (`path`, `start_line`, `end_line`, optional `start_column` and `end_column`, `annotation_level` of `"failure"`, `"warning"`, or `"notice"`, `message`, and optional `title`) pinpointing non-compliant code spans on the diff.
 
-struct CanonAdjudication:
-  // Canon file path evaluated
-  canon_path: String
-
-  // Compliance score indicating statute adherence [0.0, 1.0]
-  compliance_score: Float
-
-  // Substantive decree explaining compliance or violation
-  compliance_summary: String
-
-  // Verdict status
-  status: "pass" | "fail"
-
-  // Line-level code annotations
-  annotations: List[CodeAnnotation]
-
-struct CaseloadVerdict:
-  // Overall review gate outcome
-  status: "pass" | "fail"
-
-  // High-level verdict summary
-  summary: String
-
-  // Substantive adjudications per active case
-  adjudications: List[CanonAdjudication]
-```
+### Data Plane & Adjudication Invariants
+1. **Deterministic Verdict Aggregation:** The auditor model emits `compliance_summary`, `compliance_score`, and `annotations`; the domain engine deterministically derives each case's `status` against the `0.5` compliance threshold and sets `.verdict.status` to `"fail"` if and only if at least one case has `status: "fail"`.
+2. **Trial Isolation & Deterministic Ordering:** Concurrent per-case trials are assembled into `.verdict.adjudications` in deterministic lexicographical order by `canon_path`, ensuring bit-for-bit reproducible `Caseload` serialization regardless of async completion order.
 
 ---
 

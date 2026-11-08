@@ -41,42 +41,17 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct ProbeOptions:
-  timeout_ms?: Integer
-
-function execute_probe(
-  options: ProbeOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.probe` field on the cumulative `Caseload`:
+`probe` populates the `.probe` namespace on the cumulative `Caseload` envelope with live diagnostic health records for the configured model tiers:
 
-```text
-struct ProbeEndpointResult:
-  // Connection outcome
-  status: "ok" | "error"
+- **Screener Endpoint Health (`screener`):** Connectivity probe result for `.config.screener_model`, capturing connection `status` (`"ok"` or `"error"`), roundtrip `latency_ms`, resolved `model` identifier, and an optional diagnostic `error` message when unreachable or unauthorized.
+- **Auditor Endpoint Health (`auditor`):** Connectivity probe result for `.config.auditor_model` with the same diagnostic fields (`status`, `latency_ms`, `model`, and optional `error`).
 
-  // Roundtrip response latency in milliseconds
-  latency_ms: Integer
-
-  // Resolved model identifier probed
-  model: String
-
-  // Error message if connectivity failed
-  error?: String
-
-struct CaseloadProbe:
-  // Screener model endpoint probe result
-  screener: ProbeEndpointResult
-
-  // Auditor model endpoint probe result
-  auditor: ProbeEndpointResult
-```
+### Data Plane & Diagnostic Invariants
+1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`docket`, `admit`, `audit`, `apprise`), substantive review runs never populate or depend on `.probe`.
+2. **Non-Throwing Diagnostic Capture:** Endpoint timeouts, HTTP 4xx/5xx responses, and authentication rejections are captured inside the respective endpoint health record (`status: "error"`, `error: "<reason>"`) on `.probe` before the CLI adapter maps any failure to exit code `2`.
 
 ---
 

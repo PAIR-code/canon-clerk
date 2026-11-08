@@ -44,49 +44,17 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct AdmitOptions:
-  threshold?: Float // default: 0.5
-  screener_model?: String
-
-function execute_admit(
-  options: AdmitOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.evidence` field on the cumulative `Caseload`:
+`admit` populates the `.evidence` namespace on the cumulative `Caseload` envelope with micro evidentiary relevance records for each active case:
 
-```text
-struct AdmittedExhibit:
-  // Repository-relative path to admitted file or exhibit
-  file_path: String
+- **Per-Case Evidence Manifests (`exhibits`):** A deterministic map keyed by active canon identifier (`canon_path`), pairing each docketed case with its list of admitted `exhibits`.
+- **Admitted Exhibit Records (`AdmittedExhibit`):** Each admitted exhibit identifies the repository-relative `file_path` (or exhibit plane identifier), the model's `admissibility_summary` (rationale for admitting the exhibit into evidence for that canon), and its continuous `admissibility_score` in `[0.0, 1.0]` meeting or exceeding `--admit-threshold` (default `0.5`).
 
-  // Relevance score of exhibit to governing canon [0.0, 1.0]
-  admissibility_score: Float
-
-  // Rationale for admitting exhibit into evidence
-  admissibility_summary: String
-
-struct CanonEvidenceExhibits:
-  // Canon file path governing these exhibits
-  canon_path: String
-
-  // Admitted evidence exhibits
-  exhibits: List[AdmittedExhibit]
-
-struct CaseloadEvidence:
-  // Admitted exhibits keyed by canon path
-  exhibits: Map[String, CanonEvidenceExhibits]
-```
-
-### Domain Short-Circuit Invariant
-If all active cases retain zero admitted exhibits:
-- Execution terminates immediately with exit code `0`.
-- Zero substantive trials (`audit`) are scheduled, avoiding reasoning token expenditures.
+### Data Plane & Domain Short-Circuit Invariants
+1. **Evidentiary Filtering:** Exhibits scoring below `--admit-threshold` are excluded from the case's admitted `exhibits` list so downstream `audit` trials receive only relevant evidence.
+2. **Zero-Evidence Short-Circuit:** If every active case on `.docket.active_docket` retains zero admitted exhibits after threshold filtering, the engine attaches `.evidence` and halts downstream cascade execution immediately with exit code `0`, scheduling zero substantive `audit` trials.
 
 ---
 

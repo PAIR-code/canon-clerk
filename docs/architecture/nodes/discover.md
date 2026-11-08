@@ -50,60 +50,27 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct DiscoverOptions:
-  workspace_root: String
-  canon_globs?: List[String]
-  explicit_canon_filter?: List[String]
-  all_canons?: Boolean
-
-function execute_discover(
-  options: DiscoverOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.discovery` field on the cumulative `Caseload`:
+`discover` populates the `.discovery` namespace on the cumulative `Caseload` envelope with the resolved target scope and candidate canon intersection records:
 
-```text
-struct ActiveExhibits:
-  files: List[String]
-  pr_title?: Boolean
-  pr_body?: Boolean
-  commit_messages?: Boolean
-  linked_issues?: Boolean
+- **Discovery Mode & Target Files:** Records the active discovery `mode` (`"triggered"` vs. `"all-canons"`) and the resolved list of repository-relative `target_files` materialized from `.intake` directives and diffs.
+- **Candidate Canons (`candidate_canons`):** Stably sorted list of discovered canon file paths or qualified realm references (e.g. `.canons/...`, `builtin:...`, `<pack>:...`) whose state preconditions (`exists:`), path `triggers:`, and required `inspect:` planes match the filing (or the full repository corpus when `mode` is `"all-canons"`).
+- **Retained Active Exhibits (`active_exhibits`):** The pruned subset of materialized exhibits (`files`, `pr_title`, `pr_body`, `commit_messages`, `linked_issues`) triggered or inspected by at least one surviving candidate canon.
+- **Trigger Intersection Map (`triggers_join`):** Deterministic mapping from each candidate canon identifier to the specific matched target file paths and inspected exhibit planes that activated it.
 
-struct CaseloadDiscovery:
-  // Mode of discovery: trigger-filtered or full corpus
-  mode?: "triggered" | "all-canons"
-
-  // Modified target file paths evaluated
-  target_files: List[String]
-
-  // Discovered candidate canon paths or qualified references (e.g. .canons/..., builtin:..., <pack>:...) matching targets (or full corpus)
-  candidate_canons: List[String]
-
-  // Materialized active exhibits retained after mutual pruning with candidate canons
-  active_exhibits: ActiveExhibits
-
-  // Map of canon paths/qualified references to matched target file paths and inspected planes
-  triggers_join: Map[String, List[String]]
-```
-
-### Domain Short-Circuit Invariant
-If `candidate_canons` is empty:
-- The core engine sets `candidate_canons: []` and returns the enriched Caseload.
-- Downstream execution ceases immediately, returning a clean success state without evaluating configuration or spending tokens.
+### Data Plane & Domain Short-Circuit Invariants
+1. **Envelope Immutability & Deterministic Ordering:** Executing `discover` enriches `.discovery` without mutating upstream `.intake` records, maintaining `target_files`, `candidate_canons`, `active_exhibits.files`, and `triggers_join` keys in deterministic lexicographical order.
+2. **Mutual Pruning & Token Hygiene:** Any tendered exhibit not referenced by a surviving candidate canon is excluded from `active_exhibits`, guaranteeing that downstream heuristic stages never serialize un-inspected files or metadata into model prompts.
+3. **Empty Candidate Short-Circuit:** If `candidate_canons` is empty (`[]`), the engine attaches the empty `.discovery` record and halts downstream cascade execution immediately with a clean pass, bypassing provider configuration and spending zero tokens.
 
 ---
 
 ## 4. Process & Domain Logic (`core`)
 
 1. **Exhibit Materialization:** Resolves exhibit discovery directives from `caseload.intake` (e.g. expanding directory recursion roots and matching target glob patterns against workspace checkout into concrete file exhibits).
-2. **Plenary Canon Discovery (`--all-canons`):** When `allCanons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidate_canons` with `mode: 'all-canons'`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
+2. **Plenary Canon Discovery (`--all-canons`):** When `all_canons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidate_canons` with `mode: "all-canons"`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
 3. **Canon Corpus Enumeration & Sourcing:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`), retaining their workspace-relative file paths (alongside any active `builtin:<category>/<rule>` or configured pack `<pack-alias>:<path>` rules).
 4. **Monorepo Subordination & Scope Containment:** Enforces strict boundary encapsulation:
