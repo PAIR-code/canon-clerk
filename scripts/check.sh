@@ -32,7 +32,7 @@ echo "=== 2/4: Checking Code Formatting ==="
 cargo fmt --check
 
 echo "=== 3/4: Running Clippy Lints ==="
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 
 echo "=== 4/4: Running Test Suite ==="
 cargo test
