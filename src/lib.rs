@@ -14,10 +14,23 @@
 
 //! Canon Clerk: Automated review gate enforcing declarative engineering rule packs.
 
+pub mod canon;
 pub mod caseload;
 pub mod cli;
 pub mod intake;
 
+pub use canon::{
+    Canon, CanonBody, CanonMetadata, CanonParseError, CanonScope, CanonSourceInfo, CanonSourceKind,
+    CanonToken, CanonTokenKind, DEFAULT_FALLBACK_ID, DEFAULT_GLOBAL_TRIGGER_PATTERN,
+    DEFAULT_INSPECT_PLANES, DirectiveName, DirectiveOccurrence, ExtractedFrontmatter,
+    FrontmatterKeySpan, InspectPlane, InspectToken, ParseCanonOptions, RawFrontmatter, SourceSpan,
+    assemble_canon_from_tokens, derive_diagnostic_path, derive_exists, derive_id, derive_inspect,
+    derive_metadata, derive_references, derive_scope, derive_tags, derive_title, derive_triggers,
+    extract_first_heading, extract_first_heading_from_tokens, extract_frontmatter,
+    extract_frontmatter_from_tokens, has_directory_traversal, id_to_title_case,
+    normalize_canon_content, parse_body, parse_body_from_tokens, parse_canon, resolve_source_info,
+    scope_pattern, to_kebab_case, tokenize_canon,
+};
 pub use caseload::{
     CASELOAD_SCHEMA_VERSION, Caseload, CaseloadIntake, ContentOmissionReason, FileArtifact,
     FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason,
