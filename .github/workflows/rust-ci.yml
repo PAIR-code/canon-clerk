@@ -33,6 +33,9 @@ jobs:
       - name: Check license headers
         run: ./scripts/check-license.sh
 
+      - name: Check file size bounds
+        run: ./scripts/check-file-size.sh
+
       - name: Check code formatting
         run: cargo fmt --check
 
