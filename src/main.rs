@@ -25,7 +25,7 @@ fn main() {
         }
         Err(err) => {
             let exit_code = if err.use_stderr() { 2 } else { 0 };
-            err.print().expect("Failed to write CLI output to terminal");
+            let _ = err.print();
             std::process::exit(exit_code);
         }
     }
