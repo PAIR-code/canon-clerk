@@ -47,49 +47,18 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct ValidateOptions:
-  workspace_root: String
-  max_warnings?: Integer
-
-function execute_validate(
-  options: ValidateOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.validation` field on the cumulative `Caseload`:
+`validate` populates the `.validation` namespace on the cumulative `Caseload` envelope with deterministic static analysis results for all candidate canons:
 
-```text
-struct CodeAnnotation:
-  path: String
-  start_line: Integer
-  end_line: Integer
-  start_column?: Integer
-  end_column?: Integer
-  annotation_level: "failure" | "warning" | "notice"
-  message: String
-  title?: String
+- **Per-Canon Validation Metadata (`results`):** A deterministic map keyed by candidate canon identifier recording each canon's overall `result` (`"pass"` or `"fail"`), `warning_count`, `error_count`, and structured `diagnostics`.
+- **Line-and-Column Diagnostics (`CodeAnnotation`):** Each diagnostic entry pinpoints the target `path`, 1-based line span (`start_line`, `end_line`), optional column span (`start_column`, `end_column`), severity `annotation_level` (`"failure"`, `"warning"`, `"notice"`), diagnostic `message`, and optional rule `title`.
+- **Aggregate Error Flag (`has_errors`):** Boolean summary indicating whether any evaluated candidate canon produced one or more validation errors (or exceeded `--max-warnings`).
 
-struct ValidatedCanonMetadata:
-  result: "pass" | "fail"
-  warning_count: Integer
-  error_count: Integer
-  diagnostics: List[CodeAnnotation]
-
-struct CaseloadValidation:
-  // Map of canon paths to AST/schema validation metadata
-  results: Map[String, ValidatedCanonMetadata]
-
-  // True if any candidate canon contains lint errors
-  has_errors: Boolean
-```
-
-### Domain Error Invariant
-If `has_errors == true`, the validation result records the failure diagnostics and signals an immediate abort before loading environment credentials or spending tokens.
+### Data Plane & Domain Error Invariants
+1. **Envelope Immutability & Deterministic Ordering:** Executing `validate` enriches `.validation` without mutating upstream `.intake` or `.discovery` namespaces, maintaining `results` keys and diagnostic lists in deterministic order.
+2. **Pre-Flight Fail-Fast Gate (`has_errors == true`):** When `has_errors` is true, the engine records the complete set of `diagnostics` on `.validation` and aborts downstream cascade execution immediately (exit code `1`) before resolving provider credentials (`configure`) or spending model tokens.
 
 ---
 

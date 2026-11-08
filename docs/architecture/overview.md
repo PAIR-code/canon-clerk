@@ -227,40 +227,12 @@ The `Caseload` is the central, immutable data envelope flowing through the pipel
 
 The formal Caseload domain models and granular payload schemas are specified in each node's architectural document.
 
-### The Top-Level `Caseload` Envelope
+### Top-Level Envelope Constraints
 
-```text
-struct Caseload:
-  // Schema specification version
-  version: "1.0"
-
-  // Intake: Change diffs (FileArtifacts), target paths, prospective intent, or PR metadata
-  intake?: CaseloadIntake
-
-  // Discovery: Matched target paths, candidate canons, and trigger intersections
-  discovery?: CaseloadDiscovery
-
-  // Validation: Candidate canons syntax and frontmatter AST validation results
-  validation?: CaseloadValidation
-
-  // Configuration: Provider credentials, runtime options, and model specifiers
-  config?: CaseloadConfig
-
-  // Probe (Diagnostic Leaf): Live provider connectivity and latency test results
-  probe?: CaseloadProbe
-
-  // Apprisal (Statutory Notice): Prospective applicability assessments against design intent
-  apprisal?: CaseloadApprisal
-
-  // Docket (Macro Triage): Colorability assessments and active cases admitted to docket
-  docket?: CaseloadDocket
-
-  // Evidence (Micro Triage): Admitted exhibits and relevance scores per active case
-  evidence?: CaseloadEvidence
-
-  // Verdict (Adjudication): Substantive compliance decrees and line annotations
-  verdict?: CaseloadVerdict
-```
+1. **Schema Versioning (`version`):** Every serialized `Caseload` envelope carries a top-level `version` identifier (currently `"1.0"`) establishing wire-format compatibility across piped CLI invocations and archived CI artifacts.
+2. **Stage Namespace Isolation:** Each pipeline stage owns a dedicated, non-overlapping top-level optional namespace on the `Caseload` envelope (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.verdict`). Unexecuted or pruned stages are omitted from serialized JSON rather than emitted as null placeholders.
+3. **Additive Immutability:** Stages enrich only their designated namespace while preserving all pre-existing upstream namespaces bit-for-bit.
+4. **Deterministic Wire Representation:** All map keys and entity collections across stage payloads serialize in deterministic lexicographical order so identical evaluations yield byte-for-byte identical JSON envelopes.
 
 ### Stage Payloads & Authoritative Specifications
 
@@ -287,14 +259,10 @@ Downstream subcommands fast-forward across any stage whose corresponding namespa
 Canon Clerk strictly separates **substantive evaluation records** from **operational execution telemetry**:
 
 - **Substantive Record (`Caseload`):** Represents solely substantive findings. Identical inputs evaluated at temperature 0 produce bit-for-bit identical `caseload.json` files, enabling clean git diffs, content-addressable cache keys, and regression snapshot tests.
-- **Event Logging (`stderr` / `--log-file`):** Operational metrics (wall-clock milliseconds, token usage, time-to-first-token/thought) and streaming intermediate chunks (thought deltas) are emitted via an **Event Stream**:
-
-```text
-enum CaseloadEvent:
-  StageStart    { stage: PipelineStage, timestamp: String }
-  Thought       { stage: PipelineStage, delta: String }
-  StageFinish   { stage: PipelineStage, duration_ms: Integer, usage?: ModelUsage }
-  PipelineFinish { total_duration_ms: Integer, total_tokens?: ModelUsage }
-```
+- **Event Logging (`stderr` / `--log-file`):** Operational metrics (wall-clock milliseconds, token usage, time-to-first-token/thought) and streaming intermediate chunks (thought deltas) are emitted out-of-band via a structured **Telemetry Event Stream** comprising four lifecycle event categories:
+  - **Stage Start (`StageStart`):** Signals entry into a `PipelineStage` along with an ISO-8601 `timestamp`.
+  - **Reasoning Delta (`Thought`):** Streams incremental model reasoning `delta` chunks associated with an active `PipelineStage`.
+  - **Stage Completion (`StageFinish`):** Records stage completion with elapsed wall-clock `duration_ms` and optional token `usage` metrics.
+  - **Pipeline Completion (`PipelineFinish`):** Summarizes cumulative `total_duration_ms` and aggregate `total_tokens` across the completed DAG closure.
 
 Interactive CLI runs format this stream to `stderr` for spinners and terminal progress indicators, while automated CI pipelines capture it in workflow logs or write it via `--log-file <path>`.

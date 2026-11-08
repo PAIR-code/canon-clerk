@@ -51,52 +51,16 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct AppriseOptions:
-  // Minimum apprisal salience threshold [0.0, 1.0] to designate status as 'applicable' (default: 0.5)
-  threshold?: Float
-
-  // Optional screener model override
-  screener_model?: String
-
-  // Injectable ModelClient for testing or provider overrides
-  client?: ModelClient
-
-  // Cancellation and timeout token
-  cancel_token?: CancellationToken
-
-function execute_apprise(
-  options: AppriseOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.apprisal` field on the cumulative `Caseload`:
+`apprise` populates the `.apprisal` namespace on the cumulative `Caseload` envelope with prospective statutory notice records:
 
-```text
-struct ApprisalAssessment:
-  // Relevance score indicating prospective jurisdiction over stated intent [0.0, 1.0]
-  apprisal_score: Float
+- **Per-Canon Apprisal Assessments (`assessments`):** A deterministic map keyed by candidate canon identifier. Each assessment captures the model's `apprisal_summary` (rationale explaining why the canon does or does not govern the planned design intent and target scope), continuous `apprisal_score` in `[0.0, 1.0]`, and deterministically derived `apprisal_status` (`"applicable"` when `apprisal_score >= threshold`, otherwise `"dismissed"`).
 
-  // Rationale explaining why this canon governs (or does not govern) prospective intent
-  apprisal_summary: String
-
-  // Status outcome
-  apprisal_status: "applicable" | "dismissed"
-
-struct CaseloadApprisal:
-  // Apprisal assessments keyed by canon path
-  assessments: Map[String, ApprisalAssessment]
-```
-
-### Domain Short-Circuit Invariant
-If `caseload.discovery.candidate_canons` is empty:
-- Execution terminates immediately with exit code `0`.
-- An empty apprisal container (`assessments: {}`) is attached to `caseload.apprisal`.
-- Zero AI model calls are dispatched, preserving tokens and execution latency.
+### Data Plane & Domain Short-Circuit Invariants
+1. **Deterministic Status Derivation:** The screener model emits only `apprisal_summary` and `apprisal_score`; the domain engine deterministically evaluates the score against `--apprise-threshold` (default `0.5`) to assign `apprisal_status` (`"applicable"` vs. `"dismissed"`).
+2. **Empty Candidate Short-Circuit:** If `.discovery.candidate_canons` is empty, the engine attaches an empty `.apprisal` record (`assessments: {}`) and terminates immediately with exit code `0`, dispatching zero model calls.
 
 ---
 

@@ -152,7 +152,7 @@ The living system architecture resides directly under [`docs/architecture/`](arc
 
 1. **Spec First (Design Phase):**
    - Author or edit the relevant architectural documents under `docs/architecture/` (e.g. `overview.md`, `nodes/<stage>.md`, `scheduling.md`).
-   - Define pseudo-structs, stage-prefixed CLI flags, localized Mermaid dataflows, and exit code contracts.
+   - Define conceptual caseload deltas, data plane invariants, stage-prefixed CLI flags, localized Mermaid dataflows, and exit code contracts.
    - Commit using `spec(<surface>):` or `docs(architecture):`.
 2. **Diff Analysis & Planning:**
    - Inspect the git diff against `upstream/main` to identify all contract shifts across models, flags, and domain logic.

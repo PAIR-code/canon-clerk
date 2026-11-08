@@ -47,33 +47,18 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct ConfigureOptions:
-  env?: Map[String, String]
-  overrides?: CaseloadConfigOverrides
-
-function execute_configure(
-  options: ConfigureOptions,
-  caseload?: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.config` field on the cumulative `Caseload`:
+`configure` populates the `.config` namespace on the cumulative `Caseload` envelope with normalized runtime provider settings:
 
-```text
-struct CaseloadConfig:
-  // Model specifier for screening nodes (default: 'google:gemini-flash-lite-latest')
-  screener_model: String
+- **Screener Model Specifier (`screener_model`):** Canonical provider-prefixed model identifier used by fast heuristic screening stages (`apprise`, `docket`, `admit`; defaults to `"google:gemini-flash-lite-latest"`).
+- **Auditor Model Specifier (`auditor_model`):** Canonical provider-prefixed model identifier used for substantive trial adjudication (`audit`; defaults to `"google:gemini-pro-latest"`).
+- **Reasoning Budget (`reasoning_budget`):** Optional token ceiling governing extended thinking during `audit` trials.
 
-  // Model specifier for adjudication (default: 'google:gemini-pro-latest')
-  auditor_model: String
-
-  // Optional reasoning budget in tokens
-  reasoning_budget?: Integer
-```
+### Data Plane & Security Invariants
+1. **Credential Non-Persistence:** While `configure` verifies that required provider credentials (such as `GEMINI_API_KEY`) are present in the runtime environment, raw API keys and secret tokens are **never** serialized into `.config` on the `Caseload` envelope, ensuring `caseload.json` artifacts remain safe to archive and share.
+2. **Canonical Model Normalization:** Shorthand model aliases (e.g. `flash-lite`, `pro`) and flag overrides are normalized into canonical `provider:model` specifiers prior to being recorded on `.config`.
 
 ---
 

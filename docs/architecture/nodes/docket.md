@@ -49,48 +49,18 @@ flowchart LR
 
 ---
 
-## 3. Core Functional Contract
-
-```text
-struct DocketOptions:
-  threshold?: Float // default: 0.5
-  screener_model?: String
-
-function execute_docket(
-  options: DocketOptions,
-  caseload: Caseload
-) -> Caseload
-```
+## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-Populates the `.docket` field on the cumulative `Caseload`:
+`docket` populates the `.docket` namespace on the cumulative `Caseload` envelope with macro subject-matter jurisdiction assessments:
 
-```text
-struct ColorabilityAssessment:
-  // Numerical score indicating colorable subject-matter jurisdiction [0.0, 1.0]
-  colorability_score: Float
+- **Per-Canon Colorability Assessments (`cases`):** A deterministic map keyed by candidate canon identifier. Each assessment records the model's `colorability_summary` (rationale justifying whether jurisdiction applies to the filing), continuous `colorability_score` in `[0.0, 1.0]`, and deterministically derived `colorability_status` (`"docketed"` when `colorability_score >= threshold`, otherwise `"dismissed"`).
+- **Active Docket (`active_docket`):** Stably sorted list of canon identifiers whose `colorability_status` is `"docketed"`, establishing the active cases that proceed to micro evidentiary screening (`admit`).
+- **Diagnostic Anomalies (`anomalies`):** Optional manifest recording any non-fatal screening anomalies encountered during macro triage.
 
-  // Reasoning justifying whether jurisdiction applies to the PR context
-  colorability_summary: String
-
-  // Status outcome
-  colorability_status: "docketed" | "dismissed"
-
-struct CaseloadDocket:
-  // Colorability assessments keyed by canon path
-  cases: Map[String, ColorabilityAssessment]
-
-  // List of canon paths admitted onto the Active Docket
-  active_docket: List[String]
-
-  // Optional diagnostic anomalies manifest
-  anomalies?: DocketAnomaliesManifest
-```
-
-### Domain Short-Circuit Invariant
-If `active_docket` is empty:
-- Execution terminates immediately with exit code `0` (or returns empty active docket).
-- Zero substantive trials (`audit`) are scheduled, avoiding hundreds of thousands of deep-reasoning tokens.
+### Data Plane & Domain Short-Circuit Invariants
+1. **Deterministic Status Derivation:** The screener model emits only `colorability_summary` and `colorability_score`; the domain engine deterministically computes `colorability_status` and `active_docket` membership against `--docket-threshold` (default `0.5`).
+2. **Empty Docket Short-Circuit:** If `active_docket` is empty (`[]`), the engine attaches the populated `.docket` record and halts downstream cascade execution immediately with exit code `0`, scheduling zero `admit` or `audit` calls.
 
 ---
 
