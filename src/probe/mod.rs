@@ -16,18 +16,19 @@
 
 use crate::caseload::{Caseload, CaseloadProbe, ProbeEndpointResult, ProbeStatus};
 use crate::configure::ENV_GEMINI_API_KEY;
+use crate::provider::gemini::post_gemini_json;
+pub use crate::provider::{
+    DEFAULT_GEMINI_BASE_URL, build_generate_content_url, strip_provider_prefix,
+};
+use crate::provider::{classify_gemini_http_error, extract_gemini_error_detail};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::time::{Duration, Instant};
 
 /// Default per-endpoint timeout in milliseconds for `canon-clerk probe` (`docs/architecture/nodes/probe.md` §5).
 pub const DEFAULT_PROBE_TIMEOUT_MS: u64 = 5000;
 
 /// Environment variable name for overriding the probe timeout in milliseconds.
 pub const ENV_PROBE_TIMEOUT_MS: &str = "CANON_CLERK_PROBE_TIMEOUT_MS";
-
-/// Default Google Generative Language API v1beta base URL.
-pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 /// Domain input parameters for executing the `probe` Caseload DAG stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,20 +170,6 @@ pub fn execute_probe(
     }))
 }
 
-/// Strips the canonical `"google:"` provider prefix from a normalized model specifier.
-pub fn strip_provider_prefix(model_specifier: &str) -> &str {
-    model_specifier
-        .strip_prefix("google:")
-        .unwrap_or(model_specifier)
-}
-
-/// Constructs the Google Generative Language `POST :generateContent` URL for a model specifier.
-pub fn build_generate_content_url(base_url: &str, model_specifier: &str) -> String {
-    let base = base_url.trim_end_matches('/');
-    let model_id = strip_provider_prefix(model_specifier);
-    format!("{base}/models/{model_id}:generateContent")
-}
-
 #[derive(Debug, Serialize)]
 struct GeminiGenerateContentRequest<'a> {
     contents: Vec<GeminiContent<'a>>,
@@ -213,16 +200,6 @@ struct GeminiGenerateContentResponse {
     model_version: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GeminiErrorEnvelope {
-    error: Option<GeminiErrorBody>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GeminiErrorBody {
-    message: Option<String>,
-}
-
 /// Decodes and classifies an HTTP status code and response payload from a Gemini `:generateContent` probe.
 pub fn decode_gemini_probe_response(
     status_code: u16,
@@ -246,52 +223,13 @@ pub fn decode_gemini_probe_response(
         };
     }
 
-    let upstream_detail = serde_json::from_str::<GeminiErrorEnvelope>(body)
-        .ok()
-        .and_then(|env| env.error)
-        .and_then(|err| err.message)
-        .map(|msg| msg.trim().to_string())
-        .filter(|msg| !msg.is_empty())
-        .unwrap_or_else(|| {
-            let trimmed = body.trim();
-            if trimmed.is_empty() {
-                "empty error response".to_string()
-            } else {
-                trimmed.to_string()
-            }
-        });
-
-    let diagnostic = classify_http_error(status_code, model_specifier, &upstream_detail);
+    let upstream_detail = extract_gemini_error_detail(body);
+    let diagnostic = classify_gemini_http_error(status_code, model_specifier, &upstream_detail);
     ProbeEndpointResult {
         status: ProbeStatus::Error,
         latency_ms,
         model: model_specifier.to_string(),
         error: Some(diagnostic),
-    }
-}
-
-fn classify_http_error(status_code: u16, model_specifier: &str, detail: &str) -> String {
-    match status_code {
-        401 | 403 => format!(
-            "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
-             Hint: Verify `{ENV_GEMINI_API_KEY}` or `providers.google.apiKey` in `~/.config/canon-clerk/config.json`."
-        ),
-        404 => format!(
-            "HTTP 404: Model endpoint `{model_specifier}` was not found ({detail}). \
-             Hint: Specify a valid Gemini model via `--screener-model` or `--auditor-model` (e.g. `google:gemini-flash-lite-latest`)."
-        ),
-        429 => format!(
-            "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \
-             Hint: Check your Google AI Studio quota tier or wait before retrying."
-        ),
-        500..=599 => format!(
-            "HTTP {status_code}: Upstream Google Gemini server error for `{model_specifier}` ({detail}). \
-             Hint: Retry `canon-clerk probe` after a brief backoff or increase `--timeout <MS>`."
-        ),
-        _ => format!(
-            "HTTP {status_code}: Probe request rejected for `{model_specifier}` ({detail}). \
-             Hint: Check model compatibility and provider configuration."
-        ),
     }
 }
 
@@ -330,7 +268,6 @@ impl EndpointProber for GeminiEndpointProber {
         api_key: &str,
         timeout_ms: u64,
     ) -> ProbeEndpointResult {
-        let url = build_generate_content_url(&self.base_url, model_specifier);
         let payload = GeminiGenerateContentRequest {
             contents: vec![GeminiContent {
                 parts: vec![GeminiPart { text: "ping" }],
@@ -341,80 +278,26 @@ impl EndpointProber for GeminiEndpointProber {
             },
         };
 
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(err) => {
-                return ProbeEndpointResult {
-                    status: ProbeStatus::Error,
-                    latency_ms: 0,
-                    model: model_specifier.to_string(),
-                    error: Some(format!(
-                        "Failed to initialize async HTTP runtime for `{model_specifier}`: {err}. \
-                         Hint: Check host OS thread and file descriptor limits."
-                    )),
-                };
-            }
-        };
-
-        let start = Instant::now();
-        runtime.block_on(async {
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_millis(timeout_ms))
-                .build()
-            {
-                Ok(c) => c,
-                Err(err) => {
-                    return ProbeEndpointResult {
-                        status: ProbeStatus::Error,
-                        latency_ms: start.elapsed().as_millis() as u64,
-                        model: model_specifier.to_string(),
-                        error: Some(format!(
-                            "Failed to build HTTPS client for `{model_specifier}`: {err}. \
-                             Hint: Verify system TLS configuration."
-                        )),
-                    };
-                }
-            };
-
-            let send_res = client
-                .post(&url)
-                .header("x-goog-api-key", api_key)
-                .header("Content-Type", "application/json")
-                .json(&payload)
-                .send()
-                .await;
-            let latency_ms = start.elapsed().as_millis() as u64;
-
-            let response = match send_res {
-                Ok(resp) => resp,
-                Err(err) => {
-                    let message = if err.is_timeout() {
-                        format!(
-                            "Request to `{model_specifier}` timed out after {timeout_ms}ms. \
-                             Hint: Check network connectivity or increase the timeout with `--timeout <MS>`."
-                        )
-                    } else {
-                        format!(
-                            "Network connection failed for `{model_specifier}`: {err}. \
-                             Hint: Verify internet connectivity and DNS/TLS access to `generativelanguage.googleapis.com`."
-                        )
-                    };
-                    return ProbeEndpointResult {
-                        status: ProbeStatus::Error,
-                        latency_ms,
-                        model: model_specifier.to_string(),
-                        error: Some(message),
-                    };
-                }
-            };
-
-            let status_code = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
-            decode_gemini_probe_response(status_code, &body, model_specifier, latency_ms)
-        })
+        match post_gemini_json(
+            &self.base_url,
+            model_specifier,
+            api_key,
+            timeout_ms,
+            &payload,
+        ) {
+            Ok(outcome) => decode_gemini_probe_response(
+                outcome.status_code,
+                &outcome.body,
+                model_specifier,
+                outcome.latency_ms,
+            ),
+            Err((err, latency_ms)) => ProbeEndpointResult {
+                status: ProbeStatus::Error,
+                latency_ms,
+                model: model_specifier.to_string(),
+                error: Some(err.to_string()),
+            },
+        }
     }
 }
 
