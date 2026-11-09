@@ -14,8 +14,10 @@
 
 //! Canon Clerk CLI driving adapter and subcommand router.
 
+pub mod discover;
 pub mod intake;
 
+pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
 pub use intake::{IntakeArgs, run_intake};
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -73,13 +75,16 @@ pub struct Cli {
 pub enum Commands {
     /// Universal front door: ingest diffs, target paths, design intent, or PR metadata.
     Intake(IntakeArgs),
+    /// Multi-plane relevance sieve: identify candidate canons and prune un-inspected exhibits.
+    Discover(DiscoverArgs),
 }
 
-/// Structured CLI error carrying a standardized POSIX exit code (`1` runtime, `2` usage/input).
+/// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliError {
     exit_code: i32,
     message: String,
+    silent: bool,
 }
 
 impl CliError {
@@ -88,6 +93,7 @@ impl CliError {
         Self {
             exit_code: 2,
             message: message.into(),
+            silent: false,
         }
     }
 
@@ -96,12 +102,27 @@ impl CliError {
         Self {
             exit_code: 1,
             message: message.into(),
+            silent: false,
+        }
+    }
+
+    /// Constructs a silent non-zero exit (used for `-q` / `--quiet` predicate mode).
+    pub fn silent(exit_code: i32) -> Self {
+        Self {
+            exit_code,
+            message: String::new(),
+            silent: true,
         }
     }
 
     /// Returns the shell exit code associated with this error.
     pub fn exit_code(&self) -> i32 {
         self.exit_code
+    }
+
+    /// Returns `true` if this error should exit without printing an `error:` prefix to stderr.
+    pub fn is_silent(&self) -> bool {
+        self.silent
     }
 }
 
@@ -153,6 +174,12 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 let mut stdin = io::stdin().lock();
                 let mut stdout = io::stdout().lock();
                 run_intake(args, &mut stdin, &mut stdout)?;
+                return Ok(());
+            }
+            Commands::Discover(args) => {
+                let mut stdin = io::stdin().lock();
+                let mut stdout = io::stdout().lock();
+                run_discover(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
         }
@@ -211,7 +238,7 @@ mod tests {
                 assert_eq!(args.pr_title.as_deref(), Some("feat: test"));
                 assert!(args.json);
             }
-            None => panic!("expected Intake subcommand"),
+            Some(Commands::Discover(_)) | None => panic!("expected Intake subcommand"),
         }
     }
 

@@ -245,7 +245,7 @@ fn validate_stdin_sources(args: &IntakeArgs) -> Result<(), CliError> {
     Ok(())
 }
 
-fn read_operand_source(
+pub(crate) fn read_operand_source(
     source: &str,
     flag_name: &str,
     stdin: &mut dyn Read,
@@ -269,7 +269,7 @@ fn read_operand_source(
     }
 }
 
-fn resolve_target_operands(
+pub(crate) fn resolve_target_operands(
     targets: &[String],
     stdin: &mut dyn Read,
 ) -> Result<Option<Vec<String>>, CliError> {
@@ -295,7 +295,7 @@ fn resolve_target_operands(
     Ok(Some(resolved))
 }
 
-fn write_caseload_file(path: &Path, caseload: &Caseload) -> Result<(), CliError> {
+pub(crate) fn write_caseload_file(path: &Path, caseload: &Caseload) -> Result<(), CliError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
