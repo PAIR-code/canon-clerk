@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`).
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -266,6 +266,99 @@ pub struct CaseloadDiscovery {
     pub triggers_join: BTreeMap<String, Vec<String>>,
 }
 
+/// Severity classification for a static canon diagnostic or compliance annotation (`docs/architecture/nodes/validate.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationLevel {
+    /// Blocking validation or compliance error (`"failure"`).
+    Failure,
+    /// Non-blocking advisory lint warning (`"warning"`).
+    Warning,
+    /// Informational diagnostic notice (`"notice"`).
+    Notice,
+}
+
+impl AnnotationLevel {
+    /// Returns the canonical wire representation (`"failure"`, `"warning"`, or `"notice"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Failure => "failure",
+            Self::Warning => "warning",
+            Self::Notice => "notice",
+        }
+    }
+}
+
+/// Line-and-column source diagnostic annotation (`docs/architecture/nodes/validate.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CodeAnnotation {
+    /// Workspace-relative POSIX file path or canon source reference.
+    pub path: String,
+    /// 1-based starting line number.
+    pub start_line: usize,
+    /// 1-based ending line number.
+    pub end_line: usize,
+    /// Optional 1-based starting column number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_column: Option<usize>,
+    /// Optional 1-based ending column number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<usize>,
+    /// Severity level (`"failure"`, `"warning"`, or `"notice"`).
+    pub annotation_level: AnnotationLevel,
+    /// Human-readable diagnostic explanation.
+    pub message: String,
+    /// Optional rule identifier or short diagnostic title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Overall validation outcome for an individual candidate canon (`"pass"` or `"fail"`).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationOutcome {
+    /// Canon passed static validation with zero blocking errors.
+    #[default]
+    Pass,
+    /// Canon failed static validation with one or more errors (or exceeded `--max-warnings`).
+    Fail,
+}
+
+impl ValidationOutcome {
+    /// Returns the canonical wire representation (`"pass"` or `"fail"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+        }
+    }
+}
+
+/// Static validation metadata and diagnostics for a single candidate canon (`docs/architecture/nodes/validate.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct ValidatedCanonMetadata {
+    /// Overall pass/fail validation result for this canon.
+    pub result: ValidationOutcome,
+    /// Count of warning-level diagnostics emitted for this canon.
+    pub warning_count: usize,
+    /// Count of failure-level (error) diagnostics emitted for this canon.
+    pub error_count: usize,
+    /// Stably sorted line-and-column diagnostics for this canon.
+    #[serde(default)]
+    pub diagnostics: Vec<CodeAnnotation>,
+}
+
+/// Candidate canon AST and frontmatter validation results captured during the `validate` stage (`docs/architecture/nodes/validate.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaseloadValidation {
+    /// Deterministic map keyed by candidate canon identifier recording per-canon validation outcomes and diagnostics.
+    #[serde(default)]
+    pub results: BTreeMap<String, ValidatedCanonMetadata>,
+    /// True when any candidate canon produced one or more validation errors (or when warnings exceed `--max-warnings`).
+    #[serde(default)]
+    pub has_errors: bool,
+}
+
 /// The central, cumulative state container flowing through the Canon Clerk Caseload DAG.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Caseload {
@@ -283,7 +376,7 @@ pub struct Caseload {
 
     /// Validation: Candidate canon AST and frontmatter validation results.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation: Option<serde_json::Value>,
+    pub validation: Option<CaseloadValidation>,
 
     /// Configuration: Resolved provider credentials, model specifiers, and runtime options.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -342,6 +435,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.discovery` namespace populated, preserving all other stage fields.
     pub fn with_discovery(mut self, discovery: CaseloadDiscovery) -> Self {
         self.discovery = Some(discovery);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.validation` namespace populated, preserving all other stage fields.
+    pub fn with_validation(mut self, validation: CaseloadValidation) -> Self {
+        self.validation = Some(validation);
         self
     }
 }
@@ -467,6 +566,14 @@ mod tests {
             assert!(with_disc.discovery.is_some());
             assert_eq!(with_disc.intake, enriched.intake);
             assert_eq!(with_disc.config, enriched.config);
+
+            let with_val = with_disc
+                .clone()
+                .with_validation(CaseloadValidation::default());
+            assert!(with_val.validation.is_some());
+            assert_eq!(with_val.discovery, with_disc.discovery);
+            assert_eq!(with_val.intake, with_disc.intake);
+            assert_eq!(with_val.config, with_disc.config);
         }
     }
 }

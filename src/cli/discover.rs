@@ -255,11 +255,11 @@ pub fn run_discover(
     run_discover_in_workspace(args, stdin, stdout, &cwd)
 }
 
-fn read_incoming_caseload(
-    args: &DiscoverArgs,
+pub(crate) fn read_caseload_operand(
+    caseload_source: Option<&str>,
     stdin: &mut dyn Read,
 ) -> Result<Option<Caseload>, CliError> {
-    match &args.caseload {
+    match caseload_source {
         Some(source) => {
             let raw = read_operand_source(source, "--caseload", stdin)?;
             let parsed: Caseload = serde_json::from_str(&raw).map_err(|err| {
@@ -272,6 +272,13 @@ fn read_incoming_caseload(
         }
         None => Ok(None),
     }
+}
+
+fn read_incoming_caseload(
+    args: &DiscoverArgs,
+    stdin: &mut dyn Read,
+) -> Result<Option<Caseload>, CliError> {
+    read_caseload_operand(args.caseload.as_deref(), stdin)
 }
 
 fn build_intake_options(
@@ -304,10 +311,17 @@ fn build_intake_options(
     })
 }
 
-fn validate_stdin_sources(args: &DiscoverArgs) -> Result<(), CliError> {
+pub(crate) struct StdinSourceRefs<'a> {
+    pub(crate) targets: &'a [String],
+    pub(crate) diff: Option<&'a str>,
+    pub(crate) pr_body_file: Option<&'a str>,
+    pub(crate) caseload: Option<&'a str>,
+}
+
+pub(crate) fn ensure_single_stdin_source(refs: &StdinSourceRefs<'_>) -> Result<(), CliError> {
     let mut stdin_consumers = Vec::new();
 
-    let positional_stdin_count = args.targets.iter().filter(|t| t.as_str() == "-").count();
+    let positional_stdin_count = refs.targets.iter().filter(|t| t.as_str() == "-").count();
     if positional_stdin_count > 1 {
         return Err(CliError::usage(
             "Standard input (`-`) was specified multiple times in positional `TARGETS`.\n  \
@@ -318,13 +332,13 @@ fn validate_stdin_sources(args: &DiscoverArgs) -> Result<(), CliError> {
     if positional_stdin_count == 1 {
         stdin_consumers.push("positional `TARGETS` (`-`)");
     }
-    if args.diff.as_deref() == Some("-") {
+    if refs.diff == Some("-") {
         stdin_consumers.push("`--diff -`");
     }
-    if args.pr_body_file.as_deref() == Some("-") {
+    if refs.pr_body_file == Some("-") {
         stdin_consumers.push("`--pr-body-file -`");
     }
-    if args.caseload.as_deref() == Some("-") {
+    if refs.caseload == Some("-") {
         stdin_consumers.push("`--caseload -`");
     }
 
@@ -337,6 +351,15 @@ fn validate_stdin_sources(args: &DiscoverArgs) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+fn validate_stdin_sources(args: &DiscoverArgs) -> Result<(), CliError> {
+    ensure_single_stdin_source(&StdinSourceRefs {
+        targets: &args.targets,
+        diff: args.diff.as_deref(),
+        pr_body_file: args.pr_body_file.as_deref(),
+        caseload: args.caseload.as_deref(),
+    })
 }
 
 fn render_discover_output(

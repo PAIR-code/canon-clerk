@@ -16,9 +16,11 @@
 
 pub mod discover;
 pub mod intake;
+pub mod validate;
 
 pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
 pub use intake::{IntakeArgs, run_intake};
+pub use validate::{ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use std::fmt;
@@ -77,6 +79,8 @@ pub enum Commands {
     Intake(IntakeArgs),
     /// Multi-plane relevance sieve: identify candidate canons and prune un-inspected exhibits.
     Discover(DiscoverArgs),
+    /// Statutory validity gate: statically lint candidate canon AST and frontmatter schemas.
+    Validate(ValidateArgs),
 }
 
 /// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
@@ -182,6 +186,12 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 run_discover(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
+            Commands::Validate(args) => {
+                let mut stdin = io::stdin().lock();
+                let mut stdout = io::stdout().lock();
+                run_validate(args, &mut stdin, &mut stdout)?;
+                return Ok(());
+            }
         }
     }
 
@@ -238,7 +248,9 @@ mod tests {
                 assert_eq!(args.pr_title.as_deref(), Some("feat: test"));
                 assert!(args.json);
             }
-            Some(Commands::Discover(_)) | None => panic!("expected Intake subcommand"),
+            Some(Commands::Discover(_) | Commands::Validate(_)) | None => {
+                panic!("expected Intake subcommand")
+            }
         }
     }
 

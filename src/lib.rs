@@ -19,6 +19,7 @@ pub mod caseload;
 pub mod cli;
 pub mod discover;
 pub mod intake;
+pub mod validate;
 
 pub use canon::{
     Canon, CanonBody, CanonMetadata, CanonParseError, CanonScope, CanonSourceInfo, CanonSourceKind,
@@ -33,13 +34,15 @@ pub use canon::{
     scope_pattern, to_kebab_case, tokenize_canon,
 };
 pub use caseload::{
-    ActiveExhibits, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadDiscovery, CaseloadIntake,
-    ContentOmissionReason, DiscoveryMode, FileArtifact, FileChangeStatus, IntakeScope,
-    LinkedIssueContext, PatchOmissionReason,
+    ActiveExhibits, AnnotationLevel, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadDiscovery,
+    CaseloadIntake, CaseloadValidation, CodeAnnotation, ContentOmissionReason, DiscoveryMode,
+    FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason,
+    ValidatedCanonMetadata, ValidationOutcome,
 };
 pub use cli::{
-    Cli, CliError, Commands, DiscoverArgs, DiscoverFormat, IntakeArgs, init_logging, run,
-    run_discover, run_discover_in_workspace, run_intake,
+    Cli, CliError, Commands, DiscoverArgs, DiscoverFormat, IntakeArgs, ValidateArgs,
+    ValidateFormat, init_logging, run, run_discover, run_discover_in_workspace, run_intake,
+    run_validate, run_validate_in_workspace,
 };
 pub use discover::{
     DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,
@@ -48,6 +51,9 @@ pub use discover::{
     scope_relative_path,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
+pub use validate::{
+    ValidateError, ValidateOptions, execute_validate, execute_validate_on_disk, lint_canon_source,
+};
 
 #[cfg(test)]
 mod tests {
