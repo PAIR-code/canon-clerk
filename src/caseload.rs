@@ -12,31 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`).
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Current canonical schema version for serialized `Caseload` envelopes.
 pub const CASELOAD_SCHEMA_VERSION: &str = "1.0";
-
 /// Canonical default provider namespace for MVP model specifiers (`docs/architecture/nodes/configure.md` §3).
 pub const DEFAULT_PROVIDER: &str = "google";
-
 /// Default canonical screener model specifier (`docs/architecture/nodes/configure.md` §3).
 pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-flash-lite-latest";
-
 /// Default canonical auditor model specifier (`docs/architecture/nodes/configure.md` §3).
 pub const DEFAULT_AUDITOR_MODEL: &str = "google:gemini-pro-latest";
 
 fn default_caseload_version() -> String {
     CASELOAD_SCHEMA_VERSION.to_string()
 }
-
 fn default_screener_model() -> String {
     DEFAULT_SCREENER_MODEL.to_string()
 }
-
 fn default_auditor_model() -> String {
     DEFAULT_AUDITOR_MODEL.to_string()
 }
@@ -92,32 +87,24 @@ pub enum ContentOmissionReason {
 pub struct FileArtifact {
     /// Repository-relative POSIX path (e.g. `"src/lib.rs"`).
     pub path: String,
-
     /// File status relative to the base commit.
     pub status: FileChangeStatus,
-
     /// Original repository-relative POSIX path prior to a rename or copy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_path: Option<String>,
-
     /// Count of inserted lines across all hunks.
     pub lines_added: usize,
-
     /// Count of deleted lines across all hunks.
     pub lines_deleted: usize,
-
     /// Unified diff hunk text (present when modified hunks exist unless omitted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub patch: Option<String>,
-
     /// Explicit rationale when `patch` is `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub patch_omission_reason: Option<PatchOmissionReason>,
-
     /// Full UTF-8 file content at `HEAD` (present when materialized unless omitted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-
     /// Explicit rationale when `content` is `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_omission_reason: Option<ContentOmissionReason>,
@@ -128,15 +115,12 @@ pub struct FileArtifact {
 pub struct LinkedIssueContext {
     /// Issue number in the repository issue tracker.
     pub number: u64,
-
     /// Issue title text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-
     /// Issue description body in Markdown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-
     /// Canonical web URL to the issue.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -149,7 +133,6 @@ pub enum IntakeScope {
     #[default]
     #[serde(rename = "targeted")]
     Targeted,
-
     /// Evaluates the entire subject-matter repository codebase (`--all-targets`).
     #[serde(rename = "all-targets")]
     AllTargets,
@@ -166,49 +149,29 @@ impl IntakeScope {
 }
 
 /// Ingested filing exhibits and discovery directives captured during the `intake` stage.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct CaseloadIntake {
     /// Pull request title or commit subject line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_title: Option<String>,
-
     /// Pull request Markdown description or commit body.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_body: Option<String>,
-
     /// Prospective architectural design intent or plan description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intent: Option<String>,
-
     /// Scope of intake target evaluation (`"targeted"` or `"all-targets"`).
     #[serde(default)]
     pub scope: IntakeScope,
-
     /// Stably sorted target file paths, directory pointers, or glob directives for `discover`.
     #[serde(default)]
     pub target_paths: Vec<String>,
-
     /// Ingested code modifications keyed in deterministic lexicographical order by POSIX path.
     #[serde(default)]
     pub diffs: BTreeMap<String, FileArtifact>,
-
     /// Optional linked issue contexts associated with the filing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked_issues: Option<Vec<LinkedIssueContext>>,
-}
-
-impl Default for CaseloadIntake {
-    fn default() -> Self {
-        Self {
-            pr_title: None,
-            pr_body: None,
-            intent: None,
-            scope: IntakeScope::Targeted,
-            target_paths: Vec::new(),
-            diffs: BTreeMap::new(),
-            linked_issues: None,
-        }
-    }
 }
 
 /// Discovery evaluation mode recorded during the `discover` stage (`docs/architecture/nodes/discover.md` §3).
@@ -218,7 +181,6 @@ pub enum DiscoveryMode {
     #[default]
     #[serde(rename = "triggered")]
     Triggered,
-
     /// Promotes all discoverable workspace canons into `candidate_canons` (`--all-canons`).
     #[serde(rename = "all-canons")]
     AllCanons,
@@ -240,19 +202,15 @@ pub struct ActiveExhibits {
     /// Stably sorted repository-relative POSIX file paths triggered or inspected by at least one candidate canon.
     #[serde(default)]
     pub files: Vec<String>,
-
     /// Whether `pr_title` is present and inspected by at least one candidate canon.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_title: Option<bool>,
-
     /// Whether `pr_body` is present and inspected by at least one candidate canon.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_body: Option<bool>,
-
     /// Whether `commit_messages` is present and inspected by at least one candidate canon.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit_messages: Option<bool>,
-
     /// Whether `linked_issues` is present and inspected by at least one candidate canon.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked_issues: Option<bool>,
@@ -265,19 +223,15 @@ pub struct CaseloadDiscovery {
     /// Active discovery mode (`"triggered"` vs. `"all-canons"`).
     #[serde(default)]
     pub mode: DiscoveryMode,
-
     /// Stably sorted repository-relative POSIX target file paths materialized from `.intake` directives and diffs.
     #[serde(default)]
     pub target_files: Vec<String>,
-
     /// Stably sorted discovered canon file paths or qualified realm references matching the filing (or full corpus).
     #[serde(default)]
     pub candidate_canons: Vec<String>,
-
     /// Pruned subset of materialized exhibits triggered or inspected by at least one surviving candidate canon.
     #[serde(default)]
     pub active_exhibits: ActiveExhibits,
-
     /// Deterministic mapping from each candidate canon identifier to the matched target file paths and inspected exhibit planes.
     #[serde(default)]
     pub triggers_join: BTreeMap<String, Vec<String>>,
@@ -401,45 +355,87 @@ impl Default for CaseloadConfig {
     }
 }
 
+/// Connectivity and health status of a probed model endpoint (`docs/architecture/nodes/probe.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeStatus {
+    /// Endpoint is reachable, authenticated, and responsive (`"ok"`).
+    #[default]
+    Ok,
+    /// Endpoint timed out, rejected credentials, or returned an HTTP error (`"error"`).
+    Error,
+}
+
+impl ProbeStatus {
+    /// Returns the canonical wire representation (`"ok"` or `"error"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// Live connectivity and latency diagnostic record for a single configured model endpoint (`docs/architecture/nodes/probe.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProbeEndpointResult {
+    /// Connection and authorization status (`"ok"` or `"error"`).
+    pub status: ProbeStatus,
+    /// Roundtrip request latency in milliseconds.
+    pub latency_ms: u64,
+    /// Resolved model identifier reported by the provider (or configured specifier on failure).
+    pub model: String,
+    /// Optional diagnostic error message and remediation hint when `status == ProbeStatus::Error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Live provider connectivity and endpoint latency diagnostics captured during the `probe` stage (`docs/architecture/nodes/probe.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CaseloadProbe {
+    /// Diagnostic probe result for the configured screener model endpoint (`.config.screener_model`).
+    pub screener: ProbeEndpointResult,
+    /// Diagnostic probe result for the configured auditor model endpoint (`.config.auditor_model`).
+    pub auditor: ProbeEndpointResult,
+}
+
+impl CaseloadProbe {
+    /// Returns `true` when both `screener` and `auditor` endpoints succeeded (`status == ProbeStatus::Ok`).
+    pub fn is_healthy(&self) -> bool {
+        self.screener.status == ProbeStatus::Ok && self.auditor.status == ProbeStatus::Ok
+    }
+}
+
 /// The central, cumulative state container flowing through the Canon Clerk Caseload DAG.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Caseload {
     /// Schema specification version (always `"1.0"`).
     #[serde(default = "default_caseload_version")]
     pub version: String,
-
     /// Intake: Tendered change diffs, target path directives, design intent, and PR metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intake: Option<CaseloadIntake>,
-
     /// Discovery: Matched target files, candidate canons, active exhibits, and trigger intersections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovery: Option<CaseloadDiscovery>,
-
     /// Validation: Candidate canon AST and frontmatter validation results.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation: Option<CaseloadValidation>,
-
     /// Configuration: Resolved provider credentials, model specifiers, and runtime options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<CaseloadConfig>,
-
     /// Probe: Live provider connectivity and endpoint latency diagnostics.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub probe: Option<serde_json::Value>,
-
+    pub probe: Option<CaseloadProbe>,
     /// Apprisal: Prospective statutory applicability assessments against design intent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apprisal: Option<serde_json::Value>,
-
     /// Docket: Macro triage colorability assessments and active docket cases.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docket: Option<serde_json::Value>,
-
     /// Evidence: Micro triage admitted exhibits per active case.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<serde_json::Value>,
-
     /// Verdict: Final compliance decrees and line annotations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<serde_json::Value>,
@@ -489,6 +485,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.config` namespace populated, preserving all other stage fields.
     pub fn with_config(mut self, config: CaseloadConfig) -> Self {
         self.config = Some(config);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.probe` namespace populated, preserving all other stage fields.
+    pub fn with_probe(mut self, probe: CaseloadProbe) -> Self {
+        self.probe = Some(probe);
         self
     }
 }
@@ -610,6 +612,37 @@ mod tests {
                 Some(4096)
             );
         }
+
+        #[test]
+        fn test_caseload_probe_round_trip_and_optional_error_omission() {
+            let probe = CaseloadProbe {
+                screener: ProbeEndpointResult {
+                    status: ProbeStatus::Ok,
+                    latency_ms: 142,
+                    model: "gemini-2.5-flash-lite".to_string(),
+                    error: None,
+                },
+                auditor: ProbeEndpointResult {
+                    status: ProbeStatus::Error,
+                    latency_ms: 5001,
+                    model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    error: Some("Request timed out after 5000ms".to_string()),
+                },
+            };
+            assert!(!probe.is_healthy());
+            assert_eq!(ProbeStatus::Ok.as_str(), "ok");
+            assert_eq!(ProbeStatus::Error.as_str(), "error");
+
+            let caseload = Caseload::new().with_probe(probe);
+            let encoded = serde_json::to_string(&caseload).expect("serialize probe caseload");
+            assert!(encoded.contains(r#""status":"ok""#));
+            assert!(encoded.contains(r#""status":"error""#));
+            assert!(encoded.contains(r#""Request timed out after 5000ms""#));
+
+            let decoded: Caseload =
+                serde_json::from_str(&encoded).expect("deserialize probe caseload");
+            assert_eq!(decoded, caseload);
+        }
     }
 
     mod envelope_immutability {
@@ -649,7 +682,7 @@ mod tests {
         }
 
         #[test]
-        fn test_with_config_preserves_existing_branch_a_namespaces() {
+        fn test_with_config_and_probe_preserve_existing_namespaces() {
             let branch_a = Caseload::new()
                 .with_intake(CaseloadIntake::default())
                 .with_discovery(CaseloadDiscovery::default())
@@ -660,6 +693,28 @@ mod tests {
             assert_eq!(with_cfg.validation, branch_a.validation);
             assert_eq!(with_cfg.discovery, branch_a.discovery);
             assert_eq!(with_cfg.intake, branch_a.intake);
+
+            let healthy_probe = CaseloadProbe {
+                screener: ProbeEndpointResult {
+                    status: ProbeStatus::Ok,
+                    latency_ms: 85,
+                    model: DEFAULT_SCREENER_MODEL.to_string(),
+                    error: None,
+                },
+                auditor: ProbeEndpointResult {
+                    status: ProbeStatus::Ok,
+                    latency_ms: 210,
+                    model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    error: None,
+                },
+            };
+            assert!(healthy_probe.is_healthy());
+            let with_prb = with_cfg.clone().with_probe(healthy_probe.clone());
+            assert_eq!(with_prb.probe, Some(healthy_probe));
+            assert_eq!(with_prb.config, with_cfg.config);
+            assert_eq!(with_prb.validation, with_cfg.validation);
+            assert_eq!(with_prb.discovery, with_cfg.discovery);
+            assert_eq!(with_prb.intake, with_cfg.intake);
         }
     }
 }

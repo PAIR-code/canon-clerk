@@ -20,6 +20,7 @@ pub mod cli;
 pub mod configure;
 pub mod discover;
 pub mod intake;
+pub mod probe;
 pub mod validate;
 
 pub use canon::{
@@ -36,22 +37,23 @@ pub use canon::{
 };
 pub use caseload::{
     ActiveExhibits, AnnotationLevel, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadConfig,
-    CaseloadDiscovery, CaseloadIntake, CaseloadValidation, CodeAnnotation, ContentOmissionReason,
-    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode, FileArtifact,
-    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason, ValidatedCanonMetadata,
+    CaseloadDiscovery, CaseloadIntake, CaseloadProbe, CaseloadValidation, CodeAnnotation,
+    ContentOmissionReason, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
+    DiscoveryMode, FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext,
+    PatchOmissionReason, ProbeEndpointResult, ProbeStatus, ValidatedCanonMetadata,
     ValidationOutcome,
 };
 pub use cli::{
     Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat,
-    IntakeArgs, ValidateArgs, ValidateFormat, init_logging, run, run_configure,
-    run_configure_with_env, run_discover, run_discover_in_workspace, run_intake, run_validate,
-    run_validate_in_workspace,
+    IntakeArgs, ProbeArgs, ProbeFormat, ValidateArgs, ValidateFormat, init_logging, run,
+    run_configure, run_configure_with_env, run_discover, run_discover_in_workspace, run_intake,
+    run_probe, run_probe_with_env_and_prober, run_validate, run_validate_in_workspace,
 };
 pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,
     ENV_REASONING_BUDGET, ENV_SCREENER_MODEL, StoredConfig, StoredProviderConfig, StoredTierModel,
     execute_configure, load_host_config_file, normalize_model_specifier,
-    resolve_default_config_path,
+    resolve_default_config_path, resolve_gemini_api_key,
 };
 pub use discover::{
     DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,
@@ -60,6 +62,11 @@ pub use discover::{
     scope_relative_path,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
+pub use probe::{
+    DEFAULT_GEMINI_BASE_URL, DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber,
+    GeminiEndpointProber, ProbeError, ProbeOptions, build_generate_content_url,
+    decode_gemini_probe_response, execute_probe, strip_provider_prefix,
+};
 pub use validate::{
     ValidateError, ValidateOptions, execute_validate, execute_validate_on_disk, lint_canon_source,
 };

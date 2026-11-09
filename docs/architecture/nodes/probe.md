@@ -29,7 +29,7 @@ flowchart LR
     Params --> Probe
 
     Probe --> Report["Diagnostic Health Report<br/><i>(Endpoint latency & reachability, Exit 0)</i>"]
-    Probe -. "connectivity failure" .-> Failure["Connection Error<br/><i>(Unreachable / bad key, Exit 1)</i>"]
+    Probe -. "connectivity failure" .-> Failure["Connection Error<br/><i>(Unreachable / bad key, Exit 2)</i>"]
 
     style Probe fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style Failure stroke-dasharray: 5 5
@@ -80,9 +80,15 @@ canon-clerk probe --json
 
 ### CLI Flags & Options
 - `--timeout <ms>`: Request timeout in milliseconds (default: `5000ms`).
+- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier or alias.
+- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier or alias.
+- `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens.
+- `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.
+- `--format <stylish|json|compact>`: Output presentation format.
 - `--caseload <path|->`: Ingests upstream Caseload.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of stdout.
 - `--json`: Emits enriched Caseload JSON.
 
 ### CLI Exit Codes
 - **0:** All configured endpoints are reachable, authenticated, and responsive.
-- **2:** Provider credentials rejected (401/403) or endpoints unreachable (timeout / 5xx).
+- **2:** Missing provider credentials, invalid configuration options, or any endpoint probe failed (authentication/permission rejection `401`/`403`, model not found `404`, quota/rate limit `429`, server error `5xx`, or request timeout).

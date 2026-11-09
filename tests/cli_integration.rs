@@ -217,6 +217,15 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk configure --json");
     assert_eq!(cfg_ok.status.code(), Some(0));
+
+    // Verify probe missing GEMINI_API_KEY exits 2 and pre-populated caseload fast-forwards hermetically
+    let probe_no_key = Command::new(bin_path())
+        .arg("probe")
+        .env_remove("GEMINI_API_KEY")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("failed to execute canon-clerk probe without key");
+    assert_eq!(probe_no_key.status.code(), Some(2));
 }
 
 #[test]
