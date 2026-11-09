@@ -85,11 +85,11 @@ flowchart TD
 
 ## 3. Hexagonal Architecture: The CLI Driving Adapter vs. Core Domain Processing
 
-Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)**. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, and continuous integration environments.
+Canon Clerk strictly abides by **Hexagonal Architecture (Ports & Adapters)**. The DAG evaluation model is implemented as pure, environment-agnostic domain logic, decoupled from command-line arguments, operating system process boundaries, continuous integration environments, and external AI provider wire protocols.
 
 ```mermaid
 flowchart TD
-    subgraph DrivingAdapter ["Driving Adapter (Port)"]
+    subgraph DrivingAdapter ["Driving Adapter (Inbound Port)"]
         CLI["CLI Binary<br/>(Flags, POSIX stdin Streams, Exit Codes, Progress, Output Formatting)"]
     end
 
@@ -99,17 +99,29 @@ flowchart TD
         Schema["Schema Layer<br/>(Canon AST & Caseload Data Model)"]
     end
 
+    subgraph DrivenAdapters ["Driven Adapters (Outbound Ports)"]
+        Provider["Structured Model Provider<br/>(Deterministic JSON Decoding, Reasoning Budgets, Token & Thought Telemetry)"]
+    end
+
     CLI --> Core
     CLI --> Config
 
     Config --> Core
     Core --> Schema
+    Core --> Provider
+    Config -.-> Provider
 ```
 
 ### The Domain Engine (The Hexagon Core)
 - **Schema Layer:** Defines the canonical representations for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
-- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, or external environments.
+- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, external environments, or vendor-specific HTTP payloads.
 - **Configuration & Probe:** Resolves runtime environment and API credentials, normalizes model specifiers, and implements the diagnostic `probe` provider health check.
+
+### The Driven Adapter (The Model Provider Boundary)
+- **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific LLM transport protocols, REST wire types, and authentication headers behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `audit`) evaluate exclusively against normalized model specifiers, system instructions, prompts, and JSON Schemas.
+- **Deterministic Reason-First Constrained Decoding:** Enforces deterministic generation (`temperature: 0.0`) paired with strict JSON Schema output enforcement (`application/json`) so rationale scratchpad fields precede numeric scores across every heuristic call.
+- **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps optional token ceilings (`reasoning_budget`) to provider-native extended thinking controls, separates intermediate reasoning thought summaries from the decoded structured JSON payload, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for the out-of-band Telemetry Event Stream.
+- **Credential Encapsulation & Actionable Error Classification:** Secret API keys are bound to concrete provider adapters at construction rather than carried on generation requests or `Caseload` envelopes, and upstream HTTP or transport failures (`401`/`403`, `404`, `429`, `5xx`, timeouts, safety blocks, or malformed JSON responses) are classified into actionable diagnostics with concrete remediation hints.
 
 ### The Driving Adapter (The CLI Boundary)
 - **CLI Binary:** The sole driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
