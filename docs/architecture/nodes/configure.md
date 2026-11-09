@@ -57,15 +57,21 @@ flowchart LR
 - **Reasoning Budget (`reasoning_budget`):** Optional token ceiling governing extended thinking during `audit` trials.
 
 ### Data Plane & Security Invariants
-1. **Credential Non-Persistence:** While `configure` verifies that required provider credentials (such as `GEMINI_API_KEY`) are present in the runtime environment, raw API keys and secret tokens are **never** serialized into `.config` on the `Caseload` envelope, ensuring `caseload.json` artifacts remain safe to archive and share.
-2. **Canonical Model Normalization:** Shorthand model aliases (e.g. `flash-lite`, `pro`) and flag overrides are normalized into canonical `provider:model` specifiers prior to being recorded on `.config`.
+1. **Credential Non-Persistence & Zero Context Egress:** While `configure` verifies that required provider credentials (such as `GEMINI_API_KEY` or `providers.google.apiKey`) are present, raw API keys and secret tokens are **never** serialized into `.config` on the `Caseload` envelope or echoed to terminal output, ensuring `caseload.json` artifacts and AI coding assistant tool traces remain safe from credential exfiltration.
+2. **Workspace-External Credential Sourcing:** File-based configuration and credentials are sourced exclusively from user-level configuration directories outside the repository workspace envelope (`$XDG_CONFIG_HOME/canon-clerk/config.json` or `~/.config/canon-clerk/config.json` on Unix/macOS; `%APPDATA%\canon-clerk\config.json` on Windows). Any configuration file located inside the repository workspace is rejected with exit code `2` so workspace-scoped AI coding agents cannot read local secret files.
+3. **POSIX Owner-Only Permission Enforcement:** On POSIX platforms, `configure` inspects file mode permissions before reading the user configuration file and fails fast with exit code `2` (suggesting `chmod 600`) if group or world permissions are granted (`(mode & 0o077) != 0`; only `0600` or `0400` are accepted).
+4. **Canonical Model Normalization:** Shorthand model aliases (`flash-lite`, `flash`, `pro`), unprefixed Gemini model names (`gemini-*`), and flag overrides are normalized into canonical `google:<model>` specifiers prior to being recorded on `.config`.
 
 ---
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Credential Resolution:** Checks environment variables (`GEMINI_API_KEY`) and secure platform secret stores.
-2. **Model Specifier Normalization:** Resolves model aliases (e.g. `flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `pro` $\implies$ `google:gemini-pro-latest`).
+1. **Hierarchical Precedence Cascade:** Resolves model specifiers, reasoning budgets, and provider credentials along a strict descending specificity cascade:
+   - **Explicit CLI Flags:** `--screener-model`, `--auditor-model`, `--reasoning-budget`, `--gemini-api-key`
+   - **Environment Variables:** `CANON_CLERK_SCREENER_MODEL`, `CANON_CLERK_AUDITOR_MODEL`, `CANON_CLERK_REASONING_BUDGET`, `GEMINI_API_KEY`
+   - **User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`) and optional tier defaults (`screenerModel`, `auditorModel`, `reasoningBudget`)
+   - **Static Defaults:** `google:gemini-flash-lite-latest` (screener) and `google:gemini-pro-latest` (auditor)
+2. **Model Specifier Normalization & Provider Validation:** Resolves shorthand aliases (`flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `flash` $\implies$ `google:gemini-flash-latest`, `pro` $\implies$ `google:gemini-pro-latest`) and rejects unsupported provider prefixes or malformed model identifiers.
 3. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
 
 ---
@@ -83,12 +89,15 @@ canon-clerk configure --screener-model google:gemini-flash-lite-latest --auditor
 ```
 
 ### CLI Flags & Environment
-- `GEMINI_API_KEY`: Google Gemini API key.
-- `--screener-model <model>`: Custom screener model specifier.
-- `--auditor-model <model>`: Custom auditor model specifier.
-- `--reasoning-budget <tokens>`: Maximum reasoning budget tokens.
+- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier or alias.
+- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier or alias.
+- `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens.
+- `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.
+- `--format <stylish|json|compact>`: Output presentation format.
 - `--caseload <path|->`: Ingests upstream Caseload.
+- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of stdout.
+- `--json`: Emits enriched Caseload JSON.
 
 ### CLI Exit Codes
 - **0:** Configuration valid and normalized.
-- **2:** Missing provider credentials (`GEMINI_API_KEY`) or invalid model identifiers.
+- **2:** Missing provider credentials (`GEMINI_API_KEY`), insecure or workspace-resident configuration file, or invalid model/budget identifiers.

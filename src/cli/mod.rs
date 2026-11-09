@@ -14,10 +14,12 @@
 
 //! Canon Clerk CLI driving adapter and subcommand router.
 
+pub mod configure;
 pub mod discover;
 pub mod intake;
 pub mod validate;
 
+pub use configure::{ConfigureArgs, ConfigureFormat, run_configure, run_configure_with_env};
 pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
 pub use intake::{IntakeArgs, run_intake};
 pub use validate::{ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace};
@@ -81,6 +83,8 @@ pub enum Commands {
     Discover(DiscoverArgs),
     /// Statutory validity gate: statically lint candidate canon AST and frontmatter schemas.
     Validate(ValidateArgs),
+    /// Operational environment normalizer: verify credentials and normalize model specifiers.
+    Configure(ConfigureArgs),
 }
 
 /// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
@@ -192,6 +196,12 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 run_validate(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
+            Commands::Configure(args) => {
+                let mut stdin = io::stdin().lock();
+                let mut stdout = io::stdout().lock();
+                run_configure(args, &mut stdin, &mut stdout)?;
+                return Ok(());
+            }
         }
     }
 
@@ -248,7 +258,7 @@ mod tests {
                 assert_eq!(args.pr_title.as_deref(), Some("feat: test"));
                 assert!(args.json);
             }
-            Some(Commands::Discover(_) | Commands::Validate(_)) | None => {
+            Some(Commands::Discover(_) | Commands::Validate(_) | Commands::Configure(_)) | None => {
                 panic!("expected Intake subcommand")
             }
         }

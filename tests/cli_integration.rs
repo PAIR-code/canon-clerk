@@ -201,6 +201,22 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk validate --all-canons --json");
     assert_eq!(val_all.status.code(), Some(0));
+
+    // Verify configure missing GEMINI_API_KEY exits 2 and valid key exits 0
+    let cfg_no_key = Command::new(bin_path())
+        .arg("configure")
+        .env_remove("GEMINI_API_KEY")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("failed to execute canon-clerk configure without key");
+    assert_eq!(cfg_no_key.status.code(), Some(2));
+
+    let cfg_ok = Command::new(bin_path())
+        .args(["configure", "--json"])
+        .env("GEMINI_API_KEY", "test-key-from-integration-runner")
+        .output()
+        .expect("failed to execute canon-clerk configure --json");
+    assert_eq!(cfg_ok.status.code(), Some(0));
 }
 
 #[test]

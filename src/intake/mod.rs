@@ -349,9 +349,7 @@ index 1111111..2222222 100644
 
         #[test]
         fn test_preserves_upstream_sections_when_attaching_intake() {
-            let mut upstream = Caseload::new();
-            upstream.config =
-                Some(serde_json::json!({ "screener_model": "gemini-flash-lite-latest" }));
+            let upstream = Caseload::new().with_config(crate::caseload::CaseloadConfig::default());
 
             let options = IntakeOptions {
                 intent: Some("Prospective auth rotation".to_string()),
