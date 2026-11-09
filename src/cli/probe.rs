@@ -16,11 +16,9 @@
 
 use crate::caseload::{Caseload, CaseloadProbe, ProbeEndpointResult, ProbeStatus};
 use crate::cli::CliError;
-use crate::cli::discover::read_caseload_operand;
-use crate::cli::intake::write_caseload_file;
-use crate::configure::{
-    ConfigureOptions, execute_configure, load_host_config_file, resolve_default_config_path,
-    resolve_gemini_api_key,
+use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
+use crate::cli::runners::{
+    resolve_branch_b_options, resolve_gemini_api_key, run_branch_b_configure,
 };
 use crate::probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiEndpointProber,
@@ -30,7 +28,6 @@ use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{Read, Write};
-use std::path::PathBuf;
 
 const PROBE_EXAMPLES: &str = "\
 Examples:
@@ -72,41 +69,8 @@ pub struct ProbeArgs {
     )]
     pub timeout: Option<u64>,
 
-    /// Custom screener model specifier or shorthand alias (`flash-lite`, `flash`, `pro`; env: `CANON_CLERK_SCREENER_MODEL`).
-    #[arg(
-        long = "screener-model",
-        value_name = "MODEL",
-        help_heading = "Model & Reasoning Options",
-        help = "Screener model specifier or alias (fallback env: CANON_CLERK_SCREENER_MODEL)"
-    )]
-    pub screener_model: Option<String>,
-
-    /// Custom auditor model specifier or shorthand alias (`pro`, `flash`, `flash-lite`; env: `CANON_CLERK_AUDITOR_MODEL`).
-    #[arg(
-        long = "auditor-model",
-        value_name = "MODEL",
-        help_heading = "Model & Reasoning Options",
-        help = "Auditor model specifier or alias (fallback env: CANON_CLERK_AUDITOR_MODEL)"
-    )]
-    pub auditor_model: Option<String>,
-
-    /// Maximum reasoning budget in tokens for extended thinking during `audit` trials (env: `CANON_CLERK_REASONING_BUDGET`).
-    #[arg(
-        long = "reasoning-budget",
-        value_name = "TOKENS",
-        help_heading = "Model & Reasoning Options",
-        help = "Maximum reasoning budget tokens (fallback env: CANON_CLERK_REASONING_BUDGET)"
-    )]
-    pub reasoning_budget: Option<u32>,
-
-    /// Google Gemini API key override (fallback env: `GEMINI_API_KEY`; never persisted to Caseload JSON).
-    #[arg(
-        long = "gemini-api-key",
-        value_name = "KEY",
-        help_heading = "Provider Credentials",
-        help = "Google Gemini API key (fallback env: GEMINI_API_KEY)"
-    )]
-    pub gemini_api_key: Option<String>,
+    #[command(flatten)]
+    pub provider: ProviderConfigArgs,
 
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
@@ -118,31 +82,8 @@ pub struct ProbeArgs {
     )]
     pub format: ProbeFormat,
 
-    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
-    #[arg(
-        long = "caseload",
-        value_name = "PATH|-",
-        help_heading = "Caseload & Output",
-        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
-    )]
-    pub caseload: Option<String>,
-
-    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
-    #[arg(
-        long = "output-caseload",
-        value_name = "PATH",
-        help_heading = "Caseload & Output",
-        help = "Write cumulative Caseload JSON to disk independently of stdout"
-    )]
-    pub output_caseload: Option<PathBuf>,
-
-    /// Emit the enriched `Caseload` as JSON to standard output.
-    #[arg(
-        long = "json",
-        help_heading = "Caseload & Output",
-        help = "Emit enriched Caseload JSON to stdout"
-    )]
-    pub json: bool,
+    #[command(flatten)]
+    pub io: CaseloadIoArgs,
 }
 
 /// Executes the `probe` CLI subcommand against an explicit environment map and hexagonal [`EndpointProber`].
@@ -153,24 +94,9 @@ pub fn run_probe_with_env_and_prober(
     env: &BTreeMap<String, String>,
     prober: &dyn EndpointProber,
 ) -> Result<Caseload, CliError> {
-    let incoming_caseload = read_caseload_operand(args.caseload.as_deref(), stdin)?;
+    let incoming_caseload = args.io.read_caseload(stdin)?;
     let timeout_ms = resolve_timeout_ms(args.timeout, env)?;
-
-    let cwd = env::current_dir().ok();
-    let stored_config = match resolve_default_config_path(env) {
-        Some(cfg_path) => load_host_config_file(&cfg_path, cwd.as_deref())
-            .map_err(|err| CliError::usage(err.to_string()))?,
-        None => None,
-    };
-
-    let configure_options = ConfigureOptions {
-        screener_model: args.screener_model.clone(),
-        auditor_model: args.auditor_model.clone(),
-        reasoning_budget: args.reasoning_budget,
-        gemini_api_key: args.gemini_api_key.clone(),
-        env: env.clone(),
-        stored_config,
-    };
+    let configure_options = resolve_branch_b_options(&args.provider, env)?;
 
     let caseload = if let Some(existing) = incoming_caseload.as_ref()
         && existing.probe.is_some()
@@ -178,10 +104,8 @@ pub fn run_probe_with_env_and_prober(
     {
         existing.clone()
     } else {
-        let configured = execute_configure(&configure_options, incoming_caseload)
-            .map_err(|err| CliError::usage(err.to_string()))?;
-        let api_key = resolve_gemini_api_key(&configure_options)
-            .map_err(|err| CliError::usage(err.to_string()))?;
+        let configured = run_branch_b_configure(&configure_options, incoming_caseload)?;
+        let api_key = resolve_gemini_api_key(&configure_options)?;
         let probe_options = ProbeOptions {
             api_key,
             timeout_ms,
@@ -190,9 +114,7 @@ pub fn run_probe_with_env_and_prober(
             .map_err(|err| CliError::usage(err.to_string()))?
     };
 
-    if let Some(output_path) = &args.output_caseload {
-        write_caseload_file(output_path, &caseload)?;
-    }
+    args.io.write_output_caseload(&caseload)?;
 
     if let Some(probe) = &caseload.probe {
         render_probe_output(args, &caseload, probe, stdout)?;
@@ -252,7 +174,7 @@ fn render_probe_output(
     probe: &CaseloadProbe,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let effective_format = if args.json {
+    let effective_format = if args.io.json {
         ProbeFormat::Json
     } else {
         args.format
@@ -420,12 +342,12 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert(
             ENV_GEMINI_API_KEY.to_string(),
-            "synthetic-probe-api-key".to_string(),
+            "synthetic-test-api-key-value".to_string(),
         );
         env
     }
 
-    mod cli_argument_parsing {
+    mod cli_argument_parsing_and_help {
         use super::*;
 
         #[test]
@@ -446,9 +368,9 @@ mod tests {
             match cli.command {
                 Some(Commands::Probe(args)) => {
                     assert_eq!(args.timeout, Some(3500));
-                    assert_eq!(args.screener_model.as_deref(), Some("flash-lite"));
-                    assert_eq!(args.auditor_model.as_deref(), Some("pro"));
-                    assert!(args.json);
+                    assert_eq!(args.provider.screener_model.as_deref(), Some("flash-lite"));
+                    assert_eq!(args.provider.auditor_model.as_deref(), Some("pro"));
+                    assert!(args.io.json);
                 }
                 _ => panic!("expected Probe subcommand"),
             }
@@ -462,8 +384,14 @@ mod tests {
         fn test_telescopes_configure_and_probe_into_json_output_without_key_leakage() {
             let secret = "synthetic-secret-probe-key-never-echo-777";
             let args = ProbeArgs {
-                gemini_api_key: Some(secret.to_string()),
-                json: true,
+                provider: ProviderConfigArgs {
+                    gemini_api_key: Some(secret.to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ProbeArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -557,7 +485,10 @@ mod tests {
             };
 
             let args = ProbeArgs {
-                json: true,
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ProbeArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -639,8 +570,11 @@ mod tests {
             let raw = serde_json::to_string(&upstream).expect("serialize upstream");
 
             let args = ProbeArgs {
-                caseload: Some("-".to_string()),
-                json: true,
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ProbeArgs::default()
             };
             let mut stdin = Cursor::new(raw.into_bytes());

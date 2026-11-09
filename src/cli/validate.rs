@@ -12,40 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CLI driving adapter for the `canon-clerk validate` subcommand (`docs/architecture/nodes/validate.md` §5).
+//! CLI driving adapter for the `canon-clerk validate` subcommand.
 
 use crate::caseload::{AnnotationLevel, Caseload, CaseloadValidation, CodeAnnotation};
 use crate::cli::CliError;
-use crate::cli::discover::{StdinSourceRefs, ensure_single_stdin_source, read_caseload_operand};
-use crate::cli::intake::{read_operand_source, resolve_target_operands, write_caseload_file};
-use crate::discover::{DiscoverError, DiscoverOptions, execute_discover_on_disk};
-use crate::intake::{IntakeError, IntakeOptions, execute_intake};
-use crate::validate::{ValidateError, ValidateOptions, execute_validate_on_disk};
+use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
+use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::runners::run_branch_a_validate;
 use clap::{Args, ValueEnum};
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const VALIDATE_EXAMPLES: &str = "\
 Examples:
-  # Validate full repository canon corpus (Codex Audit):
-  canon-clerk validate --all-canons
-
-  # Validate candidate canons triggered by an in-flight diff stream:
+  # Validate candidate canons matching the working tree diff:
   git diff origin/main | canon-clerk validate --diff -
 
-  # Validate candidates on an existing Caseload JSON:
-  canon-clerk validate --caseload caseload-2.json --json
+  # Validate candidate canons for explicit target paths or globs:
+  canon-clerk validate src/lib.rs 'src/**/*.rs'
 
-  # Fail when any warning is emitted:
-  canon-clerk validate --all-canons --max-warnings 0";
+  # Validate all repository canons (pre-commit or CI statutory lint gate):
+  canon-clerk validate --all-canons
+
+  # Enforce zero warnings in strict CI mode:
+  canon-clerk validate --all-canons --max-warnings 0
+
+  # Emit tab-separated diagnostics for IDE or editor integration:
+  canon-clerk validate --all-canons --format compact
+
+  # Emit full cumulative Caseload JSON to stdout:
+  canon-clerk validate --all-canons --json";
 
 /// Output presentation format for `canon-clerk validate`.
-#[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidateFormat {
-    /// Human-readable lint report with file paths, line/column coordinates, and summary counts.
-    #[default]
+    /// Human-readable terminal output with pass/fail summary and line diagnostics.
     Stylish,
     /// Full cumulative `Caseload` JSON envelope.
     Json,
@@ -63,84 +66,11 @@ pub enum ValidateFormat {
     after_help = VALIDATE_EXAMPLES
 )]
 pub struct ValidateArgs {
-    /// Target file paths, directories, globs, or `-` to read newline-delimited paths from stdin.
-    #[arg(
-        value_name = "TARGETS",
-        help = "Target file paths, directories, globs, or '-' for stdin paths"
-    )]
-    pub targets: Vec<String>,
+    #[command(flatten)]
+    pub filing: FilingSourceArgs,
 
-    /// Read unified diff patch from a file path or `-` for standard input.
-    #[arg(
-        long = "diff",
-        value_name = "PATH|-",
-        help_heading = "Filing Sources",
-        help = "Ingest unified diff patch from file or '-' for stdin"
-    )]
-    pub diff: Option<String>,
-
-    /// Prospective architectural design intent or plan description.
-    #[arg(
-        long = "intent",
-        value_name = "TEXT",
-        help_heading = "Filing Sources",
-        help = "Ingest prospective architectural design intent"
-    )]
-    pub intent: Option<String>,
-
-    /// Ingest all repository files as target artifacts (`scope: "all-targets"`).
-    #[arg(
-        long = "all-targets",
-        help_heading = "Filing Sources",
-        help = "Ingest all repository files as target artifacts"
-    )]
-    pub all_targets: bool,
-
-    /// Pull request title or commit subject line.
-    #[arg(
-        long = "pr-title",
-        value_name = "TEXT",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request title or commit subject text"
-    )]
-    pub pr_title: Option<String>,
-
-    /// Pull request Markdown description or commit body.
-    #[arg(
-        long = "pr-body",
-        value_name = "TEXT",
-        conflicts_with = "pr_body_file",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request Markdown description text"
-    )]
-    pub pr_body: Option<String>,
-
-    /// Read pull request Markdown description from a file path or `-` for stdin.
-    #[arg(
-        long = "pr-body-file",
-        value_name = "PATH",
-        conflicts_with = "pr_body",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request Markdown description from a file"
-    )]
-    pub pr_body_file: Option<String>,
-
-    /// Validate all canons across the repository corpus, bypassing path trigger matching.
-    #[arg(
-        long = "all-canons",
-        help_heading = "Validation Options",
-        help = "Validate all repository canons, bypassing trigger matching"
-    )]
-    pub all_canons: bool,
-
-    /// Explicitly restrict candidate canons to a specific file path or glob subset.
-    #[arg(
-        long = "canon",
-        value_name = "PATH|GLOB",
-        help_heading = "Validation Options",
-        help = "Explicitly restrict candidate canons to a specific subset"
-    )]
-    pub canon: Vec<String>,
+    #[command(flatten)]
+    pub canons: CanonSelectionArgs,
 
     /// Maximum number of warnings allowed before exiting with non-zero status (`1`).
     #[arg(
@@ -169,31 +99,8 @@ pub struct ValidateArgs {
     )]
     pub format: Option<ValidateFormat>,
 
-    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
-    #[arg(
-        long = "caseload",
-        value_name = "PATH|-",
-        help_heading = "Caseload & Output",
-        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
-    )]
-    pub caseload: Option<String>,
-
-    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
-    #[arg(
-        long = "output-caseload",
-        value_name = "PATH",
-        help_heading = "Caseload & Output",
-        help = "Write cumulative Caseload JSON to disk independently of stdout"
-    )]
-    pub output_caseload: Option<PathBuf>,
-
-    /// Emit the enriched `Caseload` as JSON to standard output.
-    #[arg(
-        long = "json",
-        help_heading = "Caseload & Output",
-        help = "Emit enriched Caseload JSON to stdout"
-    )]
-    pub json: bool,
+    #[command(flatten)]
+    pub io: CaseloadIoArgs,
 }
 
 /// Executes the `validate` CLI subcommand against the provided `stdin`, `stdout`, and `workspace_root`.
@@ -203,58 +110,19 @@ pub fn run_validate_in_workspace(
     stdout: &mut dyn Write,
     workspace_root: &Path,
 ) -> Result<Caseload, CliError> {
-    ensure_single_stdin_source(&StdinSourceRefs {
-        targets: &args.targets,
-        diff: args.diff.as_deref(),
-        pr_body_file: args.pr_body_file.as_deref(),
-        caseload: args.caseload.as_deref(),
-    })?;
+    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
-    let incoming_caseload = read_caseload_operand(args.caseload.as_deref(), stdin)?;
-    let intake_opts = build_intake_options(args, stdin)?;
+    let incoming_caseload = args.io.read_caseload(stdin)?;
+    let caseload = run_branch_a_validate(
+        &args.filing,
+        &args.canons,
+        incoming_caseload,
+        workspace_root,
+        stdin,
+        args.max_warnings,
+    )?;
 
-    let caseload_after_intake = if intake_opts.has_designated_source() {
-        execute_intake(&intake_opts, incoming_caseload).map_err(|err| match err {
-            IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-                CliError::usage(err.to_string())
-            }
-        })?
-    } else if let Some(existing) = incoming_caseload {
-        existing
-    } else if args.all_canons || !args.canon.is_empty() {
-        Caseload::new()
-    } else {
-        return Err(CliError::usage(ValidateError::MissingDiscovery.to_string()));
-    };
-
-    let caseload_after_discover =
-        if caseload_after_intake.discovery.is_some() && !args.all_canons && args.canon.is_empty() {
-            caseload_after_intake
-        } else {
-            let discover_opts = DiscoverOptions {
-                all_canons: args.all_canons
-                    || (caseload_after_intake.intake.is_none() && !args.canon.is_empty()),
-                canon_patterns: args.canon.clone(),
-            };
-            execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
-                .map_err(map_discover_error)?
-        };
-
-    let validate_opts = ValidateOptions {
-        max_warnings: args.max_warnings,
-    };
-
-    let caseload =
-        execute_validate_on_disk(&validate_opts, caseload_after_discover, workspace_root).map_err(
-            |err| match err {
-                ValidateError::MissingDiscovery => CliError::usage(err.to_string()),
-                ValidateError::Discover(d) => map_discover_error(d),
-            },
-        )?;
-
-    if let Some(output_path) = &args.output_caseload {
-        write_caseload_file(output_path, &caseload)?;
-    }
+    args.io.write_output_caseload(&caseload)?;
 
     let validation = caseload.validation.clone().unwrap_or_default();
     render_validate_output(args, &caseload, &validation, stdout)?;
@@ -280,52 +148,13 @@ pub fn run_validate(
     run_validate_in_workspace(args, stdin, stdout, &cwd)
 }
 
-fn map_discover_error(err: DiscoverError) -> CliError {
-    match err {
-        DiscoverError::MissingInputSource => {
-            CliError::usage(ValidateError::MissingDiscovery.to_string())
-        }
-        DiscoverError::InvalidGlob(_) | DiscoverError::PathEscapesWorkspace { .. } => {
-            CliError::usage(err.to_string())
-        }
-        DiscoverError::Io { .. } => CliError::runtime(err.to_string()),
-    }
-}
-
-fn build_intake_options(
-    args: &ValidateArgs,
-    stdin: &mut dyn Read,
-) -> Result<IntakeOptions, CliError> {
-    let patch_content = args
-        .diff
-        .as_deref()
-        .map(|s| read_operand_source(s, "--diff", stdin))
-        .transpose()?;
-    let pr_body = if let Some(body) = &args.pr_body {
-        Some(body.clone())
-    } else if let Some(path) = &args.pr_body_file {
-        Some(read_operand_source(path, "--pr-body-file", stdin)?)
-    } else {
-        None
-    };
-    Ok(IntakeOptions {
-        pr_title: args.pr_title.clone(),
-        pr_body,
-        intent: args.intent.clone(),
-        target_paths: resolve_target_operands(&args.targets, stdin)?,
-        patch_content,
-        all_targets: args.all_targets,
-        linked_issues: None,
-    })
-}
-
 fn render_validate_output(
     args: &ValidateArgs,
     caseload: &Caseload,
     validation: &CaseloadValidation,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let effective_format = if args.json {
+    let effective_format = if args.io.json {
         ValidateFormat::Json
     } else if let Some(explicit) = args.format {
         explicit
@@ -519,8 +348,14 @@ mod tests {
         #[test]
         fn test_conflicting_stdin_operands_rejected_with_exit_code_2() {
             let args = ValidateArgs {
-                diff: Some("-".to_string()),
-                caseload: Some("-".to_string()),
+                filing: FilingSourceArgs {
+                    diff: Some("-".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
                 ..ValidateArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -538,9 +373,15 @@ mod tests {
         #[test]
         fn test_all_canons_validates_repository_corpus_and_exits_0() {
             let args = ValidateArgs {
-                all_canons: true,
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    ..CanonSelectionArgs::default()
+                },
                 max_warnings: Some(0),
-                json: true,
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ValidateArgs::default()
             };
             let mut stdin = Cursor::new(b"");

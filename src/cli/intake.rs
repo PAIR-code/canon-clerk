@@ -16,11 +16,11 @@
 
 use crate::caseload::{Caseload, CaseloadIntake};
 use crate::cli::CliError;
-use crate::intake::{IntakeError, IntakeOptions, execute_intake};
+use crate::cli::args::{CaseloadIoArgs, FilingSourceArgs};
+use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::runners::run_branch_a_intake;
 use clap::Args;
-use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
 
 const INTAKE_EXAMPLES: &str = "\
 Examples:
@@ -47,93 +47,11 @@ Examples:
     after_help = INTAKE_EXAMPLES
 )]
 pub struct IntakeArgs {
-    /// Target file paths, directories, globs, or `-` to read newline-delimited paths from stdin.
-    #[arg(
-        value_name = "TARGETS",
-        help = "Target file paths, directories, globs, or '-' for newline-delimited stdin paths"
-    )]
-    pub targets: Vec<String>,
+    #[command(flatten)]
+    pub filing: FilingSourceArgs,
 
-    /// Read unified diff patch from a file path or `-` for standard input.
-    #[arg(
-        long = "diff",
-        value_name = "PATH|-",
-        help_heading = "Filing Sources",
-        help = "Ingest unified diff patch from file or '-' for stdin"
-    )]
-    pub diff: Option<String>,
-
-    /// Prospective architectural design intent or plan description.
-    #[arg(
-        long = "intent",
-        value_name = "TEXT",
-        help_heading = "Filing Sources",
-        help = "Ingest prospective architectural design intent or plan description"
-    )]
-    pub intent: Option<String>,
-
-    /// Ingest all repository files as target artifacts (`scope: "all-targets"`).
-    #[arg(
-        long = "all-targets",
-        help_heading = "Filing Sources",
-        help = "Ingest all repository files as target artifacts"
-    )]
-    pub all_targets: bool,
-
-    /// Pull request title or commit subject line.
-    #[arg(
-        long = "pr-title",
-        value_name = "TEXT",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request title or commit subject text"
-    )]
-    pub pr_title: Option<String>,
-
-    /// Pull request Markdown description or commit body.
-    #[arg(
-        long = "pr-body",
-        value_name = "TEXT",
-        conflicts_with = "pr_body_file",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request Markdown description text"
-    )]
-    pub pr_body: Option<String>,
-
-    /// Read pull request Markdown description from a file path or `-` for stdin.
-    #[arg(
-        long = "pr-body-file",
-        value_name = "PATH",
-        conflicts_with = "pr_body",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request Markdown description from a file"
-    )]
-    pub pr_body_file: Option<String>,
-
-    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
-    #[arg(
-        long = "caseload",
-        value_name = "PATH|-",
-        help_heading = "Caseload & Output",
-        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
-    )]
-    pub caseload: Option<String>,
-
-    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
-    #[arg(
-        long = "output-caseload",
-        value_name = "PATH",
-        help_heading = "Caseload & Output",
-        help = "Write cumulative Caseload JSON to disk independently of stdout"
-    )]
-    pub output_caseload: Option<PathBuf>,
-
-    /// Emit the enriched `Caseload` as JSON to standard output.
-    #[arg(
-        long = "json",
-        help_heading = "Caseload & Output",
-        help = "Emit enriched Caseload JSON to stdout"
-    )]
-    pub json: bool,
+    #[command(flatten)]
+    pub io: CaseloadIoArgs,
 }
 
 /// Executes the `intake` CLI subcommand against the provided `stdin` and `stdout` streams.
@@ -142,58 +60,14 @@ pub fn run_intake(
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
 ) -> Result<Caseload, CliError> {
-    validate_stdin_sources(args)?;
+    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
-    let incoming_caseload = match &args.caseload {
-        Some(source) => {
-            let raw = read_operand_source(source, "--caseload", stdin)?;
-            let parsed: Caseload = serde_json::from_str(&raw).map_err(|err| {
-                CliError::usage(format!(
-                    "Failed to parse incoming Caseload JSON from `{source}`: {err}\n  \
-                     Hint: Ensure `--caseload` points to a valid Canon Clerk Caseload JSON file."
-                ))
-            })?;
-            Some(parsed)
-        }
-        None => None,
-    };
+    let incoming_caseload = args.io.read_caseload(stdin)?;
+    let caseload = run_branch_a_intake(&args.filing, incoming_caseload, stdin)?;
 
-    let patch_content = match &args.diff {
-        Some(source) => Some(read_operand_source(source, "--diff", stdin)?),
-        None => None,
-    };
+    args.io.write_output_caseload(&caseload)?;
 
-    let pr_body = if let Some(body) = &args.pr_body {
-        Some(body.clone())
-    } else if let Some(path) = &args.pr_body_file {
-        Some(read_operand_source(path, "--pr-body-file", stdin)?)
-    } else {
-        None
-    };
-
-    let target_paths = resolve_target_operands(&args.targets, stdin)?;
-
-    let options = IntakeOptions {
-        pr_title: args.pr_title.clone(),
-        pr_body,
-        intent: args.intent.clone(),
-        target_paths,
-        patch_content,
-        all_targets: args.all_targets,
-        linked_issues: None,
-    };
-
-    let caseload = execute_intake(&options, incoming_caseload).map_err(|err| match err {
-        IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-            CliError::usage(err.to_string())
-        }
-    })?;
-
-    if let Some(output_path) = &args.output_caseload {
-        write_caseload_file(output_path, &caseload)?;
-    }
-
-    if args.json {
+    if args.io.json {
         let serialized = serde_json::to_string_pretty(&caseload).map_err(|err| {
             CliError::runtime(format!("Failed to serialize Caseload JSON: {err}"))
         })?;
@@ -207,117 +81,6 @@ pub fn run_intake(
     }
 
     Ok(caseload)
-}
-
-/// Enforces the single-stdin guard: at most one operand may consume standard input (`-`).
-fn validate_stdin_sources(args: &IntakeArgs) -> Result<(), CliError> {
-    let mut stdin_consumers = Vec::new();
-
-    let positional_stdin_count = args.targets.iter().filter(|t| t.as_str() == "-").count();
-    if positional_stdin_count > 1 {
-        return Err(CliError::usage(
-            "Standard input (`-`) was specified multiple times in positional `TARGETS`.\n  \
-             Hint: Pass `-` at most once to read newline-delimited target paths from stdin."
-                .to_string(),
-        ));
-    }
-    if positional_stdin_count == 1 {
-        stdin_consumers.push("positional `TARGETS` (`-`)");
-    }
-    if args.diff.as_deref() == Some("-") {
-        stdin_consumers.push("`--diff -`");
-    }
-    if args.pr_body_file.as_deref() == Some("-") {
-        stdin_consumers.push("`--pr-body-file -`");
-    }
-    if args.caseload.as_deref() == Some("-") {
-        stdin_consumers.push("`--caseload -`");
-    }
-
-    if stdin_consumers.len() > 1 {
-        return Err(CliError::usage(format!(
-            "Conflicting standard input (`-`) sources specified: {}.\n  \
-             Hint: Standard input can only be consumed by a single source per invocation; pass file paths for the remaining options.",
-            stdin_consumers.join(", ")
-        )));
-    }
-
-    Ok(())
-}
-
-pub(crate) fn read_operand_source(
-    source: &str,
-    flag_name: &str,
-    stdin: &mut dyn Read,
-) -> Result<String, CliError> {
-    if source == "-" {
-        let mut buf = String::new();
-        stdin.read_to_string(&mut buf).map_err(|err| {
-            CliError::usage(format!(
-                "Failed to read standard input for `{flag_name} -`: {err}\n  \
-                 Hint: Pipe valid UTF-8 text into standard input or provide a file path."
-            ))
-        })?;
-        Ok(buf)
-    } else {
-        fs::read_to_string(source).map_err(|err| {
-            CliError::usage(format!(
-                "Failed to read file `{source}` for `{flag_name}`: {err}\n  \
-                 Hint: Verify that `{source}` exists and is readable, or pass `-` to read from standard input."
-            ))
-        })
-    }
-}
-
-pub(crate) fn resolve_target_operands(
-    targets: &[String],
-    stdin: &mut dyn Read,
-) -> Result<Option<Vec<String>>, CliError> {
-    if targets.is_empty() {
-        return Ok(None);
-    }
-
-    let mut resolved = Vec::new();
-    for target in targets {
-        if target == "-" {
-            let raw = read_operand_source("-", "TARGETS", stdin)?;
-            for line in raw.lines() {
-                let trimmed = line.trim();
-                if !trimmed.is_empty() {
-                    resolved.push(trimmed.to_string());
-                }
-            }
-        } else {
-            resolved.push(target.clone());
-        }
-    }
-
-    Ok(Some(resolved))
-}
-
-pub(crate) fn write_caseload_file(path: &Path, caseload: &Caseload) -> Result<(), CliError> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent).map_err(|err| {
-            CliError::usage(format!(
-                "Failed to create parent directory `{}` for `--output-caseload`: {err}\n  \
-                 Hint: Check directory write permissions for `{}`.",
-                parent.display(),
-                path.display()
-            ))
-        })?;
-    }
-
-    let json = serde_json::to_string_pretty(caseload)
-        .map_err(|err| CliError::runtime(format!("Failed to serialize Caseload JSON: {err}")))?;
-    fs::write(path, format!("{json}\n")).map_err(|err| {
-        CliError::usage(format!(
-            "Failed to write Caseload JSON to `{}`: {err}\n  \
-             Hint: Verify that the output path is writable.",
-            path.display()
-        ))
-    })
 }
 
 fn render_human_summary(intake: &CaseloadIntake, stdout: &mut dyn Write) -> std::io::Result<()> {
@@ -383,6 +146,7 @@ mod tests {
     use super::*;
     use crate::cli::{Cli, Commands, run};
     use clap::{CommandFactory, Parser};
+    use std::fs;
     use std::io::Cursor;
 
     mod help_and_flag_parsing {
@@ -437,8 +201,11 @@ mod tests {
         #[test]
         fn test_multiple_stdin_operands_rejected_with_exit_code_2() {
             let args = IntakeArgs {
-                targets: vec!["-".to_string()],
-                diff: Some("-".to_string()),
+                filing: FilingSourceArgs {
+                    targets: vec!["-".to_string()],
+                    diff: Some("-".to_string()),
+                    ..FilingSourceArgs::default()
+                },
                 ..IntakeArgs::default()
             };
             let mut stdin = Cursor::new("src/lib.rs\n");
@@ -454,7 +221,10 @@ mod tests {
         #[test]
         fn test_duplicate_positional_stdin_rejected_with_exit_code_2() {
             let args = IntakeArgs {
-                targets: vec!["-".to_string(), "-".to_string()],
+                filing: FilingSourceArgs {
+                    targets: vec!["-".to_string(), "-".to_string()],
+                    ..FilingSourceArgs::default()
+                },
                 ..IntakeArgs::default()
             };
             let mut stdin = Cursor::new("src/lib.rs\n");
@@ -495,9 +265,12 @@ mod tests {
         #[test]
         fn test_stdin_target_paths_and_human_summary() {
             let args = IntakeArgs {
-                targets: vec!["-".to_string()],
-                pr_title: Some("feat(intake): add stream support".to_string()),
-                intent: Some("Catalog piped paths".to_string()),
+                filing: FilingSourceArgs {
+                    targets: vec!["-".to_string()],
+                    pr_title: Some("feat(intake): add stream support".to_string()),
+                    intent: Some("Catalog piped paths".to_string()),
+                    ..FilingSourceArgs::default()
+                },
                 ..IntakeArgs::default()
             };
             let mut stdin = Cursor::new("src/main.rs\n./src/lib.rs\n\n");
@@ -543,11 +316,15 @@ diff --git a/src/lib.rs b/src/lib.rs
             .expect("write upstream caseload");
 
             let args = IntakeArgs {
-                diff: Some(patch_path.to_string_lossy().into_owned()),
-                caseload: Some(upstream_caseload_path.to_string_lossy().into_owned()),
-                output_caseload: Some(output_caseload_path.clone()),
-                json: false,
-                ..IntakeArgs::default()
+                filing: FilingSourceArgs {
+                    diff: Some(patch_path.to_string_lossy().into_owned()),
+                    ..FilingSourceArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    caseload: Some(upstream_caseload_path.to_string_lossy().into_owned()),
+                    output_caseload: Some(output_caseload_path.clone()),
+                    json: false,
+                },
             };
 
             let mut stdin = Cursor::new(Vec::<u8>::new());
