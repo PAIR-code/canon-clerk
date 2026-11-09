@@ -188,6 +188,19 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk discover --all-canons --json");
     assert_eq!(disc_all.status.code(), Some(0));
+
+    // Verify validate naked invocation exits 2 and --all-canons exits 0
+    let val_naked = Command::new(bin_path())
+        .arg("validate")
+        .output()
+        .expect("failed to execute canon-clerk validate");
+    assert_eq!(val_naked.status.code(), Some(2));
+
+    let val_all = Command::new(bin_path())
+        .args(["validate", "--all-canons", "--max-warnings", "0", "--json"])
+        .output()
+        .expect("failed to execute canon-clerk validate --all-canons --json");
+    assert_eq!(val_all.status.code(), Some(0));
 }
 
 #[test]
