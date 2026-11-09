@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`).
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`).
 
+mod apprisal;
 mod config;
 mod discovery;
 mod intake;
 mod probe;
 mod validation;
 
+pub use apprisal::{
+    ApprisalStatus, CanonApprisalAssessment, CaseloadApprisal, normalize_unit_score,
+};
 pub use config::{CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL};
 pub use discovery::{ActiveExhibits, CaseloadDiscovery, DiscoveryMode};
 pub use intake::{
@@ -63,7 +67,7 @@ pub struct Caseload {
     pub probe: Option<CaseloadProbe>,
     /// Apprisal: Prospective statutory applicability assessments against design intent.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub apprisal: Option<serde_json::Value>,
+    pub apprisal: Option<CaseloadApprisal>,
     /// Docket: Macro triage colorability assessments and active docket cases.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docket: Option<serde_json::Value>,
@@ -125,6 +129,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.probe` namespace populated, preserving all other stage fields.
     pub fn with_probe(mut self, probe: CaseloadProbe) -> Self {
         self.probe = Some(probe);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.apprisal` namespace populated, preserving all other stage fields.
+    pub fn with_apprisal(mut self, apprisal: CaseloadApprisal) -> Self {
+        self.apprisal = Some(apprisal);
         self
     }
 }
@@ -218,6 +228,22 @@ mod tests {
             assert_eq!(with_prb.validation, with_cfg.validation);
             assert_eq!(with_prb.discovery, with_cfg.discovery);
             assert_eq!(with_prb.intake, with_cfg.intake);
+        }
+
+        #[test]
+        fn test_with_apprisal_preserves_existing_namespaces() {
+            let upstream = Caseload::new()
+                .with_intake(CaseloadIntake::default())
+                .with_discovery(CaseloadDiscovery::default())
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default());
+
+            let with_app = upstream.clone().with_apprisal(CaseloadApprisal::default());
+            assert_eq!(with_app.apprisal, Some(CaseloadApprisal::default()));
+            assert_eq!(with_app.config, upstream.config);
+            assert_eq!(with_app.validation, upstream.validation);
+            assert_eq!(with_app.discovery, upstream.discovery);
+            assert_eq!(with_app.intake, upstream.intake);
         }
     }
 }

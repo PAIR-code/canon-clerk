@@ -226,6 +226,29 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk probe without key");
     assert_eq!(probe_no_key.status.code(), Some(2));
+
+    // Verify apprise dual-input guard exits 2 and zero-candidate short-circuit exits 0 without GEMINI_API_KEY
+    let apprise_intent_only = Command::new(bin_path())
+        .args(["apprise", "--intent", "Add new feature"])
+        .output()
+        .expect("failed to execute canon-clerk apprise --intent");
+    assert_eq!(apprise_intent_only.status.code(), Some(2));
+
+    let apprise_zero_cand = Command::new(bin_path())
+        .args([
+            "apprise",
+            "--intent",
+            "Refactor library internals",
+            "--canon",
+            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
+            "src/lib.rs",
+            "--json",
+        ])
+        .env_remove("GEMINI_API_KEY")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("failed to execute canon-clerk apprise zero-candidate run");
+    assert_eq!(apprise_zero_cand.status.code(), Some(0));
 }
 
 #[test]
