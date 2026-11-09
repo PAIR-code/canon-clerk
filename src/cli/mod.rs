@@ -17,11 +17,13 @@
 pub mod configure;
 pub mod discover;
 pub mod intake;
+pub mod probe;
 pub mod validate;
 
 pub use configure::{ConfigureArgs, ConfigureFormat, run_configure, run_configure_with_env};
 pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
 pub use intake::{IntakeArgs, run_intake};
+pub use probe::{ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober};
 pub use validate::{ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace};
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -85,6 +87,8 @@ pub enum Commands {
     Validate(ValidateArgs),
     /// Operational environment normalizer: verify credentials and normalize model specifiers.
     Configure(ConfigureArgs),
+    /// Diagnostic network health check: verify live connectivity and latency of configured endpoints.
+    Probe(ProbeArgs),
 }
 
 /// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
@@ -202,6 +206,12 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 run_configure(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
+            Commands::Probe(args) => {
+                let mut stdin = io::stdin().lock();
+                let mut stdout = io::stdout().lock();
+                run_probe(args, &mut stdin, &mut stdout)?;
+                return Ok(());
+            }
         }
     }
 
@@ -258,7 +268,13 @@ mod tests {
                 assert_eq!(args.pr_title.as_deref(), Some("feat: test"));
                 assert!(args.json);
             }
-            Some(Commands::Discover(_) | Commands::Validate(_) | Commands::Configure(_)) | None => {
+            Some(
+                Commands::Discover(_)
+                | Commands::Validate(_)
+                | Commands::Configure(_)
+                | Commands::Probe(_),
+            )
+            | None => {
                 panic!("expected Intake subcommand")
             }
         }

@@ -214,6 +214,19 @@ fn is_valid_gemini_model_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_')
 }
 
+/// Resolves the Google Gemini API key from explicit overrides, `GEMINI_API_KEY` environment variable,
+/// or the user-level configuration store (`providers.google.apiKey`).
+pub fn resolve_gemini_api_key(options: &ConfigureOptions) -> Result<String, ConfigureError> {
+    let stored = options.stored_config.as_ref();
+    resolve_non_empty(
+        options.gemini_api_key.as_deref(),
+        options.env.get(ENV_GEMINI_API_KEY).map(String::as_str),
+    )
+    .or_else(|| stored.and_then(StoredConfig::google_api_key))
+    .map(str::to_string)
+    .ok_or(ConfigureError::MissingApiKey)
+}
+
 /// Executes the pure, deterministic `configure` stage and populates `.config` on the [`Caseload`].
 ///
 /// Precedence hierarchy:
@@ -233,12 +246,7 @@ pub fn execute_configure(
 
     let stored = options.stored_config.as_ref();
 
-    let api_key = resolve_non_empty(
-        options.gemini_api_key.as_deref(),
-        options.env.get(ENV_GEMINI_API_KEY).map(String::as_str),
-    )
-    .or_else(|| stored.and_then(StoredConfig::google_api_key))
-    .ok_or(ConfigureError::MissingApiKey)?;
+    let api_key = resolve_gemini_api_key(options)?;
     let _verified_key_len = api_key.len();
 
     let existing_config = caseload.config.as_ref();
