@@ -21,6 +21,7 @@ pub mod configure;
 pub mod discover;
 pub mod intake;
 pub mod probe;
+pub mod provider;
 pub mod validate;
 
 pub use canon::{
@@ -63,9 +64,14 @@ pub use discover::{
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{
-    DEFAULT_GEMINI_BASE_URL, DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber,
-    GeminiEndpointProber, ProbeError, ProbeOptions, build_generate_content_url,
-    decode_gemini_probe_response, execute_probe, strip_provider_prefix,
+    DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiEndpointProber,
+    ProbeError, ProbeOptions, decode_gemini_probe_response, execute_probe,
+};
+pub use provider::{
+    DEFAULT_GEMINI_BASE_URL, DEFAULT_GENERATION_TIMEOUT_MS, GeminiModelProvider, GenerationRequest,
+    GenerationResponse, ProviderError, StructuredModelProvider, TokenUsage,
+    build_generate_content_url, classify_gemini_http_error, extract_gemini_error_detail,
+    strip_provider_prefix,
 };
 pub use validate::{
     ValidateError, ValidateOptions, execute_validate, execute_validate_on_disk, lint_canon_source,
