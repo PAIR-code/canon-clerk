@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`).
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -20,8 +20,25 @@ use std::collections::BTreeMap;
 /// Current canonical schema version for serialized `Caseload` envelopes.
 pub const CASELOAD_SCHEMA_VERSION: &str = "1.0";
 
+/// Canonical default provider namespace for MVP model specifiers (`docs/architecture/nodes/configure.md` §3).
+pub const DEFAULT_PROVIDER: &str = "google";
+
+/// Default canonical screener model specifier (`docs/architecture/nodes/configure.md` §3).
+pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-flash-lite-latest";
+
+/// Default canonical auditor model specifier (`docs/architecture/nodes/configure.md` §3).
+pub const DEFAULT_AUDITOR_MODEL: &str = "google:gemini-pro-latest";
+
 fn default_caseload_version() -> String {
     CASELOAD_SCHEMA_VERSION.to_string()
+}
+
+fn default_screener_model() -> String {
+    DEFAULT_SCREENER_MODEL.to_string()
+}
+
+fn default_auditor_model() -> String {
+    DEFAULT_AUDITOR_MODEL.to_string()
 }
 
 /// File modification status relative to the base commit or working tree.
@@ -359,6 +376,31 @@ pub struct CaseloadValidation {
     pub has_errors: bool,
 }
 
+/// Normalized runtime provider configuration captured during the `configure` stage (`docs/architecture/nodes/configure.md` §3).
+/// Raw API keys are intentionally omitted to uphold the Credential Non-Persistence Invariant.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CaseloadConfig {
+    /// Canonical provider-prefixed model identifier used by fast heuristic screening stages (`apprise`, `docket`, `admit`).
+    #[serde(default = "default_screener_model")]
+    pub screener_model: String,
+    /// Canonical provider-prefixed model identifier used for substantive trial adjudication (`audit`).
+    #[serde(default = "default_auditor_model")]
+    pub auditor_model: String,
+    /// Optional token ceiling governing extended thinking during `audit` trials.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget: Option<u32>,
+}
+
+impl Default for CaseloadConfig {
+    fn default() -> Self {
+        Self {
+            screener_model: DEFAULT_SCREENER_MODEL.to_string(),
+            auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+            reasoning_budget: None,
+        }
+    }
+}
+
 /// The central, cumulative state container flowing through the Canon Clerk Caseload DAG.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Caseload {
@@ -380,7 +422,7 @@ pub struct Caseload {
 
     /// Configuration: Resolved provider credentials, model specifiers, and runtime options.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<serde_json::Value>,
+    pub config: Option<CaseloadConfig>,
 
     /// Probe: Live provider connectivity and endpoint latency diagnostics.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -441,6 +483,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.validation` namespace populated, preserving all other stage fields.
     pub fn with_validation(mut self, validation: CaseloadValidation) -> Self {
         self.validation = Some(validation);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.config` namespace populated, preserving all other stage fields.
+    pub fn with_config(mut self, config: CaseloadConfig) -> Self {
+        self.config = Some(config);
         self
     }
 }
@@ -538,6 +586,30 @@ mod tests {
             let decoded: CaseloadIntake = serde_json::from_str(&json).expect("deserialize intake");
             assert_eq!(decoded.scope, IntakeScope::AllTargets);
         }
+
+        #[test]
+        fn test_caseload_config_round_trip_and_optional_budget_omission() {
+            let default_cfg = CaseloadConfig::default();
+            let json = serde_json::to_string(&default_cfg).expect("serialize default config");
+            assert_eq!(
+                json,
+                r#"{"screener_model":"google:gemini-flash-lite-latest","auditor_model":"google:gemini-pro-latest"}"#
+            );
+            assert!(!json.contains("reasoning_budget"));
+
+            let with_budget = CaseloadConfig {
+                reasoning_budget: Some(4096),
+                ..CaseloadConfig::default()
+            };
+            let caseload = Caseload::new().with_config(with_budget);
+            let encoded = serde_json::to_string(&caseload).expect("serialize caseload");
+            let decoded: Caseload = serde_json::from_str(&encoded).expect("deserialize caseload");
+            assert_eq!(decoded, caseload);
+            assert_eq!(
+                decoded.config.as_ref().and_then(|c| c.reasoning_budget),
+                Some(4096)
+            );
+        }
     }
 
     mod envelope_immutability {
@@ -548,7 +620,7 @@ mod tests {
             let raw_upstream = r#"{
                 "version": "1.0",
                 "config": {
-                    "screener_model": "gemini-flash-lite-latest"
+                    "screener_model": "google:gemini-flash-lite-latest"
                 }
             }"#;
             let upstream: Caseload =
@@ -574,6 +646,20 @@ mod tests {
             assert_eq!(with_val.discovery, with_disc.discovery);
             assert_eq!(with_val.intake, with_disc.intake);
             assert_eq!(with_val.config, with_disc.config);
+        }
+
+        #[test]
+        fn test_with_config_preserves_existing_branch_a_namespaces() {
+            let branch_a = Caseload::new()
+                .with_intake(CaseloadIntake::default())
+                .with_discovery(CaseloadDiscovery::default())
+                .with_validation(CaseloadValidation::default());
+
+            let with_cfg = branch_a.clone().with_config(CaseloadConfig::default());
+            assert_eq!(with_cfg.config, Some(CaseloadConfig::default()));
+            assert_eq!(with_cfg.validation, branch_a.validation);
+            assert_eq!(with_cfg.discovery, branch_a.discovery);
+            assert_eq!(with_cfg.intake, branch_a.intake);
         }
     }
 }

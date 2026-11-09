@@ -17,6 +17,7 @@
 pub mod canon;
 pub mod caseload;
 pub mod cli;
+pub mod configure;
 pub mod discover;
 pub mod intake;
 pub mod validate;
@@ -34,15 +35,23 @@ pub use canon::{
     scope_pattern, to_kebab_case, tokenize_canon,
 };
 pub use caseload::{
-    ActiveExhibits, AnnotationLevel, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadDiscovery,
-    CaseloadIntake, CaseloadValidation, CodeAnnotation, ContentOmissionReason, DiscoveryMode,
-    FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason,
-    ValidatedCanonMetadata, ValidationOutcome,
+    ActiveExhibits, AnnotationLevel, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadConfig,
+    CaseloadDiscovery, CaseloadIntake, CaseloadValidation, CodeAnnotation, ContentOmissionReason,
+    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode, FileArtifact,
+    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason, ValidatedCanonMetadata,
+    ValidationOutcome,
 };
 pub use cli::{
-    Cli, CliError, Commands, DiscoverArgs, DiscoverFormat, IntakeArgs, ValidateArgs,
-    ValidateFormat, init_logging, run, run_discover, run_discover_in_workspace, run_intake,
-    run_validate, run_validate_in_workspace,
+    Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat,
+    IntakeArgs, ValidateArgs, ValidateFormat, init_logging, run, run_configure,
+    run_configure_with_env, run_discover, run_discover_in_workspace, run_intake, run_validate,
+    run_validate_in_workspace,
+};
+pub use configure::{
+    ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,
+    ENV_REASONING_BUDGET, ENV_SCREENER_MODEL, StoredConfig, StoredProviderConfig, StoredTierModel,
+    execute_configure, load_host_config_file, normalize_model_specifier,
+    resolve_default_config_path,
 };
 pub use discover::{
     DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,
