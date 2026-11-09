@@ -14,6 +14,7 @@
 
 //! Canon Clerk: Automated review gate enforcing declarative engineering rule packs.
 
+pub mod apprise;
 pub mod canon;
 pub mod caseload;
 pub mod cli;
@@ -24,6 +25,9 @@ pub mod probe;
 pub mod provider;
 pub mod validate;
 
+pub use apprise::{
+    AppriseError, AppriseOptions, DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_THRESHOLD, execute_apprise,
+};
 pub use canon::{
     Canon, CanonBody, CanonMetadata, CanonParseError, CanonScope, CanonSourceInfo, CanonSourceKind,
     CanonToken, CanonTokenKind, DEFAULT_FALLBACK_ID, DEFAULT_GLOBAL_TRIGGER_PATTERN,
@@ -37,19 +41,20 @@ pub use canon::{
     scope_pattern, to_kebab_case, tokenize_canon,
 };
 pub use caseload::{
-    ActiveExhibits, AnnotationLevel, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadConfig,
-    CaseloadDiscovery, CaseloadIntake, CaseloadProbe, CaseloadValidation, CodeAnnotation,
-    ContentOmissionReason, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
-    DiscoveryMode, FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext,
-    PatchOmissionReason, ProbeEndpointResult, ProbeStatus, ValidatedCanonMetadata,
-    ValidationOutcome,
+    ActiveExhibits, AnnotationLevel, ApprisalStatus, CASELOAD_SCHEMA_VERSION,
+    CanonApprisalAssessment, Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery,
+    CaseloadIntake, CaseloadProbe, CaseloadValidation, CodeAnnotation, ContentOmissionReason,
+    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode, FileArtifact,
+    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason, ProbeEndpointResult,
+    ProbeStatus, ValidatedCanonMetadata, ValidationOutcome, normalize_unit_score,
 };
 pub use cli::{
-    CanonSelectionArgs, CaseloadIoArgs, Cli, CliError, Commands, ConfigureArgs, ConfigureFormat,
-    DiscoverArgs, DiscoverFormat, FilingSourceArgs, IntakeArgs, ProbeArgs, ProbeFormat,
-    ProviderConfigArgs, ValidateArgs, ValidateFormat, init_logging, run, run_configure,
-    run_configure_with_env, run_discover, run_discover_in_workspace, run_intake, run_probe,
-    run_probe_with_env_and_prober, run_validate, run_validate_in_workspace,
+    AppriseArgs, AppriseFormat, CanonSelectionArgs, CaseloadIoArgs, Cli, CliError, Commands,
+    ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat, FilingSourceArgs, IntakeArgs,
+    ProbeArgs, ProbeFormat, ProviderConfigArgs, ValidateArgs, ValidateFormat, init_logging, run,
+    run_apprise, run_apprise_with_snapshot_and_provider, run_configure, run_configure_with_env,
+    run_discover, run_discover_in_workspace, run_intake, run_probe, run_probe_with_env_and_prober,
+    run_validate, run_validate_in_workspace,
 };
 pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,

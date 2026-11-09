@@ -14,6 +14,7 @@
 
 //! Canon Clerk CLI driving adapter and subcommand router.
 
+pub mod apprise;
 pub mod args;
 pub mod configure;
 pub mod discover;
@@ -23,6 +24,9 @@ pub mod probe;
 pub mod runners;
 pub mod validate;
 
+pub use apprise::{
+    AppriseArgs, AppriseFormat, run_apprise, run_apprise_with_snapshot_and_provider,
+};
 pub use args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
 pub use configure::{ConfigureArgs, ConfigureFormat, run_configure, run_configure_with_env};
 pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
@@ -100,6 +104,8 @@ pub enum Commands {
     Configure(ConfigureArgs),
     /// Diagnostic network health check: verify live connectivity and latency of configured endpoints.
     Probe(ProbeArgs),
+    /// Prospective statutory notice: determine governing canons for planned design intent and target scope.
+    Apprise(AppriseArgs),
 }
 
 /// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
@@ -192,38 +198,29 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
     tracing::debug!("Initialized Canon Clerk CLI runtime");
 
     if let Some(command) = &cli.command {
+        let mut stdin = std::io::stdin().lock();
+        let mut stdout = std::io::stdout().lock();
         match command {
             Commands::Intake(args) => {
-                let mut stdin = std::io::stdin().lock();
-                let mut stdout = std::io::stdout().lock();
                 run_intake(args, &mut stdin, &mut stdout)?;
-                return Ok(());
             }
             Commands::Discover(args) => {
-                let mut stdin = std::io::stdin().lock();
-                let mut stdout = std::io::stdout().lock();
                 run_discover(args, &mut stdin, &mut stdout)?;
-                return Ok(());
             }
             Commands::Validate(args) => {
-                let mut stdin = std::io::stdin().lock();
-                let mut stdout = std::io::stdout().lock();
                 run_validate(args, &mut stdin, &mut stdout)?;
-                return Ok(());
             }
             Commands::Configure(args) => {
-                let mut stdin = std::io::stdin().lock();
-                let mut stdout = std::io::stdout().lock();
                 run_configure(args, &mut stdin, &mut stdout)?;
-                return Ok(());
             }
             Commands::Probe(args) => {
-                let mut stdin = std::io::stdin().lock();
-                let mut stdout = std::io::stdout().lock();
                 run_probe(args, &mut stdin, &mut stdout)?;
-                return Ok(());
+            }
+            Commands::Apprise(args) => {
+                run_apprise(args, &mut stdin, &mut stdout)?;
             }
         }
+        return Ok(());
     }
 
     if cli.targets.is_empty() {
@@ -283,7 +280,8 @@ mod tests {
                 Commands::Discover(_)
                 | Commands::Validate(_)
                 | Commands::Configure(_)
-                | Commands::Probe(_),
+                | Commands::Probe(_)
+                | Commands::Apprise(_),
             )
             | None => {
                 panic!("expected Intake subcommand")

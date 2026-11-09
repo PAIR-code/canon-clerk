@@ -35,15 +35,18 @@ flowchart LR
 
     Apprise --> Notice["Statutory Notice Report<br/><i>(Applicable canons & guidance, Exit 0)</i>"]
     Apprise -. "zero candidates" .-> EmptyNotice["Fast Exit (No-op 0)<br/><i>Empty apprisal assessment</i>"]
+    Apprise -. "missing intent or scope" .-> UsageError["Usage Error<br/><i>(Dual-input guard, Exit 2)</i>"]
 
     style Apprise fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style EmptyNotice stroke-dasharray: 5 5
+    style UsageError stroke-dasharray: 5 5
 ```
 
 - **Direct Prerequisites:**
   - `validate` (Branch A: validated candidate canons in `caseload.discovery.candidate_canons` and `caseload.validation`).
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** `intake`, `discover`.
+- **The Dual-Input Invariant:** Statutory apprisal evaluates governing statutes against **both** a non-empty prospective design `intent` (`--intent <text>` or pre-populated `.intake.intent`) **and** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`). Omitting either input fails fast with exit code `2` rather than silently evaluating an empty scope.
 - **Branch Independence & Pruning:**
   - Evaluates without requiring code diffs, patches, or work-in-progress (WIP) exhibits.
   - Decoupled from the contentious dispute track: completely prunes `docket`, `admit`, and `audit` from execution.
@@ -66,10 +69,10 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Candidate Canon Ingestion & Early Exit:**  
-   Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths or globs) along with `caseload.intake.intent` (and any piped specification or RFC text). If `candidate_canons` is empty, short-circuits immediately with exit code `0`.
+1. **Dual-Input Verification & Candidate Canon Early Exit:**  
+   Verifies that non-empty prospective design intent is present on `caseload.intake.intent` alongside resolved discovery scope in `caseload.discovery`. Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths, globs, or explicit canon selection). If `candidate_canons` is empty after evaluating an explicit target or canon scope, attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits immediately with exit code `0`.
 2. **Aggregate Single-Turn Screening (`gemini-flash-lite-latest`):**  
-   Evaluates **all candidate canons against the prospective intent in a single aggregate prompt turn** using `caseload.config.screener_model`.
+   Evaluates **all candidate canons against the prospective design intent and target scope context in a single aggregate prompt turn** using `caseload.config.screener_model`.
 3. **Constrained Decoding Schema (Reason-First):**  
    Enforces structured JSON output generating `apprisal_summary` before `apprisal_score`:
    ```json
@@ -103,38 +106,48 @@ The CLI exposes `apprise` as the primary entry point for design-time and pre-fli
 # 1. Inline design intent with prospective target paths:
 canon-clerk apprise --intent "Refactor authentication to round-robin between providers" "src/auth" "src/frontend"
 
-# 2. Piping a design proposal or RFC from standard input:
-canon-clerk apprise src/auth --intent "Rotate provider"
+# 2. Streaming newline-delimited prospective target paths via standard input ('-'):
+git diff origin/main --name-only | canon-clerk apprise --intent "Rotate auth provider" -
 
 # 3. Running against an upstream Caseload file:
 canon-clerk apprise --caseload upstream-discovery.json
 
-# 4. Machine-readable JSON output for AI Agent prompt injection:
+# 4. Tab-separated compact records for shell scripting:
+canon-clerk apprise --intent "Add CLI output flag" src/cli --format compact
+
+# 5. Machine-readable JSON output for AI Agent prompt injection:
 canon-clerk apprise --intent "Add Kafka event bus" src/events --json
 ```
 
-### Missing Input Source Guard (Naked Invocation)
-Invoking `canon-clerk apprise` naked without an intent, target paths, or upstream caseload fails fast with exit code `2` (Usage Error) and prints actionable guidance:
+### Dual-Input Guard (Missing Intent or Target Scope)
+`canon-clerk apprise` enforces a strict **Dual-Input Guard**: invoking `apprise` requires **both** a non-empty prospective design `intent` (`--intent <TEXT>` or pre-populated `.intake.intent`) **and** an explicit target or canon scope (positional `TARGETS`, newline-delimited target paths via `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`). Omitting either input (naked invocation, supplying `--intent` without target/canon scope, or supplying target/canon scope without `--intent`) fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance:
 ```text
-error: No design intent or target paths provided for apprise.
-  Hint: Provide an intent ('--intent <text>'), pipe a specification via standard input ('-'),
-        specify prospective target paths, or pass an upstream caseload ('--caseload <path>').
+error: Prospective apprisal requires both a non-empty design intent and an explicit target or canon scope.
+  Hint: Pass '--intent <TEXT>' alongside target paths ('src/...', '-', '--diff <PATH|->', '--all-targets')
+        or canon scope ('--all-canons', '--canon <PATH|GLOB>'), or supply '--caseload <PATH|->'.
 ```
 
-Conversely, if prospective target paths yield zero candidate canons in `discover`, the command short-circuits cleanly with exit code `0` ("0 canons triggered by prospective target scope; no applicable constraints").
+Conversely, when both prospective design intent and an explicit target or canon scope are provided and `discover` matches zero candidate canons, the command attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits cleanly with exit code `0` without invoking `validate` or requiring provider credentials (`GEMINI_API_KEY`).
 
 ### CLI Flags & Environment
-- `--apprise-threshold <number>`: Prospective applicability threshold (default: `0.5`).
-- `--intent <text>`: Prospective architectural intent statement.
-- `--caseload <path|->`: Ingests upstream Caseload.
-- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
-- `--json`: Emits enriched Caseload JSON to stdout.
+- `TARGETS` / `-` (Positional): Prospective target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
+- `--intent <TEXT>`: Inline prospective architectural design intent or plan description.
+- `--diff <PATH|->`, `--all-targets`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
+- `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags.
+- `--apprise-threshold <FLOAT>` (fallback env: `CANON_CLERK_APPRISE_THRESHOLD`): Prospective applicability threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage threshold flags are rejected with exit code `2` and guidance pointing to `--apprise-threshold`.
+- `--screener-model <MODEL>` (fallback env: `CANON_CLERK_SCREENER_MODEL`), `--auditor-model <MODEL>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`), `--reasoning-budget <TOKENS>` (fallback env: `CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (fallback env: `GEMINI_API_KEY`): Shared model configuration and credential options (resolved JIT only when validated candidate canons exist).
+- `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
+- `--caseload <PATH|->`: Ingests upstream `Caseload` JSON from file or `-` for standard input.
+- `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of terminal `stdout`.
+- `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes
-- **Default (Terminal / Stylish):** Renders a structured Markdown apprisal report on `stdout` listing applicable canons alongside their `apprisal_summary` rationales.
-- **`--json`:** Emits the cumulative `Caseload` JSON containing the fully populated `.apprisal` container.
+- **`stylish` (Default):** Renders the **Pipeline Funnel Provenance Receipt** followed by the Statutory Apprisal summary listing applicable canons alongside their `apprisal_summary` rationales.
+- **`compact`:** Emits unadorned tab-separated `<canon>\t<status>\t<score>\t<summary>` records (one candidate canon per line in deterministic lexicographical order).
+- **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing the populated `.apprisal` container.
 
 ### CLI Exit Codes
-- **0:** Successful statutory apprisal (including clean short-circuits with 0 applicable canons).
-- **2:** Usage error, missing input source (naked invocation), provider connection failure, or invalid arguments.
+- **0:** Successful statutory apprisal (including clean zero-candidate short-circuits).
+- **1:** Candidate canon validation failure (`validation.has_errors` is `true`, evaluated before checking `GEMINI_API_KEY`) or local workspace I/O runtime error.
+- **2:** Usage error, dual-input guard violation (missing design intent or missing target/canon scope), invalid or out-of-range `--apprise-threshold` / `CANON_CLERK_APPRISE_THRESHOLD`, rejected `--threshold` flag, conflicting `stdin` operands, missing API credentials, or model provider error.
 
