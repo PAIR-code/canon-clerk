@@ -12,31 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CLI driving adapter for the `canon-clerk discover` subcommand (`docs/architecture/nodes/discover.md` §5).
+//! CLI driving adapter for the `canon-clerk discover` subcommand.
 
 use crate::caseload::{Caseload, CaseloadDiscovery};
 use crate::cli::CliError;
-use crate::cli::intake::{read_operand_source, resolve_target_operands, write_caseload_file};
-use crate::discover::{DiscoverError, DiscoverOptions, execute_discover_on_disk};
-use crate::intake::{IntakeError, IntakeOptions, execute_intake};
+use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
+use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::runners::run_branch_a_discover;
 use clap::{Args, ValueEnum};
 use std::env;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const DISCOVER_EXAMPLES: &str = "\
 Examples:
-  # Evaluate discovery on an in-flight unified diff stream:
+  # Discover candidate canons matching working tree diff:
   git diff origin/main | canon-clerk discover --diff -
 
-  # Enumerate all canons across the repository corpus:
+  # Discover candidate canons for explicit target paths:
+  canon-clerk discover src/lib.rs 'src/**/*.rs'
+
+  # Discover all canons across the repository corpus:
   canon-clerk discover --all-canons
 
-  # Evaluate discovery against an upstream Caseload JSON:
-  canon-clerk discover --caseload caseload-1.json --json
+  # Predicate check (silent; exits 0 if matches exist, 1 if none):
+  canon-clerk discover --diff - -q
 
-  # Predicate mode (-q): exit 0 if candidate canons match, 1 if zero match:
-  git diff origin/main | canon-clerk discover -q --diff -";
+  # Emit discovery Caseload JSON to standard output:
+  canon-clerk discover --all-targets --json";
 
 /// Output presentation format for `canon-clerk discover`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -58,84 +61,11 @@ pub enum DiscoverFormat {
     after_help = DISCOVER_EXAMPLES
 )]
 pub struct DiscoverArgs {
-    /// Target file paths, directories, globs, or `-` to read newline-delimited paths from stdin.
-    #[arg(
-        value_name = "TARGETS",
-        help = "Target file paths, directories, globs, or '-' for newline-delimited stdin paths"
-    )]
-    pub targets: Vec<String>,
+    #[command(flatten)]
+    pub filing: FilingSourceArgs,
 
-    /// Read unified diff patch from a file path or `-` for standard input.
-    #[arg(
-        long = "diff",
-        value_name = "PATH|-",
-        help_heading = "Filing Sources",
-        help = "Ingest unified diff patch from file or '-' for stdin"
-    )]
-    pub diff: Option<String>,
-
-    /// Prospective architectural design intent or plan description.
-    #[arg(
-        long = "intent",
-        value_name = "TEXT",
-        help_heading = "Filing Sources",
-        help = "Ingest prospective architectural design intent or plan description"
-    )]
-    pub intent: Option<String>,
-
-    /// Ingest all repository files as target artifacts (`scope: "all-targets"`).
-    #[arg(
-        long = "all-targets",
-        help_heading = "Filing Sources",
-        help = "Ingest all repository files as target artifacts"
-    )]
-    pub all_targets: bool,
-
-    /// Pull request title or commit subject line.
-    #[arg(
-        long = "pr-title",
-        value_name = "TEXT",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request title or commit subject text"
-    )]
-    pub pr_title: Option<String>,
-
-    /// Pull request Markdown description or commit body.
-    #[arg(
-        long = "pr-body",
-        value_name = "TEXT",
-        conflicts_with = "pr_body_file",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request Markdown description text"
-    )]
-    pub pr_body: Option<String>,
-
-    /// Read pull request Markdown description from a file path or `-` for stdin.
-    #[arg(
-        long = "pr-body-file",
-        value_name = "PATH",
-        conflicts_with = "pr_body",
-        help_heading = "Pull Request Metadata",
-        help = "Ingest pull request Markdown description from a file"
-    )]
-    pub pr_body_file: Option<String>,
-
-    /// Discover all canons across the repository corpus, bypassing path trigger matching.
-    #[arg(
-        long = "all-canons",
-        help_heading = "Discovery Options",
-        help = "Discover all repository canons into candidate_canons, bypassing trigger matching"
-    )]
-    pub all_canons: bool,
-
-    /// Explicitly restrict candidate canons to a specific file path or glob subset.
-    #[arg(
-        long = "canon",
-        value_name = "PATH|GLOB",
-        help_heading = "Discovery Options",
-        help = "Explicitly restrict candidate canons to a specific subset"
-    )]
-    pub canon: Vec<String>,
+    #[command(flatten)]
+    pub canons: CanonSelectionArgs,
 
     /// Predicate mode: suppress stdout and indicate candidate canon match presence via exit code (`0` or `1`).
     #[arg(
@@ -156,31 +86,8 @@ pub struct DiscoverArgs {
     )]
     pub format: DiscoverFormat,
 
-    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
-    #[arg(
-        long = "caseload",
-        value_name = "PATH|-",
-        help_heading = "Caseload & Output",
-        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
-    )]
-    pub caseload: Option<String>,
-
-    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
-    #[arg(
-        long = "output-caseload",
-        value_name = "PATH",
-        help_heading = "Caseload & Output",
-        help = "Write cumulative Caseload JSON to disk independently of stdout"
-    )]
-    pub output_caseload: Option<PathBuf>,
-
-    /// Emit the enriched `Caseload` as JSON to standard output.
-    #[arg(
-        long = "json",
-        help_heading = "Caseload & Output",
-        help = "Emit enriched Caseload JSON to stdout"
-    )]
-    pub json: bool,
+    #[command(flatten)]
+    pub io: CaseloadIoArgs,
 }
 
 /// Executes the `discover` CLI subcommand against the provided `stdin`, `stdout`, and `workspace_root`.
@@ -190,43 +97,18 @@ pub fn run_discover_in_workspace(
     stdout: &mut dyn Write,
     workspace_root: &Path,
 ) -> Result<Caseload, CliError> {
-    validate_stdin_sources(args)?;
+    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
-    let incoming_caseload = read_incoming_caseload(args, stdin)?;
-    let intake_opts = build_intake_options(args, stdin)?;
+    let incoming_caseload = args.io.read_caseload(stdin)?;
+    let caseload = run_branch_a_discover(
+        &args.filing,
+        &args.canons,
+        incoming_caseload,
+        workspace_root,
+        stdin,
+    )?;
 
-    let caseload_after_intake = if intake_opts.has_designated_source() {
-        execute_intake(&intake_opts, incoming_caseload).map_err(|err| match err {
-            IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-                CliError::usage(err.to_string())
-            }
-        })?
-    } else if let Some(existing) = incoming_caseload {
-        existing
-    } else if args.all_canons {
-        Caseload::new()
-    } else {
-        return Err(CliError::usage(
-            DiscoverError::MissingInputSource.to_string(),
-        ));
-    };
-
-    let discover_opts = DiscoverOptions {
-        all_canons: args.all_canons,
-        canon_patterns: args.canon.clone(),
-    };
-
-    let caseload = execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
-        .map_err(|err| match err {
-            DiscoverError::MissingInputSource
-            | DiscoverError::InvalidGlob(_)
-            | DiscoverError::PathEscapesWorkspace { .. } => CliError::usage(err.to_string()),
-            DiscoverError::Io { .. } => CliError::runtime(err.to_string()),
-        })?;
-
-    if let Some(output_path) = &args.output_caseload {
-        write_caseload_file(output_path, &caseload)?;
-    }
+    args.io.write_output_caseload(&caseload)?;
 
     let discovery = caseload.discovery.clone().unwrap_or_default();
 
@@ -255,120 +137,13 @@ pub fn run_discover(
     run_discover_in_workspace(args, stdin, stdout, &cwd)
 }
 
-pub(crate) fn read_caseload_operand(
-    caseload_source: Option<&str>,
-    stdin: &mut dyn Read,
-) -> Result<Option<Caseload>, CliError> {
-    match caseload_source {
-        Some(source) => {
-            let raw = read_operand_source(source, "--caseload", stdin)?;
-            let parsed: Caseload = serde_json::from_str(&raw).map_err(|err| {
-                CliError::usage(format!(
-                    "Failed to parse incoming Caseload JSON from `{source}`: {err}\n  \
-                     Hint: Ensure `--caseload` points to a valid Canon Clerk Caseload JSON file."
-                ))
-            })?;
-            Ok(Some(parsed))
-        }
-        None => Ok(None),
-    }
-}
-
-fn read_incoming_caseload(
-    args: &DiscoverArgs,
-    stdin: &mut dyn Read,
-) -> Result<Option<Caseload>, CliError> {
-    read_caseload_operand(args.caseload.as_deref(), stdin)
-}
-
-fn build_intake_options(
-    args: &DiscoverArgs,
-    stdin: &mut dyn Read,
-) -> Result<IntakeOptions, CliError> {
-    let patch_content = match &args.diff {
-        Some(source) => Some(read_operand_source(source, "--diff", stdin)?),
-        None => None,
-    };
-
-    let pr_body = if let Some(body) = &args.pr_body {
-        Some(body.clone())
-    } else if let Some(path) = &args.pr_body_file {
-        Some(read_operand_source(path, "--pr-body-file", stdin)?)
-    } else {
-        None
-    };
-
-    let target_paths = resolve_target_operands(&args.targets, stdin)?;
-
-    Ok(IntakeOptions {
-        pr_title: args.pr_title.clone(),
-        pr_body,
-        intent: args.intent.clone(),
-        target_paths,
-        patch_content,
-        all_targets: args.all_targets,
-        linked_issues: None,
-    })
-}
-
-pub(crate) struct StdinSourceRefs<'a> {
-    pub(crate) targets: &'a [String],
-    pub(crate) diff: Option<&'a str>,
-    pub(crate) pr_body_file: Option<&'a str>,
-    pub(crate) caseload: Option<&'a str>,
-}
-
-pub(crate) fn ensure_single_stdin_source(refs: &StdinSourceRefs<'_>) -> Result<(), CliError> {
-    let mut stdin_consumers = Vec::new();
-
-    let positional_stdin_count = refs.targets.iter().filter(|t| t.as_str() == "-").count();
-    if positional_stdin_count > 1 {
-        return Err(CliError::usage(
-            "Standard input (`-`) was specified multiple times in positional `TARGETS`.\n  \
-             Hint: Pass `-` at most once to read newline-delimited target paths from stdin."
-                .to_string(),
-        ));
-    }
-    if positional_stdin_count == 1 {
-        stdin_consumers.push("positional `TARGETS` (`-`)");
-    }
-    if refs.diff == Some("-") {
-        stdin_consumers.push("`--diff -`");
-    }
-    if refs.pr_body_file == Some("-") {
-        stdin_consumers.push("`--pr-body-file -`");
-    }
-    if refs.caseload == Some("-") {
-        stdin_consumers.push("`--caseload -`");
-    }
-
-    if stdin_consumers.len() > 1 {
-        return Err(CliError::usage(format!(
-            "Conflicting standard input (`-`) sources specified: {}.\n  \
-             Hint: Standard input can only be consumed by a single source per invocation; pass file paths for the remaining options.",
-            stdin_consumers.join(", ")
-        )));
-    }
-
-    Ok(())
-}
-
-fn validate_stdin_sources(args: &DiscoverArgs) -> Result<(), CliError> {
-    ensure_single_stdin_source(&StdinSourceRefs {
-        targets: &args.targets,
-        diff: args.diff.as_deref(),
-        pr_body_file: args.pr_body_file.as_deref(),
-        caseload: args.caseload.as_deref(),
-    })
-}
-
 fn render_discover_output(
     args: &DiscoverArgs,
     caseload: &Caseload,
     discovery: &CaseloadDiscovery,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let effective_format = if args.json {
+    let effective_format = if args.io.json {
         DiscoverFormat::Json
     } else {
         args.format
@@ -456,8 +231,14 @@ mod tests {
         #[test]
         fn test_conflicting_stdin_operands_rejected_with_exit_code_2() {
             let args = DiscoverArgs {
-                diff: Some("-".to_string()),
-                caseload: Some("-".to_string()),
+                filing: FilingSourceArgs {
+                    diff: Some("-".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
                 ..DiscoverArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -471,8 +252,10 @@ mod tests {
         #[test]
         fn test_invalid_glob_syntax_exits_with_code_2() {
             let args = DiscoverArgs {
-                all_canons: true,
-                canon: vec![".canons/[unclosed/*.md".to_string()],
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    canon: vec![".canons/[unclosed/*.md".to_string()],
+                },
                 ..DiscoverArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -490,8 +273,14 @@ mod tests {
         #[test]
         fn test_all_canons_discovers_repository_corpus() {
             let args = DiscoverArgs {
-                all_canons: true,
-                json: true,
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    ..CanonSelectionArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..DiscoverArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -506,10 +295,17 @@ mod tests {
         #[test]
         fn test_predicate_quiet_mode_exits_1_on_zero_matches() {
             let args = DiscoverArgs {
-                targets: vec!["src/lib.rs".to_string()],
-                canon: vec![
-                    ".canons/readme-authoring/readme-must-lead-with-what-and-why.md".to_string(),
-                ],
+                filing: FilingSourceArgs {
+                    targets: vec!["src/lib.rs".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                canons: CanonSelectionArgs {
+                    canon: vec![
+                        ".canons/readme-authoring/readme-must-lead-with-what-and-why.md"
+                            .to_string(),
+                    ],
+                    ..CanonSelectionArgs::default()
+                },
                 quiet: true,
                 ..DiscoverArgs::default()
             };
@@ -525,7 +321,10 @@ mod tests {
         #[test]
         fn test_compact_format_emits_tab_separated_lines() {
             let args = DiscoverArgs {
-                targets: vec!["src/cli/mod.rs".to_string()],
+                filing: FilingSourceArgs {
+                    targets: vec!["src/cli/mod.rs".to_string()],
+                    ..FilingSourceArgs::default()
+                },
                 format: DiscoverFormat::Compact,
                 ..DiscoverArgs::default()
             };

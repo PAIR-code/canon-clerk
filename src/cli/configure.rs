@@ -12,31 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CLI driving adapter for the `canon-clerk configure` subcommand (`docs/architecture/nodes/configure.md` §5).
+//! CLI driving adapter for the `canon-clerk configure` subcommand.
 
 use crate::caseload::{Caseload, CaseloadConfig};
 use crate::cli::CliError;
-use crate::cli::discover::read_caseload_operand;
-use crate::cli::intake::write_caseload_file;
-use crate::configure::{
-    ConfigureOptions, ENV_GEMINI_API_KEY, execute_configure, load_host_config_file,
-    resolve_default_config_path,
-};
+use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
+use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
+use crate::configure::ENV_GEMINI_API_KEY;
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{Read, Write};
-use std::path::PathBuf;
 
 const CONFIGURE_EXAMPLES: &str = "\
 Examples:
-  # Normalize and print active configuration as JSON:
-  canon-clerk configure --json
+  # Verify local credentials and view normalized model specifiers:
+  canon-clerk configure
 
-  # Override model tiers and reasoning budget from CLI flags:
-  canon-clerk configure --screener-model flash-lite --auditor-model pro --reasoning-budget 4096
+  # Configure custom screener and auditor models via aliases:
+  canon-clerk configure --screener-model flash-lite --auditor-model pro
 
-  # Enrich an upstream Caseload JSON with normalized provider configuration:
+  # Configure custom models via fully-qualified specifiers:
+  canon-clerk configure --screener-model google:gemini-2.5-flash-lite --auditor-model google:gemini-2.5-pro
+
+  # Configure maximum reasoning budget tokens:
+  canon-clerk configure --reasoning-budget 4096
+
+  # Emit tab-separated configuration key-value lines:
+  canon-clerk configure --format compact
+
+  # Ingest upstream Caseload JSON and emit enriched envelope to stdout:
   canon-clerk configure --caseload caseload-3.json --json";
 
 /// Output presentation format for `canon-clerk configure`.
@@ -59,41 +64,8 @@ pub enum ConfigureFormat {
     after_help = CONFIGURE_EXAMPLES
 )]
 pub struct ConfigureArgs {
-    /// Custom screener model specifier or shorthand alias (`flash-lite`, `flash`, `pro`; env: `CANON_CLERK_SCREENER_MODEL`).
-    #[arg(
-        long = "screener-model",
-        value_name = "MODEL",
-        help_heading = "Model & Reasoning Options",
-        help = "Screener model specifier or alias (fallback env: CANON_CLERK_SCREENER_MODEL)"
-    )]
-    pub screener_model: Option<String>,
-
-    /// Custom auditor model specifier or shorthand alias (`pro`, `flash`, `flash-lite`; env: `CANON_CLERK_AUDITOR_MODEL`).
-    #[arg(
-        long = "auditor-model",
-        value_name = "MODEL",
-        help_heading = "Model & Reasoning Options",
-        help = "Auditor model specifier or alias (fallback env: CANON_CLERK_AUDITOR_MODEL)"
-    )]
-    pub auditor_model: Option<String>,
-
-    /// Maximum reasoning budget in tokens for extended thinking during `audit` trials (env: `CANON_CLERK_REASONING_BUDGET`).
-    #[arg(
-        long = "reasoning-budget",
-        value_name = "TOKENS",
-        help_heading = "Model & Reasoning Options",
-        help = "Maximum reasoning budget tokens (fallback env: CANON_CLERK_REASONING_BUDGET)"
-    )]
-    pub reasoning_budget: Option<u32>,
-
-    /// Google Gemini API key override (fallback env: `GEMINI_API_KEY`; never persisted to Caseload JSON).
-    #[arg(
-        long = "gemini-api-key",
-        value_name = "KEY",
-        help_heading = "Provider Credentials",
-        help = "Google Gemini API key (fallback env: GEMINI_API_KEY)"
-    )]
-    pub gemini_api_key: Option<String>,
+    #[command(flatten)]
+    pub provider: ProviderConfigArgs,
 
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
@@ -105,31 +77,8 @@ pub struct ConfigureArgs {
     )]
     pub format: ConfigureFormat,
 
-    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
-    #[arg(
-        long = "caseload",
-        value_name = "PATH|-",
-        help_heading = "Caseload & Output",
-        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
-    )]
-    pub caseload: Option<String>,
-
-    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
-    #[arg(
-        long = "output-caseload",
-        value_name = "PATH",
-        help_heading = "Caseload & Output",
-        help = "Write cumulative Caseload JSON to disk independently of stdout"
-    )]
-    pub output_caseload: Option<PathBuf>,
-
-    /// Emit the enriched `Caseload` as JSON to standard output.
-    #[arg(
-        long = "json",
-        help_heading = "Caseload & Output",
-        help = "Emit enriched Caseload JSON to stdout"
-    )]
-    pub json: bool,
+    #[command(flatten)]
+    pub io: CaseloadIoArgs,
 }
 
 /// Executes the `configure` CLI subcommand against an explicit environment variable map.
@@ -139,30 +88,11 @@ pub fn run_configure_with_env(
     stdout: &mut dyn Write,
     env: &BTreeMap<String, String>,
 ) -> Result<Caseload, CliError> {
-    let incoming_caseload = read_caseload_operand(args.caseload.as_deref(), stdin)?;
+    let incoming_caseload = args.io.read_caseload(stdin)?;
+    let options = resolve_branch_b_options(&args.provider, env)?;
+    let caseload = run_branch_b_configure(&options, incoming_caseload)?;
 
-    let cwd = env::current_dir().ok();
-    let stored_config = match resolve_default_config_path(env) {
-        Some(cfg_path) => load_host_config_file(&cfg_path, cwd.as_deref())
-            .map_err(|err| CliError::usage(err.to_string()))?,
-        None => None,
-    };
-
-    let options = ConfigureOptions {
-        screener_model: args.screener_model.clone(),
-        auditor_model: args.auditor_model.clone(),
-        reasoning_budget: args.reasoning_budget,
-        gemini_api_key: args.gemini_api_key.clone(),
-        env: env.clone(),
-        stored_config,
-    };
-
-    let caseload = execute_configure(&options, incoming_caseload)
-        .map_err(|err| CliError::usage(err.to_string()))?;
-
-    if let Some(output_path) = &args.output_caseload {
-        write_caseload_file(output_path, &caseload)?;
-    }
+    args.io.write_output_caseload(&caseload)?;
 
     let config = caseload.config.clone().unwrap_or_default();
     render_configure_output(args, &caseload, &config, stdout)?;
@@ -186,7 +116,7 @@ fn render_configure_output(
     config: &CaseloadConfig,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let effective_format = if args.json {
+    let effective_format = if args.io.json {
         ConfigureFormat::Json
     } else {
         args.format
@@ -275,10 +205,10 @@ mod tests {
 
             match cli.command {
                 Some(Commands::Configure(args)) => {
-                    assert_eq!(args.screener_model.as_deref(), Some("flash-lite"));
-                    assert_eq!(args.auditor_model.as_deref(), Some("pro"));
-                    assert_eq!(args.reasoning_budget, Some(4096));
-                    assert!(args.json);
+                    assert_eq!(args.provider.screener_model.as_deref(), Some("flash-lite"));
+                    assert_eq!(args.provider.auditor_model.as_deref(), Some("pro"));
+                    assert_eq!(args.provider.reasoning_budget, Some(4096));
+                    assert!(args.io.json);
                 }
                 _ => panic!("expected Configure subcommand"),
             }
@@ -292,11 +222,16 @@ mod tests {
         fn test_json_output_emits_normalized_caseload_without_key_leakage() {
             let secret = "synthetic-top-secret-never-echo-999";
             let args = ConfigureArgs {
-                screener_model: Some("flash-lite".to_string()),
-                auditor_model: Some("pro".to_string()),
-                reasoning_budget: Some(2048),
-                gemini_api_key: Some(secret.to_string()),
-                json: true,
+                provider: ProviderConfigArgs {
+                    screener_model: Some("flash-lite".to_string()),
+                    auditor_model: Some("pro".to_string()),
+                    reasoning_budget: Some(2048),
+                    gemini_api_key: Some(secret.to_string()),
+                },
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ConfigureArgs::default()
             };
             let mut stdin = Cursor::new(b"");
@@ -340,8 +275,11 @@ mod tests {
             assert!(!stylish_str.contains(secret));
 
             let compact_args = ConfigureArgs {
+                provider: ProviderConfigArgs {
+                    reasoning_budget: Some(1024),
+                    ..ProviderConfigArgs::default()
+                },
                 format: ConfigureFormat::Compact,
-                reasoning_budget: Some(1024),
                 ..ConfigureArgs::default()
             };
             let mut compact_out = Vec::new();
@@ -381,8 +319,11 @@ mod tests {
             let upstream_json = serde_json::to_string(&upstream).expect("serialize upstream");
 
             let args = ConfigureArgs {
-                caseload: Some("-".to_string()),
-                json: true,
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ConfigureArgs::default()
             };
             let mut stdin = Cursor::new(upstream_json.into_bytes());
@@ -398,8 +339,11 @@ mod tests {
         fn test_enriches_upstream_branch_a_caseload_from_stdin() {
             let raw = r#"{"version":"1.0","intake":{"scope":"targeted","target_paths":["src/lib.rs"],"diffs":{}}}"#;
             let args = ConfigureArgs {
-                caseload: Some("-".to_string()),
-                json: true,
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
                 ..ConfigureArgs::default()
             };
             let mut stdin = Cursor::new(raw.as_bytes());

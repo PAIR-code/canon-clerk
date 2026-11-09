@@ -45,10 +45,11 @@ pub use caseload::{
     ValidationOutcome,
 };
 pub use cli::{
-    Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat,
-    IntakeArgs, ProbeArgs, ProbeFormat, ValidateArgs, ValidateFormat, init_logging, run,
-    run_configure, run_configure_with_env, run_discover, run_discover_in_workspace, run_intake,
-    run_probe, run_probe_with_env_and_prober, run_validate, run_validate_in_workspace,
+    CanonSelectionArgs, CaseloadIoArgs, Cli, CliError, Commands, ConfigureArgs, ConfigureFormat,
+    DiscoverArgs, DiscoverFormat, FilingSourceArgs, IntakeArgs, ProbeArgs, ProbeFormat,
+    ProviderConfigArgs, ValidateArgs, ValidateFormat, init_logging, run, run_configure,
+    run_configure_with_env, run_discover, run_discover_in_workspace, run_intake, run_probe,
+    run_probe_with_env_and_prober, run_validate, run_validate_in_workspace,
 };
 pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,

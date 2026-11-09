@@ -14,21 +14,32 @@
 
 //! Canon Clerk CLI driving adapter and subcommand router.
 
+pub mod args;
 pub mod configure;
 pub mod discover;
 pub mod intake;
+pub mod io;
 pub mod probe;
+pub mod runners;
 pub mod validate;
 
+pub use args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
 pub use configure::{ConfigureArgs, ConfigureFormat, run_configure, run_configure_with_env};
 pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
 pub use intake::{IntakeArgs, run_intake};
+pub use io::{
+    ensure_single_stdin_source, read_caseload_operand, read_operand_source,
+    resolve_target_operands, write_caseload_file,
+};
 pub use probe::{ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober};
+pub use runners::{
+    map_discover_error, resolve_branch_b_options, resolve_gemini_api_key, run_branch_a_discover,
+    run_branch_a_intake, run_branch_a_validate, run_branch_b_configure,
+};
 pub use validate::{ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use std::fmt;
-use std::io;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -183,32 +194,32 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
     if let Some(command) = &cli.command {
         match command {
             Commands::Intake(args) => {
-                let mut stdin = io::stdin().lock();
-                let mut stdout = io::stdout().lock();
+                let mut stdin = std::io::stdin().lock();
+                let mut stdout = std::io::stdout().lock();
                 run_intake(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
             Commands::Discover(args) => {
-                let mut stdin = io::stdin().lock();
-                let mut stdout = io::stdout().lock();
+                let mut stdin = std::io::stdin().lock();
+                let mut stdout = std::io::stdout().lock();
                 run_discover(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
             Commands::Validate(args) => {
-                let mut stdin = io::stdin().lock();
-                let mut stdout = io::stdout().lock();
+                let mut stdin = std::io::stdin().lock();
+                let mut stdout = std::io::stdout().lock();
                 run_validate(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
             Commands::Configure(args) => {
-                let mut stdin = io::stdin().lock();
-                let mut stdout = io::stdout().lock();
+                let mut stdin = std::io::stdin().lock();
+                let mut stdout = std::io::stdout().lock();
                 run_configure(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
             Commands::Probe(args) => {
-                let mut stdin = io::stdin().lock();
-                let mut stdout = io::stdout().lock();
+                let mut stdin = std::io::stdin().lock();
+                let mut stdout = std::io::stdout().lock();
                 run_probe(args, &mut stdin, &mut stdout)?;
                 return Ok(());
             }
@@ -264,9 +275,9 @@ mod tests {
 
         match cli.command {
             Some(Commands::Intake(args)) => {
-                assert_eq!(args.diff.as_deref(), Some("-"));
-                assert_eq!(args.pr_title.as_deref(), Some("feat: test"));
-                assert!(args.json);
+                assert_eq!(args.filing.diff.as_deref(), Some("-"));
+                assert_eq!(args.filing.pr_title.as_deref(), Some("feat: test"));
+                assert!(args.io.json);
             }
             Some(
                 Commands::Discover(_)
