@@ -163,6 +163,31 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk intake src/lib.rs --json");
     assert_eq!(ok_out.status.code(), Some(0));
+
+    // Verify discover naked invocation exits 2, predicate -q zero-match exits 1, and --all-canons exits 0
+    let disc_naked = Command::new(bin_path())
+        .arg("discover")
+        .output()
+        .expect("failed to execute canon-clerk discover");
+    assert_eq!(disc_naked.status.code(), Some(2));
+
+    let disc_quiet_miss = Command::new(bin_path())
+        .args([
+            "discover",
+            "-q",
+            "--canon",
+            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
+            "src/lib.rs",
+        ])
+        .output()
+        .expect("failed to execute canon-clerk discover -q");
+    assert_eq!(disc_quiet_miss.status.code(), Some(1));
+
+    let disc_all = Command::new(bin_path())
+        .args(["discover", "--all-canons", "--json"])
+        .output()
+        .expect("failed to execute canon-clerk discover --all-canons --json");
+    assert_eq!(disc_all.status.code(), Some(0));
 }
 
 #[test]

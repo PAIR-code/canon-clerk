@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container and `.intake` exhibits.
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -194,6 +194,78 @@ impl Default for CaseloadIntake {
     }
 }
 
+/// Discovery evaluation mode recorded during the `discover` stage (`docs/architecture/nodes/discover.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiscoveryMode {
+    /// Evaluates candidate canons whose preconditions, triggers, and inspect planes match the filing.
+    #[default]
+    #[serde(rename = "triggered")]
+    Triggered,
+
+    /// Promotes all discoverable workspace canons into `candidate_canons` (`--all-canons`).
+    #[serde(rename = "all-canons")]
+    AllCanons,
+}
+
+impl DiscoveryMode {
+    /// Returns the canonical wire representation (`"triggered"` or `"all-canons"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Triggered => "triggered",
+            Self::AllCanons => "all-canons",
+        }
+    }
+}
+
+/// Materialized active exhibits retained after mutual pruning with candidate canons (`docs/architecture/nodes/discover.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActiveExhibits {
+    /// Stably sorted repository-relative POSIX file paths triggered or inspected by at least one candidate canon.
+    #[serde(default)]
+    pub files: Vec<String>,
+
+    /// Whether `pr_title` is present and inspected by at least one candidate canon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_title: Option<bool>,
+
+    /// Whether `pr_body` is present and inspected by at least one candidate canon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_body: Option<bool>,
+
+    /// Whether `commit_messages` is present and inspected by at least one candidate canon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_messages: Option<bool>,
+
+    /// Whether `linked_issues` is present and inspected by at least one candidate canon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_issues: Option<bool>,
+}
+
+/// Resolved target scope, candidate canons, pruned active exhibits, and trigger intersections
+/// captured during the `discover` stage (`docs/architecture/nodes/discover.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaseloadDiscovery {
+    /// Active discovery mode (`"triggered"` vs. `"all-canons"`).
+    #[serde(default)]
+    pub mode: DiscoveryMode,
+
+    /// Stably sorted repository-relative POSIX target file paths materialized from `.intake` directives and diffs.
+    #[serde(default)]
+    pub target_files: Vec<String>,
+
+    /// Stably sorted discovered canon file paths or qualified realm references matching the filing (or full corpus).
+    #[serde(default)]
+    pub candidate_canons: Vec<String>,
+
+    /// Pruned subset of materialized exhibits triggered or inspected by at least one surviving candidate canon.
+    #[serde(default)]
+    pub active_exhibits: ActiveExhibits,
+
+    /// Deterministic mapping from each candidate canon identifier to the matched target file paths and inspected exhibit planes.
+    #[serde(default)]
+    pub triggers_join: BTreeMap<String, Vec<String>>,
+}
+
 /// The central, cumulative state container flowing through the Canon Clerk Caseload DAG.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Caseload {
@@ -205,9 +277,9 @@ pub struct Caseload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intake: Option<CaseloadIntake>,
 
-    /// Discovery: Matched target files, candidate canons, and trigger intersections.
+    /// Discovery: Matched target files, candidate canons, active exhibits, and trigger intersections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub discovery: Option<serde_json::Value>,
+    pub discovery: Option<CaseloadDiscovery>,
 
     /// Validation: Candidate canon AST and frontmatter validation results.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -264,6 +336,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.intake` namespace populated, preserving all other stage fields.
     pub fn with_intake(mut self, intake: CaseloadIntake) -> Self {
         self.intake = Some(intake);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.discovery` namespace populated, preserving all other stage fields.
+    pub fn with_discovery(mut self, discovery: CaseloadDiscovery) -> Self {
+        self.discovery = Some(discovery);
         self
     }
 }
@@ -382,6 +460,13 @@ mod tests {
             let enriched = upstream.clone().with_intake(CaseloadIntake::default());
             assert!(enriched.intake.is_some());
             assert_eq!(enriched.config, upstream.config);
+
+            let with_disc = enriched
+                .clone()
+                .with_discovery(CaseloadDiscovery::default());
+            assert!(with_disc.discovery.is_some());
+            assert_eq!(with_disc.intake, enriched.intake);
+            assert_eq!(with_disc.config, enriched.config);
         }
     }
 }

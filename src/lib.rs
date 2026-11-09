@@ -17,6 +17,7 @@
 pub mod canon;
 pub mod caseload;
 pub mod cli;
+pub mod discover;
 pub mod intake;
 
 pub use canon::{
@@ -32,10 +33,20 @@ pub use canon::{
     scope_pattern, to_kebab_case, tokenize_canon,
 };
 pub use caseload::{
-    CASELOAD_SCHEMA_VERSION, Caseload, CaseloadIntake, ContentOmissionReason, FileArtifact,
-    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason,
+    ActiveExhibits, CASELOAD_SCHEMA_VERSION, Caseload, CaseloadDiscovery, CaseloadIntake,
+    ContentOmissionReason, DiscoveryMode, FileArtifact, FileChangeStatus, IntakeScope,
+    LinkedIssueContext, PatchOmissionReason,
 };
-pub use cli::{Cli, CliError, Commands, IntakeArgs, init_logging, run, run_intake};
+pub use cli::{
+    Cli, CliError, Commands, DiscoverArgs, DiscoverFormat, IntakeArgs, init_logging, run,
+    run_discover, run_discover_in_workspace, run_intake,
+};
+pub use discover::{
+    DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,
+    GlobSyntaxError, WorkspaceSnapshot, execute_discover, execute_discover_on_disk,
+    is_ignored_path, is_wildcard_pattern, normalize_workspace_path, parse_canon_or_fallback,
+    scope_relative_path,
+};
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 
 #[cfg(test)]
