@@ -69,7 +69,7 @@ flowchart LR
 1. **Hierarchical Precedence Cascade:** Resolves model specifiers, reasoning budgets, and provider credentials along a strict descending specificity cascade:
    - **Explicit CLI Flags:** `--screener-model`, `--auditor-model`, `--reasoning-budget`, `--gemini-api-key`
    - **Environment Variables:** `CANON_CLERK_SCREENER_MODEL`, `CANON_CLERK_AUDITOR_MODEL`, `CANON_CLERK_REASONING_BUDGET`, `GEMINI_API_KEY`
-   - **User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`) and optional tier defaults (`screenerModel`, `auditorModel`, `reasoningBudget`)
+   - **User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`) and optional tier and screening defaults (`screenerModel`, `auditorModel`, `reasoningBudget`, `docketBatchSize`, `docketConcurrency`)
    - **Static Defaults:** `google:gemini-flash-lite-latest` (screener) and `google:gemini-pro-latest` (auditor)
 2. **Model Specifier Normalization & Provider Validation:** Resolves shorthand aliases (`flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `flash` $\implies$ `google:gemini-flash-latest`, `pro` $\implies$ `google:gemini-pro-latest`) and rejects unsupported provider prefixes or malformed model identifiers.
 3. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.

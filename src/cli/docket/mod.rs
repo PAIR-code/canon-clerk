@@ -30,7 +30,8 @@ use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use guards::{
     can_fast_forward_completed_docket, enforce_filing_and_case_guard,
-    ensure_stage_prefixed_threshold_flags, resolve_docket_threshold,
+    ensure_stage_prefixed_threshold_flags, resolve_docket_batch_size, resolve_docket_concurrency,
+    resolve_docket_threshold,
 };
 use render::{DocketWatermarks, render_docket_output};
 use stages::{execute_jit_configure_and_docket, resolve_docket_discover, resolve_docket_intake};
@@ -88,6 +89,26 @@ pub struct DocketArgs {
         help = "Subject-matter jurisdiction threshold in [0.0, 1.0] (default: 0.5; fallback env: CANON_CLERK_DOCKET_THRESHOLD)"
     )]
     pub docket_threshold: Option<f64>,
+
+    /// Optional maximum candidate canons evaluated per screener model call (env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
+    #[arg(
+        long = "docket-batch-size",
+        visible_alias = "max-canons-per-call",
+        value_name = "COUNT",
+        help_heading = "Docket Options",
+        help = "Maximum candidate canons per screener model call (fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
+    )]
+    pub docket_batch_size: Option<usize>,
+
+    /// Optional maximum concurrent in-flight screener model calls when batched (default: `4`; env: `CANON_CLERK_DOCKET_CONCURRENCY`).
+    #[arg(
+        long = "docket-concurrency",
+        visible_alias = "max-concurrent-calls",
+        value_name = "COUNT",
+        help_heading = "Docket Options",
+        help = "Maximum concurrent in-flight screener calls when batched (default: 4; fallback env: CANON_CLERK_DOCKET_CONCURRENCY)"
+    )]
+    pub docket_concurrency: Option<usize>,
 
     /// Hidden capture rejecting ambiguous unqualified `--threshold` (`scheduling.md` §4 Pattern C).
     #[arg(long = "threshold", hide = true, allow_hyphen_values = true)]
@@ -210,6 +231,8 @@ fn run_docket_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let threshold = resolve_docket_threshold(args.docket_threshold, env)?;
+    let _validated_batch_size = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
+    let _validated_concurrency = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -278,7 +301,7 @@ fn run_docket_core(
     }
 
     let (final_caseload, configure_disp) = execute_jit_configure_and_docket(
-        &args.provider,
+        args,
         env,
         threshold,
         caseload_after_validate,
@@ -519,16 +542,24 @@ index 0000000..1111111
                 .expect("docket subcommand registered");
             let help = sub.render_long_help().to_string();
 
-            assert!(help.contains("Filing Sources:"));
-            assert!(help.contains("Canon Selection:"));
-            assert!(help.contains("Docket Options:"));
-            assert!(help.contains("Model & Reasoning Options:"));
-            assert!(help.contains("Provider Credentials:"));
-            assert!(help.contains("Caseload & Output:"));
-            assert!(help.contains("--docket-threshold <FLOAT>"));
-            assert!(help.contains("CANON_CLERK_DOCKET_THRESHOLD"));
-            assert!(help.contains("Examples:"));
-            assert!(help.contains("canon-clerk docket --diff -"));
+            for expected in [
+                "Filing Sources:",
+                "Canon Selection:",
+                "Docket Options:",
+                "Model & Reasoning Options:",
+                "Provider Credentials:",
+                "Caseload & Output:",
+                "--docket-threshold <FLOAT>",
+                "CANON_CLERK_DOCKET_THRESHOLD",
+                "--docket-batch-size <COUNT>",
+                "CANON_CLERK_DOCKET_BATCH_SIZE",
+                "--docket-concurrency <COUNT>",
+                "CANON_CLERK_DOCKET_CONCURRENCY",
+                "Examples:",
+                "canon-clerk docket --diff -",
+            ] {
+                assert!(help.contains(expected), "missing `{expected}` in help");
+            }
             assert!(!help.contains("--apprise-threshold"));
             assert!(!help.contains("--admit-threshold"));
         }
@@ -644,6 +675,63 @@ index 0000000..1111111
                 flag_res.docket.expect("docket").active_docket,
                 vec![".canons/cli/cli-flags-must-support-env-var-fallbacks.md".to_string()]
             );
+        }
+
+        #[test]
+        fn test_validates_docket_batch_size_and_concurrency_flags_and_env() {
+            let ws = sample_workspace();
+            let provider = StubProvider::succeeding(json!({}));
+            let plain_args = parse_docket_args(&["canon-clerk", "docket", "src/cli/docket.rs"]);
+
+            // Validate zero batch size and zero concurrency flags and env vars fail with exit 2
+            for bad_argv in [
+                vec![
+                    "canon-clerk",
+                    "docket",
+                    "src/cli/docket.rs",
+                    "--docket-batch-size",
+                    "0",
+                ],
+                vec![
+                    "canon-clerk",
+                    "docket",
+                    "src/cli/docket.rs",
+                    "--docket-concurrency",
+                    "0",
+                ],
+            ] {
+                let bad_args = parse_docket_args(&bad_argv);
+                let err = run_docket_with_snapshot_and_provider(
+                    &bad_args,
+                    &mut Cursor::new(b""),
+                    &mut Vec::new(),
+                    &ws,
+                    &env_with_key(),
+                    &provider,
+                )
+                .expect_err("zero batch/concurrency flag must fail with exit 2");
+                assert_eq!(err.exit_code(), 2);
+                assert!(err.to_string().contains("Hint:"));
+            }
+
+            for env_key in [
+                crate::docket::ENV_DOCKET_BATCH_SIZE,
+                crate::docket::ENV_DOCKET_CONCURRENCY,
+            ] {
+                let mut zero_env = env_with_key();
+                zero_env.insert(env_key.to_string(), "0".to_string());
+                let err = run_docket_with_snapshot_and_provider(
+                    &plain_args,
+                    &mut Cursor::new(b""),
+                    &mut Vec::new(),
+                    &ws,
+                    &zero_env,
+                    &provider,
+                )
+                .expect_err("zero env batch/concurrency must fail with exit 2");
+                assert_eq!(err.exit_code(), 2);
+                assert!(err.to_string().contains("Hint:"));
+            }
         }
     }
 
@@ -1118,6 +1206,102 @@ index 0000000..1111111
             )));
 
             let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        #[test]
+        fn test_batched_cli_execution_aggregates_multi_batch_telemetry_tokens() {
+            struct PerBatchProvider {
+                calls: Mutex<usize>,
+            }
+            impl StructuredModelProvider for PerBatchProvider {
+                fn generate_structured(
+                    &self,
+                    request: &GenerationRequest,
+                ) -> Result<GenerationResponse, ProviderError> {
+                    *self.calls.lock().expect("lock") += 1;
+                    let mut cases = Vec::new();
+                    for line in request.user_prompt.lines() {
+                        if let Some(rest) = line.strip_prefix("### Canon: `")
+                            && let Some(canon_ref) = rest.strip_suffix('`')
+                        {
+                            cases.push(json!({
+                                "canon_path": canon_ref,
+                                "colorability_summary": "Evaluated in batch.",
+                                "colorability_score": 0.85
+                            }));
+                        }
+                    }
+                    Ok(GenerationResponse {
+                        payload: json!({ "cases": cases }),
+                        thoughts: Vec::new(),
+                        usage: TokenUsage {
+                            prompt_tokens: 150,
+                            completion_tokens: 50,
+                            reasoning_tokens: 0,
+                            total_tokens: 200,
+                        },
+                        latency_ms: 20,
+                        resolved_model: "gemini-2.5-flash-lite".to_string(),
+                    })
+                }
+            }
+
+            let ws = sample_workspace();
+            let provider = PerBatchProvider {
+                calls: Mutex::new(0),
+            };
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            let args = parse_docket_args(&[
+                "canon-clerk",
+                "docket",
+                "src/cli/docket.rs",
+                "--docket-batch-size",
+                "1",
+                "--docket-concurrency",
+                "2",
+                "--json",
+            ]);
+            let mut stdout = Vec::new();
+            let caseload = run_docket_with_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &env_with_key(),
+                &provider,
+                &session,
+            )
+            .expect("batched docket succeeds");
+
+            assert_eq!(*provider.calls.lock().expect("lock"), 2);
+            let docket = caseload.docket.expect("docket populated");
+            assert_eq!(docket.cases.len(), 2);
+            assert_eq!(docket.docketed_count(), 2);
+
+            let events = sink.events();
+            assert!(events.iter().any(|e| matches!(
+                e,
+                TelemetryEvent::StageFinish {
+                    stage: PipelineStage::Docket,
+                    usage: Some(TokenUsage {
+                        prompt_tokens: 300,
+                        completion_tokens: 100,
+                        reasoning_tokens: 0,
+                        total_tokens: 400,
+                    }),
+                    ..
+                }
+            )));
+            assert!(events.iter().any(|e| matches!(
+                e,
+                TelemetryEvent::PipelineFinish {
+                    total_tokens: 400,
+                    ..
+                }
+            )));
         }
     }
 

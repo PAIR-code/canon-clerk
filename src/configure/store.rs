@@ -79,6 +79,24 @@ pub struct StoredConfig {
     /// Default reasoning budget in tokens (`reasoningBudget` or `reasoning_budget`).
     #[serde(alias = "reasoningBudget", alias = "reasoning_budget")]
     pub reasoning_budget: Option<u32>,
+
+    /// Optional default maximum candidate canons per `docket` screener call (`docketBatchSize` or `docket_batch_size`).
+    #[serde(
+        alias = "docketBatchSize",
+        alias = "docket_batch_size",
+        alias = "maxCanonsPerCall",
+        alias = "max_canons_per_call"
+    )]
+    pub docket_batch_size: Option<usize>,
+
+    /// Optional default maximum concurrent in-flight `docket` screener calls (`docketConcurrency` or `docket_concurrency`).
+    #[serde(
+        alias = "docketConcurrency",
+        alias = "docket_concurrency",
+        alias = "maxConcurrentCalls",
+        alias = "max_concurrent_calls"
+    )]
+    pub docket_concurrency: Option<usize>,
 }
 
 impl StoredConfig {

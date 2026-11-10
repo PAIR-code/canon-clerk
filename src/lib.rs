@@ -78,7 +78,9 @@ pub use discover::{
     scope_relative_path,
 };
 pub use docket::{
-    DEFAULT_DOCKET_THRESHOLD, DocketError, DocketOptions, ENV_DOCKET_THRESHOLD, execute_docket,
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD, DocketError, DocketOptions,
+    ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD, ENV_MAX_CANONS_PER_CALL,
+    ENV_MAX_CONCURRENT_CALLS, execute_docket, partition_candidate_canons,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{

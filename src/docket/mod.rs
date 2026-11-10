@@ -24,16 +24,36 @@ use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
 };
-use prompt::{DOCKET_SYSTEM_INSTRUCTION, build_docket_schema, build_docket_user_prompt};
+use prompt::{
+    DOCKET_SYSTEM_INSTRUCTION, build_docket_batch_user_prompt, build_docket_filing_prefix,
+    build_docket_schema,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Default subject-matter jurisdiction threshold for `docket` (`docs/architecture/nodes/docket.md` §4.4).
 pub const DEFAULT_DOCKET_THRESHOLD: f64 = 0.5;
 
+/// Default maximum concurrent in-flight screener model calls when `docket` executes multiple batches.
+pub const DEFAULT_DOCKET_MAX_CONCURRENT_CALLS: usize = 4;
+
 /// Environment variable name for overriding `--docket-threshold` (`docs/architecture/nodes/docket.md` §5).
 pub const ENV_DOCKET_THRESHOLD: &str = "CANON_CLERK_DOCKET_THRESHOLD";
+
+/// Environment variable name for overriding `--docket-batch-size` (`docs/architecture/nodes/docket.md` §5).
+pub const ENV_DOCKET_BATCH_SIZE: &str = "CANON_CLERK_DOCKET_BATCH_SIZE";
+
+/// Alias environment variable name for overriding `--max-canons-per-call`.
+pub const ENV_MAX_CANONS_PER_CALL: &str = "CANON_CLERK_MAX_CANONS_PER_CALL";
+
+/// Environment variable name for overriding `--docket-concurrency` (`docs/architecture/nodes/docket.md` §5).
+pub const ENV_DOCKET_CONCURRENCY: &str = "CANON_CLERK_DOCKET_CONCURRENCY";
+
+/// Alias environment variable name for overriding `--max-concurrent-calls`.
+pub const ENV_MAX_CONCURRENT_CALLS: &str = "CANON_CLERK_MAX_CONCURRENT_CALLS";
 
 /// Domain input parameters for executing the `docket` pipeline stage.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +62,10 @@ pub struct DocketOptions {
     pub threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
+    /// Optional maximum candidate canons evaluated per screener model call (`>= 1`; `None` evaluates all in a single turn).
+    pub max_canons_per_call: Option<usize>,
+    /// Optional maximum concurrent in-flight screener model calls when batched (`>= 1`; defaults to [`DEFAULT_DOCKET_MAX_CONCURRENT_CALLS`]).
+    pub max_concurrent_calls: Option<usize>,
 }
 
 impl Default for DocketOptions {
@@ -49,6 +73,8 @@ impl Default for DocketOptions {
         Self {
             threshold: DEFAULT_DOCKET_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            max_canons_per_call: None,
+            max_concurrent_calls: None,
         }
     }
 }
@@ -58,6 +84,10 @@ impl Default for DocketOptions {
 pub enum DocketError {
     /// Configured threshold is non-finite or outside `[0.0, 1.0]`.
     InvalidThreshold { detail: String },
+    /// Configured `max_canons_per_call` is zero (`0`).
+    InvalidBatchSize { detail: String },
+    /// Configured `max_concurrent_calls` is zero (`0`).
+    InvalidConcurrency { detail: String },
     /// Case-or-Controversy violation: `.intake` is missing from the incoming `Caseload`.
     MissingIntake,
     /// Prerequisite `.discovery` namespace is missing from the incoming `Caseload`.
@@ -80,6 +110,18 @@ impl fmt::Display for DocketError {
                 "Invalid docket threshold: {detail}.\n  \
                  Hint: Pass a finite threshold in `[0.0, 1.0]` via `--docket-threshold <FLOAT>` \
                  or `{ENV_DOCKET_THRESHOLD}` (default: `{DEFAULT_DOCKET_THRESHOLD}`)."
+            ),
+            Self::InvalidBatchSize { detail } => write!(
+                f,
+                "Invalid docket batch size: {detail}.\n  \
+                 Hint: Pass a positive integer (`>= 1`) via `--docket-batch-size <COUNT>` \
+                 or `{ENV_DOCKET_BATCH_SIZE}`."
+            ),
+            Self::InvalidConcurrency { detail } => write!(
+                f,
+                "Invalid docket concurrency limit: {detail}.\n  \
+                 Hint: Pass a positive integer (`>= 1`) via `--docket-concurrency <COUNT>` \
+                 or `{ENV_DOCKET_CONCURRENCY}` (default: `{DEFAULT_DOCKET_MAX_CONCURRENT_CALLS}`)."
             ),
             Self::MissingIntake => write!(
                 f,
@@ -120,6 +162,47 @@ impl From<ProviderError> for DocketError {
     }
 }
 
+fn validate_batching_options(options: &DocketOptions) -> Result<(), DocketError> {
+    if options.max_canons_per_call == Some(0) {
+        return Err(DocketError::InvalidBatchSize {
+            detail: "max_canons_per_call must be at least 1, got 0".to_string(),
+        });
+    }
+    if options.max_concurrent_calls == Some(0) {
+        return Err(DocketError::InvalidConcurrency {
+            detail: "max_concurrent_calls must be at least 1, got 0".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Partitions `candidate_canons` into deterministic, balanced contiguous batches of at most `max_canons_per_call`.
+pub fn partition_candidate_canons(
+    candidate_canons: &[String],
+    max_canons_per_call: Option<usize>,
+) -> Vec<Vec<String>> {
+    let total = candidate_canons.len();
+    if total == 0 {
+        return Vec::new();
+    }
+    match max_canons_per_call {
+        Some(batch_size) if batch_size >= 1 && batch_size < total => {
+            let num_batches = total.div_ceil(batch_size);
+            let base_len = total / num_batches;
+            let remainder = total % num_batches;
+            let mut batches = Vec::with_capacity(num_batches);
+            let mut offset = 0;
+            for idx in 0..num_batches {
+                let len = base_len + usize::from(idx < remainder);
+                batches.push(candidate_canons[offset..offset + len].to_vec());
+                offset += len;
+            }
+            batches
+        }
+        _ => vec![candidate_canons.to_vec()],
+    }
+}
+
 /// Executes the pure `docket` domain stage against an in-memory [`WorkspaceSnapshot`] and
 /// hexagonal [`StructuredModelProvider`] (`docs/architecture/nodes/docket.md` §4).
 pub fn execute_docket(
@@ -130,6 +213,7 @@ pub fn execute_docket(
 ) -> Result<Caseload, DocketError> {
     let threshold = normalize_colorability_score(options.threshold)
         .map_err(|detail| DocketError::InvalidThreshold { detail })?;
+    validate_batching_options(options)?;
 
     if caseload.docket.is_some() {
         return Ok(caseload);
@@ -155,28 +239,108 @@ pub fn execute_docket(
 
     let config = caseload.config.as_ref().ok_or(DocketError::MissingConfig)?;
 
-    let user_prompt = build_docket_user_prompt(intake, discovery, workspace)
-        .map_err(|canon_ref| DocketError::MissingCandidateCanon { canon_ref })?;
+    let filing_prefix = build_docket_filing_prefix(intake, discovery);
     let response_schema = build_docket_schema();
+    let batches =
+        partition_candidate_canons(&discovery.candidate_canons, options.max_canons_per_call);
 
-    let request = GenerationRequest {
-        model_specifier: config.screener_model.clone(),
-        system_instruction: DOCKET_SYSTEM_INSTRUCTION.to_string(),
-        user_prompt,
-        response_schema,
-        reasoning_budget: None,
-        timeout_ms: options.timeout_ms,
-    };
+    let mut prepared_batches = Vec::with_capacity(batches.len());
+    for batch_canons in batches {
+        let user_prompt =
+            build_docket_batch_user_prompt(&filing_prefix, &batch_canons, discovery, workspace)
+                .map_err(|canon_ref| DocketError::MissingCandidateCanon { canon_ref })?;
+        let request = GenerationRequest {
+            model_specifier: config.screener_model.clone(),
+            system_instruction: DOCKET_SYSTEM_INSTRUCTION.to_string(),
+            user_prompt,
+            response_schema: response_schema.clone(),
+            reasoning_budget: None,
+            timeout_ms: options.timeout_ms,
+        };
+        prepared_batches.push((batch_canons, request));
+    }
 
-    let response = provider.generate_structured(&request)?;
-    let cases = decode_docket_cases(
-        &response.payload,
-        &discovery.candidate_canons,
+    let concurrency_limit = options
+        .max_concurrent_calls
+        .unwrap_or(DEFAULT_DOCKET_MAX_CONCURRENT_CALLS);
+    let cases = execute_docket_batches(
+        &prepared_batches,
+        concurrency_limit,
         threshold,
         &config.screener_model,
+        provider,
     )?;
 
     Ok(caseload.with_docket(CaseloadDocket::from_cases(cases)))
+}
+
+type BatchCasesResult = Result<BTreeMap<String, CanonDocketAssessment>, DocketError>;
+
+fn execute_docket_batches(
+    prepared_batches: &[(Vec<String>, GenerationRequest)],
+    concurrency_limit: usize,
+    threshold: f64,
+    model_specifier: &str,
+    provider: &dyn StructuredModelProvider,
+) -> BatchCasesResult {
+    let worker_count = concurrency_limit.min(prepared_batches.len()).max(1);
+    if worker_count == 1 {
+        let mut combined = BTreeMap::new();
+        for (batch_canons, request) in prepared_batches {
+            let response = provider.generate_structured(request)?;
+            let batch_cases =
+                decode_docket_cases(&response.payload, batch_canons, threshold, model_specifier)?;
+            combined.extend(batch_cases);
+        }
+        return Ok(combined);
+    }
+
+    let next_index = AtomicUsize::new(0);
+    let aborted = AtomicBool::new(false);
+    let outcomes: Mutex<Vec<Option<BatchCasesResult>>> =
+        Mutex::new((0..prepared_batches.len()).map(|_| None).collect());
+
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            scope.spawn(|| {
+                loop {
+                    if aborted.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
+                    if idx >= prepared_batches.len() {
+                        break;
+                    }
+                    let (batch_canons, request) = &prepared_batches[idx];
+                    let res = provider
+                        .generate_structured(request)
+                        .map_err(Into::into)
+                        .and_then(|response| {
+                            decode_docket_cases(
+                                &response.payload,
+                                batch_canons,
+                                threshold,
+                                model_specifier,
+                            )
+                        });
+                    if res.is_err() {
+                        aborted.store(true, Ordering::Relaxed);
+                    }
+                    if let Ok(mut guard) = outcomes.lock() {
+                        guard[idx] = Some(res);
+                    }
+                }
+            });
+        }
+    });
+
+    let collected = outcomes.into_inner().unwrap_or_default();
+    let mut combined = BTreeMap::new();
+    for slot in collected.into_iter().flatten() {
+        let batch_cases = slot?;
+        combined.extend(batch_cases);
+    }
+    Ok(combined)
 }
 
 fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> DocketError {
@@ -203,18 +367,27 @@ fn decode_docket_cases(
         })?;
 
     let expected: BTreeSet<&str> = candidate_canons.iter().map(String::as_str).collect();
+    let same_len = cases_arr.len() == candidate_canons.len();
     let mut out = BTreeMap::new();
 
     for (index, raw_item) in cases_arr.iter().enumerate() {
-        let (canon_path, assessment) =
-            decode_single_case(raw_item, index, &expected, threshold, model_specifier)?;
-        if out.contains_key(&canon_path) {
+        let pos_expected = same_len
+            .then(|| candidate_canons.get(index).map(String::as_str))
+            .flatten();
+        let (canon_path, assessment) = decode_single_case(
+            raw_item,
+            index,
+            &expected,
+            pos_expected,
+            threshold,
+            model_specifier,
+        )?;
+        if out.insert(canon_path.clone(), assessment).is_some() {
             return Err(schema_decode_error(
                 model_specifier,
                 format!("duplicate `canon_path` `{canon_path}` in structured docket response"),
             ));
         }
-        out.insert(canon_path, assessment);
     }
 
     let missing: Vec<&str> = candidate_canons
@@ -235,60 +408,74 @@ fn decode_docket_cases(
     Ok(out)
 }
 
+fn resolve_canon_path<'a>(
+    raw_path: &'a str,
+    expected: &BTreeSet<&'a str>,
+    pos: Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(&exact) = expected.get(raw_path) {
+        return Some(exact);
+    }
+    let pos = pos?;
+    if raw_path.rsplit('/').next() == pos.rsplit('/').next() {
+        return Some(pos);
+    }
+    let pref = raw_path
+        .bytes()
+        .zip(pos.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let suff = raw_path
+        .bytes()
+        .rev()
+        .zip(pos.bytes().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    ((pref + suff) * 5 >= raw_path.len().max(pos.len()).max(1) * 4).then_some(pos)
+}
+
 fn decode_single_case(
     raw_item: &Value,
     index: usize,
     expected: &BTreeSet<&str>,
+    positional_expected: Option<&str>,
     threshold: f64,
-    model_specifier: &str,
+    model: &str,
 ) -> Result<(String, CanonDocketAssessment), DocketError> {
     let entry = raw_item.as_object().ok_or_else(|| {
         schema_decode_error(
-            model_specifier,
+            model,
             format!("expected object at `cases[{index}]` in structured docket response"),
         )
     })?;
-
-    let canon_path = entry
-        .get("canon_path")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
+    let raw_canon_path = entry["canon_path"].as_str().ok_or_else(|| {
+        schema_decode_error(
+            model,
+            format!("missing string `canon_path` at `cases[{index}]`"),
+        )
+    })?;
+    let canon_path =
+        resolve_canon_path(raw_canon_path, expected, positional_expected).ok_or_else(|| {
             schema_decode_error(
-                model_specifier,
-                format!("missing string `canon_path` at `cases[{index}]`"),
+                model,
+                format!("unknown `canon_path` `{raw_canon_path}` in structured docket response"),
             )
         })?;
-
-    if !expected.contains(canon_path) {
-        return Err(schema_decode_error(
-            model_specifier,
-            format!("unknown `canon_path` `{canon_path}` in structured docket response"),
-        ));
-    }
-
-    let raw_summary = entry
-        .get("colorability_summary")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                format!("missing string `colorability_summary` for `{canon_path}`"),
-            )
-        })?;
-
-    let raw_score = entry
-        .get("colorability_score")
-        .and_then(Value::as_f64)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                format!("missing numeric `colorability_score` for `{canon_path}`"),
-            )
-        })?;
-
+    let raw_summary = entry["colorability_summary"].as_str().ok_or_else(|| {
+        schema_decode_error(
+            model,
+            format!("missing string `colorability_summary` for `{canon_path}`"),
+        )
+    })?;
+    let raw_score = entry["colorability_score"].as_f64().ok_or_else(|| {
+        schema_decode_error(
+            model,
+            format!("missing numeric `colorability_score` for `{canon_path}`"),
+        )
+    })?;
     let colorability_score = normalize_colorability_score(raw_score).map_err(|detail| {
         schema_decode_error(
-            model_specifier,
+            model,
             format!("invalid `colorability_score` for `{canon_path}`: {detail}"),
         )
     })?;
@@ -546,6 +733,38 @@ mod tests {
                 assert!(matches!(err, DocketError::InvalidThreshold { .. }));
             }
         }
+
+        #[test]
+        fn test_rejects_zero_batch_size_and_zero_concurrency_with_hints() {
+            let ws = sample_workspace();
+            let provider = RecordingMockProvider::with_payload(json!({}));
+
+            let zero_batch = execute_docket(
+                &DocketOptions {
+                    max_canons_per_call: Some(0),
+                    ..DocketOptions::default()
+                },
+                Caseload::new(),
+                &ws,
+                &provider,
+            )
+            .expect_err("zero batch size must fail");
+            assert!(matches!(zero_batch, DocketError::InvalidBatchSize { .. }));
+            assert!(zero_batch.to_string().contains("Hint:"));
+
+            let zero_conc = execute_docket(
+                &DocketOptions {
+                    max_concurrent_calls: Some(0),
+                    ..DocketOptions::default()
+                },
+                Caseload::new(),
+                &ws,
+                &provider,
+            )
+            .expect_err("zero concurrency must fail");
+            assert!(matches!(zero_conc, DocketError::InvalidConcurrency { .. }));
+            assert!(zero_conc.to_string().contains("Hint:"));
+        }
     }
 
     mod aggregate_screening_and_threshold_gating {
@@ -748,6 +967,232 @@ mod tests {
                 &transport_provider,
             )
             .expect_err("provider timeout must propagate");
+            assert!(matches!(
+                err,
+                DocketError::Provider(ProviderError::Timeout { .. })
+            ));
+        }
+    }
+
+    mod batching_and_concurrency {
+        use super::*;
+        use crate::telemetry::{
+            PipelineStage, RecordingTelemetrySink, SteppingTelemetryClock, TelemetryEvent,
+            TelemetrySession,
+        };
+        use std::time::Duration;
+
+        struct OutOfOrderBatchProvider {
+            call_order: Mutex<Vec<String>>,
+            fail_on_canon: Option<String>,
+        }
+
+        impl StructuredModelProvider for OutOfOrderBatchProvider {
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                let mut batch_canons = Vec::new();
+                for line in request.user_prompt.lines() {
+                    if let Some(rest) = line.strip_prefix("### Canon: `")
+                        && let Some(canon_ref) = rest.strip_suffix('`')
+                    {
+                        batch_canons.push(canon_ref.to_string());
+                    }
+                }
+
+                // Force early batches to sleep longer so later batches complete first out of order
+                if batch_canons.iter().any(|c| c.contains("rule-000")) {
+                    std::thread::sleep(Duration::from_millis(35));
+                } else if batch_canons.iter().any(|c| c.contains("rule-002")) {
+                    std::thread::sleep(Duration::from_millis(15));
+                }
+
+                if let Some(fail_target) = &self.fail_on_canon
+                    && batch_canons.iter().any(|c| c == fail_target)
+                {
+                    return Err(ProviderError::Timeout {
+                        model_specifier: request.model_specifier.clone(),
+                        timeout_ms: request.timeout_ms,
+                    });
+                }
+
+                self.call_order
+                    .lock()
+                    .expect("lock call_order")
+                    .push(batch_canons.first().cloned().unwrap_or_default());
+
+                let mut cases = Vec::new();
+                for canon_ref in batch_canons.into_iter().rev() {
+                    let is_even = canon_ref
+                        .chars()
+                        .rfind(|c| c.is_ascii_digit())
+                        .is_some_and(|d| (d as u8).is_multiple_of(2));
+                    let score = if is_even { 0.85 } else { 0.15 };
+                    cases.push(json!({
+                        "canon_path": canon_ref,
+                        "colorability_summary": format!("Assessed {canon_ref}."),
+                        "colorability_score": score
+                    }));
+                }
+
+                Ok(GenerationResponse {
+                    payload: json!({ "cases": cases }),
+                    thoughts: vec!["Batch thought chunk.".to_string()],
+                    usage: TokenUsage {
+                        prompt_tokens: 100,
+                        completion_tokens: 25,
+                        reasoning_tokens: 0,
+                        total_tokens: 125,
+                    },
+                    latency_ms: 15,
+                    resolved_model: "gemini-2.5-flash-lite".to_string(),
+                })
+            }
+        }
+
+        #[test]
+        fn test_partition_candidate_canons_handles_empty_unbounded_and_remainder_slices() {
+            assert!(partition_candidate_canons(&[], Some(5)).is_empty());
+            let five: Vec<String> = (0..5).map(|i| format!("c{i}")).collect();
+            assert_eq!(partition_candidate_canons(&five, None), vec![five.clone()]);
+            assert_eq!(
+                partition_candidate_canons(&five, Some(10)),
+                vec![five.clone()]
+            );
+            assert_eq!(
+                partition_candidate_canons(&five, Some(2)),
+                vec![
+                    vec!["c0".to_string(), "c1".to_string()],
+                    vec!["c2".to_string(), "c3".to_string()],
+                    vec!["c4".to_string()],
+                ]
+            );
+        }
+
+        #[test]
+        fn test_out_of_order_concurrent_batches_fold_deterministically_and_aggregate_telemetry() {
+            let mut ws = WorkspaceSnapshot::new();
+            let mut candidates = Vec::new();
+            for i in 0..5 {
+                let path = format!(".canons/pack/rule-{i:03}.md");
+                ws = ws.with_canon_markdown(
+                    &format!("# Rule {i}\n\nRule {i} MUST hold.\n"),
+                    &ParseCanonOptions::with_source_ref(path.clone()),
+                );
+                candidates.push(path);
+            }
+            let caseload = sample_filing_caseload(candidates);
+
+            // 1. Unbounded single-turn baseline
+            let single_provider = OutOfOrderBatchProvider {
+                call_order: Mutex::new(Vec::new()),
+                fail_on_canon: None,
+            };
+            let single_res = execute_docket(
+                &DocketOptions::default(),
+                caseload.clone(),
+                &ws,
+                &single_provider,
+            )
+            .expect("single-turn baseline");
+
+            // 2. Batched (batch size 2 => 3 batches: [0,1], [2,3], [4]) with concurrency 3 + telemetry
+            let batched_provider = OutOfOrderBatchProvider {
+                call_order: Mutex::new(Vec::new()),
+                fail_on_canon: None,
+            };
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            let batched_res = session
+                .run_stage(PipelineStage::Docket, |scope| {
+                    let instrumented = scope.instrument_provider(&batched_provider);
+                    execute_docket(
+                        &DocketOptions {
+                            max_canons_per_call: Some(2),
+                            max_concurrent_calls: Some(3),
+                            ..DocketOptions::default()
+                        },
+                        caseload.clone(),
+                        &ws,
+                        &instrumented,
+                    )
+                })
+                .expect("concurrent batched docket");
+
+            // Completion order was out-of-order (batch 2 finished before batch 0), yet Caseload is byte-for-byte identical
+            let completion_order = batched_provider.call_order.lock().expect("lock").clone();
+            assert_eq!(completion_order.len(), 3);
+            assert_ne!(
+                completion_order[0], ".canons/pack/rule-000.md",
+                "batch 0 slept longest and must not finish first"
+            );
+            assert_eq!(batched_res, single_res);
+            assert_eq!(
+                serde_json::to_string(&batched_res).expect("json"),
+                serde_json::to_string(&single_res).expect("json")
+            );
+
+            // Verify telemetry accumulated all 3 batch calls (3 * 125 = 375 total_tokens) and 3 Thought events
+            let events = sink.events();
+            let thought_count = events
+                .iter()
+                .filter(|e| matches!(e, TelemetryEvent::Thought { .. }))
+                .count();
+            assert_eq!(thought_count, 3);
+            let stage_finish = events
+                .iter()
+                .find_map(|e| match e {
+                    TelemetryEvent::StageFinish {
+                        stage: PipelineStage::Docket,
+                        usage,
+                        ..
+                    } => *usage,
+                    _ => None,
+                })
+                .expect("Docket StageFinish usage");
+            assert_eq!(
+                stage_finish,
+                TokenUsage {
+                    prompt_tokens: 300,
+                    completion_tokens: 75,
+                    reasoning_tokens: 0,
+                    total_tokens: 375,
+                }
+            );
+        }
+
+        #[test]
+        fn test_concurrent_batch_error_propagates_cleanly() {
+            let mut ws = WorkspaceSnapshot::new();
+            let mut candidates = Vec::new();
+            for i in 0..4 {
+                let path = format!(".canons/pack/rule-{i:03}.md");
+                ws = ws.with_canon_markdown(
+                    &format!("# Rule {i}\n\nRule {i} MUST hold.\n"),
+                    &ParseCanonOptions::with_source_ref(path.clone()),
+                );
+                candidates.push(path);
+            }
+            let caseload = sample_filing_caseload(candidates);
+            let failing_provider = OutOfOrderBatchProvider {
+                call_order: Mutex::new(Vec::new()),
+                fail_on_canon: Some(".canons/pack/rule-002.md".to_string()),
+            };
+
+            let err = execute_docket(
+                &DocketOptions {
+                    max_canons_per_call: Some(2),
+                    max_concurrent_calls: Some(2),
+                    ..DocketOptions::default()
+                },
+                caseload,
+                &ws,
+                &failing_provider,
+            )
+            .expect_err("failing second batch must fail execute_docket");
             assert!(matches!(
                 err,
                 DocketError::Provider(ProviderError::Timeout { .. })

@@ -251,13 +251,22 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk apprise zero-candidate run");
     assert_eq!(apprise_zero_cand.status.code(), Some(0));
+}
 
+#[test]
+fn test_cli_docket_guards_and_batch_validation() {
     // Verify docket Case-or-Controversy guard exits 2 and zero-candidate short-circuit exits 0 without GEMINI_API_KEY
     let docket_all_canons_no_filing = Command::new(bin_path())
         .args(["docket", "--all-canons"])
         .output()
         .expect("failed to execute canon-clerk docket --all-canons");
     assert_eq!(docket_all_canons_no_filing.status.code(), Some(2));
+
+    let docket_zero_batch = Command::new(bin_path())
+        .args(["docket", "src/lib.rs", "--docket-batch-size", "0"])
+        .output()
+        .expect("failed to execute canon-clerk docket --docket-batch-size 0");
+    assert_eq!(docket_zero_batch.status.code(), Some(2));
 
     let docket_zero_cand = Command::new(bin_path())
         .args([
