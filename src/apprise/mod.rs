@@ -25,7 +25,7 @@ use crate::provider::{
 };
 use prompt::{APPRISE_SYSTEM_INSTRUCTION, build_apprise_schema, build_apprise_user_prompt};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 /// Default prospective applicability score threshold for `apprise` (`docs/architecture/nodes/apprise.md` §4.4).
@@ -171,7 +171,7 @@ pub fn execute_apprise(
 
     let user_prompt = build_apprise_user_prompt(intake, discovery, workspace)
         .map_err(|canon_ref| AppriseError::MissingCandidateCanon { canon_ref })?;
-    let response_schema = build_apprise_schema(&discovery.candidate_canons);
+    let response_schema = build_apprise_schema();
 
     let request = GenerationRequest {
         model_specifier: config.screener_model.clone(),
@@ -193,81 +193,128 @@ pub fn execute_apprise(
     Ok(caseload.with_apprisal(CaseloadApprisal { assessments }))
 }
 
+fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> AppriseError {
+    AppriseError::Provider(ProviderError::SchemaDecode {
+        model_specifier: model_specifier.to_string(),
+        message: message.into(),
+    })
+}
+
 fn decode_apprise_assessments(
     payload: &Value,
     candidate_canons: &[String],
     threshold: f64,
     model_specifier: &str,
 ) -> Result<BTreeMap<String, CanonApprisalAssessment>, AppriseError> {
-    let assessments_obj = payload
+    let assessments_arr = payload
         .get("assessments")
-        .and_then(Value::as_object)
+        .and_then(Value::as_array)
         .ok_or_else(|| {
-            AppriseError::Provider(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: "missing object field `assessments` in structured apprise response"
-                    .to_string(),
-            })
+            schema_decode_error(
+                model_specifier,
+                "missing array field `assessments` in structured apprise response",
+            )
         })?;
 
+    let expected: BTreeSet<&str> = candidate_canons.iter().map(String::as_str).collect();
     let mut out = BTreeMap::new();
-    for canon_ref in candidate_canons {
-        let assessment =
-            decode_single_assessment(assessments_obj, canon_ref, threshold, model_specifier)?;
-        out.insert(canon_ref.clone(), assessment);
+
+    for (index, raw_item) in assessments_arr.iter().enumerate() {
+        let (canon_path, assessment) =
+            decode_single_assessment(raw_item, index, &expected, threshold, model_specifier)?;
+        if out.contains_key(&canon_path) {
+            return Err(schema_decode_error(
+                model_specifier,
+                format!("duplicate `canon_path` `{canon_path}` in structured apprise response"),
+            ));
+        }
+        out.insert(canon_path, assessment);
+    }
+
+    let missing: Vec<&str> = candidate_canons
+        .iter()
+        .map(String::as_str)
+        .filter(|canon_ref| !out.contains_key(*canon_ref))
+        .collect();
+    if !missing.is_empty() {
+        return Err(schema_decode_error(
+            model_specifier,
+            format!(
+                "missing assessment entry for candidate canon(s): {}",
+                missing.join(", ")
+            ),
+        ));
     }
 
     Ok(out)
 }
 
 fn decode_single_assessment(
-    assessments_obj: &serde_json::Map<String, Value>,
-    canon_ref: &str,
+    raw_item: &Value,
+    index: usize,
+    expected: &BTreeSet<&str>,
     threshold: f64,
     model_specifier: &str,
-) -> Result<CanonApprisalAssessment, AppriseError> {
-    let entry = assessments_obj
-        .get(canon_ref)
-        .and_then(Value::as_object)
+) -> Result<(String, CanonApprisalAssessment), AppriseError> {
+    let entry = raw_item.as_object().ok_or_else(|| {
+        schema_decode_error(
+            model_specifier,
+            format!("expected object at `assessments[{index}]` in structured apprise response"),
+        )
+    })?;
+
+    let canon_path = entry
+        .get("canon_path")
+        .and_then(Value::as_str)
         .ok_or_else(|| {
-            AppriseError::Provider(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!("missing assessment entry for candidate canon `{canon_ref}`"),
-            })
+            schema_decode_error(
+                model_specifier,
+                format!("missing string `canon_path` at `assessments[{index}]`"),
+            )
         })?;
+
+    if !expected.contains(canon_path) {
+        return Err(schema_decode_error(
+            model_specifier,
+            format!("unknown `canon_path` `{canon_path}` in structured apprise response"),
+        ));
+    }
 
     let raw_summary = entry
         .get("apprisal_summary")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            AppriseError::Provider(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!("missing string `apprisal_summary` for `{canon_ref}`"),
-            })
+            schema_decode_error(
+                model_specifier,
+                format!("missing string `apprisal_summary` for `{canon_path}`"),
+            )
         })?;
 
     let raw_score = entry
         .get("apprisal_score")
         .and_then(Value::as_f64)
         .ok_or_else(|| {
-            AppriseError::Provider(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!("missing numeric `apprisal_score` for `{canon_ref}`"),
-            })
+            schema_decode_error(
+                model_specifier,
+                format!("missing numeric `apprisal_score` for `{canon_path}`"),
+            )
         })?;
 
     let apprisal_score = normalize_unit_score(raw_score).map_err(|detail| {
-        AppriseError::Provider(ProviderError::SchemaDecode {
-            model_specifier: model_specifier.to_string(),
-            message: format!("invalid `apprisal_score` for `{canon_ref}`: {detail}"),
-        })
+        schema_decode_error(
+            model_specifier,
+            format!("invalid `apprisal_score` for `{canon_path}`: {detail}"),
+        )
     })?;
 
-    Ok(CanonApprisalAssessment {
-        apprisal_summary: raw_summary.trim().to_string(),
-        apprisal_score,
-        apprisal_status: ApprisalStatus::from_score(apprisal_score, threshold),
-    })
+    Ok((
+        canon_path.to_string(),
+        CanonApprisalAssessment {
+            apprisal_summary: raw_summary.trim().to_string(),
+            apprisal_score,
+            apprisal_status: ApprisalStatus::from_score(apprisal_score, threshold),
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -404,7 +451,7 @@ mod tests {
         #[test]
         fn test_rejects_missing_intent_discovery_config_validation_failure_and_bad_threshold() {
             let snapshot = fixture_snapshot();
-            let provider = RecordingMockProvider::with_payload(json!({"assessments": {}}));
+            let provider = RecordingMockProvider::with_payload(json!({"assessments": []}));
 
             let bad_threshold_err = execute_apprise(
                 &AppriseOptions {
@@ -483,25 +530,50 @@ mod tests {
     mod aggregate_screening_and_threshold_gating {
         use super::*;
 
+        fn assert_domain_indirected_array_schema(response_schema: &Value) {
+            let assessments_schema = &response_schema["properties"]["assessments"];
+            assert_eq!(assessments_schema["type"], json!("array"));
+            let item_schema = &assessments_schema["items"];
+            assert_eq!(
+                item_schema["propertyOrdering"],
+                json!(["canon_path", "apprisal_summary", "apprisal_score"]),
+                "schema must enforce domain-indirected, reason-first ordering"
+            );
+            assert_eq!(
+                item_schema["required"],
+                json!(["canon_path", "apprisal_summary", "apprisal_score"])
+            );
+            assert!(
+                item_schema["properties"]["canon_path"]
+                    .get("enum")
+                    .is_none(),
+                "canon_path schema must omit dynamic enum lists for O(1) scaling"
+            );
+        }
+
         #[test]
-        fn test_single_turn_reason_first_schema_and_deterministic_threshold_derivation() {
+        fn test_single_turn_domain_indirected_reason_first_schema_and_deterministic_threshold_derivation()
+         {
             let snapshot = fixture_snapshot();
             let candidates = vec![
                 ".canons/auth/cache-expiry.md".to_string(),
                 ".canons/auth/db-rollback.md".to_string(),
             ];
             let caseload = fixture_caseload(candidates);
+            // Return items in reverse order to verify deterministic BTreeMap folding
             let provider = RecordingMockProvider::with_payload(json!({
-                "assessments": {
-                    ".canons/auth/cache-expiry.md": {
-                        "apprisal_summary": "In-memory TTL cache directly requires explicit expiration rules.",
-                        "apprisal_score": 0.91
-                    },
-                    ".canons/auth/db-rollback.md": {
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/db-rollback.md",
                         "apprisal_summary": "No SQL migrations or schema modifications are planned.",
                         "apprisal_score": 0.49
+                    },
+                    {
+                        "canon_path": ".canons/auth/cache-expiry.md",
+                        "apprisal_summary": "In-memory TTL cache directly requires explicit expiration rules.",
+                        "apprisal_score": 0.91
                     }
-                }
+                ]
             }));
 
             let result =
@@ -520,19 +592,18 @@ mod tests {
             assert!(req.user_prompt.contains("Refactor auth provider dispatch"));
             assert!(req.user_prompt.contains(".canons/auth/cache-expiry.md"));
             assert!(req.user_prompt.contains(".canons/auth/db-rollback.md"));
-
-            let item_schema = &req.response_schema["properties"]["assessments"]["properties"][".canons/auth/cache-expiry.md"];
-            assert_eq!(
-                item_schema["propertyOrdering"],
-                json!(["apprisal_summary", "apprisal_score"]),
-                "schema must enforce reason-first ordering"
-            );
-            assert_eq!(
-                item_schema["required"],
-                json!(["apprisal_summary", "apprisal_score"])
-            );
+            assert_domain_indirected_array_schema(&req.response_schema);
 
             let apprisal = result.apprisal.expect("apprisal populated");
+            let keys: Vec<&String> = apprisal.assessments.keys().collect();
+            assert_eq!(
+                keys,
+                vec![
+                    ".canons/auth/cache-expiry.md",
+                    ".canons/auth/db-rollback.md"
+                ],
+                "folded CaseloadApprisal.assessments must maintain deterministic lexicographical order"
+            );
             assert_eq!(apprisal.applicable_count(), 1);
             assert_eq!(apprisal.dismissed_count(), 1);
             assert_eq!(
@@ -546,6 +617,68 @@ mod tests {
         }
 
         #[test]
+        fn test_constant_size_schema_scales_across_60_candidate_canons() {
+            let mut snapshot = WorkspaceSnapshot::new().with_file("src/auth/provider.rs");
+            let mut candidates = Vec::new();
+            let mut wire_items = Vec::new();
+
+            for idx in 0..60 {
+                let canon_ref = format!(".canons/scale/canon-{idx:03}.md");
+                let md = format!(
+                    "---\ntriggers:\n  - \"src/**\"\n---\nScale test invariant number {idx} MUST hold.\n"
+                );
+                snapshot = snapshot
+                    .with_canon_markdown(&md, &ParseCanonOptions::with_source_ref(&canon_ref));
+                let score = if idx % 10 == 0 { 0.85 } else { 0.10 };
+                wire_items.push(json!({
+                    "canon_path": canon_ref,
+                    "apprisal_summary": format!("Scale rationale {idx}."),
+                    "apprisal_score": score
+                }));
+                candidates.push(canon_ref);
+            }
+            wire_items.reverse();
+
+            let one_canon_provider = RecordingMockProvider::with_payload(json!({
+                "assessments": [
+                    {
+                        "canon_path": candidates[0],
+                        "apprisal_summary": "Single canon run.",
+                        "apprisal_score": 0.85
+                    }
+                ]
+            }));
+            execute_apprise(
+                &AppriseOptions::default(),
+                fixture_caseload(vec![candidates[0].clone()]),
+                &snapshot,
+                &one_canon_provider,
+            )
+            .expect("1-canon execution");
+
+            let sixty_canon_provider =
+                RecordingMockProvider::with_payload(json!({ "assessments": wire_items }));
+            let result = execute_apprise(
+                &AppriseOptions::default(),
+                fixture_caseload(candidates.clone()),
+                &snapshot,
+                &sixty_canon_provider,
+            )
+            .expect("60-canon execution");
+
+            assert_eq!(
+                one_canon_provider.recorded_requests()[0].response_schema,
+                sixty_canon_provider.recorded_requests()[0].response_schema,
+                "response_schema must remain O(1) constant-size independent of candidate canon count"
+            );
+
+            let apprisal = result.apprisal.expect("apprisal populated");
+            assert_eq!(apprisal.assessments.len(), 60);
+            assert_eq!(apprisal.applicable_count(), 6);
+            assert_eq!(apprisal.dismissed_count(), 54);
+        }
+
+        #[test]
         fn test_custom_threshold_boundary_inclusivity() {
             let snapshot = fixture_snapshot();
             let candidates = vec![
@@ -553,16 +686,18 @@ mod tests {
                 ".canons/auth/db-rollback.md".to_string(),
             ];
             let provider = RecordingMockProvider::with_payload(json!({
-                "assessments": {
-                    ".canons/auth/cache-expiry.md": {
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/cache-expiry.md",
                         "apprisal_summary": "Exact threshold match.",
                         "apprisal_score": 0.75
                     },
-                    ".canons/auth/db-rollback.md": {
+                    {
+                        "canon_path": ".canons/auth/db-rollback.md",
                         "apprisal_summary": "Below custom threshold.",
                         "apprisal_score": 0.74
                     }
-                }
+                ]
             }));
 
             let result = execute_apprise(
@@ -612,12 +747,13 @@ mod tests {
             assert!(err.to_string().contains("HTTP 401"));
 
             let out_of_range_provider = RecordingMockProvider::with_payload(json!({
-                "assessments": {
-                    ".canons/auth/cache-expiry.md": {
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/cache-expiry.md",
                         "apprisal_summary": "Score exceeds 1.0",
                         "apprisal_score": 1.4
                     }
-                }
+                ]
             }));
             let score_err = execute_apprise(
                 &AppriseOptions::default(),
@@ -630,6 +766,98 @@ mod tests {
                 score_err,
                 AppriseError::Provider(ProviderError::SchemaDecode { .. })
             ));
+        }
+
+        #[test]
+        fn test_rejects_non_array_missing_unknown_and_duplicate_canon_path_entries() {
+            let snapshot = fixture_snapshot();
+            let two_candidates = vec![
+                ".canons/auth/cache-expiry.md".to_string(),
+                ".canons/auth/db-rollback.md".to_string(),
+            ];
+
+            let bad_payloads = [
+                (
+                    "non-array assessments object",
+                    json!({
+                        "assessments": {
+                            ".canons/auth/cache-expiry.md": {
+                                "apprisal_summary": "Legacy object wire shape.",
+                                "apprisal_score": 0.8
+                            }
+                        }
+                    }),
+                ),
+                (
+                    "missing second candidate canon",
+                    json!({
+                        "assessments": [
+                            {
+                                "canon_path": ".canons/auth/cache-expiry.md",
+                                "apprisal_summary": "Only one returned.",
+                                "apprisal_score": 0.8
+                            }
+                        ]
+                    }),
+                ),
+                (
+                    "unknown canon_path entry",
+                    json!({
+                        "assessments": [
+                            {
+                                "canon_path": ".canons/auth/cache-expiry.md",
+                                "apprisal_summary": "Valid.",
+                                "apprisal_score": 0.8
+                            },
+                            {
+                                "canon_path": ".canons/unknown/hallucinated-canon.md",
+                                "apprisal_summary": "Hallucinated identifier.",
+                                "apprisal_score": 0.2
+                            }
+                        ]
+                    }),
+                ),
+                (
+                    "duplicate canon_path entry",
+                    json!({
+                        "assessments": [
+                            {
+                                "canon_path": ".canons/auth/cache-expiry.md",
+                                "apprisal_summary": "First copy.",
+                                "apprisal_score": 0.8
+                            },
+                            {
+                                "canon_path": ".canons/auth/cache-expiry.md",
+                                "apprisal_summary": "Duplicate copy.",
+                                "apprisal_score": 0.8
+                            },
+                            {
+                                "canon_path": ".canons/auth/db-rollback.md",
+                                "apprisal_summary": "Valid second canon.",
+                                "apprisal_score": 0.1
+                            }
+                        ]
+                    }),
+                ),
+            ];
+
+            for (case_label, payload) in bad_payloads {
+                let provider = RecordingMockProvider::with_payload(payload);
+                let err = execute_apprise(
+                    &AppriseOptions::default(),
+                    fixture_caseload(two_candidates.clone()),
+                    &snapshot,
+                    &provider,
+                )
+                .expect_err(case_label);
+                assert!(
+                    matches!(
+                        err,
+                        AppriseError::Provider(ProviderError::SchemaDecode { .. })
+                    ),
+                    "case `{case_label}` must return ProviderError::SchemaDecode, got: {err:?}"
+                );
+            }
         }
     }
 }

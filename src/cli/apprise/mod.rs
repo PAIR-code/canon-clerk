@@ -510,7 +510,7 @@ mod tests {
         #[test]
         fn test_rejects_unqualified_and_out_of_closure_threshold_flags_with_exit_2() {
             let snapshot = valid_snapshot();
-            let provider = StubProvider::succeeding(json!({"assessments": {}}));
+            let provider = StubProvider::succeeding(json!({"assessments": []}));
 
             for bad_flag in ["--threshold", "--docket-threshold", "--admit-threshold"] {
                 let cli = Cli::try_parse_from([
@@ -548,7 +548,7 @@ mod tests {
         #[test]
         fn test_rejects_out_of_range_and_malformed_thresholds_via_flag_or_env() {
             let snapshot = valid_snapshot();
-            let provider = StubProvider::succeeding(json!({"assessments": {}}));
+            let provider = StubProvider::succeeding(json!({"assessments": []}));
 
             for bad_val in [-0.1, 1.5, f64::NAN, f64::INFINITY] {
                 let args = AppriseArgs {
@@ -603,7 +603,7 @@ mod tests {
         #[test]
         fn test_dual_input_guard_fails_with_exit_2_when_intent_or_scope_missing() {
             let snapshot = valid_snapshot();
-            let provider = StubProvider::succeeding(json!({"assessments": {}}));
+            let provider = StubProvider::succeeding(json!({"assessments": []}));
 
             // 1. Naked invocation (missing both)
             let naked_err = run_apprise_with_snapshot_and_provider(
@@ -774,16 +774,18 @@ mod tests {
 
         fn canned_assessments_payload() -> Value {
             json!({
-                "assessments": {
-                    ".canons/auth/auth-caches-must-define-ttl-window.md": {
-                        "apprisal_summary": "Planned provider cache requires an explicit TTL window.",
-                        "apprisal_score": 0.93
-                    },
-                    ".canons/cli/cli-flags-must-use-positive-polarity.md": {
+                "assessments": [
+                    {
+                        "canon_path": ".canons/cli/cli-flags-must-use-positive-polarity.md",
                         "apprisal_summary": "No CLI flags are introduced or modified.",
                         "apprisal_score": 0.12
+                    },
+                    {
+                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
+                        "apprisal_summary": "Planned provider cache requires an explicit TTL window.",
+                        "apprisal_score": 0.93
                     }
-                }
+                ]
             })
         }
 
@@ -978,6 +980,45 @@ mod tests {
             assert_eq!(provider_err.exit_code(), 2);
             assert!(provider_err.to_string().contains("timed out"));
         }
+
+        #[test]
+        fn test_schema_decode_wire_errors_map_to_exit_code_2() {
+            let snapshot = valid_snapshot();
+            let active_args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Rotate auth provider".to_string()),
+                    targets: vec!["src/auth".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+
+            let dup_wire_provider = StubProvider::succeeding(json!({
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
+                        "apprisal_summary": "First copy.",
+                        "apprisal_score": 0.9
+                    },
+                    {
+                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
+                        "apprisal_summary": "Duplicate copy.",
+                        "apprisal_score": 0.9
+                    }
+                ]
+            }));
+            let dup_err = run_apprise_with_snapshot_and_provider(
+                &active_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &snapshot,
+                &test_env_with_key(),
+                &dup_wire_provider,
+            )
+            .expect_err("duplicate canon_path wire payload must map to exit 2");
+            assert_eq!(dup_err.exit_code(), 2);
+            assert!(dup_err.to_string().contains("duplicate `canon_path`"));
+        }
     }
 
     mod telemetry_instrumentation {
@@ -992,12 +1033,13 @@ mod tests {
             let snapshot = valid_snapshot();
             let env = test_env_with_key();
             let payload = json!({
-                "assessments": {
-                    ".canons/auth/auth-caches-must-define-ttl-window.md": {
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
                         "apprisal_summary": "Planned provider cache requires TTL.",
                         "apprisal_score": 0.91
                     }
-                }
+                ]
             });
             let provider = StubProvider::succeeding_with_thoughts(
                 payload,
@@ -1093,12 +1135,13 @@ mod tests {
             let snapshot = valid_snapshot();
             let env = test_env_with_key();
             let provider = StubProvider::succeeding(json!({
-                "assessments": {
-                    ".canons/auth/auth-caches-must-define-ttl-window.md": {
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
                         "apprisal_summary": "Applicable.",
                         "apprisal_score": 0.85
                     }
-                }
+                ]
             }));
 
             let upstream = Caseload::new()
