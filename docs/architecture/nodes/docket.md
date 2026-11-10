@@ -68,18 +68,20 @@ flowchart LR
 
 1. **Aggregate Single-Turn Screening:**  
    Evaluates **all candidate canons in a single aggregate prompt turn** using `gemini-flash-lite-latest`.
-2. **Constrained Grammar Decoding (Reason-First):**  
-   Forces structured JSON output with guaranteed schema keys, generating `colorability_summary` before `colorability_score` to provide a chain-of-thought scratchpad that anchors reproducible probability distributions:
+2. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**  
+   Enforces a constant-size structured JSON wire array pairing each `canon_path` with `colorability_summary` generated before `colorability_score`:
    ```json
    {
-     "cases": {
-       ".canons/cli/cli-flags-kebab-case.md": {
+     "cases": [
+       {
+         "canon_path": ".canons/cli/cli-flags-kebab-case.md",
          "colorability_summary": "PR introduces new command flags in CLI.",
          "colorability_score": 0.95
        }
-     }
+     ]
    }
    ```
+   Generating `colorability_summary` before `colorability_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions, while domain-indirected array items keep the wire grammar independent of candidate canon count. Each candidate canon must appear once without unknown or duplicate identifiers before folding into `.docket.cases`.
 3. **Deterministic Threshold Gating (`colorability_score >= --docket-threshold`, default: `0.5`):**  
    The core domain engine deterministically evaluates the continuous score against the threshold to assign `colorability_status`:
    - Canons scoring $\ge 0.5$ establish jurisdiction, are marked `colorability_status: "docketed"`, and are entered into `active_docket`.

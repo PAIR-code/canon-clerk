@@ -17,7 +17,7 @@
 use crate::canon::Canon;
 use crate::caseload::{CaseloadDiscovery, CaseloadIntake};
 use crate::discover::WorkspaceSnapshot;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 
 pub(super) const APPRISE_SYSTEM_INSTRUCTION: &str = "\
@@ -25,33 +25,23 @@ You are the Clerk of the Court for Canon Clerk exercising Statutory Apprisal Aut
 Given a prospective architectural design intent, target scope context, and a set of candidate engineering canons, determine whether each candidate canon has a colorable claim of prospective subject-matter jurisdiction over the planned work before implementation begins.
 
 Evaluation Rules:
-1. Reason First: For every candidate canon, write a concise, concrete `apprisal_summary` explaining why the canon does or does not govern the planned design intent and target scope BEFORE assigning `apprisal_score`.
-2. Positive Polarity Scoring (`[0.0, 1.0]`):
+1. Exact Domain Indirection: For each entry in `assessments`, set `canon_path` to the exact candidate canon path string presented under `### Canon:` without modification.
+2. Reason First: Write a concise, concrete `apprisal_summary` explaining why the canon does or does not govern the planned design intent and target scope BEFORE assigning `apprisal_score`.
+3. Positive Polarity Scoring (`[0.0, 1.0]`):
    - Score >= 0.5 when the planned work touches, introduces, or modifies concerns governed by the canon's invariant or exceptions.
    - Score < 0.5 when the canon is orthogonal or inapplicable to the planned work.
-3. Completeness: Return an assessment for every candidate canon identifier.";
+4. Completeness & Uniqueness: Return an `assessments` array containing one entry per candidate canon identifier—no omissions, no duplicates, and no extra identifiers.";
 
-/// Builds a strict reason-first JSON Schema enforcing `apprisal_summary` before `apprisal_score`
-/// for every candidate canon (`docs/architecture/nodes/apprise.md` §4.3).
-pub(super) fn build_apprise_schema(candidate_canons: &[String]) -> Value {
-    let mut assessment_props = Map::new();
-    for canon_ref in candidate_canons {
-        assessment_props.insert(canon_ref.clone(), single_canon_assessment_schema());
-    }
-
-    let ordered_keys: Vec<Value> = candidate_canons
-        .iter()
-        .map(|k| Value::String(k.clone()))
-        .collect();
-
+/// Builds a constant-size domain-indirected, reason-first JSON Schema enforcing
+/// `canon_path`, `apprisal_summary`, then `apprisal_score` (`docs/architecture/nodes/apprise.md` §4.3).
+pub(super) fn build_apprise_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "assessments": {
-                "type": "object",
-                "properties": Value::Object(assessment_props),
-                "propertyOrdering": ordered_keys,
-                "required": candidate_canons,
+                "type": "array",
+                "description": "Statutory apprisal assessments, containing one entry per candidate canon in the prompt.",
+                "items": single_canon_assessment_schema()
             }
         },
         "propertyOrdering": ["assessments"],
@@ -63,6 +53,10 @@ fn single_canon_assessment_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
+            "canon_path": {
+                "type": "string",
+                "description": "Exact candidate canon path identifier from the prompt (`### Canon: ...`)."
+            },
             "apprisal_summary": {
                 "type": "string",
                 "description": "Concise rationale explaining why this canon does or does not claim prospective jurisdiction over the planned design intent and target scope."
@@ -74,8 +68,8 @@ fn single_canon_assessment_schema() -> Value {
                 "description": "Continuous prospective applicability score in [0.0, 1.0], where >= 0.5 indicates the canon governs the planned work."
             }
         },
-        "propertyOrdering": ["apprisal_summary", "apprisal_score"],
-        "required": ["apprisal_summary", "apprisal_score"]
+        "propertyOrdering": ["canon_path", "apprisal_summary", "apprisal_score"],
+        "required": ["canon_path", "apprisal_summary", "apprisal_score"]
     })
 }
 

@@ -73,23 +73,25 @@ flowchart LR
    Verifies that non-empty prospective design intent is present on `caseload.intake.intent` alongside resolved discovery scope in `caseload.discovery`. Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths, globs, or explicit canon selection). If `candidate_canons` is empty after evaluating an explicit target or canon scope, attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits immediately with exit code `0`.
 2. **Aggregate Single-Turn Screening (`gemini-flash-lite-latest`):**  
    Evaluates **all candidate canons against the prospective design intent and target scope context in a single aggregate prompt turn** using `caseload.config.screener_model`.
-3. **Constrained Decoding Schema (Reason-First):**  
-   Enforces structured JSON output generating `apprisal_summary` before `apprisal_score`:
+3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**  
+   Enforces a constant-size structured JSON wire array pairing each `canon_path` with `apprisal_summary` generated before `apprisal_score`:
    ```json
    {
-     "assessments": {
-       ".canons/auth/cacheing-layers-must-have-configurable-expiry.md": {
+     "assessments": [
+       {
+         "canon_path": ".canons/auth/cacheing-layers-must-have-configurable-expiry.md",
          "apprisal_summary": "Proposed round-robin dispatch introduces a dynamically updated provider cache, which must define explicit expiration policies.",
          "apprisal_score": 0.92
        },
-       ".canons/auth/database-migrations-must-include-rollback-instructions.md": {
+       {
+         "canon_path": ".canons/auth/database-migrations-must-include-rollback-instructions.md",
          "apprisal_summary": "The planned refactor only modifies in-memory provider dispatch and does not alter database schemas or migrations.",
          "apprisal_score": 0.05
        }
-     }
+     ]
    }
    ```
-   Generating `apprisal_summary` before `apprisal_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions.
+   Generating `apprisal_summary` before `apprisal_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions, while domain-indirected array items keep the wire grammar independent of candidate canon count. Each candidate canon must appear once without unknown or duplicate identifiers before folding into `.apprisal.assessments`.
 4. **Deterministic Threshold Gating (`apprisal_score >= --apprise-threshold`, default: `0.5`):**  
    The core domain engine deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
    - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: "applicable"`.
