@@ -25,12 +25,14 @@ You are the Clerk of the Court for Canon Clerk exercising Statutory Apprisal Aut
 Given a prospective architectural design intent, target scope context, and a set of candidate engineering canons, determine whether each candidate canon has a colorable claim of prospective subject-matter jurisdiction over the planned work before implementation begins.
 
 Evaluation Rules:
-1. Exact Domain Indirection: For each entry in `assessments`, set `canon_path` to the exact candidate canon path string presented under `### Canon:` without modification.
+1. Exact Domain Indirection: For each entry in `assessments`, set `canon_path` to the exact candidate canon identifier string presented under `### Canon:` (and listed under `## Required canon_path Identifiers`) without modification.
 2. Reason First: Write a concise, concrete `apprisal_summary` explaining why the canon does or does not govern the planned design intent and target scope BEFORE assigning `apprisal_score`.
-3. Positive Polarity Scoring (`[0.0, 1.0]`):
-   - Score >= 0.5 when the planned work touches, introduces, or modifies concerns governed by the canon's invariant or exceptions.
-   - Score < 0.5 when the canon is orthogonal or inapplicable to the planned work.
-4. Completeness & Uniqueness: Return an `assessments` array containing one entry per candidate canon identifier—no omissions, no duplicates, and no extra identifiers.";
+3. Positive Polarity Jurisdiction Scoring & Rubric Bands (`[0.0, 1.0]`):
+   - Score `0.75 - 0.95` (Applicable, `>= 0.5`) when the planned work touches, introduces, or modifies the domain construct, layer, workflow, or documentation requirement governed by the canon's invariant or exceptions.
+   - NEVER Dismiss Because of Anticipated Compliance: Prospective jurisdiction depends on whether the planned work touches the governed construct, NEVER on whether the design already satisfies the rule. Likewise, if a canon requires feature work to update a reference file (e.g., `README.md`), any planned feature work is under its prospective jurisdiction (`0.75 - 0.95`) even when that file is not yet listed in the target scope.
+   - Score `0.05 - 0.25` (Dismissed, `< 0.5`) ONLY when the canon's specific domain construct is absent from and orthogonal to the planned work.
+   - Avoid ambiguous boundary scores in `0.35 - 0.65`: commit decisively to `>= 0.75` when the governed construct is present or `<= 0.25` when absent.
+4. Completeness & Uniqueness: Return an `assessments` array containing one entry per candidate canon identifier in the exact order listed—no omissions, no duplicates, and no extra identifiers.";
 
 /// Builds a constant-size domain-indirected, reason-first JSON Schema enforcing
 /// `canon_path`, `apprisal_summary`, then `apprisal_score` (`docs/architecture/nodes/apprise.md` §4.3).
@@ -40,7 +42,7 @@ pub(super) fn build_apprise_schema() -> Value {
         "properties": {
             "assessments": {
                 "type": "array",
-                "description": "Statutory apprisal assessments, containing one entry per candidate canon in the prompt.",
+                "description": "Statutory apprisal assessments, containing one entry per candidate canon identifier in the prompt.",
                 "items": single_canon_assessment_schema()
             }
         },
@@ -55,7 +57,7 @@ fn single_canon_assessment_schema() -> Value {
         "properties": {
             "canon_path": {
                 "type": "string",
-                "description": "Exact candidate canon path identifier from the prompt (`### Canon: ...`)."
+                "description": "Exact candidate canon identifier from the prompt (`### Canon: ...` / `## Required canon_path Identifiers`)."
             },
             "apprisal_summary": {
                 "type": "string",
@@ -104,6 +106,15 @@ pub(super) fn build_apprise_user_prompt(
         append_canon_section(&mut out, canon_ref, canon, matched);
     }
 
+    let _ = writeln!(
+        out,
+        "## Required `canon_path` Identifiers ({})",
+        discovery.candidate_canons.len()
+    );
+    for (idx, canon_ref) in discovery.candidate_canons.iter().enumerate() {
+        let _ = writeln!(out, "{}. `{canon_ref}`", idx + 1);
+    }
+
     Ok(out)
 }
 
@@ -138,8 +149,34 @@ fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matche
     let _ = writeln!(out, "### Canon: `{canon_ref}`");
     let _ = writeln!(out, "- ID: `{}`", canon.id);
     let _ = writeln!(out, "- Title: {}", canon.title);
+    if !canon.triggers.is_empty() {
+        let _ = writeln!(out, "- Triggers: {}", canon.triggers.join(", "));
+    }
+    if !canon.exists.is_empty() {
+        let _ = writeln!(out, "- Exists: {}", canon.exists.join(", "));
+    }
+    if !canon.inspect.is_empty() {
+        let inspect_list: Vec<String> = canon
+            .inspect
+            .iter()
+            .map(|p| {
+                if p.optional {
+                    format!("{}?", p.token.as_str())
+                } else {
+                    p.token.as_str().to_string()
+                }
+            })
+            .collect();
+        let _ = writeln!(out, "- Inspect: {}", inspect_list.join(", "));
+    }
+    if !canon.references.is_empty() {
+        let _ = writeln!(out, "- References: {}", canon.references.join(", "));
+    }
+    if !canon.tags.is_empty() {
+        let _ = writeln!(out, "- Tags: {}", canon.tags.join(", "));
+    }
     if !matched.is_empty() {
-        let _ = writeln!(out, "- Triggered Scope: {}", matched.join(", "));
+        let _ = writeln!(out, "- Triggered Exhibits: {}", matched.join(", "));
     }
     let body = canon.raw_body.trim();
     let statute = if body.is_empty() {
@@ -147,5 +184,6 @@ fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matche
     } else {
         body
     };
-    let _ = writeln!(out, "\n{statute}\n");
+    let _ = writeln!(out, "\n{statute}");
+    let _ = writeln!(out, "- Exact `canon_path`: `{canon_ref}`\n");
 }

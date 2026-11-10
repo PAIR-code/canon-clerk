@@ -721,6 +721,159 @@ mod tests {
                 ApprisalStatus::Dismissed
             );
         }
+
+        fn multi_realm_snapshot(
+            local_ref: &str,
+            builtin_ref: &str,
+            pack_ref: &str,
+        ) -> WorkspaceSnapshot {
+            let local_md = "\
+---
+triggers:
+  - \"src/**\"
+exists:
+  - \"README.md\"
+inspect:
+  - diff
+  - pr_title
+  - linked_issues?
+references:
+  - \"README.md\"
+tags:
+  - documentation
+  - features
+---
+# README Must Reflect Developed Features
+
+Feature changes MUST update `README.md` when introducing user-facing capabilities.
+";
+            let builtin_md = "\
+---
+triggers:
+  - \"src/**\"
+inspect:
+  - diff
+tags:
+  - security
+---
+# No Hardcoded Secrets
+
+Source files MUST NOT embed raw API keys or credentials.
+";
+            let pack_md = "\
+---
+triggers:
+  - \"**/*.tsx\"
+---
+# Accessible Buttons
+
+Interactive UI controls MUST provide accessible labels.
+";
+
+            WorkspaceSnapshot::new()
+                .with_file("src/cli/apprise.rs")
+                .with_file("README.md")
+                .with_canon_markdown(local_md, &ParseCanonOptions::with_source_ref(local_ref))
+                .with_canon_markdown(builtin_md, &ParseCanonOptions::with_source_ref(builtin_ref))
+                .with_canon_markdown(pack_md, &ParseCanonOptions::with_source_ref(pack_ref))
+        }
+
+        fn assert_multi_realm_prompt_grounding(req: &GenerationRequest) {
+            assert!(req.system_instruction.contains("0.75 - 0.95"));
+            assert!(req.system_instruction.contains("0.05 - 0.25"));
+            assert!(
+                req.system_instruction
+                    .contains("candidate canon identifier")
+            );
+
+            let prompt = &req.user_prompt;
+            for expected in [
+                "- Triggers: src/**",
+                "- Exists: README.md",
+                "- Inspect: diff, pr_title, linked_issues?",
+                "- References: README.md",
+                "- Tags: documentation, features",
+                "- Triggered Exhibits: src/cli/apprise.rs",
+                "- Exact `canon_path`: `.canons/docs/readme-must-reflect-developed-features.md`",
+                "- Exact `canon_path`: `acme-corp:packages/ui/.canons/accessibility.md`",
+                "- Exact `canon_path`: `builtin:security/no-hardcoded-secrets`",
+                "## Required `canon_path` Identifiers (3)\n\
+                 1. `.canons/docs/readme-must-reflect-developed-features.md`\n\
+                 2. `acme-corp:packages/ui/.canons/accessibility.md`\n\
+                 3. `builtin:security/no-hardcoded-secrets`\n",
+            ] {
+                assert!(
+                    prompt.contains(expected),
+                    "prompt missing `{expected}`:\n{prompt}"
+                );
+            }
+            assert!(!prompt.contains("- Triggered Scope:"));
+            assert!(!prompt.contains("- Scope:"));
+        }
+
+        #[test]
+        fn test_prompt_renders_normalized_frontmatter_triggered_exhibits_and_realm_neutral_identifiers()
+         {
+            let local_ref = ".canons/docs/readme-must-reflect-developed-features.md";
+            let builtin_ref = "builtin:security/no-hardcoded-secrets";
+            let pack_ref = "acme-corp:packages/ui/.canons/accessibility.md";
+            let snapshot = multi_realm_snapshot(local_ref, builtin_ref, pack_ref);
+
+            let candidates = vec![
+                local_ref.to_string(),
+                pack_ref.to_string(),
+                builtin_ref.to_string(),
+            ];
+            let mut triggers_join = BTreeMap::new();
+            triggers_join.insert(
+                local_ref.to_string(),
+                vec!["src/cli/apprise.rs".to_string()],
+            );
+            triggers_join.insert(
+                builtin_ref.to_string(),
+                vec!["src/cli/apprise.rs".to_string()],
+            );
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    intent: Some("Add new CLI subcommand flag for apprise".to_string()),
+                    target_paths: vec!["src/cli".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    target_files: vec!["src/cli/apprise.rs".to_string()],
+                    candidate_canons: candidates,
+                    triggers_join,
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default());
+
+            let provider = RecordingMockProvider::with_payload(json!({
+                "assessments": [
+                    {
+                        "canon_path": local_ref,
+                        "apprisal_summary": "New CLI subcommand flag requires updating README.md.",
+                        "apprisal_score": 0.90
+                    },
+                    {
+                        "canon_path": pack_ref,
+                        "apprisal_summary": "No TSX UI components are touched.",
+                        "apprisal_score": 0.10
+                    },
+                    {
+                        "canon_path": builtin_ref,
+                        "apprisal_summary": "CLI flag parsing touches credential flags.",
+                        "apprisal_score": 0.80
+                    }
+                ]
+            }));
+
+            execute_apprise(&AppriseOptions::default(), caseload, &snapshot, &provider)
+                .expect("execute apprise across multi-realm canons");
+
+            assert_multi_realm_prompt_grounding(&provider.recorded_requests()[0]);
+        }
     }
 
     mod malformed_and_failed_provider_responses {
