@@ -20,6 +20,7 @@ pub mod caseload;
 pub mod cli;
 pub mod configure;
 pub mod discover;
+pub mod docket;
 pub mod intake;
 pub mod probe;
 pub mod provider;
@@ -43,24 +44,26 @@ pub use canon::{
 };
 pub use caseload::{
     ActiveExhibits, AnnotationLevel, ApprisalStatus, CASELOAD_SCHEMA_VERSION,
-    CanonApprisalAssessment, Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery,
-    CaseloadIntake, CaseloadProbe, CaseloadValidation, CodeAnnotation, ContentOmissionReason,
-    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode, FileArtifact,
-    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason, ProbeEndpointResult,
-    ProbeStatus, ValidatedCanonMetadata, ValidationOutcome, normalize_unit_score,
+    CanonApprisalAssessment, CanonDocketAssessment, Caseload, CaseloadApprisal, CaseloadConfig,
+    CaseloadDiscovery, CaseloadDocket, CaseloadIntake, CaseloadProbe, CaseloadValidation,
+    CodeAnnotation, ColorabilityStatus, ContentOmissionReason, DEFAULT_AUDITOR_MODEL,
+    DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode, FileArtifact, FileChangeStatus,
+    IntakeScope, LinkedIssueContext, PatchOmissionReason, ProbeEndpointResult, ProbeStatus,
+    ValidatedCanonMetadata, ValidationOutcome, normalize_colorability_score, normalize_unit_score,
 };
 pub use cli::{
     AppriseArgs, AppriseFormat, CanonSelectionArgs, CaseloadIoArgs, Cli, CliError, Commands,
-    ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat, ENV_LOG_FILE, ENV_VERBOSE,
-    FilingSourceArgs, IntakeArgs, ProbeArgs, ProbeFormat, ProviderConfigArgs, StderrProgressSink,
-    StderrTelemetryOptions, ValidateArgs, ValidateFormat, build_cli_telemetry_sink, init_logging,
-    open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag, run, run_apprise,
-    run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
-    run_apprise_with_telemetry, run_configure, run_configure_with_env,
-    run_configure_with_telemetry, run_discover, run_discover_in_workspace,
-    run_discover_with_telemetry, run_intake, run_intake_with_telemetry, run_probe,
-    run_probe_with_env_and_prober, run_probe_with_telemetry, run_validate,
-    run_validate_in_workspace, run_validate_with_telemetry,
+    ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat, DocketArgs, DocketFormat,
+    ENV_LOG_FILE, ENV_VERBOSE, FilingSourceArgs, IntakeArgs, ProbeArgs, ProbeFormat,
+    ProviderConfigArgs, StageDisposition, StderrProgressSink, StderrTelemetryOptions, ValidateArgs,
+    ValidateFormat, build_cli_telemetry_sink, init_logging, open_jsonl_log_sink,
+    resolve_log_file_path, resolve_verbose_flag, run, run_apprise, run_apprise_live_with_telemetry,
+    run_apprise_with_snapshot_and_provider, run_apprise_with_telemetry, run_configure,
+    run_configure_with_env, run_configure_with_telemetry, run_discover, run_discover_in_workspace,
+    run_discover_with_telemetry, run_docket, run_docket_live_with_telemetry,
+    run_docket_with_snapshot_and_provider, run_docket_with_telemetry, run_intake,
+    run_intake_with_telemetry, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,
+    run_validate, run_validate_in_workspace, run_validate_with_telemetry,
 };
 pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,
@@ -73,6 +76,9 @@ pub use discover::{
     GlobSyntaxError, WorkspaceSnapshot, execute_discover, execute_discover_on_disk,
     is_ignored_path, is_wildcard_pattern, normalize_workspace_path, parse_canon_or_fallback,
     scope_relative_path,
+};
+pub use docket::{
+    DEFAULT_DOCKET_THRESHOLD, DocketError, DocketOptions, ENV_DOCKET_THRESHOLD, execute_docket,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{

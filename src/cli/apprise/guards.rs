@@ -19,6 +19,7 @@ use crate::apprise::{DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_THRESHOLD};
 use crate::caseload::{Caseload, IntakeScope, normalize_unit_score};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
+use crate::cli::closure::has_provider_overrides;
 use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
@@ -85,16 +86,11 @@ pub(super) fn can_fast_forward_completed_apprisal(
     intake_opts: &IntakeOptions,
     incoming: Option<&Caseload>,
 ) -> bool {
-    let has_provider_overrides = args.provider.screener_model.is_some()
-        || args.provider.auditor_model.is_some()
-        || args.provider.reasoning_budget.is_some()
-        || args.provider.gemini_api_key.is_some();
-
     incoming.is_some_and(|c| c.apprisal.is_some())
         && !intake_opts.has_designated_source()
         && args.canons.is_empty()
         && args.apprise_threshold.is_none()
-        && !has_provider_overrides
+        && !has_provider_overrides(&args.provider)
 }
 
 pub(super) fn enforce_dual_input_guard(

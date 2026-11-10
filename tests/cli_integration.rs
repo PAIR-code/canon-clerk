@@ -251,6 +251,27 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk apprise zero-candidate run");
     assert_eq!(apprise_zero_cand.status.code(), Some(0));
+
+    // Verify docket Case-or-Controversy guard exits 2 and zero-candidate short-circuit exits 0 without GEMINI_API_KEY
+    let docket_all_canons_no_filing = Command::new(bin_path())
+        .args(["docket", "--all-canons"])
+        .output()
+        .expect("failed to execute canon-clerk docket --all-canons");
+    assert_eq!(docket_all_canons_no_filing.status.code(), Some(2));
+
+    let docket_zero_cand = Command::new(bin_path())
+        .args([
+            "docket",
+            "--canon",
+            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
+            "src/lib.rs",
+            "--json",
+        ])
+        .env_remove("GEMINI_API_KEY")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("failed to execute canon-clerk docket zero-candidate run");
+    assert_eq!(docket_zero_cand.status.code(), Some(0));
 }
 
 #[test]

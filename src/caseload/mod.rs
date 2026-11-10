@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`).
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`).
 
 mod apprisal;
 mod config;
 mod discovery;
+mod docket;
 mod intake;
 mod probe;
 mod validation;
@@ -26,6 +27,9 @@ pub use apprisal::{
 };
 pub use config::{CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL};
 pub use discovery::{ActiveExhibits, CaseloadDiscovery, DiscoveryMode};
+pub use docket::{
+    CanonDocketAssessment, CaseloadDocket, ColorabilityStatus, normalize_colorability_score,
+};
 pub use intake::{
     CaseloadIntake, ContentOmissionReason, FileArtifact, FileChangeStatus, IntakeScope,
     LinkedIssueContext, PatchOmissionReason,
@@ -70,7 +74,7 @@ pub struct Caseload {
     pub apprisal: Option<CaseloadApprisal>,
     /// Docket: Macro triage colorability assessments and active docket cases.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub docket: Option<serde_json::Value>,
+    pub docket: Option<CaseloadDocket>,
     /// Evidence: Micro triage admitted exhibits per active case.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<serde_json::Value>,
@@ -135,6 +139,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.apprisal` namespace populated, preserving all other stage fields.
     pub fn with_apprisal(mut self, apprisal: CaseloadApprisal) -> Self {
         self.apprisal = Some(apprisal);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.docket` namespace populated, preserving all other stage fields.
+    pub fn with_docket(mut self, docket: CaseloadDocket) -> Self {
+        self.docket = Some(docket);
         self
     }
 }
@@ -244,6 +254,22 @@ mod tests {
             assert_eq!(with_app.validation, upstream.validation);
             assert_eq!(with_app.discovery, upstream.discovery);
             assert_eq!(with_app.intake, upstream.intake);
+        }
+
+        #[test]
+        fn test_with_docket_preserves_existing_namespaces() {
+            let upstream = Caseload::new()
+                .with_intake(CaseloadIntake::default())
+                .with_discovery(CaseloadDiscovery::default())
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default());
+
+            let with_doc = upstream.clone().with_docket(CaseloadDocket::default());
+            assert_eq!(with_doc.docket, Some(CaseloadDocket::default()));
+            assert_eq!(with_doc.config, upstream.config);
+            assert_eq!(with_doc.validation, upstream.validation);
+            assert_eq!(with_doc.discovery, upstream.discovery);
+            assert_eq!(with_doc.intake, upstream.intake);
         }
     }
 }
