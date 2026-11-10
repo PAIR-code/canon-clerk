@@ -16,11 +16,14 @@
 
 pub mod apprise;
 pub mod args;
+mod closure;
 pub mod configure;
 pub mod discover;
+pub mod docket;
 pub mod intake;
 pub mod io;
 pub mod probe;
+mod provenance;
 pub mod runners;
 pub mod telemetry;
 pub mod validate;
@@ -38,6 +41,10 @@ pub use discover::{
     DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace,
     run_discover_with_telemetry,
 };
+pub use docket::{
+    DocketArgs, DocketFormat, run_docket, run_docket_live_with_telemetry,
+    run_docket_with_snapshot_and_provider, run_docket_with_telemetry,
+};
 pub use intake::{IntakeArgs, run_intake, run_intake_with_telemetry};
 pub use io::{
     ensure_single_stdin_source, read_caseload_operand, read_operand_source,
@@ -46,6 +53,7 @@ pub use io::{
 pub use probe::{
     ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,
 };
+pub use provenance::StageDisposition;
 pub use runners::{
     map_discover_error, resolve_branch_b_options, resolve_gemini_api_key, run_branch_a_discover,
     run_branch_a_intake, run_branch_a_validate, run_branch_b_configure,
@@ -140,6 +148,8 @@ pub enum Commands {
     Probe(ProbeArgs),
     /// Prospective statutory notice: determine governing canons for planned design intent and target scope.
     Apprise(AppriseArgs),
+    /// Macro jurisdiction triage: screen candidate canons to open active cases on the docket.
+    Docket(DocketArgs),
 }
 
 impl Commands {
@@ -147,7 +157,11 @@ impl Commands {
         match self {
             Self::Discover(args) => args.quiet,
             Self::Validate(args) => args.quiet,
-            Self::Intake(_) | Self::Configure(_) | Self::Probe(_) | Self::Apprise(_) => false,
+            Self::Intake(_)
+            | Self::Configure(_)
+            | Self::Probe(_)
+            | Self::Apprise(_)
+            | Self::Docket(_) => false,
         }
     }
 }
@@ -320,6 +334,9 @@ fn dispatch_subcommand(
         Commands::Apprise(args) => {
             run_apprise_live_with_telemetry(args, stdin, stdout, session)?;
         }
+        Commands::Docket(args) => {
+            run_docket_live_with_telemetry(args, stdin, stdout, session)?;
+        }
     }
     Ok(())
 }
@@ -400,7 +417,8 @@ mod tests {
                     | Commands::Validate(_)
                     | Commands::Configure(_)
                     | Commands::Probe(_)
-                    | Commands::Apprise(_),
+                    | Commands::Apprise(_)
+                    | Commands::Docket(_),
                 )
                 | None => {
                     panic!("expected Intake subcommand")

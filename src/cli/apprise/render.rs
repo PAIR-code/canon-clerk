@@ -15,23 +15,13 @@
 //! Terminal Funnel Provenance receipt and `stylish`/`compact`/`json` output formatters for `canon-clerk apprise`.
 
 use super::{AppriseArgs, AppriseFormat};
-use crate::caseload::{
-    ApprisalStatus, Caseload, CaseloadApprisal, CaseloadDiscovery, CaseloadIntake,
-    CaseloadValidation, IntakeScope,
-};
+use crate::caseload::{ApprisalStatus, Caseload, CaseloadApprisal, CaseloadDiscovery};
 use crate::cli::CliError;
+use crate::cli::provenance::{
+    StageDisposition, fast_forward_suffix, glyph_for, write_configure_provenance,
+    write_discover_provenance, write_intent_intake_provenance, write_validate_provenance,
+};
 use std::io::Write;
-
-/// Per-stage execution watermark recorded for the Pipeline Funnel Provenance receipt (`docs/architecture/scheduling.md` §6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StageDisposition {
-    Executed,
-    PrePopulated,
-    ZeroCandidateShortCircuit,
-    SkippedZeroCandidates,
-    ValidationFailed,
-    SkippedValidationFailed,
-}
 
 /// Complete provenance watermarks across the `[intake, discover, validate, configure, apprise]` closure.
 #[derive(Debug, Clone, Copy)]
@@ -108,7 +98,7 @@ fn render_stylish_output(
     stdout: &mut dyn Write,
 ) -> std::io::Result<()> {
     writeln!(stdout, "Pipeline Provenance:")?;
-    write_intake_provenance(caseload.intake.as_ref(), wm.intake, stdout)?;
+    write_intent_intake_provenance(caseload.intake.as_ref(), wm.intake, stdout)?;
     write_discover_provenance(
         caseload.discovery.as_ref(),
         wm.discover,
@@ -125,117 +115,6 @@ fn render_stylish_output(
     }
 
     Ok(())
-}
-
-fn write_intake_provenance(
-    intake: Option<&CaseloadIntake>,
-    disp: StageDisposition,
-    stdout: &mut dyn Write,
-) -> std::io::Result<()> {
-    let suffix = fast_forward_suffix(disp);
-    let glyph = glyph_for(disp);
-    let detail = match intake {
-        Some(inc) if inc.scope == IntakeScope::AllTargets => {
-            "design intent + all repository targets".to_string()
-        }
-        Some(inc) if !inc.diffs.is_empty() => {
-            format!("design intent + {} modified file(s)", inc.diffs.len())
-        }
-        Some(inc) if !inc.target_paths.is_empty() => format!(
-            "design intent + {} target directive(s) ({})",
-            inc.target_paths.len(),
-            inc.target_paths.join(", ")
-        ),
-        Some(_) => "prospective design intent ingested".to_string(),
-        None => "(not populated)".to_string(),
-    };
-    writeln!(stdout, "  {glyph} intake    : {detail}{suffix}")
-}
-
-fn write_discover_provenance(
-    discovery: Option<&CaseloadDiscovery>,
-    disp: StageDisposition,
-    total_canons: Option<usize>,
-    stdout: &mut dyn Write,
-) -> std::io::Result<()> {
-    let glyph = glyph_for(disp);
-    let suffix = fast_forward_suffix(disp);
-    let matched = discovery.map_or(0, |d| d.candidate_canons.len());
-    let detail = match (matched, total_canons) {
-        (0, Some(total)) => format!("0 candidate canons matched ({total} canons evaluated)"),
-        (0, None) => "0 candidate canons matched".to_string(),
-        (n, Some(total)) if total >= n => format!(
-            "{n} candidate canon(s) matched ({} un-triggered)",
-            total - n
-        ),
-        (n, _) => format!("{n} candidate canon(s) matched"),
-    };
-    writeln!(stdout, "  {glyph} discover  : {detail}{suffix}")
-}
-
-fn write_validate_provenance(
-    validation: Option<&CaseloadValidation>,
-    disp: StageDisposition,
-    stdout: &mut dyn Write,
-) -> std::io::Result<()> {
-    if disp == StageDisposition::SkippedZeroCandidates {
-        return writeln!(
-            stdout,
-            "  ⊘ validate  : (fast-forward: zero candidate canons)"
-        );
-    }
-    let glyph = glyph_for(disp);
-    let suffix = fast_forward_suffix(disp);
-    let (total, errors, warnings) = match validation {
-        Some(val) => {
-            let errs: usize = val.results.values().map(|m| m.error_count).sum();
-            let warns: usize = val.results.values().map(|m| m.warning_count).sum();
-            (val.results.len(), errs, warns)
-        }
-        None => (0, 0, 0),
-    };
-    let status_word = if disp == StageDisposition::ValidationFailed {
-        "failed"
-    } else {
-        "valid"
-    };
-    writeln!(
-        stdout,
-        "  {glyph} validate  : {total} candidate canon(s) {status_word} ({errors} errors, {warnings} warnings){suffix}"
-    )
-}
-
-fn write_configure_provenance(
-    caseload: &Caseload,
-    disp: StageDisposition,
-    stdout: &mut dyn Write,
-) -> std::io::Result<()> {
-    match disp {
-        StageDisposition::SkippedZeroCandidates => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: zero candidate canons)"
-            )
-        }
-        StageDisposition::SkippedValidationFailed => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: canon validation failed)"
-            )
-        }
-        _ => {
-            let glyph = glyph_for(disp);
-            let suffix = fast_forward_suffix(disp);
-            let model = caseload
-                .config
-                .as_ref()
-                .map_or("<unresolved>", |c| c.screener_model.as_str());
-            writeln!(
-                stdout,
-                "  {glyph} configure : screener model '{model}'{suffix}"
-            )
-        }
-    }
 }
 
 fn write_apprise_provenance(
@@ -308,22 +187,4 @@ fn write_apprisal_summary(
         }
     }
     Ok(())
-}
-
-fn glyph_for(disp: StageDisposition) -> &'static str {
-    match disp {
-        StageDisposition::Executed => "✓",
-        StageDisposition::PrePopulated => "↷",
-        StageDisposition::ZeroCandidateShortCircuit
-        | StageDisposition::SkippedZeroCandidates
-        | StageDisposition::SkippedValidationFailed => "⊘",
-        StageDisposition::ValidationFailed => "✗",
-    }
-}
-
-fn fast_forward_suffix(disp: StageDisposition) -> &'static str {
-    match disp {
-        StageDisposition::PrePopulated => " (fast-forward: pre-populated)",
-        _ => "",
-    }
 }

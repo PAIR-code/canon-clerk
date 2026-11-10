@@ -21,7 +21,9 @@ mod stages;
 use crate::caseload::{Caseload, CaseloadApprisal};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
+use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::provenance::StageDisposition;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
@@ -30,11 +32,8 @@ use guards::{
     can_fast_forward_completed_apprisal, enforce_dual_input_guard,
     ensure_stage_prefixed_threshold_flags, resolve_apprise_threshold,
 };
-use render::{AppriseWatermarks, StageDisposition, render_apprise_output};
-use stages::{
-    AppriseBackend, execute_jit_configure_and_apprise, materialize_snapshot,
-    resolve_apprise_discover, resolve_apprise_intake, resolve_apprise_validate,
-};
+use render::{AppriseWatermarks, render_apprise_output};
+use stages::{execute_jit_configure_and_apprise, resolve_apprise_discover, resolve_apprise_intake};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{Read, Write};
@@ -135,7 +134,7 @@ pub fn run_apprise_with_telemetry(
         stdin,
         stdout,
         env,
-        AppriseBackend::Hermetic {
+        ClosureBackend::Hermetic {
             workspace,
             provider,
         },
@@ -182,7 +181,7 @@ pub fn run_apprise_live_with_telemetry(
         stdin,
         stdout,
         &env_map,
-        AppriseBackend::LiveDisk {
+        ClosureBackend::LiveDisk {
             workspace_root: &cwd,
         },
         telemetry,
@@ -204,7 +203,7 @@ fn run_apprise_core(
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
     env: &BTreeMap<String, String>,
-    backend: AppriseBackend<'_>,
+    backend: ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
@@ -229,7 +228,8 @@ fn run_apprise_core(
     let (caseload_after_intake, intake_disp, target_changed) =
         resolve_apprise_intake(&intake_opts, incoming, telemetry)?;
 
-    let snapshot = materialize_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
+    let snapshot =
+        materialize_closure_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
     let total_workspace_canons = Some(snapshot.canons.len());
 
     let (caseload_after_discover, discover_disp) = resolve_apprise_discover(
@@ -257,7 +257,7 @@ fn run_apprise_core(
     }
 
     let (caseload_after_validate, validate_disp) =
-        resolve_apprise_validate(caseload_after_discover, &snapshot, telemetry)?;
+        resolve_closure_validate(caseload_after_discover, &snapshot, telemetry)?;
 
     if caseload_after_validate
         .validation

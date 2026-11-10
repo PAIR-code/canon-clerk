@@ -14,35 +14,20 @@
 
 //! Guarded Branch A and JIT Branch B execution steps for `canon-clerk apprise`.
 
-use super::render::StageDisposition;
 use crate::apprise::{AppriseOptions, execute_apprise};
-use crate::canon::ParseCanonOptions;
-use crate::caseload::{Caseload, CaseloadIntake, IntakeScope};
+use crate::caseload::{Caseload, IntakeScope};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
+use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
+use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
     map_discover_error, resolve_branch_b_options, resolve_gemini_api_key, run_branch_b_configure,
 };
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
-use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GeminiModelProvider, StructuredModelProvider,
-};
+use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, GeminiModelProvider};
 use crate::telemetry::{PipelineStage, TelemetrySession};
-use crate::validate::{ValidateError, ValidateOptions, execute_validate};
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::Path;
-
-pub(super) enum AppriseBackend<'a> {
-    LiveDisk {
-        workspace_root: &'a Path,
-    },
-    Hermetic {
-        workspace: &'a WorkspaceSnapshot,
-        provider: &'a dyn StructuredModelProvider,
-    },
-}
 
 pub(super) fn resolve_apprise_intake(
     intake_opts: &IntakeOptions,
@@ -100,62 +85,6 @@ fn execute_apprise_intake_body(
     Ok((updated, StageDisposition::Executed, cli_has_targets))
 }
 
-fn merge_metadata_onto_intake(mut base: CaseloadIntake, opts: &IntakeOptions) -> CaseloadIntake {
-    if let Some(intent) = opts
-        .intent
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        base.intent = Some(intent.to_string());
-    }
-    if let Some(title) = opts
-        .pr_title
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        base.pr_title = Some(title.to_string());
-    }
-    if let Some(body) = opts
-        .pr_body
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        base.pr_body = Some(body.to_string());
-    }
-    base
-}
-
-pub(super) fn materialize_snapshot(
-    backend: &AppriseBackend<'_>,
-    canon_patterns: &[String],
-    caseload: &Caseload,
-) -> Result<WorkspaceSnapshot, CliError> {
-    match backend {
-        AppriseBackend::Hermetic { workspace, .. } => Ok((*workspace).clone()),
-        AppriseBackend::LiveDisk { workspace_root } => {
-            let mut snapshot = WorkspaceSnapshot::from_disk(workspace_root, canon_patterns)
-                .map_err(map_discover_error)?;
-            if let Some(disc) = &caseload.discovery {
-                for canon_ref in &disc.candidate_canons {
-                    if !snapshot.canons.contains_key(canon_ref) {
-                        let full_path = workspace_root.join(canon_ref);
-                        if full_path.is_file()
-                            && let Ok(raw) = fs::read_to_string(&full_path)
-                        {
-                            let opts = ParseCanonOptions::with_source_ref(canon_ref.clone());
-                            snapshot = snapshot.with_canon_markdown(&raw, &opts);
-                        }
-                    }
-                }
-            }
-            Ok(snapshot)
-        }
-    }
-}
-
 pub(super) fn resolve_apprise_discover(
     canons: &CanonSelectionArgs,
     mut caseload: Caseload,
@@ -185,30 +114,13 @@ pub(super) fn resolve_apprise_discover(
     Ok((updated, StageDisposition::Executed))
 }
 
-pub(super) fn resolve_apprise_validate(
-    caseload: Caseload,
-    snapshot: &WorkspaceSnapshot,
-    telemetry: &TelemetrySession<'_>,
-) -> Result<(Caseload, StageDisposition), CliError> {
-    if caseload.validation.is_some() {
-        return Ok((caseload, StageDisposition::PrePopulated));
-    }
-    let updated = telemetry.run_stage(PipelineStage::Validate, |_scope| {
-        execute_validate(&ValidateOptions::default(), caseload, snapshot).map_err(|err| match err {
-            ValidateError::MissingDiscovery => CliError::usage(err.to_string()),
-            ValidateError::Discover(d) => map_discover_error(d),
-        })
-    })?;
-    Ok((updated, StageDisposition::Executed))
-}
-
 pub(super) fn execute_jit_configure_and_apprise(
     provider_args: &ProviderConfigArgs,
     env: &BTreeMap<String, String>,
     threshold: f64,
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
-    backend: &AppriseBackend<'_>,
+    backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
     let configure_options = resolve_branch_b_options(provider_args, env)?;
@@ -225,11 +137,11 @@ pub(super) fn execute_jit_configure_and_apprise(
 
     let enriched = telemetry
         .run_stage(PipelineStage::Apprise, |scope| match backend {
-            AppriseBackend::Hermetic { provider, .. } => {
+            ClosureBackend::Hermetic { provider, .. } => {
                 let instrumented = scope.instrument_provider(*provider);
                 execute_apprise(&apprise_opts, configured, snapshot, &instrumented)
             }
-            AppriseBackend::LiveDisk { .. } => {
+            ClosureBackend::LiveDisk { .. } => {
                 let live_provider = GeminiModelProvider::new(api_key);
                 let instrumented = scope.instrument_provider(&live_provider);
                 execute_apprise(&apprise_opts, configured, snapshot, &instrumented)

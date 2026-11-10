@@ -1,0 +1,157 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Guarded Branch A and JIT Branch B execution steps for `canon-clerk docket`.
+
+use crate::caseload::Caseload;
+use crate::cli::CliError;
+use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
+use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
+use crate::cli::provenance::StageDisposition;
+use crate::cli::runners::{
+    map_discover_error, resolve_branch_b_options, resolve_gemini_api_key, run_branch_b_configure,
+};
+use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
+use crate::docket::{DocketOptions, execute_docket};
+use crate::intake::{IntakeError, IntakeOptions, execute_intake};
+use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, GeminiModelProvider};
+use crate::telemetry::{PipelineStage, TelemetrySession};
+use std::collections::BTreeMap;
+
+pub(super) fn resolve_docket_intake(
+    intake_opts: &IntakeOptions,
+    incoming: Option<Caseload>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition, bool), CliError> {
+    if !intake_opts.has_designated_source() {
+        let existing = incoming.ok_or_else(|| {
+            CliError::usage("Missing upstream caseload or filing inputs for `docket`.")
+        })?;
+        return Ok((existing, StageDisposition::PrePopulated, false));
+    }
+
+    telemetry.run_stage(PipelineStage::Intake, |_scope| {
+        execute_docket_intake_body(intake_opts, incoming)
+    })
+}
+
+fn execute_docket_intake_body(
+    intake_opts: &IntakeOptions,
+    mut incoming: Option<Caseload>,
+) -> Result<(Caseload, StageDisposition, bool), CliError> {
+    let cli_has_targets = intake_opts.all_targets
+        || intake_opts.patch_content.is_some()
+        || intake_opts.target_paths.is_some();
+
+    if !cli_has_targets
+        && let Some(existing) = incoming.as_mut()
+        && let Some(prev_intake) = existing.intake.take()
+    {
+        let pr_meta_added = intake_opts
+            .pr_title
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+            || intake_opts
+                .pr_body
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty());
+        let merged = merge_metadata_onto_intake(prev_intake, intake_opts);
+        existing.docket = None;
+        existing.intake = Some(merged);
+        if pr_meta_added {
+            existing.discovery = None;
+            existing.validation = None;
+        }
+        return Ok((existing.clone(), StageDisposition::Executed, pr_meta_added));
+    }
+
+    let mut updated = execute_intake(intake_opts, incoming).map_err(|err| match err {
+        IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
+            CliError::usage(err.to_string())
+        }
+    })?;
+    updated.discovery = None;
+    updated.validation = None;
+    updated.docket = None;
+    Ok((updated, StageDisposition::Executed, true))
+}
+
+pub(super) fn resolve_docket_discover(
+    canons: &CanonSelectionArgs,
+    mut caseload: Caseload,
+    snapshot: &WorkspaceSnapshot,
+    intake_changed: bool,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition), CliError> {
+    if caseload.discovery.is_some() && !intake_changed && canons.is_empty() {
+        return Ok((caseload, StageDisposition::PrePopulated));
+    }
+
+    caseload.discovery = None;
+    caseload.validation = None;
+    caseload.docket = None;
+
+    let discover_opts = DiscoverOptions {
+        all_canons: canons.all_canons,
+        canon_patterns: canons.canon.clone(),
+    };
+
+    let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {
+        execute_discover(&discover_opts, caseload, snapshot).map_err(map_discover_error)
+    })?;
+    Ok((updated, StageDisposition::Executed))
+}
+
+pub(super) fn execute_jit_configure_and_docket(
+    provider_args: &ProviderConfigArgs,
+    env: &BTreeMap<String, String>,
+    threshold: f64,
+    mut caseload: Caseload,
+    snapshot: &WorkspaceSnapshot,
+    backend: &ClosureBackend<'_>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition), CliError> {
+    let configure_options = resolve_branch_b_options(provider_args, env)?;
+    let config_was_present =
+        caseload.config.is_some() && !configure_options.has_explicit_overrides();
+    caseload.docket = None;
+
+    let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
+    let api_key = resolve_gemini_api_key(&configure_options)?;
+    let docket_opts = DocketOptions {
+        threshold,
+        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+    };
+
+    let enriched = telemetry
+        .run_stage(PipelineStage::Docket, |scope| match backend {
+            ClosureBackend::Hermetic { provider, .. } => {
+                let instrumented = scope.instrument_provider(*provider);
+                execute_docket(&docket_opts, configured, snapshot, &instrumented)
+            }
+            ClosureBackend::LiveDisk { .. } => {
+                let live_provider = GeminiModelProvider::new(api_key);
+                let instrumented = scope.instrument_provider(&live_provider);
+                execute_docket(&docket_opts, configured, snapshot, &instrumented)
+            }
+        })
+        .map_err(|err| CliError::usage(err.to_string()))?;
+
+    let disp = if config_was_present {
+        StageDisposition::PrePopulated
+    } else {
+        StageDisposition::Executed
+    };
+    Ok((enriched, disp))
+}
