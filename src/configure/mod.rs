@@ -451,6 +451,7 @@ mod tests {
                 screener_model: Some(StoredTierModel::Specifier("flash".to_string())),
                 auditor_model: Some(StoredTierModel::Specifier("gemini-2.5-pro".to_string())),
                 reasoning_budget: Some(2048),
+                ..StoredConfig::default()
             };
 
             // 1. Stored config used when env and CLI flags are absent

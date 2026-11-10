@@ -19,7 +19,12 @@ use crate::caseload::{Caseload, normalize_colorability_score};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::has_provider_overrides;
-use crate::docket::{DEFAULT_DOCKET_THRESHOLD, ENV_DOCKET_THRESHOLD};
+use crate::configure::StoredConfig;
+use crate::docket::{
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD, ENV_DOCKET_BATCH_SIZE,
+    ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD, ENV_MAX_CANONS_PER_CALL,
+    ENV_MAX_CONCURRENT_CALLS,
+};
 use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
@@ -81,6 +86,86 @@ pub(super) fn resolve_docket_threshold(
     Ok(DEFAULT_DOCKET_THRESHOLD)
 }
 
+pub(super) fn resolve_docket_batch_size(
+    flag_batch_size: Option<usize>,
+    env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
+) -> Result<Option<usize>, CliError> {
+    if let Some(val) = flag_batch_size {
+        if val == 0 {
+            return Err(CliError::usage(format!(
+                "Invalid `--docket-batch-size` value `0`: batch size must be at least 1.\n  \
+                 Hint: Pass a positive integer (`>= 1`) via `--docket-batch-size <COUNT>` or `{ENV_DOCKET_BATCH_SIZE}`."
+            )));
+        }
+        return Ok(Some(val));
+    }
+
+    for env_key in [ENV_DOCKET_BATCH_SIZE, ENV_MAX_CANONS_PER_CALL] {
+        if let Some(raw_env) = env.get(env_key).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
+                CliError::usage(format!(
+                    "Invalid batch size `{raw_env}` in `{env_key}`: expected a positive integer (`>= 1`).\n  \
+                     Hint: Pass `--docket-batch-size <COUNT>` or set `{ENV_DOCKET_BATCH_SIZE}=15`."
+                ))
+            })?;
+            return Ok(Some(parsed));
+        }
+    }
+
+    if let Some(stored_val) = stored.and_then(|s| s.docket_batch_size) {
+        if stored_val == 0 {
+            return Err(CliError::usage(format!(
+                "Invalid `docketBatchSize` value `0` in user configuration: batch size must be at least 1.\n  \
+                 Hint: Configure a positive integer (`>= 1`) for `docketBatchSize` or override with `--docket-batch-size <COUNT>` / `{ENV_DOCKET_BATCH_SIZE}`."
+            )));
+        }
+        return Ok(Some(stored_val));
+    }
+
+    Ok(None)
+}
+
+pub(super) fn resolve_docket_concurrency(
+    flag_concurrency: Option<usize>,
+    env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
+) -> Result<Option<usize>, CliError> {
+    if let Some(val) = flag_concurrency {
+        if val == 0 {
+            return Err(CliError::usage(format!(
+                "Invalid `--docket-concurrency` value `0`: concurrency limit must be at least 1.\n  \
+                 Hint: Pass a positive integer (`>= 1`) via `--docket-concurrency <COUNT>` or `{ENV_DOCKET_CONCURRENCY}` (default: `{DEFAULT_DOCKET_MAX_CONCURRENT_CALLS}`)."
+            )));
+        }
+        return Ok(Some(val));
+    }
+
+    for env_key in [ENV_DOCKET_CONCURRENCY, ENV_MAX_CONCURRENT_CALLS] {
+        if let Some(raw_env) = env.get(env_key).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
+                CliError::usage(format!(
+                    "Invalid concurrency limit `{raw_env}` in `{env_key}`: expected a positive integer (`>= 1`).\n  \
+                     Hint: Pass `--docket-concurrency <COUNT>` or set `{ENV_DOCKET_CONCURRENCY}={DEFAULT_DOCKET_MAX_CONCURRENT_CALLS}`."
+                ))
+            })?;
+            return Ok(Some(parsed));
+        }
+    }
+
+    if let Some(stored_val) = stored.and_then(|s| s.docket_concurrency) {
+        if stored_val == 0 {
+            return Err(CliError::usage(format!(
+                "Invalid `docketConcurrency` value `0` in user configuration: concurrency limit must be at least 1.\n  \
+                 Hint: Configure a positive integer (`>= 1`) for `docketConcurrency` or override with `--docket-concurrency <COUNT>` / `{ENV_DOCKET_CONCURRENCY}`."
+            )));
+        }
+        return Ok(Some(stored_val));
+    }
+
+    Ok(None)
+}
+
 pub(super) fn can_fast_forward_completed_docket(
     args: &DocketArgs,
     intake_opts: &IntakeOptions,
@@ -90,6 +175,8 @@ pub(super) fn can_fast_forward_completed_docket(
         && !intake_opts.has_designated_source()
         && args.canons.is_empty()
         && args.docket_threshold.is_none()
+        && args.docket_batch_size.is_none()
+        && args.docket_concurrency.is_none()
         && !has_provider_overrides(&args.provider)
 }
 

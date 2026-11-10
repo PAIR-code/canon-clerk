@@ -28,12 +28,14 @@ You are the Clerk of the Court for Canon Clerk performing Macro Subject-Matter J
 Given an in-flight filing (pull request metadata, linked issues, target file scope, and modified file diffs) and a set of candidate engineering canons, determine whether each candidate canon has a colorable claim of subject-matter jurisdiction over this filing as a whole before opening a formal case on the active docket.
 
 Evaluation Rules:
-1. Exact Domain Indirection: For each entry in `cases`, set `canon_path` to the exact candidate canon path string presented under `### Canon:` without modification.
+1. Exact Domain Indirection: For each entry in `cases`, set `canon_path` to the exact candidate canon path string presented under `### Canon:` (and listed under `## Required canon_path Identifiers`) without modification.
 2. Reason First: Write a concise, concrete `colorability_summary` explaining why the canon does or does not have a colorable claim of jurisdiction over the filing BEFORE assigning `colorability_score`.
-3. Positive Polarity Jurisdiction Scoring (`[0.0, 1.0]`):
-   - Score >= 0.5 when the filing touches, introduces, or modifies code, configuration, documentation, or metadata governed by the canon's invariant or exceptions (even if the change already appears compliant—substantive merits compliance belongs to downstream `audit`).
-   - Score < 0.5 when the canon's subject matter is orthogonal or inapplicable to the filing.
-4. Completeness & Uniqueness: Return a `cases` array containing one entry per candidate canon identifier—no omissions, no duplicates, and no extra identifiers.";
+3. Positive Polarity Jurisdiction Scoring & Rubric Bands (`[0.0, 1.0]`):
+   - Score `0.75 - 0.95` (Docketed, `>= 0.5`) when the filing touches, introduces, or modifies the domain construct, layer, or workflow governed by the canon (such as domain entity structs, default constants, pipeline subroutines, pure validators, CLI flags/subcommands/help/streams, provider credential configuration, or `feat` PR documentation requirements).
+   - NEVER Dismiss Because of Compliance: Jurisdiction depends on whether the filing touches the governed construct, NEVER on whether the filing violates the rule. If a canon states that an anti-pattern is forbidden in domain entities, defaults, pipeline subroutines, CLI commands, refactors, or credential handling, you MUST score `0.75 - 0.95` whenever the filing touches those constructs—even if the implementation is 100% compliant. Likewise, if a canon requires `feat` PRs to update a file (e.g., `README.md`), every `feat` PR is under its jurisdiction (`0.75 - 0.95`) even when that file is absent from the diff.
+   - Score `0.05 - 0.25` (Dismissed, `< 0.5`) ONLY when the canon's specific domain construct is absent from the filing (e.g., `fix` commit rules on a `feat` PR; third-party GitHub Action rules when no `.github/` workflows are touched; POSIX `SIGINT`/`SIGTERM` signal-trap rules when no signal handlers are touched; live external service test skip/remediation rules when only offline hermetic tests are touched; custom path-ignore exclusion rules when no ignore sets are modified; asynchronous streaming generator rules on synchronous code; or document-grammar lexer/AST parser rules when no document syntax parser is modified).
+   - Avoid ambiguous boundary scores in `0.35 - 0.65`: commit decisively to `>= 0.75` when the governed construct is present or `<= 0.25` when absent.
+4. Completeness & Uniqueness: Return a `cases` array containing one entry per candidate canon identifier in the exact order listed—no omissions, no duplicates, and no extra identifiers.";
 
 /// Builds a constant-size domain-indirected, reason-first JSON Schema enforcing
 /// `canon_path`, `colorability_summary`, then `colorability_score` (`docs/architecture/nodes/docket.md` §4.3).
@@ -76,22 +78,29 @@ fn single_canon_case_schema() -> Value {
     })
 }
 
-/// Assembles the single-turn aggregate user prompt presenting the filing context and all candidate canons.
-pub(super) fn build_docket_user_prompt(
+/// Assembles the shared filing metadata and modified file exhibit prefix shared identically across all batch prompts.
+pub(super) fn build_docket_filing_prefix(
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
-    workspace: &WorkspaceSnapshot,
-) -> Result<String, String> {
+) -> String {
     let mut out = String::new();
     append_filing_metadata_section(&mut out, intake, discovery);
     append_file_exhibits_section(&mut out, intake, discovery);
+    out
+}
 
-    let _ = writeln!(
-        out,
-        "## Candidate Canons ({})\n",
-        discovery.candidate_canons.len()
-    );
-    for canon_ref in &discovery.candidate_canons {
+/// Assembles a user prompt for a specific candidate canon batch slice prefixed by the shared `filing_prefix`.
+pub(super) fn build_docket_batch_user_prompt(
+    filing_prefix: &str,
+    batch_canons: &[String],
+    discovery: &CaseloadDiscovery,
+    workspace: &WorkspaceSnapshot,
+) -> Result<String, String> {
+    let mut out = String::with_capacity(filing_prefix.len() + batch_canons.len() * 512);
+    out.push_str(filing_prefix);
+
+    let _ = writeln!(out, "## Candidate Canons ({})\n", batch_canons.len());
+    for canon_ref in batch_canons {
         let canon = workspace
             .canons
             .get(canon_ref)
@@ -102,6 +111,15 @@ pub(super) fn build_docket_user_prompt(
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         append_canon_section(&mut out, canon_ref, canon, matched);
+    }
+
+    let _ = writeln!(
+        out,
+        "## Required `canon_path` Identifiers ({})",
+        batch_canons.len()
+    );
+    for (idx, canon_ref) in batch_canons.iter().enumerate() {
+        let _ = writeln!(out, "{}. `{canon_ref}`", idx + 1);
     }
 
     Ok(out)
@@ -223,6 +241,35 @@ fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matche
     let _ = writeln!(out, "### Canon: `{canon_ref}`");
     let _ = writeln!(out, "- ID: `{}`", canon.id);
     let _ = writeln!(out, "- Title: {}", canon.title);
+    if let Some(scope) = non_blank(canon.scope.as_deref()) {
+        let _ = writeln!(out, "- Scope: `{scope}`");
+    }
+    if !canon.triggers.is_empty() {
+        let _ = writeln!(out, "- Triggers: {}", canon.triggers.join(", "));
+    }
+    if !canon.exists.is_empty() {
+        let _ = writeln!(out, "- Exists: {}", canon.exists.join(", "));
+    }
+    if !canon.inspect.is_empty() {
+        let inspect_list: Vec<String> = canon
+            .inspect
+            .iter()
+            .map(|p| {
+                if p.optional {
+                    format!("{}?", p.token.as_str())
+                } else {
+                    p.token.as_str().to_string()
+                }
+            })
+            .collect();
+        let _ = writeln!(out, "- Inspect: {}", inspect_list.join(", "));
+    }
+    if !canon.references.is_empty() {
+        let _ = writeln!(out, "- References: {}", canon.references.join(", "));
+    }
+    if !canon.tags.is_empty() {
+        let _ = writeln!(out, "- Tags: {}", canon.tags.join(", "));
+    }
     if !matched.is_empty() {
         let _ = writeln!(out, "- Triggered Exhibits: {}", matched.join(", "));
     }
@@ -232,7 +279,8 @@ fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matche
     } else {
         body
     };
-    let _ = writeln!(out, "\n{statute}\n");
+    let _ = writeln!(out, "\n{statute}");
+    let _ = writeln!(out, "- Exact `canon_path`: `{canon_ref}`\n");
 }
 
 fn non_blank(text: Option<&str>) -> Option<&str> {

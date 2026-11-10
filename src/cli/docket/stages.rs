@@ -14,9 +14,11 @@
 
 //! Guarded Branch A and JIT Branch B execution steps for `canon-clerk docket`.
 
+use super::DocketArgs;
+use super::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::caseload::Caseload;
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
+use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
@@ -114,7 +116,7 @@ pub(super) fn resolve_docket_discover(
 }
 
 pub(super) fn execute_jit_configure_and_docket(
-    provider_args: &ProviderConfigArgs,
+    args: &DocketArgs,
     env: &BTreeMap<String, String>,
     threshold: f64,
     mut caseload: Caseload,
@@ -122,7 +124,17 @@ pub(super) fn execute_jit_configure_and_docket(
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
-    let configure_options = resolve_branch_b_options(provider_args, env)?;
+    let configure_options = resolve_branch_b_options(&args.provider, env)?;
+    let max_canons_per_call = resolve_docket_batch_size(
+        args.docket_batch_size,
+        env,
+        configure_options.stored_config.as_ref(),
+    )?;
+    let max_concurrent_calls = resolve_docket_concurrency(
+        args.docket_concurrency,
+        env,
+        configure_options.stored_config.as_ref(),
+    )?;
     let config_was_present =
         caseload.config.is_some() && !configure_options.has_explicit_overrides();
     caseload.docket = None;
@@ -132,6 +144,8 @@ pub(super) fn execute_jit_configure_and_docket(
     let docket_opts = DocketOptions {
         threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        max_canons_per_call,
+        max_concurrent_calls,
     };
 
     let enriched = telemetry
