@@ -71,8 +71,8 @@ flowchart LR
 
 1. **Dual-Input Verification & Candidate Canon Early Exit:**  
    Verifies that non-empty prospective design intent is present on `caseload.intake.intent` alongside resolved discovery scope in `caseload.discovery`. Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths, globs, or explicit canon selection). If `candidate_canons` is empty after evaluating an explicit target or canon scope, attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits immediately with exit code `0`.
-2. **Aggregate Single-Turn Screening (`gemini-flash-lite-latest`):**  
-   Evaluates **all candidate canons against the prospective design intent and target scope context in a single aggregate prompt turn** using `caseload.config.screener_model`.
+2. **Aggregate Single-Turn Screening & Normalized Canon Grounding (`gemini-flash-lite-latest`):**  
+   Evaluates **all candidate canons against the prospective design intent and target scope context in a single aggregate prompt turn** using `caseload.config.screener_model`. Each candidate canon section renders normalized frontmatter metadata (`Triggers`, `Exists`, `Inspect` with trailing `?` on optional planes, `References`, `Tags`) when non-empty alongside matched `- Triggered Exhibits:`, the statute body, and an explicit `- Exact \`canon_path\`: \`<canon_ref>\`` footer, followed by a numbered `## Required \`canon_path\` Identifiers` checklist at the end of the prompt. Candidate keys are framed as realm-neutral **candidate canon identifiers** (supporting local `.canons/...`, `builtin:...`, and `<pack>:...` references) anchored to the wire `canon_path` property.
 3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**  
    Enforces a constant-size structured JSON wire array pairing each `canon_path` with `apprisal_summary` generated before `apprisal_score`:
    ```json
@@ -92,8 +92,8 @@ flowchart LR
    }
    ```
    Generating `apprisal_summary` before `apprisal_score` provides a chain-of-thought scratchpad, anchoring reproducible probability distributions, while domain-indirected array items keep the wire grammar independent of candidate canon count. Each candidate canon must appear once without unknown or duplicate identifiers before folding into `.apprisal.assessments`.
-4. **Deterministic Threshold Gating (`apprisal_score >= --apprise-threshold`, default: `0.5`):**  
-   The core domain engine deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
+4. **Anchored Rubric Calibration & Deterministic Threshold Gating (`apprisal_score >= --apprise-threshold`, default: `0.5`):**  
+   Screener system instructions anchor scores to discrete prospective jurisdiction rubric bands—distinguishing direct or substantial engagement with the governed construct (`0.75 - 0.95`) from absent or orthogonal domain constructs (`0.05 - 0.25`) so borderline candidates do not wobble across the `0.5` boundary. The core domain engine then deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
    - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: "applicable"`.
    - Canons scoring $< 0.5$ are marked `apprisal_status: "dismissed"`.
 5. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
