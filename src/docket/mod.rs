@@ -828,6 +828,41 @@ mod tests {
         }
 
         #[test]
+        fn test_scoped_canon_omits_redundant_scope_line_from_docket_prompt() {
+            let mut ws = WorkspaceSnapshot::new();
+            let scoped_ref = "packages/ui/.canons/accessibility.md";
+            ws = ws.with_canon_markdown(
+                "---\ntriggers:\n  - \"**/*.tsx\"\n---\n# Accessible Buttons\n\nButtons MUST provide an accessible label.\n",
+                &ParseCanonOptions::with_source_ref(scoped_ref),
+            );
+            assert_eq!(
+                ws.canons[scoped_ref].scope.as_deref(),
+                Some("packages/ui"),
+                "internal monorepo package scope must remain intact on Canon"
+            );
+
+            let provider = RecordingMockProvider::with_payload(json!({
+                "cases": [
+                    {
+                        "canon_path": scoped_ref,
+                        "colorability_summary": "Touches UI button component.",
+                        "colorability_score": 0.90
+                    }
+                ]
+            }));
+            let caseload = sample_filing_caseload(vec![scoped_ref.to_string()]);
+            execute_docket(&DocketOptions::default(), caseload, &ws, &provider)
+                .expect("execute docket for scoped canon");
+
+            let prompt = &provider.captured_requests()[0].user_prompt;
+            assert!(prompt.contains("### Canon: `packages/ui/.canons/accessibility.md`"));
+            assert!(
+                !prompt.contains("- Scope:"),
+                "docket prompt must not emit redundant `- Scope:` line: {prompt}"
+            );
+        }
+
+        #[test]
         fn test_constant_size_wire_schema_across_60_candidate_canons_and_threshold_boundary() {
             let mut ws = WorkspaceSnapshot::new();
             let mut candidates = Vec::new();

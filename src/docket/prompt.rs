@@ -241,9 +241,6 @@ fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matche
     let _ = writeln!(out, "### Canon: `{canon_ref}`");
     let _ = writeln!(out, "- ID: `{}`", canon.id);
     let _ = writeln!(out, "- Title: {}", canon.title);
-    if let Some(scope) = non_blank(canon.scope.as_deref()) {
-        let _ = writeln!(out, "- Scope: `{scope}`");
-    }
     if !canon.triggers.is_empty() {
         let _ = writeln!(out, "- Triggers: {}", canon.triggers.join(", "));
     }
