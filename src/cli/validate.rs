@@ -19,6 +19,7 @@ use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::runners::run_branch_a_validate;
+use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use std::env;
 use std::fs::OpenOptions;
@@ -103,12 +104,13 @@ pub struct ValidateArgs {
     pub io: CaseloadIoArgs,
 }
 
-/// Executes the `validate` CLI subcommand against the provided `stdin`, `stdout`, and `workspace_root`.
-pub fn run_validate_in_workspace(
+/// Executes the `validate` CLI subcommand against `workspace_root` with an explicit [`TelemetrySession`].
+pub fn run_validate_with_telemetry(
     args: &ValidateArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
     workspace_root: &Path,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
@@ -120,7 +122,9 @@ pub fn run_validate_in_workspace(
         workspace_root,
         stdin,
         args.max_warnings,
+        telemetry,
     )?;
+    telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&caseload)?;
 
@@ -132,6 +136,22 @@ pub fn run_validate_in_workspace(
     }
 
     Ok(caseload)
+}
+
+/// Executes the `validate` CLI subcommand against the provided `stdin`, `stdout`, and `workspace_root`.
+pub fn run_validate_in_workspace(
+    args: &ValidateArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    workspace_root: &Path,
+) -> Result<Caseload, CliError> {
+    run_validate_with_telemetry(
+        args,
+        stdin,
+        stdout,
+        workspace_root,
+        &TelemetrySession::noop(),
+    )
 }
 
 /// Executes the `validate` CLI subcommand using the current working directory as `workspace_root`.

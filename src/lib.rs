@@ -23,6 +23,7 @@ pub mod discover;
 pub mod intake;
 pub mod probe;
 pub mod provider;
+pub mod telemetry;
 pub mod validate;
 
 pub use apprise::{
@@ -50,11 +51,16 @@ pub use caseload::{
 };
 pub use cli::{
     AppriseArgs, AppriseFormat, CanonSelectionArgs, CaseloadIoArgs, Cli, CliError, Commands,
-    ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat, FilingSourceArgs, IntakeArgs,
-    ProbeArgs, ProbeFormat, ProviderConfigArgs, ValidateArgs, ValidateFormat, init_logging, run,
-    run_apprise, run_apprise_with_snapshot_and_provider, run_configure, run_configure_with_env,
-    run_discover, run_discover_in_workspace, run_intake, run_probe, run_probe_with_env_and_prober,
-    run_validate, run_validate_in_workspace,
+    ConfigureArgs, ConfigureFormat, DiscoverArgs, DiscoverFormat, ENV_LOG_FILE, ENV_VERBOSE,
+    FilingSourceArgs, IntakeArgs, ProbeArgs, ProbeFormat, ProviderConfigArgs, StderrProgressSink,
+    StderrTelemetryOptions, ValidateArgs, ValidateFormat, build_cli_telemetry_sink, init_logging,
+    open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag, run, run_apprise,
+    run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
+    run_apprise_with_telemetry, run_configure, run_configure_with_env,
+    run_configure_with_telemetry, run_discover, run_discover_in_workspace,
+    run_discover_with_telemetry, run_intake, run_intake_with_telemetry, run_probe,
+    run_probe_with_env_and_prober, run_probe_with_telemetry, run_validate,
+    run_validate_in_workspace, run_validate_with_telemetry,
 };
 pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,
@@ -78,6 +84,12 @@ pub use provider::{
     GenerationResponse, ProviderError, StructuredModelProvider, TokenUsage,
     build_generate_content_url, classify_gemini_http_error, extract_gemini_error_detail,
     strip_provider_prefix,
+};
+pub use telemetry::{
+    CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,
+    NoopTelemetrySink, PipelineStage, RecordingTelemetrySink, StageScope, SteppingTelemetryClock,
+    SystemTelemetryClock, TelemetryClock, TelemetryEvent, TelemetrySession, TelemetrySink,
+    format_unix_millis_iso8601,
 };
 pub use validate::{
     ValidateError, ValidateOptions, execute_validate, execute_validate_on_disk, lint_canon_source,

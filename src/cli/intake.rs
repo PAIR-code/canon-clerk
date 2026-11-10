@@ -19,6 +19,7 @@ use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, FilingSourceArgs};
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::runners::run_branch_a_intake;
+use crate::telemetry::TelemetrySession;
 use clap::Args;
 use std::io::{Read, Write};
 
@@ -54,16 +55,18 @@ pub struct IntakeArgs {
     pub io: CaseloadIoArgs,
 }
 
-/// Executes the `intake` CLI subcommand against the provided `stdin` and `stdout` streams.
-pub fn run_intake(
+/// Executes the `intake` CLI subcommand with an explicit [`TelemetrySession`].
+pub fn run_intake_with_telemetry(
     args: &IntakeArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
     let incoming_caseload = args.io.read_caseload(stdin)?;
-    let caseload = run_branch_a_intake(&args.filing, incoming_caseload, stdin)?;
+    let caseload = run_branch_a_intake(&args.filing, incoming_caseload, stdin, telemetry)?;
+    telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&caseload)?;
 
@@ -81,6 +84,15 @@ pub fn run_intake(
     }
 
     Ok(caseload)
+}
+
+/// Executes the `intake` CLI subcommand against the provided `stdin` and `stdout` streams.
+pub fn run_intake(
+    args: &IntakeArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+) -> Result<Caseload, CliError> {
+    run_intake_with_telemetry(args, stdin, stdout, &TelemetrySession::noop())
 }
 
 fn render_human_summary(intake: &CaseloadIntake, stdout: &mut dyn Write) -> std::io::Result<()> {

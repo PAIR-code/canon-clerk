@@ -21,7 +21,8 @@ use crate::configure::{
     ConfigureOptions, execute_configure, load_host_config_file, resolve_default_config_path,
 };
 use crate::discover::{DiscoverError, DiscoverOptions, execute_discover_on_disk};
-use crate::intake::{IntakeError, execute_intake};
+use crate::intake::{IntakeError, IntakeOptions, execute_intake};
+use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::validate::{ValidateError, ValidateOptions, execute_validate_on_disk};
 use std::collections::BTreeMap;
 use std::env;
@@ -38,20 +39,35 @@ pub fn map_discover_error(err: DiscoverError) -> CliError {
     }
 }
 
+fn map_intake_error(err: IntakeError) -> CliError {
+    match err {
+        IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
+            CliError::usage(err.to_string())
+        }
+    }
+}
+
+fn execute_intake_step(
+    intake_opts: &IntakeOptions,
+    incoming: Option<Caseload>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, CliError> {
+    telemetry.run_stage(PipelineStage::Intake, |_scope| {
+        execute_intake(intake_opts, incoming).map_err(map_intake_error)
+    })
+}
+
 /// Executes Branch A `intake` stage, honoring fast-forward skip semantics if `.intake` is already present.
 pub fn run_branch_a_intake(
     filing: &FilingSourceArgs,
     incoming: Option<Caseload>,
     stdin: &mut dyn Read,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let intake_opts = filing.resolve_intake_options(stdin)?;
 
     if intake_opts.has_designated_source() {
-        execute_intake(&intake_opts, incoming).map_err(|err| match err {
-            IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-                CliError::usage(err.to_string())
-            }
-        })
+        execute_intake_step(&intake_opts, incoming, telemetry)
     } else if let Some(existing) = incoming {
         Ok(existing)
     } else {
@@ -66,15 +82,12 @@ pub fn run_branch_a_discover(
     incoming: Option<Caseload>,
     workspace_root: &Path,
     stdin: &mut dyn Read,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let intake_opts = filing.resolve_intake_options(stdin)?;
 
     let caseload_after_intake = if intake_opts.has_designated_source() {
-        execute_intake(&intake_opts, incoming).map_err(|err| match err {
-            IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-                CliError::usage(err.to_string())
-            }
-        })?
+        execute_intake_step(&intake_opts, incoming, telemetry)?
     } else if let Some(existing) = incoming {
         existing
     } else if canons.all_canons {
@@ -92,8 +105,10 @@ pub fn run_branch_a_discover(
             all_canons: canons.all_canons,
             canon_patterns: canons.canon.clone(),
         };
-        execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
-            .map_err(map_discover_error)
+        telemetry.run_stage(PipelineStage::Discover, |_scope| {
+            execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
+                .map_err(map_discover_error)
+        })
     }
 }
 
@@ -105,15 +120,12 @@ pub fn run_branch_a_validate(
     workspace_root: &Path,
     stdin: &mut dyn Read,
     max_warnings: Option<usize>,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let intake_opts = filing.resolve_intake_options(stdin)?;
 
     let caseload_after_intake = if intake_opts.has_designated_source() {
-        execute_intake(&intake_opts, incoming).map_err(|err| match err {
-            IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-                CliError::usage(err.to_string())
-            }
-        })?
+        execute_intake_step(&intake_opts, incoming, telemetry)?
     } else if let Some(existing) = incoming {
         existing
     } else if canons.all_canons || !canons.canon.is_empty() {
@@ -131,20 +143,23 @@ pub fn run_branch_a_validate(
                 || (caseload_after_intake.intake.is_none() && !canons.canon.is_empty()),
             canon_patterns: canons.canon.clone(),
         };
-        execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
-            .map_err(map_discover_error)?
+        telemetry.run_stage(PipelineStage::Discover, |_scope| {
+            execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
+                .map_err(map_discover_error)
+        })?
     };
 
     if caseload_after_discover.validation.is_some() && canons.is_empty() && max_warnings.is_none() {
         Ok(caseload_after_discover)
     } else {
         let validate_opts = ValidateOptions { max_warnings };
-        execute_validate_on_disk(&validate_opts, caseload_after_discover, workspace_root).map_err(
-            |err| match err {
-                ValidateError::MissingDiscovery => CliError::usage(err.to_string()),
-                ValidateError::Discover(d) => map_discover_error(d),
-            },
-        )
+        telemetry.run_stage(PipelineStage::Validate, |_scope| {
+            execute_validate_on_disk(&validate_opts, caseload_after_discover, workspace_root)
+                .map_err(|err| match err {
+                    ValidateError::MissingDiscovery => CliError::usage(err.to_string()),
+                    ValidateError::Discover(d) => map_discover_error(d),
+                })
+        })
     }
 }
 
@@ -174,6 +189,7 @@ pub fn resolve_branch_b_options(
 pub fn run_branch_b_configure(
     options: &ConfigureOptions,
     incoming: Option<Caseload>,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     if let Some(existing) = incoming.as_ref()
         && existing.config.is_some()
@@ -181,7 +197,9 @@ pub fn run_branch_b_configure(
     {
         Ok(existing.clone())
     } else {
-        execute_configure(options, incoming).map_err(|err| CliError::usage(err.to_string()))
+        telemetry.run_stage(PipelineStage::Configure, |_scope| {
+            execute_configure(options, incoming).map_err(|err| CliError::usage(err.to_string()))
+        })
     }
 }
 
@@ -195,52 +213,94 @@ pub fn resolve_gemini_api_key(options: &ConfigureOptions) -> Result<String, CliE
 mod tests {
     use super::*;
     use crate::caseload::CaseloadConfig;
+    use crate::telemetry::{RecordingTelemetrySink, SteppingTelemetryClock, TelemetryEvent};
     use std::io::Cursor;
 
-    #[test]
-    fn test_map_discover_error_exit_codes() {
-        let missing = DiscoverError::MissingInputSource;
-        assert_eq!(map_discover_error(missing).exit_code(), 2);
+    mod error_mapping {
+        use super::*;
 
-        let glob_err = DiscoverError::InvalidGlob(
-            crate::discover::GlobPattern::parse("[unclosed").unwrap_err(),
-        );
-        assert_eq!(map_discover_error(glob_err).exit_code(), 2);
+        #[test]
+        fn test_map_discover_error_exit_codes() {
+            let missing = DiscoverError::MissingInputSource;
+            assert_eq!(map_discover_error(missing).exit_code(), 2);
 
-        let io_err = DiscoverError::Io {
-            path: "foo".to_string(),
-            message: "not found".to_string(),
-        };
-        assert_eq!(map_discover_error(io_err).exit_code(), 1);
+            let glob_err = DiscoverError::InvalidGlob(
+                crate::discover::GlobPattern::parse("[unclosed").unwrap_err(),
+            );
+            assert_eq!(map_discover_error(glob_err).exit_code(), 2);
+
+            let io_err = DiscoverError::Io {
+                path: "foo".to_string(),
+                message: "not found".to_string(),
+            };
+            assert_eq!(map_discover_error(io_err).exit_code(), 1);
+        }
     }
 
-    #[test]
-    fn test_run_branch_a_intake_fast_forward_when_already_populated() {
-        let existing = Caseload::new();
-        let filing = FilingSourceArgs::default();
-        let mut stdin = Cursor::new(b"");
-        let result = run_branch_a_intake(&filing, Some(existing.clone()), &mut stdin)
-            .expect("fast-forward skip on intake");
-        assert_eq!(result, existing);
-    }
+    mod fast_forward_telemetry_omission {
+        use super::*;
 
-    #[test]
-    fn test_run_branch_b_configure_fast_forward_when_already_populated() {
-        let existing = Caseload::new().with_config(CaseloadConfig {
-            screener_model: "google:gemini-2.5-flash-lite".to_string(),
-            auditor_model: "google:gemini-2.5-pro".to_string(),
-            reasoning_budget: Some(1024),
-        });
-        let options = ConfigureOptions {
-            screener_model: None,
-            auditor_model: None,
-            reasoning_budget: None,
-            gemini_api_key: None,
-            env: BTreeMap::new(),
-            stored_config: None,
-        };
-        let result = run_branch_b_configure(&options, Some(existing.clone()))
-            .expect("fast-forward skip on config");
-        assert_eq!(result, existing);
+        #[test]
+        fn test_run_branch_a_intake_fast_forward_skips_stage_events() {
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            let existing = Caseload::new();
+            let filing = FilingSourceArgs::default();
+            let mut stdin = Cursor::new(b"");
+            let result = run_branch_a_intake(&filing, Some(existing.clone()), &mut stdin, &session)
+                .expect("fast-forward skip on intake");
+            assert_eq!(result, existing);
+            assert!(sink.events().is_empty());
+        }
+
+        #[test]
+        fn test_run_branch_b_configure_fast_forward_vs_executed_events() {
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            let existing = Caseload::new().with_config(CaseloadConfig {
+                screener_model: "google:gemini-2.5-flash-lite".to_string(),
+                auditor_model: "google:gemini-2.5-pro".to_string(),
+                reasoning_budget: Some(1024),
+            });
+            let options = ConfigureOptions {
+                screener_model: None,
+                auditor_model: None,
+                reasoning_budget: None,
+                gemini_api_key: None,
+                env: BTreeMap::new(),
+                stored_config: None,
+            };
+            let result = run_branch_b_configure(&options, Some(existing.clone()), &session)
+                .expect("fast-forward skip on config");
+            assert_eq!(result, existing);
+            assert!(sink.events().is_empty());
+
+            let executed_opts = ConfigureOptions {
+                gemini_api_key: Some("test-key".to_string()),
+                ..options
+            };
+            run_branch_b_configure(&executed_opts, None, &session)
+                .expect("executed configure stage");
+            assert_eq!(sink.events().len(), 2);
+            assert!(matches!(
+                sink.events()[0],
+                TelemetryEvent::StageStart {
+                    stage: PipelineStage::Configure,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                sink.events()[1],
+                TelemetryEvent::StageFinish {
+                    stage: PipelineStage::Configure,
+                    usage: None,
+                    ..
+                }
+            ));
+        }
     }
 }

@@ -24,6 +24,7 @@ use crate::probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiEndpointProber,
     ProbeOptions, execute_probe,
 };
+use crate::telemetry::{PipelineStage, TelemetrySession};
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::env;
@@ -86,13 +87,14 @@ pub struct ProbeArgs {
     pub io: CaseloadIoArgs,
 }
 
-/// Executes the `probe` CLI subcommand against an explicit environment map and hexagonal [`EndpointProber`].
-pub fn run_probe_with_env_and_prober(
+/// Executes the `probe` CLI subcommand with an explicit environment map, [`EndpointProber`], and [`TelemetrySession`].
+pub fn run_probe_with_telemetry(
     args: &ProbeArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
     env: &BTreeMap<String, String>,
     prober: &dyn EndpointProber,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let incoming_caseload = args.io.read_caseload(stdin)?;
     let timeout_ms = resolve_timeout_ms(args.timeout, env)?;
@@ -104,15 +106,18 @@ pub fn run_probe_with_env_and_prober(
     {
         existing.clone()
     } else {
-        let configured = run_branch_b_configure(&configure_options, incoming_caseload)?;
+        let configured = run_branch_b_configure(&configure_options, incoming_caseload, telemetry)?;
         let api_key = resolve_gemini_api_key(&configure_options)?;
         let probe_options = ProbeOptions {
             api_key,
             timeout_ms,
         };
-        execute_probe(&probe_options, prober, configured)
-            .map_err(|err| CliError::usage(err.to_string()))?
+        telemetry.run_stage(PipelineStage::Probe, |_scope| {
+            execute_probe(&probe_options, prober, configured)
+                .map_err(|err| CliError::usage(err.to_string()))
+        })?
     };
+    telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&caseload)?;
 
@@ -124,6 +129,17 @@ pub fn run_probe_with_env_and_prober(
     }
 
     Ok(caseload)
+}
+
+/// Executes the `probe` CLI subcommand against an explicit environment map and hexagonal [`EndpointProber`].
+pub fn run_probe_with_env_and_prober(
+    args: &ProbeArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    env: &BTreeMap<String, String>,
+    prober: &dyn EndpointProber,
+) -> Result<Caseload, CliError> {
+    run_probe_with_telemetry(args, stdin, stdout, env, prober, &TelemetrySession::noop())
 }
 
 /// Executes the `probe` CLI subcommand using the process environment and live [`GeminiEndpointProber`].
@@ -590,6 +606,76 @@ mod tests {
             )
             .expect("fast-forward when .probe already populated");
             assert_eq!(result, upstream);
+        }
+    }
+
+    mod telemetry_events {
+        use super::*;
+        use crate::telemetry::{RecordingTelemetrySink, SteppingTelemetryClock, TelemetryEvent};
+
+        #[test]
+        fn test_probe_closure_emits_configure_and_probe_stage_events() {
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            let args = ProbeArgs {
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
+                ..ProbeArgs::default()
+            };
+            let prober = MockProber::healthy();
+            run_probe_with_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &test_env(),
+                &prober,
+                &session,
+            )
+            .expect("probe succeeds");
+
+            let events = sink.events();
+            assert_eq!(events.len(), 5);
+            assert!(matches!(
+                events[0],
+                TelemetryEvent::StageStart {
+                    stage: PipelineStage::Configure,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                events[1],
+                TelemetryEvent::StageFinish {
+                    stage: PipelineStage::Configure,
+                    usage: None,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                events[2],
+                TelemetryEvent::StageStart {
+                    stage: PipelineStage::Probe,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                events[3],
+                TelemetryEvent::StageFinish {
+                    stage: PipelineStage::Probe,
+                    usage: None,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                events[4],
+                TelemetryEvent::PipelineFinish {
+                    total_tokens: 0,
+                    ..
+                }
+            ));
         }
     }
 }
