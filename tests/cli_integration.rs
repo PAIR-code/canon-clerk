@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use canon_clerk::{Caseload, PipelineStage, TelemetryEvent};
+use std::fs;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn bin_path() -> &'static str {
     env!("CARGO_BIN_EXE_canon-clerk")
@@ -276,4 +278,96 @@ fn test_cli_cold_start_latency() {
         avg_ms < 50,
         "Cold start average latency ({avg_ms} ms) must be well within performance budget"
     );
+}
+
+#[test]
+fn test_cli_log_file_and_env_fallback_emit_jsonl_without_polluting_stdout() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("canon-clerk-telemetry-it-{unique}"));
+    let flag_log = dir.join("nested").join("flag-events.jsonl");
+    let env_log = dir.join("env-events.jsonl");
+
+    // Baseline stdout without --log-file
+    let baseline = Command::new(bin_path())
+        .args(["validate", "src/lib.rs", "--json"])
+        .output()
+        .expect("baseline validate");
+    assert_eq!(baseline.status.code(), Some(0));
+
+    // 1. Explicit --log-file overrides CANON_CLERK_LOG_FILE and creates parent dirs
+    let instrumented = Command::new(bin_path())
+        .args(["validate", "src/lib.rs", "--json", "--log-file"])
+        .arg(&flag_log)
+        .env("CANON_CLERK_LOG_FILE", &env_log)
+        .env("CI", "true")
+        .env("NO_COLOR", "1")
+        .arg("-v")
+        .output()
+        .expect("instrumented validate");
+    assert_eq!(instrumented.status.code(), Some(0));
+
+    // stdout Caseload JSON must remain bit-for-bit identical
+    assert_eq!(instrumented.stdout, baseline.stdout);
+    let _: Caseload = serde_json::from_slice(&instrumented.stdout).expect("valid Caseload JSON");
+    assert!(
+        !env_log.exists(),
+        "--log-file must override CANON_CLERK_LOG_FILE"
+    );
+
+    let stderr_text = String::from_utf8_lossy(&instrumented.stderr);
+    assert!(stderr_text.contains("[telemetry]"));
+    assert!(
+        !stderr_text.contains("\x1b["),
+        "CI/NO_COLOR stderr must omit ANSI escapes"
+    );
+
+    let raw_jsonl = fs::read_to_string(&flag_log).expect("read flag jsonl");
+    let events: Vec<TelemetryEvent> = raw_jsonl
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("valid JSONL TelemetryEvent"))
+        .collect();
+    let started: Vec<PipelineStage> = events
+        .iter()
+        .filter_map(|e| match e {
+            TelemetryEvent::StageStart { stage, .. } => Some(*stage),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        started,
+        vec![
+            PipelineStage::Intake,
+            PipelineStage::Discover,
+            PipelineStage::Validate
+        ]
+    );
+    assert!(matches!(
+        events.last(),
+        Some(TelemetryEvent::PipelineFinish {
+            total_tokens: 0,
+            ..
+        })
+    ));
+
+    // 2. CANON_CLERK_LOG_FILE fallback combined with -q quiet mode suppresses stderr
+    let env_run = Command::new(bin_path())
+        .args(["discover", "-q", "--all-canons"])
+        .env("CANON_CLERK_LOG_FILE", &env_log)
+        .arg("-v")
+        .output()
+        .expect("env fallback discover -q");
+    assert_eq!(env_run.status.code(), Some(0));
+    assert!(env_run.stdout.is_empty());
+    let env_stderr = String::from_utf8_lossy(&env_run.stderr);
+    assert!(
+        !env_stderr.contains("[telemetry]"),
+        "-q must suppress telemetry stderr progress"
+    );
+    let env_jsonl = fs::read_to_string(&env_log).expect("read env jsonl");
+    assert!(env_jsonl.lines().count() >= 3);
+
+    let _ = fs::remove_dir_all(&dir);
 }

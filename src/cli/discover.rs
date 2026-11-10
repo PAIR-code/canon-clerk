@@ -19,6 +19,7 @@ use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::runners::run_branch_a_discover;
+use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use std::env;
 use std::io::{Read, Write};
@@ -90,12 +91,13 @@ pub struct DiscoverArgs {
     pub io: CaseloadIoArgs,
 }
 
-/// Executes the `discover` CLI subcommand against the provided `stdin`, `stdout`, and `workspace_root`.
-pub fn run_discover_in_workspace(
+/// Executes the `discover` CLI subcommand against `workspace_root` with an explicit [`TelemetrySession`].
+pub fn run_discover_with_telemetry(
     args: &DiscoverArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
     workspace_root: &Path,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
@@ -106,7 +108,9 @@ pub fn run_discover_in_workspace(
         incoming_caseload,
         workspace_root,
         stdin,
+        telemetry,
     )?;
+    telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&caseload)?;
 
@@ -121,6 +125,22 @@ pub fn run_discover_in_workspace(
 
     render_discover_output(args, &caseload, &discovery, stdout)?;
     Ok(caseload)
+}
+
+/// Executes the `discover` CLI subcommand against the provided `stdin`, `stdout`, and `workspace_root`.
+pub fn run_discover_in_workspace(
+    args: &DiscoverArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    workspace_root: &Path,
+) -> Result<Caseload, CliError> {
+    run_discover_with_telemetry(
+        args,
+        stdin,
+        stdout,
+        workspace_root,
+        &TelemetrySession::noop(),
+    )
 }
 
 /// Executes the `discover` CLI subcommand using the current working directory as `workspace_root`.

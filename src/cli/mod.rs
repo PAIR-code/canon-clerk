@@ -22,28 +22,49 @@ pub mod intake;
 pub mod io;
 pub mod probe;
 pub mod runners;
+pub mod telemetry;
 pub mod validate;
 
 pub use apprise::{
-    AppriseArgs, AppriseFormat, run_apprise, run_apprise_with_snapshot_and_provider,
+    AppriseArgs, AppriseFormat, run_apprise, run_apprise_live_with_telemetry,
+    run_apprise_with_snapshot_and_provider, run_apprise_with_telemetry,
 };
 pub use args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
-pub use configure::{ConfigureArgs, ConfigureFormat, run_configure, run_configure_with_env};
-pub use discover::{DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace};
-pub use intake::{IntakeArgs, run_intake};
+pub use configure::{
+    ConfigureArgs, ConfigureFormat, run_configure, run_configure_with_env,
+    run_configure_with_telemetry,
+};
+pub use discover::{
+    DiscoverArgs, DiscoverFormat, run_discover, run_discover_in_workspace,
+    run_discover_with_telemetry,
+};
+pub use intake::{IntakeArgs, run_intake, run_intake_with_telemetry};
 pub use io::{
     ensure_single_stdin_source, read_caseload_operand, read_operand_source,
     resolve_target_operands, write_caseload_file,
 };
-pub use probe::{ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober};
+pub use probe::{
+    ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,
+};
 pub use runners::{
     map_discover_error, resolve_branch_b_options, resolve_gemini_api_key, run_branch_a_discover,
     run_branch_a_intake, run_branch_a_validate, run_branch_b_configure,
 };
-pub use validate::{ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace};
+pub use telemetry::{
+    ENV_LOG_FILE, ENV_VERBOSE, StderrProgressSink, StderrTelemetryOptions,
+    build_cli_telemetry_sink, open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag,
+};
+pub use validate::{
+    ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace,
+    run_validate_with_telemetry,
+};
 
+use crate::probe::GeminiEndpointProber;
+use crate::telemetry::{SystemTelemetryClock, TelemetrySession};
 use clap::{CommandFactory, Parser, Subcommand};
+use std::collections::BTreeMap;
 use std::fmt;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -53,10 +74,13 @@ Examples:
   git diff origin/main | canon-clerk intake --diff -
 
   # Ingest explicit target paths or globs:
-  canon-clerk intake src/lib.rs 'src/**/*.rs'";
+  canon-clerk intake src/lib.rs 'src/**/*.rs'
+
+  # Record out-of-band JSONL stage telemetry alongside Caseload JSON output:
+  canon-clerk validate --all-canons --log-file telemetry.jsonl --json";
 
 /// Canon Clerk CLI command-line argument parser.
-#[derive(Parser, Debug, Clone, PartialEq, Eq)]
+#[derive(Parser, Debug, Clone, Default, PartialEq, Eq)]
 #[command(
     name = "canon-clerk",
     author = "PAIR-code",
@@ -80,15 +104,25 @@ pub struct Cli {
     )]
     pub targets: Vec<PathBuf>,
 
-    /// Diagnostic verbose flag with positive polarity.
+    /// Diagnostic verbose flag with positive polarity (fallback env: `CANON_CLERK_VERBOSE`).
     #[arg(
         short = 'v',
         long = "verbose",
         global = true,
         help_heading = "Logging & Diagnostics",
-        help = "Enable verbose diagnostic output"
+        help = "Enable verbose diagnostic output (fallback env: CANON_CLERK_VERBOSE)"
     )]
     pub verbose: bool,
+
+    /// Write structured JSON Lines (`JSONL`) telemetry events to disk (fallback env: `CANON_CLERK_LOG_FILE`).
+    #[arg(
+        long = "log-file",
+        value_name = "PATH",
+        global = true,
+        help_heading = "Logging & Diagnostics",
+        help = "Write structured JSONL telemetry events to file (fallback env: CANON_CLERK_LOG_FILE)"
+    )]
+    pub log_file: Option<PathBuf>,
 }
 
 /// Top-level Caseload DAG stage subcommands.
@@ -106,6 +140,16 @@ pub enum Commands {
     Probe(ProbeArgs),
     /// Prospective statutory notice: determine governing canons for planned design intent and target scope.
     Apprise(AppriseArgs),
+}
+
+impl Commands {
+    const fn is_quiet(&self) -> bool {
+        match self {
+            Self::Discover(args) => args.quiet,
+            Self::Validate(args) => args.quiet,
+            Self::Intake(_) | Self::Configure(_) | Self::Probe(_) | Self::Apprise(_) => false,
+        }
+    }
 }
 
 /// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
@@ -173,6 +217,13 @@ impl Cli {
 
 /// Initializes structured logging directed exclusively to stderr.
 pub fn init_logging(verbose: bool) {
+    let env_map: BTreeMap<String, String> = std::env::vars().collect();
+    let stderr_opts =
+        StderrTelemetryOptions::from_env(std::io::stderr().is_terminal(), verbose, false, &env_map);
+    init_logging_with_ansi(verbose, stderr_opts.use_ansi_color());
+}
+
+fn init_logging_with_ansi(verbose: bool, use_ansi: bool) {
     let env_filter = if verbose {
         tracing_subscriber::EnvFilter::new("debug")
     } else {
@@ -185,41 +236,46 @@ pub fn init_logging(verbose: bool) {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(std::io::stderr)
+                .with_ansi(use_ansi)
                 .compact(),
         )
         .try_init()
         .ok();
 }
 
+fn current_workspace_dir() -> Result<PathBuf, CliError> {
+    std::env::current_dir().map_err(|err| {
+        CliError::runtime(format!(
+            "Failed to determine current working directory: {err}"
+        ))
+    })
+}
+
 /// Executes the CLI application logic and routes subcommands.
 pub fn run(cli: Cli) -> Result<(), CliError> {
-    init_logging(cli.verbose);
+    let env_map: BTreeMap<String, String> = std::env::vars().collect();
+    let effective_verbose = resolve_verbose_flag(cli.verbose, &env_map)?;
+    let log_file_path = resolve_log_file_path(cli.log_file.as_deref(), &env_map)?;
+    let subcommand_quiet = cli.command.as_ref().is_some_and(Commands::is_quiet);
+
+    let stderr_opts = StderrTelemetryOptions::from_env(
+        std::io::stderr().is_terminal(),
+        effective_verbose,
+        subcommand_quiet,
+        &env_map,
+    );
+    init_logging_with_ansi(effective_verbose, stderr_opts.use_ansi_color());
 
     tracing::debug!("Initialized Canon Clerk CLI runtime");
 
     if let Some(command) = &cli.command {
+        let sink = build_cli_telemetry_sink(log_file_path.as_deref(), stderr_opts)?;
+        let clock = SystemTelemetryClock::new();
+        let session = TelemetrySession::new(&sink, &clock);
+
         let mut stdin = std::io::stdin().lock();
         let mut stdout = std::io::stdout().lock();
-        match command {
-            Commands::Intake(args) => {
-                run_intake(args, &mut stdin, &mut stdout)?;
-            }
-            Commands::Discover(args) => {
-                run_discover(args, &mut stdin, &mut stdout)?;
-            }
-            Commands::Validate(args) => {
-                run_validate(args, &mut stdin, &mut stdout)?;
-            }
-            Commands::Configure(args) => {
-                run_configure(args, &mut stdin, &mut stdout)?;
-            }
-            Commands::Probe(args) => {
-                run_probe(args, &mut stdin, &mut stdout)?;
-            }
-            Commands::Apprise(args) => {
-                run_apprise(args, &mut stdin, &mut stdout)?;
-            }
-        }
+        dispatch_subcommand(command, &mut stdin, &mut stdout, &env_map, &session)?;
         return Ok(());
     }
 
@@ -235,102 +291,178 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
     Ok(())
 }
 
+fn dispatch_subcommand(
+    command: &Commands,
+    stdin: &mut dyn std::io::Read,
+    stdout: &mut dyn std::io::Write,
+    env_map: &BTreeMap<String, String>,
+    session: &TelemetrySession<'_>,
+) -> Result<(), CliError> {
+    match command {
+        Commands::Intake(args) => {
+            run_intake_with_telemetry(args, stdin, stdout, session)?;
+        }
+        Commands::Discover(args) => {
+            let cwd = current_workspace_dir()?;
+            run_discover_with_telemetry(args, stdin, stdout, &cwd, session)?;
+        }
+        Commands::Validate(args) => {
+            let cwd = current_workspace_dir()?;
+            run_validate_with_telemetry(args, stdin, stdout, &cwd, session)?;
+        }
+        Commands::Configure(args) => {
+            run_configure_with_telemetry(args, stdin, stdout, env_map, session)?;
+        }
+        Commands::Probe(args) => {
+            let prober = GeminiEndpointProber::new();
+            run_probe_with_telemetry(args, stdin, stdout, env_map, &prober, session)?;
+        }
+        Commands::Apprise(args) => {
+            run_apprise_live_with_telemetry(args, stdin, stdout, session)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_cli_parse_empty() {
-        let cli = Cli::try_parse_from(["canon-clerk"]).expect("parsing empty args should succeed");
-        assert!(cli.command.is_none());
-        assert!(cli.targets.is_empty());
-        assert!(!cli.verbose);
-    }
+    mod argument_parsing {
+        use super::*;
 
-    #[test]
-    fn test_cli_parse_targets_positional() {
-        let cli = Cli::try_parse_from(["canon-clerk", "src/lib.rs", "SPEC.md"])
-            .expect("parsing positionals should succeed");
-        assert_eq!(cli.targets.len(), 2);
-        assert_eq!(cli.targets[0], PathBuf::from("src/lib.rs"));
-        assert_eq!(cli.targets[1], PathBuf::from("SPEC.md"));
-        assert!(!cli.verbose);
-    }
+        #[test]
+        fn test_cli_parse_empty() {
+            let cli =
+                Cli::try_parse_from(["canon-clerk"]).expect("parsing empty args should succeed");
+            assert!(cli.command.is_none());
+            assert!(cli.targets.is_empty());
+            assert!(!cli.verbose);
+            assert!(cli.log_file.is_none());
+        }
 
-    #[test]
-    fn test_cli_parse_intake_subcommand() {
-        let cli = Cli::try_parse_from([
-            "canon-clerk",
-            "intake",
-            "--diff",
-            "-",
-            "--pr-title",
-            "feat: test",
-            "--json",
-        ])
-        .expect("parsing intake subcommand should succeed");
+        #[test]
+        fn test_cli_parse_targets_positional() {
+            let cli = Cli::try_parse_from(["canon-clerk", "src/lib.rs", "SPEC.md"])
+                .expect("parsing positionals should succeed");
+            assert_eq!(cli.targets.len(), 2);
+            assert_eq!(cli.targets[0], PathBuf::from("src/lib.rs"));
+            assert_eq!(cli.targets[1], PathBuf::from("SPEC.md"));
+            assert!(!cli.verbose);
+        }
 
-        match cli.command {
-            Some(Commands::Intake(args)) => {
-                assert_eq!(args.filing.diff.as_deref(), Some("-"));
-                assert_eq!(args.filing.pr_title.as_deref(), Some("feat: test"));
-                assert!(args.io.json);
+        #[test]
+        fn test_cli_parse_global_log_file_before_and_after_subcommand() {
+            let before = Cli::try_parse_from([
+                "canon-clerk",
+                "--log-file",
+                "before.jsonl",
+                "intake",
+                "src/lib.rs",
+            ])
+            .expect("global --log-file before subcommand");
+            assert_eq!(before.log_file, Some(PathBuf::from("before.jsonl")));
+
+            let after = Cli::try_parse_from([
+                "canon-clerk",
+                "intake",
+                "src/lib.rs",
+                "--log-file",
+                "after.jsonl",
+                "-v",
+            ])
+            .expect("global --log-file after subcommand");
+            assert_eq!(after.log_file, Some(PathBuf::from("after.jsonl")));
+            assert!(after.verbose);
+        }
+
+        #[test]
+        fn test_cli_parse_intake_subcommand() {
+            let cli = Cli::try_parse_from([
+                "canon-clerk",
+                "intake",
+                "--diff",
+                "-",
+                "--pr-title",
+                "feat: test",
+                "--json",
+            ])
+            .expect("parsing intake subcommand should succeed");
+
+            match cli.command {
+                Some(Commands::Intake(args)) => {
+                    assert_eq!(args.filing.diff.as_deref(), Some("-"));
+                    assert_eq!(args.filing.pr_title.as_deref(), Some("feat: test"));
+                    assert!(args.io.json);
+                }
+                Some(
+                    Commands::Discover(_)
+                    | Commands::Validate(_)
+                    | Commands::Configure(_)
+                    | Commands::Probe(_)
+                    | Commands::Apprise(_),
+                )
+                | None => {
+                    panic!("expected Intake subcommand")
+                }
             }
-            Some(
-                Commands::Discover(_)
-                | Commands::Validate(_)
-                | Commands::Configure(_)
-                | Commands::Probe(_)
-                | Commands::Apprise(_),
-            )
-            | None => {
-                panic!("expected Intake subcommand")
-            }
+        }
+
+        #[test]
+        fn test_cli_parse_verbose_short_and_long() {
+            let cli_short = Cli::try_parse_from(["canon-clerk", "-v"]).expect("-v should succeed");
+            assert!(cli_short.verbose);
+
+            let cli_long = Cli::try_parse_from(["canon-clerk", "--verbose"])
+                .expect("--verbose should succeed");
+            assert!(cli_long.verbose);
+        }
+
+        #[test]
+        fn test_cli_parse_invalid_flag_yields_usage_error() {
+            let err = Cli::try_parse_from(["canon-clerk", "--unrecognized-option"])
+                .expect_err("unrecognized flag must fail");
+            assert!(err.use_stderr());
+            assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
         }
     }
 
-    #[test]
-    fn test_cli_parse_verbose_short_and_long() {
-        let cli_short = Cli::try_parse_from(["canon-clerk", "-v"]).expect("-v should succeed");
-        assert!(cli_short.verbose);
+    mod help_and_metadata {
+        use super::*;
 
-        let cli_long =
-            Cli::try_parse_from(["canon-clerk", "--verbose"]).expect("--verbose should succeed");
-        assert!(cli_long.verbose);
-    }
+        #[test]
+        fn test_cli_help_screen_groups_options_by_concern() {
+            let help = Cli::render_help();
+            assert!(
+                help.contains("Logging & Diagnostics:"),
+                "help screen must contain 'Logging & Diagnostics' group heading"
+            );
+            assert!(
+                help.contains("-v, --verbose"),
+                "help screen must document verbose flag"
+            );
+            assert!(
+                help.contains("--log-file <PATH>"),
+                "help screen must document --log-file flag"
+            );
+            assert!(
+                help.contains("CANON_CLERK_LOG_FILE"),
+                "help screen must document CANON_CLERK_LOG_FILE fallback"
+            );
+            assert!(
+                help.contains("TARGETS"),
+                "help screen must document positional TARGETS"
+            );
+            assert!(
+                help.contains("intake"),
+                "help screen must document intake subcommand"
+            );
+        }
 
-    #[test]
-    fn test_cli_parse_invalid_flag_yields_usage_error() {
-        let err = Cli::try_parse_from(["canon-clerk", "--unrecognized-option"])
-            .expect_err("unrecognized flag must fail");
-        assert!(err.use_stderr());
-        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
-    }
-
-    #[test]
-    fn test_cli_help_screen_groups_options_by_concern() {
-        let help = Cli::render_help();
-        assert!(
-            help.contains("Logging & Diagnostics:"),
-            "help screen must contain 'Logging & Diagnostics' group heading"
-        );
-        assert!(
-            help.contains("-v, --verbose"),
-            "help screen must document verbose flag"
-        );
-        assert!(
-            help.contains("TARGETS"),
-            "help screen must document positional TARGETS"
-        );
-        assert!(
-            help.contains("intake"),
-            "help screen must document intake subcommand"
-        );
-    }
-
-    #[test]
-    fn test_cli_version_matches_cargo_pkg() {
-        let cmd = Cli::command();
-        assert_eq!(cmd.get_version(), Some(env!("CARGO_PKG_VERSION")));
+        #[test]
+        fn test_cli_version_matches_cargo_pkg() {
+            let cmd = Cli::command();
+            assert_eq!(cmd.get_version(), Some(env!("CARGO_PKG_VERSION")));
+        }
     }
 }

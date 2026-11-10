@@ -24,6 +24,7 @@ use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, Pro
 use crate::cli::io::ensure_single_stdin_source;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
+use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use guards::{
     can_fast_forward_completed_apprisal, enforce_dual_input_guard,
@@ -119,15 +120,15 @@ pub struct AppriseArgs {
 
 impl Eq for AppriseArgs {}
 
-/// Executes `canon-clerk apprise` hermetically against an in-memory [`WorkspaceSnapshot`],
-/// explicit environment map, and hexagonal [`StructuredModelProvider`].
-pub fn run_apprise_with_snapshot_and_provider(
+/// Executes `canon-clerk apprise` hermetically with an explicit [`TelemetrySession`].
+pub fn run_apprise_with_telemetry(
     args: &AppriseArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
     workspace: &WorkspaceSnapshot,
     env: &BTreeMap<String, String>,
     provider: &dyn StructuredModelProvider,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     run_apprise_core(
         args,
@@ -138,15 +139,37 @@ pub fn run_apprise_with_snapshot_and_provider(
             workspace,
             provider,
         },
+        telemetry,
     )
 }
 
-/// Executes `canon-clerk apprise` using the current working directory, process environment,
-/// and live [`GeminiModelProvider`].
-pub fn run_apprise(
+/// Executes `canon-clerk apprise` hermetically against an in-memory [`WorkspaceSnapshot`],
+/// explicit environment map, and hexagonal [`StructuredModelProvider`].
+pub fn run_apprise_with_snapshot_and_provider(
     args: &AppriseArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
+    workspace: &WorkspaceSnapshot,
+    env: &BTreeMap<String, String>,
+    provider: &dyn StructuredModelProvider,
+) -> Result<Caseload, CliError> {
+    run_apprise_with_telemetry(
+        args,
+        stdin,
+        stdout,
+        workspace,
+        env,
+        provider,
+        &TelemetrySession::noop(),
+    )
+}
+
+/// Executes `canon-clerk apprise` against the live working directory with an explicit [`TelemetrySession`].
+pub fn run_apprise_live_with_telemetry(
+    args: &AppriseArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let cwd = env::current_dir().map_err(|err| {
         CliError::runtime(format!(
@@ -162,7 +185,18 @@ pub fn run_apprise(
         AppriseBackend::LiveDisk {
             workspace_root: &cwd,
         },
+        telemetry,
     )
+}
+
+/// Executes `canon-clerk apprise` using the current working directory, process environment,
+/// and live [`GeminiModelProvider`].
+pub fn run_apprise(
+    args: &AppriseArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+) -> Result<Caseload, CliError> {
+    run_apprise_live_with_telemetry(args, stdin, stdout, &TelemetrySession::noop())
 }
 
 fn run_apprise_core(
@@ -171,6 +205,7 @@ fn run_apprise_core(
     stdout: &mut dyn Write,
     env: &BTreeMap<String, String>,
     backend: AppriseBackend<'_>,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
@@ -182,6 +217,7 @@ fn run_apprise_core(
     if can_fast_forward_completed_apprisal(args, &intake_opts, incoming.as_ref())
         && let Some(completed) = incoming
     {
+        telemetry.finish_pipeline();
         args.io.write_output_caseload(&completed)?;
         let wm = pre_populated_watermarks(threshold);
         render_apprise_output(args, &completed, &wm, stdout)?;
@@ -191,7 +227,7 @@ fn run_apprise_core(
     enforce_dual_input_guard(&intake_opts, &args.canons, incoming.as_ref())?;
 
     let (caseload_after_intake, intake_disp, target_changed) =
-        resolve_apprise_intake(&intake_opts, incoming)?;
+        resolve_apprise_intake(&intake_opts, incoming, telemetry)?;
 
     let snapshot = materialize_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
     let total_workspace_canons = Some(snapshot.canons.len());
@@ -201,6 +237,7 @@ fn run_apprise_core(
         caseload_after_intake,
         &snapshot,
         target_changed,
+        telemetry,
     )?;
 
     if caseload_after_discover
@@ -208,29 +245,26 @@ fn run_apprise_core(
         .as_ref()
         .is_some_and(|d| d.candidate_canons.is_empty())
     {
-        let short_circuited = caseload_after_discover.with_apprisal(CaseloadApprisal::default());
-        args.io.write_output_caseload(&short_circuited)?;
-        let wm = AppriseWatermarks {
-            intake: intake_disp,
-            discover: StageDisposition::ZeroCandidateShortCircuit,
-            validate: StageDisposition::SkippedZeroCandidates,
-            configure: StageDisposition::SkippedZeroCandidates,
-            apprise: StageDisposition::SkippedZeroCandidates,
+        telemetry.finish_pipeline();
+        return finish_zero_candidate_apprisal(
+            args,
+            caseload_after_discover,
+            intake_disp,
             total_workspace_canons,
             threshold,
-        };
-        render_apprise_output(args, &short_circuited, &wm, stdout)?;
-        return Ok(short_circuited);
+            stdout,
+        );
     }
 
     let (caseload_after_validate, validate_disp) =
-        resolve_apprise_validate(caseload_after_discover, &snapshot)?;
+        resolve_apprise_validate(caseload_after_discover, &snapshot, telemetry)?;
 
     if caseload_after_validate
         .validation
         .as_ref()
         .is_some_and(|v| v.has_errors)
     {
+        telemetry.finish_pipeline();
         return handle_validation_failure(
             args,
             &caseload_after_validate,
@@ -249,7 +283,9 @@ fn run_apprise_core(
         caseload_after_validate,
         &snapshot,
         &backend,
+        telemetry,
     )?;
+    telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&final_caseload)?;
     let wm = AppriseWatermarks {
@@ -263,6 +299,29 @@ fn run_apprise_core(
     };
     render_apprise_output(args, &final_caseload, &wm, stdout)?;
     Ok(final_caseload)
+}
+
+fn finish_zero_candidate_apprisal(
+    args: &AppriseArgs,
+    caseload_after_discover: Caseload,
+    intake_disp: StageDisposition,
+    total_workspace_canons: Option<usize>,
+    threshold: f64,
+    stdout: &mut dyn Write,
+) -> Result<Caseload, CliError> {
+    let short_circuited = caseload_after_discover.with_apprisal(CaseloadApprisal::default());
+    args.io.write_output_caseload(&short_circuited)?;
+    let wm = AppriseWatermarks {
+        intake: intake_disp,
+        discover: StageDisposition::ZeroCandidateShortCircuit,
+        validate: StageDisposition::SkippedZeroCandidates,
+        configure: StageDisposition::SkippedZeroCandidates,
+        apprise: StageDisposition::SkippedZeroCandidates,
+        total_workspace_canons,
+        threshold,
+    };
+    render_apprise_output(args, &short_circuited, &wm, stdout)?;
+    Ok(short_circuited)
 }
 
 fn pre_populated_watermarks(threshold: f64) -> AppriseWatermarks {
@@ -330,6 +389,7 @@ mod tests {
     struct StubProvider {
         calls: Mutex<usize>,
         response: Result<Value, ProviderError>,
+        thoughts: Vec<String>,
     }
 
     impl StubProvider {
@@ -337,6 +397,15 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 response: Ok(payload),
+                thoughts: Vec::new(),
+            }
+        }
+
+        fn succeeding_with_thoughts(payload: Value, thoughts: Vec<String>) -> Self {
+            Self {
+                calls: Mutex::new(0),
+                response: Ok(payload),
+                thoughts,
             }
         }
 
@@ -344,6 +413,7 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 response: Err(err),
+                thoughts: Vec::new(),
             }
         }
 
@@ -369,7 +439,7 @@ mod tests {
                         reasoning_tokens: 0,
                         total_tokens: 394,
                     },
-                    thoughts: Vec::new(),
+                    thoughts: self.thoughts.clone(),
                 }),
                 Err(err) => Err(err.clone()),
             }
@@ -907,6 +977,232 @@ mod tests {
             .expect_err("provider timeout must map to exit 2");
             assert_eq!(provider_err.exit_code(), 2);
             assert!(provider_err.to_string().contains("timed out"));
+        }
+    }
+
+    mod telemetry_instrumentation {
+        use super::*;
+        use crate::caseload::CaseloadValidation;
+        use crate::telemetry::{
+            PipelineStage, RecordingTelemetrySink, SteppingTelemetryClock, TelemetryEvent,
+        };
+
+        #[test]
+        fn test_full_apprise_closure_emits_ordered_events_thoughts_tokens_and_preserves_caseload() {
+            let snapshot = valid_snapshot();
+            let env = test_env_with_key();
+            let payload = json!({
+                "assessments": {
+                    ".canons/auth/auth-caches-must-define-ttl-window.md": {
+                        "apprisal_summary": "Planned provider cache requires TTL.",
+                        "apprisal_score": 0.91
+                    }
+                }
+            });
+            let provider = StubProvider::succeeding_with_thoughts(
+                payload,
+                vec![
+                    "Inspecting auth cache TTL canon.".to_string(),
+                    "Jurisdiction confirmed.".to_string(),
+                ],
+            );
+
+            let args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Add auth token cache".to_string()),
+                    targets: vec!["src/auth/login.rs".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+
+            let mut baseline_stdout = Vec::new();
+            run_apprise_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut baseline_stdout,
+                &snapshot,
+                &env,
+                &provider,
+            )
+            .expect("baseline apprise");
+
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
+            let session = TelemetrySession::new(&sink, &clock);
+            let mut instrumented_stdout = Vec::new();
+            run_apprise_with_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut instrumented_stdout,
+                &snapshot,
+                &env,
+                &provider,
+                &session,
+            )
+            .expect("instrumented apprise");
+
+            // Substantive Caseload JSON on stdout MUST be bit-for-bit identical and free of telemetry
+            assert_eq!(instrumented_stdout, baseline_stdout);
+            let json_text = String::from_utf8(instrumented_stdout).expect("utf8 json");
+            assert!(!json_text.contains("duration_ms"));
+            assert!(!json_text.contains("total_tokens"));
+            assert!(!json_text.contains("timestamp"));
+
+            let events = sink.events();
+            let stages_and_kinds: Vec<String> = events
+                .iter()
+                .map(|ev| match ev {
+                    TelemetryEvent::StageStart { stage, .. } => format!("start:{stage}"),
+                    TelemetryEvent::Thought { stage, delta } => format!("thought:{stage}:{delta}"),
+                    TelemetryEvent::StageFinish { stage, usage, .. } => {
+                        format!("finish:{stage}:{}", usage.map_or(0, |u| u.total_tokens))
+                    }
+                    TelemetryEvent::PipelineFinish { total_tokens, .. } => {
+                        format!("pipeline:{total_tokens}")
+                    }
+                })
+                .collect();
+
+            assert_eq!(
+                stages_and_kinds,
+                vec![
+                    "start:intake",
+                    "finish:intake:0",
+                    "start:discover",
+                    "finish:discover:0",
+                    "start:validate",
+                    "finish:validate:0",
+                    "start:configure",
+                    "finish:configure:0",
+                    "start:apprise",
+                    "thought:apprise:Inspecting auth cache TTL canon.",
+                    "thought:apprise:Jurisdiction confirmed.",
+                    "finish:apprise:394",
+                    "pipeline:394",
+                ]
+            );
+        }
+
+        #[test]
+        fn test_fast_forwarded_stages_are_omitted_from_telemetry() {
+            let snapshot = valid_snapshot();
+            let env = test_env_with_key();
+            let provider = StubProvider::succeeding(json!({
+                "assessments": {
+                    ".canons/auth/auth-caches-must-define-ttl-window.md": {
+                        "apprisal_summary": "Applicable.",
+                        "apprisal_score": 0.85
+                    }
+                }
+            }));
+
+            let upstream = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    intent: Some("Cached intent".to_string()),
+                    target_paths: vec!["src/auth/login.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    candidate_canons: vec![
+                        ".canons/auth/auth-caches-must-define-ttl-window.md".to_string(),
+                    ],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default());
+            let raw_upstream = serde_json::to_vec(&upstream).expect("serialize upstream");
+
+            let ff_sink = RecordingTelemetrySink::new();
+            let ff_clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
+            let ff_session = TelemetrySession::new(&ff_sink, &ff_clock);
+            let ff_args = AppriseArgs {
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+            run_apprise_with_telemetry(
+                &ff_args,
+                &mut Cursor::new(raw_upstream),
+                &mut Vec::new(),
+                &snapshot,
+                &env,
+                &provider,
+                &ff_session,
+            )
+            .expect("fast-forwarded upstream stages");
+
+            let ff_events = ff_sink.events();
+            assert_eq!(ff_events.len(), 3);
+            assert!(matches!(
+                ff_events[0],
+                TelemetryEvent::StageStart {
+                    stage: PipelineStage::Apprise,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                ff_events[1],
+                TelemetryEvent::StageFinish {
+                    stage: PipelineStage::Apprise,
+                    usage: Some(u),
+                    ..
+                } if u.total_tokens == 394
+            ));
+            assert!(matches!(
+                ff_events[2],
+                TelemetryEvent::PipelineFinish {
+                    total_tokens: 394,
+                    ..
+                }
+            ));
+        }
+
+        #[test]
+        fn test_zero_candidate_short_circuit_omits_downstream_stages_from_telemetry() {
+            let snapshot = valid_snapshot();
+            let provider = StubProvider::failing(ProviderError::MissingApiKey);
+            let sc_sink = RecordingTelemetrySink::new();
+            let sc_clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
+            let sc_session = TelemetrySession::new(&sc_sink, &sc_clock);
+            let sc_args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Update docs".to_string()),
+                    targets: vec!["docs/readme.md".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+            run_apprise_with_telemetry(
+                &sc_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &snapshot,
+                &BTreeMap::new(),
+                &provider,
+                &sc_session,
+            )
+            .expect("zero-candidate short-circuit");
+
+            let sc_stages: Vec<PipelineStage> = sc_sink
+                .events()
+                .into_iter()
+                .filter_map(|e| match e {
+                    TelemetryEvent::StageStart { stage, .. } => Some(stage),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                sc_stages,
+                vec![PipelineStage::Intake, PipelineStage::Discover]
+            );
         }
     }
 }

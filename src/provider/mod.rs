@@ -61,6 +61,18 @@ pub struct TokenUsage {
     pub total_tokens: u64,
 }
 
+impl TokenUsage {
+    /// Accumulates token counts from `other` into `self` using saturating addition.
+    pub fn accumulate(&mut self, other: Self) {
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(other.completion_tokens);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+    }
+}
+
 /// Normalized structured output and operational telemetry produced by [`StructuredModelProvider`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationResponse {

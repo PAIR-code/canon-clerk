@@ -19,6 +19,7 @@ use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
 use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
 use crate::configure::ENV_GEMINI_API_KEY;
+use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::env;
@@ -81,16 +82,18 @@ pub struct ConfigureArgs {
     pub io: CaseloadIoArgs,
 }
 
-/// Executes the `configure` CLI subcommand against an explicit environment variable map.
-pub fn run_configure_with_env(
+/// Executes the `configure` CLI subcommand against an explicit environment map and [`TelemetrySession`].
+pub fn run_configure_with_telemetry(
     args: &ConfigureArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
     env: &BTreeMap<String, String>,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let incoming_caseload = args.io.read_caseload(stdin)?;
     let options = resolve_branch_b_options(&args.provider, env)?;
-    let caseload = run_branch_b_configure(&options, incoming_caseload)?;
+    let caseload = run_branch_b_configure(&options, incoming_caseload, telemetry)?;
+    telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&caseload)?;
 
@@ -98,6 +101,16 @@ pub fn run_configure_with_env(
     render_configure_output(args, &caseload, &config, stdout)?;
 
     Ok(caseload)
+}
+
+/// Executes the `configure` CLI subcommand against an explicit environment variable map.
+pub fn run_configure_with_env(
+    args: &ConfigureArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    env: &BTreeMap<String, String>,
+) -> Result<Caseload, CliError> {
+    run_configure_with_telemetry(args, stdin, stdout, env, &TelemetrySession::noop())
 }
 
 /// Executes the `configure` CLI subcommand using the process environment.

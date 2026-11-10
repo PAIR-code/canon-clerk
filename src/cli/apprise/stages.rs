@@ -28,6 +28,7 @@ use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, GeminiModelProvider, StructuredModelProvider,
 };
+use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::validate::{ValidateError, ValidateOptions, execute_validate};
 use std::collections::BTreeMap;
 use std::fs;
@@ -45,7 +46,8 @@ pub(super) enum AppriseBackend<'a> {
 
 pub(super) fn resolve_apprise_intake(
     intake_opts: &IntakeOptions,
-    mut incoming: Option<Caseload>,
+    incoming: Option<Caseload>,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition, bool), CliError> {
     if !intake_opts.has_designated_source() {
         let existing = incoming.ok_or_else(|| {
@@ -54,6 +56,15 @@ pub(super) fn resolve_apprise_intake(
         return Ok((existing, StageDisposition::PrePopulated, false));
     }
 
+    telemetry.run_stage(PipelineStage::Intake, |_scope| {
+        execute_apprise_intake_body(intake_opts, incoming)
+    })
+}
+
+fn execute_apprise_intake_body(
+    intake_opts: &IntakeOptions,
+    mut incoming: Option<Caseload>,
+) -> Result<(Caseload, StageDisposition, bool), CliError> {
     let cli_has_targets = intake_opts.all_targets
         || intake_opts.patch_content.is_some()
         || intake_opts.target_paths.is_some();
@@ -150,6 +161,7 @@ pub(super) fn resolve_apprise_discover(
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     target_changed: bool,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
     if caseload.discovery.is_some() && !target_changed && canons.is_empty() {
         return Ok((caseload, StageDisposition::PrePopulated));
@@ -167,24 +179,26 @@ pub(super) fn resolve_apprise_discover(
         canon_patterns: canons.canon.clone(),
     };
 
-    let updated =
-        execute_discover(&discover_opts, caseload, snapshot).map_err(map_discover_error)?;
+    let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {
+        execute_discover(&discover_opts, caseload, snapshot).map_err(map_discover_error)
+    })?;
     Ok((updated, StageDisposition::Executed))
 }
 
 pub(super) fn resolve_apprise_validate(
     caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
     if caseload.validation.is_some() {
         return Ok((caseload, StageDisposition::PrePopulated));
     }
-    let updated = execute_validate(&ValidateOptions::default(), caseload, snapshot).map_err(
-        |err| match err {
+    let updated = telemetry.run_stage(PipelineStage::Validate, |_scope| {
+        execute_validate(&ValidateOptions::default(), caseload, snapshot).map_err(|err| match err {
             ValidateError::MissingDiscovery => CliError::usage(err.to_string()),
             ValidateError::Discover(d) => map_discover_error(d),
-        },
-    )?;
+        })
+    })?;
     Ok((updated, StageDisposition::Executed))
 }
 
@@ -195,29 +209,33 @@ pub(super) fn execute_jit_configure_and_apprise(
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     backend: &AppriseBackend<'_>,
+    telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
     let configure_options = resolve_branch_b_options(provider_args, env)?;
     let config_was_present =
         caseload.config.is_some() && !configure_options.has_explicit_overrides();
     caseload.apprisal = None;
 
-    let configured = run_branch_b_configure(&configure_options, Some(caseload))?;
+    let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
     let api_key = resolve_gemini_api_key(&configure_options)?;
     let apprise_opts = AppriseOptions {
         threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
     };
 
-    let enriched = match backend {
-        AppriseBackend::Hermetic { provider, .. } => {
-            execute_apprise(&apprise_opts, configured, snapshot, *provider)
-        }
-        AppriseBackend::LiveDisk { .. } => {
-            let live_provider = GeminiModelProvider::new(api_key);
-            execute_apprise(&apprise_opts, configured, snapshot, &live_provider)
-        }
-    }
-    .map_err(|err| CliError::usage(err.to_string()))?;
+    let enriched = telemetry
+        .run_stage(PipelineStage::Apprise, |scope| match backend {
+            AppriseBackend::Hermetic { provider, .. } => {
+                let instrumented = scope.instrument_provider(*provider);
+                execute_apprise(&apprise_opts, configured, snapshot, &instrumented)
+            }
+            AppriseBackend::LiveDisk { .. } => {
+                let live_provider = GeminiModelProvider::new(api_key);
+                let instrumented = scope.instrument_provider(&live_provider);
+                execute_apprise(&apprise_opts, configured, snapshot, &instrumented)
+            }
+        })
+        .map_err(|err| CliError::usage(err.to_string()))?;
 
     let disp = if config_was_present {
         StageDisposition::PrePopulated
