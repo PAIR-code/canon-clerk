@@ -236,6 +236,19 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .expect("failed to execute canon-clerk apprise --intent");
     assert_eq!(apprise_intent_only.status.code(), Some(2));
 
+    let apprise_zero_batch = Command::new(bin_path())
+        .args([
+            "apprise",
+            "--intent",
+            "Add new feature",
+            "src/lib.rs",
+            "--apprise-batch-size",
+            "0",
+        ])
+        .output()
+        .expect("failed to execute canon-clerk apprise --apprise-batch-size 0");
+    assert_eq!(apprise_zero_batch.status.code(), Some(2));
+
     let apprise_zero_cand = Command::new(bin_path())
         .args([
             "apprise",

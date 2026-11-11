@@ -28,7 +28,8 @@ pub mod telemetry;
 pub mod validate;
 
 pub use apprise::{
-    AppriseError, AppriseOptions, DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_THRESHOLD, execute_apprise,
+    AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
+    ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD, execute_apprise,
 };
 pub use canon::{
     Canon, CanonBody, CanonMetadata, CanonParseError, CanonScope, CanonSourceInfo, CanonSourceKind,

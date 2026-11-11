@@ -122,6 +122,14 @@ pub struct DocketArgs {
     #[arg(long = "admit-threshold", hide = true, allow_hyphen_values = true)]
     pub rejected_admit_threshold: Option<String>,
 
+    /// Hidden capture rejecting out-of-closure `--apprise-batch-size`.
+    #[arg(long = "apprise-batch-size", hide = true, allow_hyphen_values = true)]
+    pub rejected_apprise_batch_size: Option<String>,
+
+    /// Hidden capture rejecting out-of-closure `--apprise-concurrency`.
+    #[arg(long = "apprise-concurrency", hide = true, allow_hyphen_values = true)]
+    pub rejected_apprise_concurrency: Option<String>,
+
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
@@ -569,9 +577,15 @@ index 0000000..1111111
             let ws = sample_workspace();
             let provider = StubProvider::succeeding(json!({}));
 
-            for flag in ["--threshold", "--apprise-threshold", "--admit-threshold"] {
+            for (flag, val, expected_hint) in [
+                ("--threshold", "0.6", "--docket-threshold"),
+                ("--apprise-threshold", "0.6", "--docket-threshold"),
+                ("--admit-threshold", "0.6", "--docket-threshold"),
+                ("--apprise-batch-size", "15", "--docket-batch-size"),
+                ("--apprise-concurrency", "4", "--docket-concurrency"),
+            ] {
                 let args =
-                    parse_docket_args(&["canon-clerk", "docket", "src/cli/docket.rs", flag, "0.6"]);
+                    parse_docket_args(&["canon-clerk", "docket", "src/cli/docket.rs", flag, val]);
                 let mut stdin = Cursor::new(b"");
                 let mut stdout = Vec::new();
                 let err = run_docket_with_snapshot_and_provider(
@@ -582,9 +596,9 @@ index 0000000..1111111
                     &env_with_key(),
                     &provider,
                 )
-                .expect_err("disallowed threshold flag must fail");
+                .expect_err("disallowed threshold/batching flag must fail");
                 assert_eq!(err.exit_code(), 2);
-                assert!(err.to_string().contains("--docket-threshold"));
+                assert!(err.to_string().contains(expected_hint));
             }
             assert_eq!(provider.call_count(), 0);
         }
