@@ -80,6 +80,14 @@ pub struct StoredConfig {
     #[serde(alias = "reasoningBudget", alias = "reasoning_budget")]
     pub reasoning_budget: Option<u32>,
 
+    /// Optional default maximum candidate canons per `apprise` screener call (`appriseBatchSize` or `apprise_batch_size`).
+    #[serde(alias = "appriseBatchSize", alias = "apprise_batch_size")]
+    pub apprise_batch_size: Option<usize>,
+
+    /// Optional default maximum concurrent in-flight `apprise` screener calls (`appriseConcurrency` or `apprise_concurrency`).
+    #[serde(alias = "appriseConcurrency", alias = "apprise_concurrency")]
+    pub apprise_concurrency: Option<usize>,
+
     /// Optional default maximum candidate canons per `docket` screener call (`docketBatchSize` or `docket_batch_size`).
     #[serde(
         alias = "docketBatchSize",
@@ -302,7 +310,9 @@ mod tests {
                     "provider": "google",
                     "model": "gemini-2.5-pro"
                 },
-                "reasoningBudget": 4096
+                "reasoningBudget": 4096,
+                "appriseBatchSize": 15,
+                "appriseConcurrency": 3
             }"#;
             write_config_with_mode(&cfg_path, json, 0o600);
 
@@ -319,6 +329,8 @@ mod tests {
                 Some("google:gemini-2.5-pro")
             );
             assert_eq!(loaded.reasoning_budget, Some(4096));
+            assert_eq!(loaded.apprise_batch_size, Some(15));
+            assert_eq!(loaded.apprise_concurrency, Some(3));
 
             let _ = fs::remove_dir_all(&dir);
         }

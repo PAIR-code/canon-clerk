@@ -48,6 +48,18 @@ pub(super) fn ensure_stage_prefixed_threshold_flags(args: &DocketArgs) -> Result
              Hint: Pass `--docket-threshold <FLOAT>` for macro subject-matter jurisdiction triage.",
         ));
     }
+    if args.rejected_apprise_batch_size.is_some() {
+        return Err(CliError::usage(
+            "Out-of-closure flag `--apprise-batch-size` is not valid for `canon-clerk docket` (`apprise` is pruned from the docket closure).\n  \
+             Hint: Pass `--docket-batch-size <COUNT>` (or `--max-canons-per-call <COUNT>`) for macro subject-matter jurisdiction triage.",
+        ));
+    }
+    if args.rejected_apprise_concurrency.is_some() {
+        return Err(CliError::usage(
+            "Out-of-closure flag `--apprise-concurrency` is not valid for `canon-clerk docket` (`apprise` is pruned from the docket closure).\n  \
+             Hint: Pass `--docket-concurrency <COUNT>` (or `--max-concurrent-calls <COUNT>`) for macro subject-matter jurisdiction triage.",
+        ));
+    }
     Ok(())
 }
 

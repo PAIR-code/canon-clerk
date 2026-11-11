@@ -26,7 +26,7 @@ flowchart LR
     subgraph Inputs["Inputs"]
         Validate["validate (Branch A)<br/><code>.validation</code>"]
         Config["configure (Branch B)<br/><code>.config</code>"]
-        Params["Stage Flags<br/><i>(--apprise-threshold, --intent, --screener-model)</i>"]
+        Params["Stage Flags<br/><i>(--apprise-threshold, --apprise-batch-size,<br/>--apprise-concurrency, --intent, --screener-model)</i>"]
     end
 
     Validate --> Apprise["apprise<br/><b>(Current Node)</b><br/><code>.apprisal</code>"]
@@ -63,7 +63,8 @@ flowchart LR
 
 ### Data Plane & Domain Short-Circuit Invariants
 1. **Deterministic Status Derivation:** The screener model emits only `apprisal_summary` and `apprisal_score`; the domain engine deterministically evaluates the score against `--apprise-threshold` (default `0.5`) to assign `apprisal_status` (`"applicable"` vs. `"dismissed"`).
-2. **Empty Candidate Short-Circuit:** If `.discovery.candidate_canons` is empty, the engine attaches an empty `.apprisal` record (`assessments: {}`) and terminates immediately with exit code `0`, dispatching zero model calls.
+2. **Completion-Order-Independent Deterministic Folding:** Whether candidate canons are evaluated in a single aggregate call or partitioned into concurrent batches, all per-canon assessments fold into a deterministic lexicographically ordered `assessments` map. Identical per-canon model outputs produce byte-for-byte identical `.apprisal` records regardless of batch partitioning or in-flight batch completion order.
+3. **Empty Candidate Short-Circuit:** If `.discovery.candidate_canons` is empty, the engine attaches an empty `.apprisal` record (`assessments: {}`) and terminates immediately with exit code `0`, dispatching zero model calls.
 
 ---
 
@@ -71,8 +72,12 @@ flowchart LR
 
 1. **Dual-Input Verification & Candidate Canon Early Exit:**  
    Verifies that non-empty prospective design intent is present on `caseload.intake.intent` alongside resolved discovery scope in `caseload.discovery`. Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths, globs, or explicit canon selection). If `candidate_canons` is empty after evaluating an explicit target or canon scope, attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits immediately with exit code `0`.
-2. **Aggregate Single-Turn Screening & Normalized Canon Grounding (`gemini-flash-lite-latest`):**  
-   Evaluates **all candidate canons against the prospective design intent and target scope context in a single aggregate prompt turn** using `caseload.config.screener_model`. Each candidate canon section renders normalized frontmatter metadata (`Triggers`, `Exists`, `Inspect` with trailing `?` on optional planes, `References`, `Tags`) when non-empty alongside matched `- Triggered Exhibits:`, the statute body, and an explicit `- Exact \`canon_path\`: \`<canon_ref>\`` footer, followed by a numbered `## Required \`canon_path\` Identifiers` checklist at the end of the prompt. Candidate keys are framed as realm-neutral **candidate canon identifiers** (supporting local `.canons/...`, `builtin:...`, and `<pack>:...` references) anchored to the wire `canon_path` property.
+2. **Aggregate & Batched Canon Screening (`gemini-flash-lite-latest`):**  
+   Evaluates candidate canons against the prospective design intent and target scope context using `caseload.config.screener_model` at `temperature: 0.0` (with extended thinking omitted so `gemini-flash-lite-latest` executes with zero thinking tokens):
+   - **Single-Turn Default:** When no batch size limit is configured, screens all candidate canons in a single aggregate prompt turn.
+   - **Deterministic Balanced Canon Batching:** When an optional maximum canons per call (`--apprise-batch-size` / `--max-canons-per-call`) is configured, partitions `candidate_canons` in deterministic lexicographical order into balanced contiguous batches (`div_ceil`) of at most that size. Each batch prompt shares an identical leading prospective design intent and target scope prefix followed by its assigned canon slice, leveraging provider prefix caching while eliminating autoregressive drift across large candidate arrays.
+   - **Normalized Canon Grounding:** Each candidate canon section renders normalized frontmatter metadata (`Triggers`, `Exists`, `Inspect` with trailing `?` on optional planes, `References`, `Tags`) when non-empty alongside matched `- Triggered Exhibits:`, the statute body, and an explicit `- Exact \`canon_path\`: \`<canon_ref>\`` footer, followed by a numbered `## Required \`canon_path\` Identifiers` checklist at the end of the prompt. Candidate keys are framed as realm-neutral **candidate canon identifiers** (supporting local `.canons/...`, `builtin:...`, and `<pack>:...` references) anchored to the wire `canon_path` property.
+   - **Bounded In-Flight Concurrency & Telemetry Aggregation:** Executes batches concurrently up to the configured maximum concurrent in-flight calls (`--apprise-concurrency` / `--max-concurrent-calls`, default `4` when batched), deterministically merging per-batch assessments into `.apprisal.assessments` regardless of completion order and summing multi-batch token accounting and thought events into `StageFinish` telemetry. If any batch fails provider transport or schema validation, the stage fails fast.
 3. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**  
    Enforces a constant-size structured JSON wire array pairing each `canon_path` with `apprisal_summary` generated before `apprisal_score`:
    ```json
@@ -96,7 +101,7 @@ flowchart LR
    Screener system instructions anchor scores to discrete prospective jurisdiction rubric bands—distinguishing direct or substantial engagement with the governed construct (`0.75 - 0.95`) from absent or orthogonal domain constructs (`0.05 - 0.25`) so borderline candidates do not wobble across the `0.5` boundary. The core domain engine then deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
    - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: "applicable"`.
    - Canons scoring $< 0.5$ are marked `apprisal_status: "dismissed"`.
-5. **Latency & Token Economy:** Executes in ~400ms, expending only ~1,200 tokens across 20+ candidate canons.
+5. **Latency & Token Economy:** Executes in ~400ms on compact candidate sets (expending ~1,200 tokens across 20+ candidate canons), and scales across 40+ candidate canons via concurrent batches with reduced wall-clock latency and stabilized per-canon classifications.
 
 ---
 
@@ -119,6 +124,9 @@ canon-clerk apprise --intent "Add CLI output flag" src/cli --format compact
 
 # 5. Machine-readable JSON output for AI Agent prompt injection:
 canon-clerk apprise --intent "Add Kafka event bus" src/events --json
+
+# 6. Partition large candidate sets into concurrent batches of 15 canons:
+canon-clerk apprise --intent "Add CLI output flag" src/cli --apprise-batch-size 15 --apprise-concurrency 4
 ```
 
 ### Dual-Input Guard (Missing Intent or Target Scope)
@@ -137,7 +145,10 @@ Conversely, when both prospective design intent and an explicit target or canon 
 - `--diff <PATH|->`, `--all-targets`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags.
 - `--apprise-threshold <FLOAT>` (fallback env: `CANON_CLERK_APPRISE_THRESHOLD`): Prospective applicability threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage threshold flags are rejected with exit code `2` and guidance pointing to `--apprise-threshold`.
+- `--apprise-batch-size <COUNT>` / `--max-canons-per-call <COUNT>` (fallback env: `CANON_CLERK_APPRISE_BATCH_SIZE` / `CANON_CLERK_MAX_CANONS_PER_CALL`; config file key: `appriseBatchSize`): Optional positive integer (`>= 1`) capping the maximum candidate canons evaluated per screener model call. Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ unbounded single-call default).
+- `--apprise-concurrency <COUNT>` / `--max-concurrent-calls <COUNT>` (fallback env: `CANON_CLERK_APPRISE_CONCURRENCY` / `CANON_CLERK_MAX_CONCURRENT_CALLS`; config file key: `appriseConcurrency`): Optional positive integer (`>= 1`) bounding the maximum concurrent in-flight screener model calls when candidate canons are partitioned into multiple batches (default: `4`). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).
 - `--screener-model <MODEL>` (fallback env: `CANON_CLERK_SCREENER_MODEL`), `--auditor-model <MODEL>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`), `--reasoning-budget <TOKENS>` (fallback env: `CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (fallback env: `GEMINI_API_KEY`): Shared model configuration and credential options (resolved JIT only when validated candidate canons exist).
+- `-v` / `--verbose` (fallback env: `CANON_CLERK_VERBOSE`), `--log-file <PATH>` (fallback env: `CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options.
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload` JSON from file or `-` for standard input.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of terminal `stdout`.
@@ -151,5 +162,5 @@ Conversely, when both prospective design intent and an explicit target or canon 
 ### CLI Exit Codes
 - **0:** Successful statutory apprisal (including clean zero-candidate short-circuits).
 - **1:** Candidate canon validation failure (`validation.has_errors` is `true`, evaluated before checking `GEMINI_API_KEY`) or local workspace I/O runtime error.
-- **2:** Usage error, dual-input guard violation (missing design intent or missing target/canon scope), invalid or out-of-range `--apprise-threshold` / `CANON_CLERK_APPRISE_THRESHOLD`, rejected `--threshold` flag, conflicting `stdin` operands, missing API credentials, or model provider error.
+- **2:** Usage error, dual-input guard violation (missing design intent or missing target/canon scope), invalid or out-of-range `--apprise-threshold` / `CANON_CLERK_APPRISE_THRESHOLD`, invalid or zero `--apprise-batch-size` / `--apprise-concurrency` (or their environment/config fallbacks), rejected `--threshold` / `--docket-threshold` / `--admit-threshold` flag, conflicting `stdin` operands, missing API credentials, or model provider error.
 

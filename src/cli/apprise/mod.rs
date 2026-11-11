@@ -30,7 +30,8 @@ use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use guards::{
     can_fast_forward_completed_apprisal, enforce_dual_input_guard,
-    ensure_stage_prefixed_threshold_flags, resolve_apprise_threshold,
+    ensure_stage_prefixed_threshold_flags, resolve_apprise_batch_size, resolve_apprise_concurrency,
+    resolve_apprise_threshold,
 };
 use render::{AppriseWatermarks, render_apprise_output};
 use stages::{execute_jit_configure_and_apprise, resolve_apprise_discover, resolve_apprise_intake};
@@ -88,6 +89,26 @@ pub struct AppriseArgs {
     )]
     pub apprise_threshold: Option<f64>,
 
+    /// Optional maximum candidate canons evaluated per screener model call (env: `CANON_CLERK_APPRISE_BATCH_SIZE`).
+    #[arg(
+        long = "apprise-batch-size",
+        visible_alias = "max-canons-per-call",
+        value_name = "COUNT",
+        help_heading = "Apprisal Options",
+        help = "Maximum candidate canons per screener model call (fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
+    )]
+    pub apprise_batch_size: Option<usize>,
+
+    /// Optional maximum concurrent in-flight screener model calls when batched (default: `4`; env: `CANON_CLERK_APPRISE_CONCURRENCY`).
+    #[arg(
+        long = "apprise-concurrency",
+        visible_alias = "max-concurrent-calls",
+        value_name = "COUNT",
+        help_heading = "Apprisal Options",
+        help = "Maximum concurrent in-flight screener calls when batched (default: 4; fallback env: CANON_CLERK_APPRISE_CONCURRENCY)"
+    )]
+    pub apprise_concurrency: Option<usize>,
+
     /// Hidden capture rejecting ambiguous unqualified `--threshold` (`scheduling.md` §4 Pattern C).
     #[arg(long = "threshold", hide = true, allow_hyphen_values = true)]
     pub rejected_threshold: Option<String>,
@@ -99,6 +120,14 @@ pub struct AppriseArgs {
     /// Hidden capture rejecting out-of-closure `--admit-threshold` (`scheduling.md` §4 Pattern C).
     #[arg(long = "admit-threshold", hide = true, allow_hyphen_values = true)]
     pub rejected_admit_threshold: Option<String>,
+
+    /// Hidden capture rejecting out-of-closure `--docket-batch-size`.
+    #[arg(long = "docket-batch-size", hide = true, allow_hyphen_values = true)]
+    pub rejected_docket_batch_size: Option<String>,
+
+    /// Hidden capture rejecting out-of-closure `--docket-concurrency`.
+    #[arg(long = "docket-concurrency", hide = true, allow_hyphen_values = true)]
+    pub rejected_docket_concurrency: Option<String>,
 
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
@@ -209,6 +238,8 @@ fn run_apprise_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let threshold = resolve_apprise_threshold(args.apprise_threshold, env)?;
+    let _validated_batch_size = resolve_apprise_batch_size(args.apprise_batch_size, env, None)?;
+    let _validated_concurrency = resolve_apprise_concurrency(args.apprise_concurrency, env, None)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -277,7 +308,7 @@ fn run_apprise_core(
     }
 
     let (final_caseload, configure_disp) = execute_jit_configure_and_apprise(
-        &args.provider,
+        args,
         env,
         threshold,
         caseload_after_validate,
@@ -452,6 +483,10 @@ mod tests {
             ENV_GEMINI_API_KEY.to_string(),
             "synthetic-apprise-cli-test-key".to_string(),
         );
+        env.insert(
+            "XDG_CONFIG_HOME".to_string(),
+            "/nonexistent-canon-clerk-xdg-dir".to_string(),
+        );
         env
     }
 
@@ -488,6 +523,10 @@ mod tests {
                 "src/auth",
                 "--apprise-threshold",
                 "0.65",
+                "--apprise-batch-size",
+                "15",
+                "--apprise-concurrency",
+                "3",
                 "--screener-model",
                 "flash-lite",
                 "--format",
@@ -500,19 +539,46 @@ mod tests {
                     assert_eq!(args.filing.intent.as_deref(), Some("Rotate auth provider"));
                     assert_eq!(args.filing.targets, vec!["src/auth".to_string()]);
                     assert_eq!(args.apprise_threshold, Some(0.65));
+                    assert_eq!(args.apprise_batch_size, Some(15));
+                    assert_eq!(args.apprise_concurrency, Some(3));
                     assert_eq!(args.provider.screener_model.as_deref(), Some("flash-lite"));
                     assert_eq!(args.format, AppriseFormat::Compact);
                 }
                 _ => panic!("expected Apprise subcommand"),
             }
+
+            let alias_cli = Cli::try_parse_from([
+                "canon-clerk",
+                "apprise",
+                "--intent",
+                "Rotate auth provider",
+                "src/auth",
+                "--max-canons-per-call",
+                "12",
+                "--max-concurrent-calls",
+                "2",
+            ])
+            .expect("parse apprise batching aliases");
+            if let Some(Commands::Apprise(args)) = alias_cli.command {
+                assert_eq!(args.apprise_batch_size, Some(12));
+                assert_eq!(args.apprise_concurrency, Some(2));
+            } else {
+                panic!("expected Apprise subcommand");
+            }
         }
 
         #[test]
-        fn test_rejects_unqualified_and_out_of_closure_threshold_flags_with_exit_2() {
+        fn test_rejects_unqualified_and_out_of_closure_threshold_and_batching_flags_with_exit_2() {
             let snapshot = valid_snapshot();
             let provider = StubProvider::succeeding(json!({"assessments": []}));
 
-            for bad_flag in ["--threshold", "--docket-threshold", "--admit-threshold"] {
+            for (bad_flag, bad_val, expected_hint) in [
+                ("--threshold", "0.7", "--apprise-threshold"),
+                ("--docket-threshold", "0.7", "--apprise-threshold"),
+                ("--admit-threshold", "0.7", "--apprise-threshold"),
+                ("--docket-batch-size", "15", "--apprise-batch-size"),
+                ("--docket-concurrency", "4", "--apprise-concurrency"),
+            ] {
                 let cli = Cli::try_parse_from([
                     "canon-clerk",
                     "apprise",
@@ -520,7 +586,7 @@ mod tests {
                     "Test",
                     "src/auth",
                     bad_flag,
-                    "0.7",
+                    bad_val,
                 ])
                 .expect("parse hidden rejected flag");
                 let Some(Commands::Apprise(args)) = cli.command else {
@@ -536,12 +602,70 @@ mod tests {
                     &test_env_with_key(),
                     &provider,
                 )
-                .expect_err("must reject invalid threshold flag");
+                .expect_err("must reject invalid threshold/batching flag");
                 assert_eq!(err.exit_code(), 2);
                 assert!(
-                    err.to_string().contains("--apprise-threshold"),
-                    "error for {bad_flag} must point to --apprise-threshold, got: {err}"
+                    err.to_string().contains(expected_hint),
+                    "error for {bad_flag} must point to {expected_hint}, got: {err}"
                 );
+            }
+        }
+
+        #[test]
+        fn test_validates_apprise_batch_size_and_concurrency_flags_and_env() {
+            let snapshot = valid_snapshot();
+            let provider = StubProvider::succeeding(json!({"assessments": []}));
+            let base_args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Test".to_string()),
+                    targets: vec!["src/auth".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+
+            for bad_args in [
+                AppriseArgs {
+                    apprise_batch_size: Some(0),
+                    ..base_args.clone()
+                },
+                AppriseArgs {
+                    apprise_concurrency: Some(0),
+                    ..base_args.clone()
+                },
+            ] {
+                let err = run_apprise_with_snapshot_and_provider(
+                    &bad_args,
+                    &mut Cursor::new(b""),
+                    &mut Vec::new(),
+                    &snapshot,
+                    &test_env_with_key(),
+                    &provider,
+                )
+                .expect_err("zero batch/concurrency flag must fail with exit 2");
+                assert_eq!(err.exit_code(), 2);
+                assert!(err.to_string().contains("Hint:"));
+            }
+
+            for env_key in [
+                crate::apprise::ENV_APPRISE_BATCH_SIZE,
+                crate::docket::ENV_MAX_CANONS_PER_CALL,
+                crate::apprise::ENV_APPRISE_CONCURRENCY,
+                crate::docket::ENV_MAX_CONCURRENT_CALLS,
+            ] {
+                let mut zero_env = test_env_with_key();
+                zero_env.insert(env_key.to_string(), "0".to_string());
+                let err = run_apprise_with_snapshot_and_provider(
+                    &base_args,
+                    &mut Cursor::new(b""),
+                    &mut Vec::new(),
+                    &snapshot,
+                    &zero_env,
+                    &provider,
+                )
+                .expect_err("zero env batch/concurrency must fail with exit 2");
+                assert_eq!(err.exit_code(), 2);
+                assert!(err.to_string().contains("Hint:"));
             }
         }
 

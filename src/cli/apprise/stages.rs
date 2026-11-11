@@ -14,10 +14,12 @@
 
 //! Guarded Branch A and JIT Branch B execution steps for `canon-clerk apprise`.
 
+use super::AppriseArgs;
+use super::guards::{resolve_apprise_batch_size, resolve_apprise_concurrency};
 use crate::apprise::{AppriseOptions, execute_apprise};
 use crate::caseload::{Caseload, IntakeScope};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
+use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
@@ -115,7 +117,7 @@ pub(super) fn resolve_apprise_discover(
 }
 
 pub(super) fn execute_jit_configure_and_apprise(
-    provider_args: &ProviderConfigArgs,
+    args: &AppriseArgs,
     env: &BTreeMap<String, String>,
     threshold: f64,
     mut caseload: Caseload,
@@ -123,7 +125,17 @@ pub(super) fn execute_jit_configure_and_apprise(
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
-    let configure_options = resolve_branch_b_options(provider_args, env)?;
+    let configure_options = resolve_branch_b_options(&args.provider, env)?;
+    let max_canons_per_call = resolve_apprise_batch_size(
+        args.apprise_batch_size,
+        env,
+        configure_options.stored_config.as_ref(),
+    )?;
+    let max_concurrent_calls = resolve_apprise_concurrency(
+        args.apprise_concurrency,
+        env,
+        configure_options.stored_config.as_ref(),
+    )?;
     let config_was_present =
         caseload.config.is_some() && !configure_options.has_explicit_overrides();
     caseload.apprisal = None;
@@ -133,6 +145,8 @@ pub(super) fn execute_jit_configure_and_apprise(
     let apprise_opts = AppriseOptions {
         threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        max_canons_per_call,
+        max_concurrent_calls,
     };
 
     let enriched = telemetry
