@@ -24,7 +24,7 @@ $$
 \begin{aligned}
 \text{Branch A (Filing Track):}\quad & \text{intake} \longrightarrow \text{discover} \longrightarrow \text{validate} \\
 \text{Branch B (Environment Track):}\quad & \text{configure} \quad (\longrightarrow \text{probe}) \\
-\text{Adjudication Spine:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{docket} \longrightarrow \text{admit} \longrightarrow \text{audit} \\
+\text{Adjudication Spine:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{docket} \longrightarrow \text{admit} \longrightarrow \text{vet} \longrightarrow \text{audit} \\
 \text{Apprisal Track:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{apprise}
 \end{aligned}
 $$
@@ -43,10 +43,10 @@ The DAG consists of **Two Feeder Branches** that converge at `docket` (for dispu
    Resolves active provider credentials (`GEMINI_API_KEY`, `TYPESAFE_API_KEY`), canonical `<provider>:<model>` specifiers, and reasoning budgets. Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
 3. **Diagnostic Leaf (`probe`):**  
    An auxiliary termination node depending strictly on `configure`. Executes live provider connectivity and latency tests without triggering an audit run.
-4. **The Heuristic Cascade (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `audit`):**  
-   Converges at `docket` (requiring both validated candidate canons and active provider configuration), followed by exhibit admissibility screening (`admit`) and single-trial adjudication (`audit`).
+4. **The Heuristic Cascade (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`):**  
+   Converges at `docket` (requiring both validated candidate canons and active provider configuration), followed by exhibit admissibility screening (`admit`), prima facie compliance vetting on the papers (`vet`), and isolated generative adjudication of contested cases (`audit`).
 5. **The Prospective Apprisal Track (`apprise`):**  
-   Converges at `apprise` (requiring validated candidate canons and provider configuration) to evaluate prospective design intent before implementation, completely bypassing diff parsing, `docket`, `admit`, and `audit`.
+   Converges at `apprise` (requiring validated candidate canons and provider configuration) to evaluate prospective design intent before implementation, completely bypassing diff parsing, `docket`, `admit`, `vet`, and `audit`.
 
 ```mermaid
 flowchart TD
@@ -68,9 +68,10 @@ flowchart TD
         S_Apprise["apprise<br/>(Statutory Notice: Candidate canons → Applicable Canons)"]
     end
 
-    subgraph HeuristicCascade ["The Heuristic Cascade (AI-Driven · Positive Polarity ≥ 0.5 Threshold)"]
+    subgraph HeuristicCascade ["The Heuristic Cascade (AI-Driven · Positive Polarity)"]
         S5["docket<br/>(Macro Triage: Candidate canons → Active Cases)"] --> S6["admit<br/>(Micro Triage: Target files/diff hunks → Admitted Exhibits)"]
-        S6 --> S7["audit<br/>(Adjudication: Single-trial evaluation of Exhibits vs. Statute)"]
+        S6 --> S6_Vet["vet<br/>(Prima Facie Vetting: Active Cases → Vetted vs. Contested)"]
+        S6_Vet --> S7["audit<br/>(Judicial Adjudication: Generative trials for Contested Cases)"]
     end
 
     S3 --> S5
@@ -117,12 +118,12 @@ flowchart TD
 
 ### The Domain Engine (The Hexagon Core)
 - **Schema Layer:** Defines the canonical representations for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
-- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, external environments, or vendor-specific HTTP payloads.
+- **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `vet`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, external environments, or vendor-specific HTTP payloads.
 - **Configuration & Probe:** Resolves runtime environment and API credentials, normalizes model specifiers, and implements the diagnostic `probe` provider health check.
 
 ### The Driven Adapter (The Model Provider Boundary)
-- **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (`google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `audit`) evaluate against normalized model specifiers, system instructions, prompts, and JSON Schemas.
-- **Discriminative Decision Model Port:** Encapsulates discriminative classifier endpoints (`typesafe:jev-*`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus two-tier happy-path fast-pass escalation in `audit`.
+- **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (`google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) evaluate against normalized model specifiers, system instructions, prompts, and JSON Schemas.
+- **Discriminative Decision Model Port:** Encapsulates discriminative classifier endpoints (`typesafe:jev-*`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus prima facie compliance vetting in `vet`.
 - **Deterministic Reason-First Constrained Decoding:** Enforces deterministic generation (`temperature: 0.0`) paired with strict JSON Schema output enforcement (`application/json`) on generative tiers so rationale scratchpad fields precede numeric scores across generative calls.
 - **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps optional token ceilings (`reasoning_budget`) to provider-native extended thinking controls, separates intermediate reasoning thought summaries from decoded payloads, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for the out-of-band Telemetry Event Stream.
 - **Credential Encapsulation & Actionable Error Classification:** Secret API keys are bound to concrete provider adapters at construction rather than carried on evaluation requests or `Caseload` envelopes, and upstream HTTP or transport failures (`401`/`403`, `404`, `429`, `5xx`, context token limits, timeouts, safety blocks, or malformed responses) are classified into actionable diagnostics with provider-specific remediation hints.
@@ -149,7 +150,7 @@ flowchart TD
 
 ---
 
-## 4. The Architectural Triad: Colorability $\to$ Admissibility $\to$ Compliance
+## 4. The Clerkship Sequence: Colorability $\to$ Admissibility $\to$ Vetting $\to$ Compliance
 
 Grounding AI evaluation in the cognitive and procedural division of labor of a court clerkship establishes distinct, unambiguous semantics for every heuristic stage:
 
@@ -158,7 +159,8 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
 | **`apprise`** | **Statutory Apprisal** *(Procedural Notice)* | `apprisal_score`<br/>`apprisal_summary` | *"Given this prospective design intent and target scope, does this canon have a colorable claim of jurisdiction over the planned work?"* | `score >= 0.5` $\implies$ Marked **Applicable** |
 | **`docket`** | **Colorability** *(Subject-Matter Jurisdiction)* | `colorability_score`<br/>`colorability_summary` | *"Does this candidate canon have a colorable claim of jurisdiction over this PR as a whole?"* | `score >= 0.5` $\implies$ Opened as an **Active Case** |
 | **`admit`** | **Admissibility** *(Relevance of Evidence)* | `admissibility_score`<br/>`admissibility_summary` | *"For an active Case, is this specific file/diff hunk admissible as relevant evidence?"* | `score >= 0.5` $\implies$ Admitted as an **Exhibit** |
-| **`audit`** | **Compliance** *(Substantive Merits)* | `compliance_score`<br/>`compliance_summary` | *"Given the admitted exhibits and governing invariant/exceptions, does the change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
+| **`vet`** | **Prima Facie Vetting** *(Uncontested Compliance)* | `vetting_score`<br/>`vetting_summary` | *"Given the admitted exhibits and governing statute, does the filing clearly comply on its face without requiring remediation?"* | `score >= 0.8` $\implies$ **Vetted** (`vetted`)<br/>`score < 0.8` $\implies$ **Contested** (`contested`) |
+| **`audit`** | **Compliance** *(Substantive Merits)* | `compliance_score`<br/>`compliance_summary` | *"Given the admitted exhibits and governing invariant/exceptions, does the contested change comply with canon statute?"* | `score >= 0.5` $\implies$ **Compliant** (`pass`) 🟢<br/>`score < 0.5` $\implies$ **Violation** (`fail`) 🔴 |
 
 ### The Court Clerkship Taxonomy
 - **The Caseload:** The cumulative lifecycle container for the evaluation run.
@@ -169,13 +171,15 @@ Grounding AI evaluation in the cognitive and procedural division of labor of a c
   - **Tendered Exhibits (`intake`):** Raw filing inputs, including literal text metadata (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`), diff streams (`diff`), prospective design intent (`--intent`), and target file discovery directives.
   - **Candidate Exhibits (`discover`):** Materialized exhibits retained after mutual pruning with candidate canons (dropping un-inspected exhibits to preserve token hygiene).
   - **Admitted Exhibits (`admit`):** Exhibits formally admitted as relevant evidence for a specific Case on the docket (`admissibility_score >= 0.5`).
-- **Trial / Decree:** The isolated prompt turn and final adjudication rendered during `audit` per Case against its admitted exhibits.
+- **Prima Facie Vetting (`vet`):** Pre-trial compliance review on the papers clearing plainly compliant cases (`vetted`) and binding disputed cases (`contested`) over for trial.
+- **Trial / Decree:** The isolated generative prompt turn and final adjudication rendered during `audit` per contested Case against its admitted exhibits.
 
 ### Positive Polarity Consistency
 All heuristic metrics share an identical polarity convention: **a higher score reflects the affirmative presence of the named property**:
 - **`apprise` (High Apprisal):** Affirmative jurisdiction $\implies$ canon marked applicable (`score >= 0.5`).
 - **`docket` (High Colorability):** Affirmative jurisdiction $\implies$ canon opened as an active Case.
 - **`admit` (High Admissibility):** Affirmative relevance $\implies$ file/hunk admitted as an Exhibit for that Case.
+- **`vet` (High Prima Facie Compliance):** Affirmative uncontested adherence $\implies$ case cleared on the papers (`score >= 0.8`).
 - **`audit` (High Compliance):** Affirmative adherence $\implies$ change complies with canon statute and passes review (`score >= 0.5`).
 
 ---
@@ -192,7 +196,8 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 | `apprise` | Apprisal Track | Screener AI (`Flash-Lite` / `Jev`) | ~200–400ms, low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
 | `docket` | Cascade Spine | Screener AI (`Flash-Lite` / `Jev`) | ~200–400ms, low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
 | `admit` | Cascade Spine | Screener AI (`Flash-Lite` / `Jev`) | ~300–600ms, low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `audit` | Cascade Spine | Auditor AI (`Pro` / 2-Tier Fast-Pass) | ~0.3–2.5s, targeted | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `vet` | Cascade Spine | Screener AI (`Jev` / `Flash-Lite`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Cascade Spine | Generative Auditor (`Pro`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -218,20 +223,24 @@ flowchart TD
     
     C3 --> G6{"admit Gate<br/>(Admissibility ≥ 0.5)"}
     G6 -- "Inadmissible (< 0.5)" --> SievePrune2["Pruned"]
-    G6 -- "Admitted (≥ 0.5)" --> E5["5 Admitted Exhibits<br/>(~600ms · gemini-flash-lite-latest)"]
+    G6 -- "Admitted (≥ 0.5)" --> E5["3 Active Cases · 5 Admitted Exhibits<br/>(~600ms · Screener AI)"]
     
-    E5 --> G7["audit Adjudication<br/>(1 Trial per Case · gemini-pro-latest)"]
-    G7 --> FinalVerdict["Final Verdict & Decree<br/>(~2.5s · ~7,500 total tokens)"]
+    E5 --> G6_Vet{"vet Gate<br/>(Prima Facie ≥ 0.8 · Jev)"}
+    G6_Vet -- "Vetted (≥ 0.8)" --> VettedPass["2 Vetted Cases<br/>(0 output tokens · Folded into Verdict)"]
+    G6_Vet -- "Contested (< 0.8)" --> G7["audit Adjudication<br/>(1 Contested Trial · gemini-pro-latest)"]
+    VettedPass --> FinalVerdict["Final Verdict & Decree<br/>(~1.8s · Targeted Reasoning)"]
+    G7 --> FinalVerdict
 ```
 
 | Pipeline Step | Canons / Cases in Flight | Target Exhibits | Model Tier | Token Cost | Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
 | **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **`docket` Gate** | 3 active Cases | 6 touched files | `gemini-flash-lite-latest` | ~1,200 tokens | ~420ms |
-| **`admit` Gate** | 3 active Cases | 5 admitted hunks | `gemini-flash-lite-latest` | ~1,800 tokens | ~610ms |
-| **`audit` Adjudication** | 3 trials | 5 exhibits | `gemini-pro-latest` | ~4,500 tokens | ~2,400ms |
-| **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~7,500 tokens** | **< 3.5s** |
+| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`jev` / `flash-lite`) | ~1,200 tokens | ~350ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`jev` / `flash-lite`) | ~1,800 tokens | ~500ms |
+| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`jev`) | 0 output tokens | ~200ms |
+| **`audit` Adjudication** | 1 contested trial | 2 exhibits | `gemini-pro-latest` | ~1,500 tokens | ~1,200ms |
+| **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.5s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
 
@@ -246,11 +255,11 @@ The formal Caseload domain models and granular payload schemas are specified in 
 ### Top-Level Envelope Constraints
 
 1. **Schema Versioning (`version`):** Every serialized `Caseload` envelope carries a top-level `version` identifier (currently `"1.0"`) establishing wire-format compatibility across piped CLI invocations and archived CI artifacts.
-2. **Stage Namespace Isolation:** Each pipeline stage owns a dedicated, non-overlapping top-level optional namespace on the `Caseload` envelope (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.verdict`). Unexecuted or pruned stages are omitted from serialized JSON rather than emitted as null placeholders.
+2. **Stage Namespace Isolation:** Each pipeline stage owns a dedicated, non-overlapping top-level optional namespace on the `Caseload` envelope (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.vetting`, `.verdict`). Unexecuted or pruned stages are omitted from serialized JSON rather than emitted as null placeholders.
 3. **Additive Immutability:** Stages enrich only their designated namespace while preserving all pre-existing upstream namespaces bit-for-bit.
 4. **Three-Tier Determinism & Stability Contract:**
    - **Engine & Wire Determinism (Bit-for-Bit):** All map keys, entity collections, per-case adjudications, and line annotations across stage payloads serialize in canonical lexicographical order so identical model responses, `--caseload` fast-forwards, and concurrent fold completion orders produce byte-for-byte identical JSON envelopes.
-   - **Gate Verdict Stability (1D Flipper Contract):** Across repeated live runs at `temperature: 0.0`, heuristic stages anchor numeric scores to polarized bands away from the `0.5` decision boundary so per-canon gate classifications (`applicable`, `docketed`, `admitted`, `pass`/`fail`) remain unanimous even when extended reasoning trajectories vary.
+   - **Gate Verdict Stability (1D Flipper Contract):** Across repeated live runs at `temperature: 0.0`, heuristic stages anchor numeric scores to polarized bands away from their decision boundaries (`0.5` for `apprise`, `docket`, `admit`, `audit`; `0.8` for `vet`) so per-canon gate classifications (`applicable`, `docketed`, `admitted`, `vetted`/`contested`, `pass`/`fail`) remain unanimous even when extended reasoning trajectories vary.
    - **Guidance & Span Granularity (Benign Generative Variance):** Natural wording variations in rationale/remediation prose and minor line-span granularity shifts under extended reasoning are tolerated and never constitute verdict flippers, bounded by deterministic structural anchoring guardrails.
 
 ### Stage Payloads & Authoritative Specifications
@@ -267,6 +276,7 @@ Each pipeline stage owns a dedicated, non-overlapping field on the cumulative `C
 | `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisal_score`, `apprisal_summary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
 | `.docket` | `docket` | Dispute Spine | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |
 | `.evidence` | `admit` | Dispute Spine | Micro triage evidence admissibility: admitted file exhibits per active case | [`nodes/admit.md`](nodes/admit.md#caseload-delta) |
+| `.vetting` | `vet` | Dispute Spine | Prima facie compliance vetting assessments (`vetted_cases`, `contested_cases`) | [`nodes/vet.md`](nodes/vet.md#caseload-delta) |
 | `.verdict` | `audit` | Dispute Spine | Final substantive adjudications, compliance scores, decrees, and line annotations | [`nodes/audit.md`](nodes/audit.md#caseload-delta) |
 
 Downstream subcommands fast-forward across any stage whose corresponding namespace is already populated on an incoming `Caseload` (via `--caseload <path|->`).

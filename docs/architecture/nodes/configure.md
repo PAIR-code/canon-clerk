@@ -43,7 +43,7 @@ flowchart LR
 - **Direct Prerequisites:** None (Root node of Branch B).
 - **Transitive Prerequisites:** None.
 - **Independence:** Resolves environment credentials and models with zero dependencies on diffs or canons.
-- **Lazy Evaluation in Cascades:** When executed within a review cascade (`docket`, `admit`, `audit`), `configure` is evaluated lazily *after* `discover` confirms matching candidate canons, guaranteeing that un-governed PRs pass cleanly without checking credentials.
+- **Lazy Evaluation in Cascades:** When executed within a review cascade (`docket`, `admit`, `vet`, `audit`), `configure` is evaluated lazily *after* `discover` confirms matching candidate canons, guaranteeing that un-governed PRs pass cleanly without checking credentials.
 
 ---
 
@@ -52,8 +52,8 @@ flowchart LR
 ### Caseload Delta
 `configure` populates the `.config` namespace on the cumulative `Caseload` envelope with normalized runtime provider settings:
 
-- **Screener Model Specifier (`screener_model`):** Canonical provider-prefixed model identifier used by fast heuristic screening stages (`apprise`, `docket`, `admit`; defaults to `"google:gemini-flash-lite-latest"`).
-- **Auditor Model Specifier (`auditor_model`):** Canonical provider-prefixed model identifier used for substantive trial adjudication (`audit`; defaults to `"google:gemini-pro-latest"`).
+- **Screener Model Specifier (`screener_model`):** Canonical provider-prefixed model identifier used by fast heuristic screening and prima facie vetting stages (`apprise`, `docket`, `admit`, `vet`; defaults to `"google:gemini-flash-lite-latest"`).
+- **Auditor Model Specifier (`auditor_model`):** Canonical provider-prefixed generative model identifier used for substantive trial adjudication (`audit`; defaults to `"google:gemini-pro-latest"`). Discriminative-only classifiers (`typesafe:*` / `jev`) are disallowed on `auditor_model` because `audit` requires structured prose decrees, `Remediation` synthesis, and 1-based `CodeAnnotation` spans.
 - **Reasoning Budget (`reasoning_budget`):** Optional token ceiling governing extended thinking during `audit` trials.
 
 ### Data Plane & Security Invariants
@@ -69,9 +69,9 @@ flowchart LR
 1. **Hierarchical Precedence Cascade:** Resolves model specifiers, reasoning budgets, and provider credentials along a strict descending specificity cascade:
    - **Explicit CLI Flags:** `--screener-model`, `--auditor-model`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`
    - **Environment Variables:** `CANON_CLERK_SCREENER_MODEL`, `CANON_CLERK_AUDITOR_MODEL`, `CANON_CLERK_REASONING_BUDGET`, `GEMINI_API_KEY`, `TYPESAFE_API_KEY`
-   - **User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`, `providers.typesafe.apiKey`) and optional tier and concurrency defaults (`screenerModel`, `auditorModel`, `reasoningBudget`, `appriseBatchSize`, `appriseConcurrency`, `docketBatchSize`, `docketConcurrency`, `admitConcurrency`, `auditConcurrency`)
+   - **User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`, `providers.typesafe.apiKey`) and optional tier and concurrency defaults (`screenerModel`, `auditorModel`, `reasoningBudget`, `appriseBatchSize`, `appriseConcurrency`, `docketBatchSize`, `docketConcurrency`, `admitConcurrency`, `vetConcurrency`, `auditConcurrency`)
    - **Static Defaults:** `google:gemini-flash-lite-latest` (screener) and `google:gemini-pro-latest` (auditor)
-2. **Model Specifier Normalization & Active-Provider Credential Gating:** Resolves shorthand aliases (`flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `flash` $\implies$ `google:gemini-flash-latest`, `pro` $\implies$ `google:gemini-pro-latest`, `jev` / `typesafe:jev` $\implies$ `typesafe:jev-latest`) and rejects unsupported provider prefixes or malformed model identifiers *before* inspecting credentials. `configure` then verifies credentials strictly for the provider namespaces actively referenced by the resolved `screener_model` and `auditor_model` tiers—so pairing `typesafe:jev-latest` (screener) with `google:gemini-pro-latest` (auditor) requires both `TYPESAFE_API_KEY` and `GEMINI_API_KEY`, whereas homogeneous single-provider configurations require only that active provider's key.
+2. **Model Specifier Normalization, Generative Auditor Enforcement, & Closure-Scoped Credential Gating:** Resolves shorthand aliases (`flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `flash` $\implies$ `google:gemini-flash-latest`, `pro` $\implies$ `google:gemini-pro-latest`, `jev` / `typesafe:jev` $\implies$ `typesafe:jev-latest`) and rejects unsupported provider prefixes, malformed model identifiers, or discriminative-only models (`typesafe:*`) on `auditor_model` *before* inspecting credentials. `configure` then verifies credentials strictly for the provider namespaces actively required by the invoked closure—requiring only `screener_model`'s provider key on screener-only closures (`apprise`, `docket`, `admit`, `vet` unless `--auditor-model` is explicitly overridden), and verifying both `screener_model` and `auditor_model` keys on `configure`, `probe`, and `audit`. Thus an environment provisioned solely with `TYPESAFE_API_KEY` can execute up through `canon-clerk vet --screener-model jev`, while `canon-clerk audit` requires a generative auditor credential (`GEMINI_API_KEY`).
 3. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
 
 ---
@@ -90,7 +90,7 @@ canon-clerk configure --screener-model jev --auditor-model pro
 
 ### CLI Flags & Environment
 - `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier or alias (`flash-lite`, `flash`, `pro`, `jev`, `google:<model>`, `typesafe:<model>`).
-- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier or alias.
+- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom generative auditor model specifier or alias (`pro`, `flash`, `flash-lite`, `google:<model>`).
 - `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens.
 - `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.
 - `--typesafe-api-key <key>` (fallback env: `TYPESAFE_API_KEY`): TypeSafe AI Jev API key override.
