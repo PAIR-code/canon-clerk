@@ -823,10 +823,6 @@ mod tests {
 
             let reqs = provider.captured_requests();
             assert_eq!(reqs.len(), 1);
-            let canon_pos = reqs[0]
-                .user_prompt
-                .find("## Active Case Governing Canon:")
-                .expect("canon section present");
             let overview_pos = reqs[0]
                 .user_prompt
                 .find("## Filing Overview")
@@ -835,9 +831,17 @@ mod tests {
                 .user_prompt
                 .find("## Candidate Exhibits")
                 .expect("exhibits section present");
+            let canon_pos = reqs[0]
+                .user_prompt
+                .find("## Active Case Governing Canon:")
+                .expect("canon section present");
+            let required_pos = reqs[0]
+                .user_prompt
+                .find("## Required `file_path` Identifiers")
+                .expect("required identifiers section present");
             assert!(
-                canon_pos < overview_pos && overview_pos < exhibits_pos,
-                "governing canon must lead the prompt to anchor construct and stratum attention"
+                overview_pos < exhibits_pos && exhibits_pos < canon_pos && canon_pos < required_pos,
+                "shared exhibits must lead for prefix caching while governing canon sits at peak recency before generation"
             );
             assert!(reqs[0].user_prompt.contains("- Governing Invariant:"));
             assert!(
@@ -849,6 +853,39 @@ mod tests {
                 !reqs[0].user_prompt.contains("Modified Files in Filing ("),
                 "filing overview must not prime comma-joined filename lists"
             );
+        }
+
+        #[test]
+        fn test_shared_candidate_exhibits_produce_byte_identical_prompt_prefixes() {
+            let ws = sample_workspace();
+            let cli_canon = ws
+                .canons
+                .get(".canons/cli/cli-flags-kebab-case.md")
+                .expect("cli canon");
+            let readme_canon = ws
+                .canons
+                .get(".canons/readme/feat-updates-readme.md")
+                .expect("readme canon");
+            let shared_exhibits = vec!["src/cli/admit.rs".to_string(), "pr_title".to_string()];
+            let p1 = build_admit_case_user_prompt(
+                ".canons/cli/cli-flags-kebab-case.md",
+                cli_canon,
+                &shared_exhibits,
+                &CaseloadIntake::default(),
+                &CaseloadDiscovery::default(),
+                &ws,
+            );
+            let p2 = build_admit_case_user_prompt(
+                ".canons/readme/feat-updates-readme.md",
+                readme_canon,
+                &shared_exhibits,
+                &CaseloadIntake::default(),
+                &CaseloadDiscovery::default(),
+                &ws,
+            );
+            let p1_split = p1.find("## Active Case Governing Canon:").expect("split 1");
+            let p2_split = p2.find("## Active Case Governing Canon:").expect("split 2");
+            assert_eq!(&p1[..p1_split], &p2[..p2_split]);
         }
 
         #[test]
