@@ -35,6 +35,7 @@ The complete architectural specification is partitioned across the following ded
 ### Core Framework & Execution Model
 - **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Hexagonal Architecture (Ports & Adapters with the CLI binary as the driving adapter), Two Feeder Branches $\to$ Dual Adjudication/Apprisal Spines (Contentious Dispute Resolution vs. Statutory Apprisal), the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, `Caseload` schema, and telemetry event stream.
 - **[DAG Scheduling & Semantics](architecture/scheduling.md):** Transitive dependency closure calculation, branch pruning, the Guarded/Lazy Scheduling Invariant (zero-credential short-circuits for un-governed changes), telescoping backfill mode, and the static schedule lookup table.
+- **[Consistency & Flipper Benchmarking](architecture/benchmarking.md):** Multi-trial stage stability evaluation, out-of-band developer harness boundary, upstream closure reuse with downstream namespace stripping, polymorphic 1D/2D subject keys, and flipper dispersion metrics.
 
 ### Node-by-Node Stage Specifications (`docs/architecture/nodes/`)
 Comprehensive specifications for each of the nine imperative verb stages:
