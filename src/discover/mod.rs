@@ -160,7 +160,7 @@ pub fn execute_discover(
 
             let mut join_items = eval.matched_files;
             join_items.extend(eval.inspected_metadata);
-            triggers_join.insert(canon_ref.clone(), join_items);
+            triggers_join.insert(canon_ref, join_items);
         }
     }
 
