@@ -15,6 +15,7 @@
 //! Canon Clerk: Automated review gate enforcing declarative engineering rule packs.
 
 pub mod apprise;
+pub mod bench;
 pub mod canon;
 pub mod caseload;
 pub mod cli;
@@ -30,6 +31,18 @@ pub mod validate;
 pub use apprise::{
     AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
     ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD, execute_apprise,
+};
+pub use bench::{
+    BenchIoStreams, BenchmarkStage, ConfigConsistencyReport, ConfigSweepInputs,
+    ConsistencyBenchCli, ConsistencyBenchError, ConsistencyBenchFormat, ConsistencyBenchOptions,
+    ConsistencyBenchReport, ConsistencyConfigSpec, DEFAULT_BENCHMARK_TRIALS, ENV_BENCH_BATCH_SIZE,
+    ENV_BENCH_CONCURRENCY, ENV_BENCH_FORMAT, ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_OUTPUT_JSON,
+    ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS, ExtractedAssessment, HermeticBenchDeps,
+    SubjectConsistency, SubjectKey, SubjectObservation, TrialRecord, TrialSummary,
+    UpstreamCaseloadInputs, analyze_config_trials, execute_consistency_bench,
+    execute_consistency_bench_observed, extract_stage_assessments, parse_batch_tokens,
+    prepare_upstream_caseload, render_consistency_markdown, resolve_config_specs,
+    run_consistency_bench_cli, run_consistency_bench_hermetic,
 };
 pub use canon::{
     Canon, CanonBody, CanonMetadata, CanonParseError, CanonScope, CanonSourceInfo, CanonSourceKind,

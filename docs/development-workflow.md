@@ -172,6 +172,27 @@ Prompt your assistant:
 
 **What happens:** The assistant activates the `doc-driven-change` skill in `.agents/skills/doc-driven-change/` to inspect the documentation diff against `upstream/main`, structure a progressive task breakdown, and implement the change against the documented contracts.
 
+### Benchmarking Stage Consistency & Flippers
+
+When modifying `.canons/**/*.md`, calibrating stage prompts (`src/apprise/prompt.rs`, `src/docket/prompt.rs`), or tuning batching and concurrency settings, run the multi-trial consistency harness ([`scripts/bench-consistency.sh`](../scripts/bench-consistency.sh)) to measure run-to-run status agreement, sample score standard deviation (`stdev`), wall-clock latency, and side-by-side flipper rationales (requiring `GEMINI_API_KEY` or host `config.json` credentials):
+
+```bash
+# Benchmark apprise across N=5 trials on a prospective target scope:
+./scripts/bench-consistency.sh --stage apprise --intent "Add a new CLI flag for filtering output" src/cli
+
+# Compare unbounded single-turn vs. batched configurations side-by-side and archive JSON:
+./scripts/bench-consistency.sh --stage apprise --batch-size unbounded,15,25 \
+  --intent "Add a new CLI flag for filtering output" src/cli \
+  --output-json /tmp/apprise-consistency.json
+
+# Benchmark docket across N=5 trials against an in-flight unified diff:
+git diff upstream/main | ./scripts/bench-consistency.sh --stage docket --diff - --batch-size 15
+
+# Emit structured JSON directly to stdout (or pass --include-stable to list unanimous canons):
+./scripts/bench-consistency.sh --stage apprise --trials 5 --intent "Refactor parser" src/canon --json
+```
+
+The harness executes deterministic Branch A + Branch B setup (`intake` → `discover` → `validate` + `configure`) once, runs `N` isolated trials of the target heuristic stage, streams per-trial progress to `stderr`, and emits Markdown summary and flipper rationale tables (or structured `ConsistencyBenchReport` JSON) to `stdout`. See **[Consistency & Flipper Benchmarking](architecture/benchmarking.md)** for the underlying architectural contracts and stage support matrix.
 
 ---
 
