@@ -40,7 +40,8 @@ pub use apprise::{
 };
 pub use audit::{
     AuditError, AuditOptions, DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD,
-    ENV_AUDIT_CONCURRENCY, ENV_AUDIT_THRESHOLD, execute_audit, resolve_canon_reference_paths,
+    DEFAULT_AUDIT_TIMEOUT_MS, ENV_AUDIT_CONCURRENCY, ENV_AUDIT_THRESHOLD, execute_audit,
+    resolve_canon_reference_paths,
 };
 pub use bench::{
     BenchIoStreams, BenchmarkStage, ConfigConsistencyReport, ConfigSweepInputs,

@@ -24,6 +24,7 @@ use super::{
     BenchmarkStage, ConsistencyBenchOptions, ConsistencyBenchReport, TrialSummary,
     execute_consistency_bench_observed,
 };
+use crate::audit::DEFAULT_AUDIT_TIMEOUT_MS;
 use crate::caseload::Caseload;
 use crate::cli::{
     CanonSelectionArgs, CliError, FilingSourceArgs, ProviderConfigArgs, ensure_single_stdin_source,
@@ -254,6 +255,11 @@ pub fn run_consistency_bench_cli(
     .map_err(map_bench_error)?;
     populate_stage_disk_contents(resolved.stage, &cwd, &caseload, &mut snapshot);
 
+    let stage_timeout_ms = if resolved.stage == BenchmarkStage::Audit {
+        DEFAULT_AUDIT_TIMEOUT_MS
+    } else {
+        DEFAULT_GENERATION_TIMEOUT_MS
+    };
     let specs = resolve_config_specs(&ConfigSweepInputs {
         stage: resolved.stage,
         threshold: resolved.threshold,
@@ -261,7 +267,7 @@ pub fn run_consistency_bench_cli(
         flag_concurrency: cli.concurrency,
         env: &env_map,
         stored_config: configure_opts.stored_config.as_ref(),
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        timeout_ms: stage_timeout_ms,
     })
     .map_err(map_bench_error)?;
 

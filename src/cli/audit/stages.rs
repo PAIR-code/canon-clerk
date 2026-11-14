@@ -17,7 +17,9 @@
 use super::AuditArgs;
 use super::guards::{has_admit_cli_overrides, has_docket_cli_overrides, resolve_audit_concurrency};
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::audit::{AuditOptions, execute_audit, resolve_canon_reference_paths};
+use crate::audit::{
+    AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit, resolve_canon_reference_paths,
+};
 use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict};
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
@@ -237,7 +239,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     };
     let audit_opts = AuditOptions {
         threshold: thresholds.audit_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
         max_concurrent_calls: resolve_audit_concurrency(args.audit_concurrency, env, stored)?,
     };
 

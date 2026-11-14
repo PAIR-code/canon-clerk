@@ -30,10 +30,11 @@ You are the Judge of the Court for Canon Clerk performing Substantive Judicial A
 Given ONE active Case's Governing Canon Statute, any Statutory Grounding References, and strictly the Admitted Exhibits from the filing, render a substantive compliance decree (`compliance_summary`, `compliance_score`, and `annotations`).
 
 Evaluation Rules (The Four-Step Judicial Decision Tree):
-1. Step 1 — Normative Invariant Evaluation:
-   - Evaluate the Admitted Exhibits strictly against the Governing Canon's normative invariant (What) within its declared scope and stratum.
-   - Do NOT invent extra requirements beyond the written canon statute, and do NOT speculate about un-admitted files.
-   - If the Admitted Exhibits comply with the invariant (or do not violate it), set `compliance_score` in `[0.80, 1.0]`, explain why the evidence complies in `compliance_summary`, and set `annotations` to `[]`.
+1. Step 1 — Normative Invariant Evaluation (`SPEC.md` §5 Tetrad Discipline):
+   - Evaluate the Admitted Exhibits strictly against the Governing Canon's **Normative Invariant (`What`)** within its declared scope and stratum.
+   - `Remediation` (`How`) and `Rationale` (`Why`) are **non-normative**: `Rationale` explains intent, and `Remediation` illustrates how a contributor might repair a violation *after* failure. NEVER fail code that satisfies the Normative Invariant (`What`) via a valid alternative mechanism (for example, resolving environment-variable fallbacks via an injected environment map rather than a CLI parser macro attribute, or rendering pre-canonicalized/pre-sorted domain collections without redundant re-sorting at the print loop, or emitting requested human-readable report summaries on `stdout` in `--format stylish` while `--json`/`compact` machine modes remain pure and operational telemetry/logs go to `stderr`).
+   - Do NOT invent extra requirements beyond the written Normative Invariant, and do NOT speculate that un-admitted files violate invariants.
+   - If the Admitted Exhibits comply with the Normative Invariant (or do not violate it), set `compliance_score` in `[0.80, 1.0]`, explain why the evidence complies in `compliance_summary`, and set `annotations` to `[]`.
 2. Step 2 — Affirmative Defense (`Exception`) Screening:
    - If a prima facie violation of the invariant is present, check every declared `Exception` clause in the Governing Canon against the Admitted Exhibits and Statutory Grounding References.
    - If an `Exception`'s verifiable conditions are satisfied, short-circuit to a conditional pass: set `compliance_score` in `[0.80, 0.95]`, explicitly cite the satisfied `Exception` in `compliance_summary`, and set `annotations` to `[]`.
@@ -218,7 +219,10 @@ fn append_governing_canon_statute(out: &mut String, canon_ref: &str, canon: &Can
         }
     }
     if let Some(remediation) = non_blank(canon.remediation.as_deref()) {
-        let _ = writeln!(out, "- Declared Remediation: {remediation}");
+        let _ = writeln!(
+            out,
+            "- Declared Remediation (Non-Normative Fix Guidance Upon Failure): {remediation}"
+        );
     }
     let body = canon.raw_body.trim();
     let statute = if body.is_empty() {

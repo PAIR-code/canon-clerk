@@ -23,9 +23,7 @@ pub use exhibits::resolve_canon_reference_paths;
 use crate::caseload::{CanonAdjudication, Caseload, CaseloadVerdict, normalize_compliance_score};
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
-use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
-};
+use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
 use decode::decode_case_adjudication;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_case_user_prompt, build_audit_schema};
 use std::collections::BTreeSet;
@@ -39,6 +37,9 @@ pub const DEFAULT_AUDIT_THRESHOLD: f64 = 0.5;
 /// Default maximum concurrent in-flight per-case trial calls during `audit`.
 pub const DEFAULT_AUDIT_MAX_CONCURRENT_CALLS: usize = 4;
 
+/// Default per-trial timeout ceiling in milliseconds (`180_000ms` / 3 minutes) accommodating extended auditor reasoning.
+pub const DEFAULT_AUDIT_TIMEOUT_MS: u64 = 180_000;
+
 /// Environment variable name for overriding `--audit-threshold` (`docs/architecture/nodes/audit.md` §5).
 pub const ENV_AUDIT_THRESHOLD: &str = "CANON_CLERK_AUDIT_THRESHOLD";
 
@@ -50,7 +51,7 @@ pub const ENV_AUDIT_CONCURRENCY: &str = "CANON_CLERK_AUDIT_CONCURRENCY";
 pub struct AuditOptions {
     /// Substantive compliance score threshold in `[0.0, 1.0]` (defaults to [`DEFAULT_AUDIT_THRESHOLD`]).
     pub threshold: f64,
-    /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
+    /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_AUDIT_TIMEOUT_MS`]).
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case trial calls (`>= 1`; defaults to [`DEFAULT_AUDIT_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
@@ -60,7 +61,7 @@ impl Default for AuditOptions {
     fn default() -> Self {
         Self {
             threshold: DEFAULT_AUDIT_THRESHOLD,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
             max_concurrent_calls: None,
         }
     }
