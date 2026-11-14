@@ -24,7 +24,8 @@ use crate::cli::closure::{ClosureBackend, has_provider_overrides, merge_metadata
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, map_discover_error, resolve_branch_b_options, run_branch_b_configure,
+    build_live_model_provider, map_discover_error, resolve_screener_branch_b_options,
+    run_branch_b_configure,
 };
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{DocketOptions, execute_docket};
@@ -174,7 +175,7 @@ pub(super) fn execute_jit_configure_docket_and_admit(
         return Ok(outcome);
     }
 
-    let configure_options = resolve_branch_b_options(&args.provider, env)?;
+    let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
     let docket_batch_size = resolve_docket_batch_size(
         args.docket_batch_size,
         env,

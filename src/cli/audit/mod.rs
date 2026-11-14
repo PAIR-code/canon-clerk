@@ -20,11 +20,10 @@ mod stages;
 
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVerdict, VerdictStatus};
 use crate::cli::CliError;
-use crate::cli::admit::guards::{resolve_admit_concurrency, resolve_admit_threshold};
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
-use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
-use crate::cli::docket::guards::{
-    resolve_docket_batch_size, resolve_docket_concurrency, resolve_docket_threshold,
+use crate::cli::closure::{
+    ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
+    resolve_closure_validate,
 };
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::provenance::StageDisposition;
@@ -34,13 +33,10 @@ use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use guards::{
     can_fast_forward_completed_audit, enforce_filing_and_case_guard,
-    ensure_stage_prefixed_threshold_flags, resolve_audit_concurrency, resolve_audit_threshold,
+    ensure_stage_prefixed_threshold_flags, resolve_and_validate_audit_cli_params,
 };
 use render::{AuditWatermarks, render_audit_output, resolve_effective_format};
-use stages::{
-    AuditCascadeThresholds, execute_jit_configure_docket_admit_and_audit, resolve_audit_discover,
-    resolve_audit_intake,
-};
+use stages::{AuditCascadeThresholds, execute_jit_configure_docket_admit_and_audit};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{Read, Write};
@@ -60,13 +56,13 @@ Examples:
   # Run in GitHub Actions annotation mode while archiving caseload.json for CI forensics:
   git diff origin/main | canon-clerk audit --diff - --format github --output-caseload caseload.json
 
-  # Use TypeSafe Jev for ultra-fast screening and happy-path fast-pass:
+  # Use TypeSafe Jev across docket, admit, and vet before escalating contested cases:
   git diff origin/main | canon-clerk audit --diff - --screener-model jev";
 
 /// Output presentation format for `canon-clerk audit`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditFormat {
-    /// Human-readable 7-stage Pipeline Funnel Provenance receipt and Verdict summary.
+    /// Human-readable 8-stage Pipeline Funnel Provenance receipt and Verdict summary.
     Stylish,
     /// Full cumulative `Caseload` JSON envelope.
     Json,
@@ -80,7 +76,7 @@ pub enum AuditFormat {
 #[derive(Args, Debug, Clone, Default, PartialEq)]
 #[command(
     about = "Judicial adjudication: evaluate admitted exhibits against canon statutes and render verdicts",
-    long_about = "Judicial Adjudication stage of the Caseload DAG (Cascade Spine terminus). Executes the guarded [intake, discover, validate, configure, docket, admit, audit] closure to evaluate admitted exhibits in isolated per-case reasoning trials, rendering compliance decrees and source line annotations.",
+    long_about = "Judicial Adjudication stage of the Caseload DAG (Cascade Spine terminus). Executes the guarded [intake, discover, validate, configure, docket, admit, vet, audit] closure to evaluate contested cases in isolated per-case reasoning trials, rendering compliance decrees and source line annotations.",
     after_help = AUDIT_EXAMPLES
 )]
 pub struct AuditArgs {
@@ -100,16 +96,6 @@ pub struct AuditArgs {
     )]
     pub audit_threshold: Option<f64>,
 
-    /// Happy-path discriminative fast-pass confidence threshold in `[0.0, 1.0]` (default: `0.80`; env: `CANON_CLERK_AUDIT_FASTPASS_THRESHOLD`).
-    #[arg(
-        long = "audit-fastpass-threshold",
-        value_name = "FLOAT",
-        allow_hyphen_values = true,
-        help_heading = "Audit Options",
-        help = "Happy-path discriminative fast-pass threshold in [0.0, 1.0] (default: 0.80; fallback env: CANON_CLERK_AUDIT_FASTPASS_THRESHOLD)"
-    )]
-    pub audit_fastpass_threshold: Option<f64>,
-
     /// Optional maximum concurrent in-flight per-case trial calls (default: `4`; env: `CANON_CLERK_AUDIT_CONCURRENCY`).
     #[arg(
         long = "audit-concurrency",
@@ -118,6 +104,25 @@ pub struct AuditArgs {
         help = "Maximum concurrent in-flight per-case trial calls (default: 4; fallback env: CANON_CLERK_AUDIT_CONCURRENCY)"
     )]
     pub audit_concurrency: Option<usize>,
+
+    /// Upstream prima facie compliance vetting threshold in `[0.0, 1.0]` (default: `0.80`; env: `CANON_CLERK_VET_THRESHOLD`).
+    #[arg(
+        long = "vet-threshold",
+        value_name = "FLOAT",
+        allow_hyphen_values = true,
+        help_heading = "Vet Options",
+        help = "Upstream prima facie compliance threshold in [0.0, 1.0] (default: 0.80; fallback env: CANON_CLERK_VET_THRESHOLD)"
+    )]
+    pub vet_threshold: Option<f64>,
+
+    /// Upstream maximum concurrent in-flight per-case `vet` calls (default: `4`; env: `CANON_CLERK_VET_CONCURRENCY`).
+    #[arg(
+        long = "vet-concurrency",
+        value_name = "COUNT",
+        help_heading = "Vet Options",
+        help = "Maximum concurrent upstream vet calls (default: 4; fallback env: CANON_CLERK_VET_CONCURRENCY)"
+    )]
+    pub vet_concurrency: Option<usize>,
 
     /// Upstream evidentiary admissibility score threshold in `[0.0, 1.0]` (default: `0.5`; env: `CANON_CLERK_ADMIT_THRESHOLD`).
     #[arg(
@@ -291,18 +296,7 @@ fn run_audit_core(
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
-
-    let thresholds = AuditCascadeThresholds {
-        docket_threshold: resolve_docket_threshold(args.docket_threshold, env)?,
-        admit_threshold: resolve_admit_threshold(args.admit_threshold, env)?,
-        audit_threshold: resolve_audit_threshold(args.audit_threshold, env)?,
-    };
-    let _validated_docket_batch = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
-    let _validated_docket_conc = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
-    let _validated_admit_conc = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
-    let _validated_audit_conc = resolve_audit_concurrency(args.audit_concurrency, env, None)?;
-    let _validated_fastpass =
-        guards::resolve_audit_fastpass_threshold(args.audit_fastpass_threshold, env)?;
+    let thresholds = resolve_and_validate_audit_cli_params(args, env)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -314,7 +308,9 @@ fn run_audit_core(
         let wm = AuditWatermarks::pre_populated(
             thresholds.docket_threshold,
             thresholds.admit_threshold,
+            thresholds.vet_threshold,
             thresholds.audit_threshold,
+            completed.vetting.is_some(),
         );
         return finalize_verdict_and_exit_code(args, completed, &wm, env, stdout);
     }
@@ -322,13 +318,13 @@ fn run_audit_core(
     enforce_filing_and_case_guard(&intake_opts, &args.canons, incoming.as_ref())?;
 
     let (caseload_after_intake, intake_disp, intake_changed) =
-        resolve_audit_intake(&intake_opts, incoming, telemetry)?;
+        resolve_cascade_intake("audit", &intake_opts, incoming, telemetry)?;
 
     let mut snapshot =
         materialize_closure_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
     let total_workspace_canons = Some(snapshot.canons.len());
 
-    let (caseload_after_discover, discover_disp) = resolve_audit_discover(
+    let (caseload_after_discover, discover_disp) = resolve_cascade_discover(
         &args.canons,
         caseload_after_intake,
         &snapshot,
@@ -392,10 +388,12 @@ fn run_audit_core(
         configure: outcome.configure_disp,
         docket: outcome.docket_disp,
         admit: outcome.admit_disp,
+        vet: outcome.vet_disp,
         audit: outcome.audit_disp,
         total_workspace_canons,
         docket_threshold: thresholds.docket_threshold,
         admit_threshold: thresholds.admit_threshold,
+        vet_threshold: thresholds.vet_threshold,
         audit_threshold: thresholds.audit_threshold,
     };
     finalize_verdict_and_exit_code(args, outcome.caseload, &wm, env, stdout)
@@ -434,26 +432,14 @@ fn finish_zero_candidate_audit(
         .with_evidence(CaseloadEvidence::default())
         .with_verdict(CaseloadVerdict::default());
     args.io.write_output_caseload(&short_circuited)?;
-    let wm = AuditWatermarks {
-        intake: intake_disp,
-        discover: StageDisposition::ZeroCandidateShortCircuit,
-        validate: StageDisposition::SkippedZeroCandidates,
-        configure: StageDisposition::SkippedZeroCandidates,
-        docket: StageDisposition::SkippedZeroCandidates,
-        admit: StageDisposition::SkippedZeroCandidates,
-        audit: StageDisposition::SkippedZeroCandidates,
-        total_workspace_canons,
-        docket_threshold: thresholds.docket_threshold,
-        admit_threshold: thresholds.admit_threshold,
-        audit_threshold: thresholds.audit_threshold,
-    };
+    let wm = AuditWatermarks::zero_candidates(intake_disp, total_workspace_canons, thresholds);
     render_audit_output(args, &short_circuited, &wm, env, stdout)?;
     Ok(short_circuited)
 }
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "Internal CLI helper formatting validation failure provenance watermarks across the 7-stage audit closure"
+    reason = "Internal CLI helper formatting validation failure provenance watermarks across the 8-stage audit closure"
 )]
 fn handle_validation_failure(
     args: &AuditArgs,
@@ -466,19 +452,12 @@ fn handle_validation_failure(
     stdout: &mut dyn Write,
 ) -> Result<Caseload, CliError> {
     args.io.write_output_caseload(caseload)?;
-    let wm = AuditWatermarks {
-        intake: intake_disp,
-        discover: discover_disp,
-        validate: StageDisposition::ValidationFailed,
-        configure: StageDisposition::SkippedValidationFailed,
-        docket: StageDisposition::SkippedValidationFailed,
-        admit: StageDisposition::SkippedValidationFailed,
-        audit: StageDisposition::SkippedValidationFailed,
+    let wm = AuditWatermarks::validation_failed(
+        intake_disp,
+        discover_disp,
         total_workspace_canons,
-        docket_threshold: thresholds.docket_threshold,
-        admit_threshold: thresholds.admit_threshold,
-        audit_threshold: thresholds.audit_threshold,
-    };
+        thresholds,
+    );
     if resolve_effective_format(args, env) != AuditFormat::Compact {
         render_audit_output(args, caseload, &wm, env, stdout)?;
     }
@@ -592,6 +571,7 @@ mod tests {
             let sub = cmd.find_subcommand_mut("audit").expect("audit subcommand");
             let help = sub.render_help().to_string();
             assert!(help.contains("Audit Options:"));
+            assert!(help.contains("Vet Options:"));
             assert!(help.contains("Admit Options:"));
             assert!(help.contains("Docket Options:"));
             assert!(help.contains("CANON_CLERK_AUDIT_THRESHOLD"));
@@ -651,7 +631,7 @@ mod tests {
                     "canon-clerk",
                     "audit",
                     "src/cli/audit.rs",
-                    "--audit-fastpass-threshold",
+                    "--vet-threshold",
                     "1.2",
                 ],
             ] {

@@ -17,11 +17,11 @@
 use crate::canon::ParseCanonOptions;
 use crate::caseload::{Caseload, CaseloadIntake};
 use crate::cli::CliError;
-use crate::cli::args::ProviderConfigArgs;
+use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::map_discover_error;
-use crate::discover::WorkspaceSnapshot;
-use crate::intake::IntakeOptions;
+use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
+use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::validate::{ValidateError, ValidateOptions, execute_validate};
@@ -108,6 +108,104 @@ pub(crate) fn materialize_closure_snapshot(
             Ok(snapshot)
         }
     }
+}
+
+/// Executes `intake` within a contentious cascade (`vet`, `audit`), fast-forwarding if `.intake` is pre-populated.
+pub(crate) fn resolve_cascade_intake(
+    stage_name: &str,
+    intake_opts: &IntakeOptions,
+    incoming: Option<Caseload>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition, bool), CliError> {
+    if !intake_opts.has_designated_source() {
+        let existing = incoming.ok_or_else(|| {
+            CliError::usage(format!(
+                "Missing upstream caseload or filing inputs for `{stage_name}`."
+            ))
+        })?;
+        return Ok((existing, StageDisposition::PrePopulated, false));
+    }
+
+    telemetry.run_stage(PipelineStage::Intake, |_scope| {
+        execute_cascade_intake_body(intake_opts, incoming)
+    })
+}
+
+fn execute_cascade_intake_body(
+    intake_opts: &IntakeOptions,
+    mut incoming: Option<Caseload>,
+) -> Result<(Caseload, StageDisposition, bool), CliError> {
+    let cli_has_targets = intake_opts.all_targets
+        || intake_opts.patch_content.is_some()
+        || intake_opts.target_paths.is_some();
+
+    if !cli_has_targets
+        && let Some(existing) = incoming.as_mut()
+        && let Some(prev_intake) = existing.intake.take()
+    {
+        let pr_meta_added = intake_opts
+            .pr_title
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+            || intake_opts
+                .pr_body
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty());
+        let merged = merge_metadata_onto_intake(prev_intake, intake_opts);
+        existing.docket = None;
+        existing.evidence = None;
+        existing.vetting = None;
+        existing.verdict = None;
+        existing.intake = Some(merged);
+        if pr_meta_added {
+            existing.discovery = None;
+            existing.validation = None;
+        }
+        return Ok((existing.clone(), StageDisposition::Executed, pr_meta_added));
+    }
+
+    let mut updated = execute_intake(intake_opts, incoming).map_err(|err| match err {
+        IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
+            CliError::usage(err.to_string())
+        }
+    })?;
+    updated.discovery = None;
+    updated.validation = None;
+    updated.docket = None;
+    updated.evidence = None;
+    updated.vetting = None;
+    updated.verdict = None;
+    Ok((updated, StageDisposition::Executed, true))
+}
+
+/// Executes `discover` within a contentious cascade (`vet`, `audit`), fast-forwarding if `.discovery` is pre-populated.
+pub(crate) fn resolve_cascade_discover(
+    canons: &CanonSelectionArgs,
+    mut caseload: Caseload,
+    snapshot: &WorkspaceSnapshot,
+    intake_changed: bool,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition), CliError> {
+    if caseload.discovery.is_some() && !intake_changed && canons.is_empty() {
+        return Ok((caseload, StageDisposition::PrePopulated));
+    }
+
+    caseload.discovery = None;
+    caseload.validation = None;
+    caseload.docket = None;
+    caseload.evidence = None;
+    caseload.vetting = None;
+    caseload.verdict = None;
+
+    let discover_opts = DiscoverOptions {
+        all_canons: canons.all_canons,
+        canon_patterns: canons.canon.clone(),
+    };
+
+    let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {
+        execute_discover(&discover_opts, caseload, snapshot).map_err(map_discover_error)
+    })?;
+    Ok((updated, StageDisposition::Executed))
 }
 
 /// Executes `validate` within a converged closure, fast-forwarding if `.validation` is already populated.

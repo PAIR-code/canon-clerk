@@ -138,7 +138,7 @@ fn single_annotation_schema() -> Value {
 
 /// Assembles the isolated judicial trial prompt for a single active case (`canon_ref`)
 /// and returns `(user_prompt, admitted_file_paths)`.
-pub(super) fn build_audit_case_user_prompt(
+pub(crate) fn build_audit_case_user_prompt(
     canon_ref: &str,
     canon: &Canon,
     admitted_exhibits: &[&ExhibitAssessment],

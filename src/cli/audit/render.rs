@@ -12,22 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Terminal 7-stage Funnel Provenance receipt and `stylish`/`compact`/`json`/`github` output formatters for `canon-clerk audit`.
+//! Terminal 8-stage Funnel Provenance receipt and `stylish`/`compact`/`json`/`github` output formatters for `canon-clerk audit`.
 
+use super::stages::AuditCascadeThresholds;
 use super::{AuditArgs, AuditFormat};
 use crate::caseload::{AnnotationLevel, Caseload, CaseloadVerdict, CodeAnnotation, VerdictStatus};
 use crate::cli::CliError;
 use crate::cli::provenance::{
     StageDisposition, write_admit_provenance, write_audit_configure_provenance,
     write_audit_provenance, write_discover_provenance, write_docket_provenance,
-    write_filing_intake_provenance, write_validate_provenance,
+    write_filing_intake_provenance, write_validate_provenance, write_vet_provenance,
 };
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
-/// Complete provenance watermarks across the 7-stage `[intake, discover, validate, configure, docket, admit, audit]` closure.
+/// Complete provenance watermarks across the 8-stage `[intake, discover, validate, configure, docket, admit, vet, audit]` closure.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AuditWatermarks {
     pub intake: StageDisposition,
@@ -36,10 +37,12 @@ pub(super) struct AuditWatermarks {
     pub configure: StageDisposition,
     pub docket: StageDisposition,
     pub admit: StageDisposition,
+    pub vet: StageDisposition,
     pub audit: StageDisposition,
     pub total_workspace_canons: Option<usize>,
     pub docket_threshold: f64,
     pub admit_threshold: f64,
+    pub vet_threshold: f64,
     pub audit_threshold: f64,
 }
 
@@ -47,7 +50,9 @@ impl AuditWatermarks {
     pub(super) const fn pre_populated(
         docket_threshold: f64,
         admit_threshold: f64,
+        vet_threshold: f64,
         audit_threshold: f64,
+        vet_was_present: bool,
     ) -> Self {
         Self {
             intake: StageDisposition::PrePopulated,
@@ -56,11 +61,62 @@ impl AuditWatermarks {
             configure: StageDisposition::PrePopulated,
             docket: StageDisposition::PrePopulated,
             admit: StageDisposition::PrePopulated,
+            vet: if vet_was_present {
+                StageDisposition::PrePopulated
+            } else {
+                StageDisposition::SkippedGenerativeScreener
+            },
             audit: StageDisposition::PrePopulated,
             total_workspace_canons: None,
             docket_threshold,
             admit_threshold,
+            vet_threshold,
             audit_threshold,
+        }
+    }
+
+    pub(super) const fn zero_candidates(
+        intake: StageDisposition,
+        total_workspace_canons: Option<usize>,
+        thresholds: AuditCascadeThresholds,
+    ) -> Self {
+        Self {
+            intake,
+            discover: StageDisposition::ZeroCandidateShortCircuit,
+            validate: StageDisposition::SkippedZeroCandidates,
+            configure: StageDisposition::SkippedZeroCandidates,
+            docket: StageDisposition::SkippedZeroCandidates,
+            admit: StageDisposition::SkippedZeroCandidates,
+            vet: StageDisposition::SkippedZeroCandidates,
+            audit: StageDisposition::SkippedZeroCandidates,
+            total_workspace_canons,
+            docket_threshold: thresholds.docket_threshold,
+            admit_threshold: thresholds.admit_threshold,
+            vet_threshold: thresholds.vet_threshold,
+            audit_threshold: thresholds.audit_threshold,
+        }
+    }
+
+    pub(super) const fn validation_failed(
+        intake: StageDisposition,
+        discover: StageDisposition,
+        total_workspace_canons: Option<usize>,
+        thresholds: AuditCascadeThresholds,
+    ) -> Self {
+        Self {
+            intake,
+            discover,
+            validate: StageDisposition::ValidationFailed,
+            configure: StageDisposition::SkippedValidationFailed,
+            docket: StageDisposition::SkippedValidationFailed,
+            admit: StageDisposition::SkippedValidationFailed,
+            vet: StageDisposition::SkippedValidationFailed,
+            audit: StageDisposition::SkippedValidationFailed,
+            total_workspace_canons,
+            docket_threshold: thresholds.docket_threshold,
+            admit_threshold: thresholds.admit_threshold,
+            vet_threshold: thresholds.vet_threshold,
+            audit_threshold: thresholds.audit_threshold,
         }
     }
 }
@@ -292,7 +348,20 @@ fn write_seven_stage_provenance(
         wm.admit_threshold,
         out,
     )?;
-    write_audit_provenance(caseload.verdict.as_ref(), wm.audit, wm.audit_threshold, out)?;
+    write_vet_provenance(
+        caseload.vetting.as_ref(),
+        caseload.evidence.as_ref(),
+        wm.vet,
+        wm.vet_threshold,
+        out,
+    )?;
+    write_audit_provenance(
+        caseload.verdict.as_ref(),
+        caseload.vetting.as_ref(),
+        wm.audit,
+        wm.audit_threshold,
+        out,
+    )?;
     Ok(())
 }
 

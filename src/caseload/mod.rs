@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.verdict`).
+//! Core data plane models for the cumulative `Caseload` state container (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.vetting`, `.verdict`).
 
 mod apprisal;
 mod config;
@@ -23,6 +23,7 @@ mod intake;
 mod probe;
 mod validation;
 mod verdict;
+mod vetting;
 
 pub use apprisal::{
     ApprisalStatus, CanonApprisalAssessment, CaseloadApprisal, normalize_unit_score,
@@ -48,6 +49,9 @@ pub use validation::{
 };
 pub use verdict::{
     CanonAdjudication, CaseloadVerdict, VerdictStatus, normalize_compliance_score, sort_annotations,
+};
+pub use vetting::{
+    CanonVettingAssessment, CaseloadVetting, VettingStatus, normalize_vetting_score,
 };
 
 use serde::{Deserialize, Serialize};
@@ -89,6 +93,9 @@ pub struct Caseload {
     /// Evidence: Micro triage admitted and excluded exhibits per active case.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<CaseloadEvidence>,
+    /// Vetting: Prima facie compliance vetting assessments and vetted/contested case partition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vetting: Option<CaseloadVetting>,
     /// Verdict: Final compliance decrees and line annotations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<CaseloadVerdict>,
@@ -113,6 +120,7 @@ impl Caseload {
             apprisal: None,
             docket: None,
             evidence: None,
+            vetting: None,
             verdict: None,
         }
     }
@@ -162,6 +170,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.evidence` namespace populated, preserving all other stage fields.
     pub fn with_evidence(mut self, evidence: CaseloadEvidence) -> Self {
         self.evidence = Some(evidence);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.vetting` namespace populated, preserving all other stage fields.
+    pub fn with_vetting(mut self, vetting: CaseloadVetting) -> Self {
+        self.vetting = Some(vetting);
         self
     }
 
@@ -311,10 +325,12 @@ mod tests {
                 .with_validation(CaseloadValidation::default())
                 .with_config(CaseloadConfig::default())
                 .with_docket(CaseloadDocket::default())
-                .with_evidence(CaseloadEvidence::default());
+                .with_evidence(CaseloadEvidence::default())
+                .with_vetting(CaseloadVetting::default());
 
             let with_verd = upstream.clone().with_verdict(CaseloadVerdict::default());
             assert_eq!(with_verd.verdict, Some(CaseloadVerdict::default()));
+            assert_eq!(with_verd.vetting, upstream.vetting);
             assert_eq!(with_verd.evidence, upstream.evidence);
             assert_eq!(with_verd.docket, upstream.docket);
             assert_eq!(with_verd.config, upstream.config);

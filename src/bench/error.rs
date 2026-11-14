@@ -19,6 +19,7 @@ use crate::apprise::{AppriseError, DEFAULT_APPRISE_THRESHOLD};
 use crate::audit::{AuditError, DEFAULT_AUDIT_THRESHOLD};
 use crate::docket::{DEFAULT_DOCKET_THRESHOLD, DocketError};
 use crate::telemetry::PipelineStage;
+use crate::vet::{DEFAULT_VET_THRESHOLD, VetError};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -55,6 +56,8 @@ pub enum BenchmarkStage {
     Docket,
     /// Cascade Spine: Micro evidentiary admissibility screening (`admit`).
     Admit,
+    /// Cascade Spine: Prima facie compliance vetting (`vet`).
+    Vet,
     /// Cascade Spine: Substantive per-case compliance adjudication (`audit`).
     Audit,
 }
@@ -66,6 +69,7 @@ impl BenchmarkStage {
             Self::Apprise => "apprise",
             Self::Docket => "docket",
             Self::Admit => "admit",
+            Self::Vet => "vet",
             Self::Audit => "audit",
         }
     }
@@ -76,25 +80,28 @@ impl BenchmarkStage {
             Self::Apprise => PipelineStage::Apprise,
             Self::Docket => PipelineStage::Docket,
             Self::Admit => PipelineStage::Admit,
+            Self::Vet => PipelineStage::Vet,
             Self::Audit => PipelineStage::Audit,
         }
     }
 
-    /// Returns the stage's affirmative status wire string (`"applicable"`, `"docketed"`, `"admitted"`, `"pass"`).
+    /// Returns the stage's affirmative status wire string (`"applicable"`, `"docketed"`, `"admitted"`, `"vetted"`, `"pass"`).
     pub const fn positive_status_label(self) -> &'static str {
         match self {
             Self::Apprise => "applicable",
             Self::Docket => "docketed",
             Self::Admit => "admitted",
+            Self::Vet => "vetted",
             Self::Audit => "pass",
         }
     }
 
-    /// Returns the stage's negative status wire string (`"dismissed"`, `"excluded"`, `"fail"`).
+    /// Returns the stage's negative status wire string (`"dismissed"`, `"excluded"`, `"contested"`, `"fail"`).
     pub const fn negative_status_label(self) -> &'static str {
         match self {
             Self::Apprise | Self::Docket => "dismissed",
             Self::Admit => "excluded",
+            Self::Vet => "contested",
             Self::Audit => "fail",
         }
     }
@@ -105,6 +112,7 @@ impl BenchmarkStage {
             Self::Apprise => "Applicable",
             Self::Docket => "Docketed",
             Self::Admit => "Admitted",
+            Self::Vet => "Vetted",
             Self::Audit => "Passed",
         }
     }
@@ -114,16 +122,18 @@ impl BenchmarkStage {
         match self {
             Self::Apprise | Self::Docket => "Dismissed",
             Self::Admit => "Excluded",
+            Self::Vet => "Contested",
             Self::Audit => "Failed",
         }
     }
 
-    /// Returns the default gate score threshold (`0.5`) for the stage.
+    /// Returns the default gate score threshold for the stage (`0.80` for `vet`, `0.50` otherwise).
     pub const fn default_threshold(self) -> f64 {
         match self {
             Self::Apprise => DEFAULT_APPRISE_THRESHOLD,
             Self::Docket => DEFAULT_DOCKET_THRESHOLD,
             Self::Admit => DEFAULT_ADMIT_THRESHOLD,
+            Self::Vet => DEFAULT_VET_THRESHOLD,
             Self::Audit => DEFAULT_AUDIT_THRESHOLD,
         }
     }
@@ -178,6 +188,8 @@ pub enum ConsistencyBenchError {
     Docket(DocketError),
     /// Underlying `admit` domain execution error.
     Admit(AdmitError),
+    /// Underlying `vet` domain execution error.
+    Vet(VetError),
     /// Underlying `audit` domain execution error.
     Audit(AuditError),
 }
@@ -198,6 +210,7 @@ impl ConsistencyBenchError {
             | Self::Apprise(_)
             | Self::Docket(_)
             | Self::Admit(_)
+            | Self::Vet(_)
             | Self::Audit(_) => 2,
         }
     }
@@ -252,6 +265,7 @@ impl fmt::Display for ConsistencyBenchError {
             Self::Apprise(err) => write!(f, "{err}"),
             Self::Docket(err) => write!(f, "{err}"),
             Self::Admit(err) => write!(f, "{err}"),
+            Self::Vet(err) => write!(f, "{err}"),
             Self::Audit(err) => write!(f, "{err}"),
         }
     }

@@ -92,6 +92,7 @@ pub fn extract_stage_assessments(
         BenchmarkStage::Apprise => extract_apprisal(caseload),
         BenchmarkStage::Docket => extract_docket(caseload),
         BenchmarkStage::Admit => extract_admit(caseload),
+        BenchmarkStage::Vet => extract_vet(caseload),
         BenchmarkStage::Audit => extract_audit(caseload),
     }
 }
@@ -180,6 +181,38 @@ fn extract_admit(
                 },
             );
         }
+    }
+    Ok(out)
+}
+
+fn extract_vet(
+    caseload: &Caseload,
+) -> Result<BTreeMap<SubjectKey, ExtractedAssessment>, ConsistencyBenchError> {
+    let vetting = caseload
+        .vetting
+        .as_ref()
+        .ok_or(ConsistencyBenchError::MissingStagePayload {
+            stage: BenchmarkStage::Vet,
+            namespace: ".vetting",
+        })?;
+
+    let mut out = BTreeMap::new();
+    for (canon_path, entry) in &vetting.cases {
+        let score = normalize_unit_score(entry.vetting_score).map_err(|detail| {
+            ConsistencyBenchError::MalformedStagePayload {
+                stage: BenchmarkStage::Vet,
+                detail,
+            }
+        })?;
+        out.insert(
+            SubjectKey::canon(canon_path.clone()),
+            ExtractedAssessment {
+                status: entry.vetting_status.as_str().to_string(),
+                is_positive: entry.vetting_status == crate::caseload::VettingStatus::Vetted,
+                score,
+                summary: entry.vetting_summary.clone(),
+            },
+        );
     }
     Ok(out)
 }

@@ -14,25 +14,23 @@
 
 //! Core domain execution engine for the `audit` Caseload DAG stage (`docs/architecture/nodes/audit.md`).
 
-mod decision;
 mod decode;
 mod exhibits;
 mod prompt;
 
-pub use decision::{DEFAULT_AUDIT_FASTPASS_THRESHOLD, ENV_AUDIT_FASTPASS_THRESHOLD};
 pub use exhibits::resolve_canon_reference_paths;
+pub(crate) use prompt::build_audit_case_user_prompt;
 
 use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadVerdict, TYPESAFE_PROVIDER, normalize_compliance_score,
+    CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_MODEL, TYPESAFE_PROVIDER,
+    VerdictStatus, normalize_compliance_score,
 };
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
-use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
-};
+use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
 use decode::decode_case_adjudication;
-use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_case_user_prompt, build_audit_schema};
+use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Mutex;
@@ -53,16 +51,11 @@ pub const ENV_AUDIT_THRESHOLD: &str = "CANON_CLERK_AUDIT_THRESHOLD";
 /// Environment variable name for overriding `--audit-concurrency` (`docs/architecture/nodes/audit.md` §5).
 pub const ENV_AUDIT_CONCURRENCY: &str = "CANON_CLERK_AUDIT_CONCURRENCY";
 
-pub(super) const DEFAULT_GENERATION_TIMEOUT_FOR_FASTPASS_MS: u64 = DEFAULT_GENERATION_TIMEOUT_MS;
-
 /// Domain input parameters for executing the `audit` pipeline stage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditOptions {
     /// Substantive compliance score threshold in `[0.0, 1.0]` (defaults to [`DEFAULT_AUDIT_THRESHOLD`]).
     pub threshold: f64,
-    /// Optional confidence threshold in `[0.0, 1.0]` required for discriminative happy-path fast-pass
-    /// when `screener_model` uses a decision model (`None` defaults to `threshold.max(0.80)`).
-    pub fastpass_threshold: Option<f64>,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_AUDIT_TIMEOUT_MS`]).
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case trial calls (`>= 1`; defaults to [`DEFAULT_AUDIT_MAX_CONCURRENT_CALLS`]).
@@ -73,7 +66,6 @@ impl Default for AuditOptions {
     fn default() -> Self {
         Self {
             threshold: DEFAULT_AUDIT_THRESHOLD,
-            fastpass_threshold: None,
             timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
             max_concurrent_calls: None,
         }
@@ -97,6 +89,8 @@ pub enum AuditError {
     MissingEvidence,
     /// Prerequisite `.config` namespace is missing when active cases require trial adjudication.
     MissingConfig,
+    /// Configured `auditor_model` is a discriminative classifier incapable of structured decrees or line annotations.
+    DiscriminativeAuditorUnsupported { specifier: String },
     /// An active canon listed in `.evidence.active_cases` is absent from the workspace snapshot.
     MissingActiveCanon { canon_ref: String },
     /// Structured model provider returned a transport, HTTP, block, or schema decoding error.
@@ -144,6 +138,13 @@ impl fmt::Display for AuditError {
                 "Cannot execute `audit` trials without a resolved `.config` namespace on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk audit` directly to resolve configuration JIT."
             ),
+            Self::DiscriminativeAuditorUnsupported { specifier } => write!(
+                f,
+                "Discriminative model `{specifier}` cannot adjudicate `audit` trials \
+                 (`audit` requires a generative model for exception rulings, remediation guidance, and line annotations).\n  \
+                 Hint: Use `canon-clerk vet --screener-model jev` for discriminative vetting, or configure \
+                 `{DEFAULT_AUDITOR_MODEL}` (`pro`) as `--auditor-model`."
+            ),
             Self::MissingActiveCanon { canon_ref } => write!(
                 f,
                 "Active case canon `{canon_ref}` referenced in `.evidence.active_cases` was not found in the workspace snapshot.\n  \
@@ -169,14 +170,9 @@ pub(super) struct PreparedTrialCall {
     pub(super) request: GenerationRequest,
 }
 
-fn validate_audit_options(options: &AuditOptions) -> Result<(f64, f64), AuditError> {
+fn validate_audit_options(options: &AuditOptions) -> Result<f64, AuditError> {
     let threshold = normalize_compliance_score(options.threshold)
         .map_err(|detail| AuditError::InvalidThreshold { detail })?;
-    let fastpass_threshold = match options.fastpass_threshold {
-        Some(raw_fp) => normalize_compliance_score(raw_fp)
-            .map_err(|detail| AuditError::InvalidThreshold { detail })?,
-        None => threshold.max(DEFAULT_AUDIT_FASTPASS_THRESHOLD),
-    };
     if options.max_concurrent_calls == Some(0) {
         return Err(AuditError::InvalidConcurrency {
             detail: format!(
@@ -184,7 +180,33 @@ fn validate_audit_options(options: &AuditOptions) -> Result<(f64, f64), AuditErr
             ),
         });
     }
-    Ok((threshold, fastpass_threshold))
+    Ok(threshold)
+}
+
+fn partition_vetted_and_trial_refs<'a>(
+    vetting: Option<&'a crate::caseload::CaseloadVetting>,
+    evidence: &'a crate::caseload::CaseloadEvidence,
+    threshold: f64,
+) -> (Vec<CanonAdjudication>, &'a [String]) {
+    match vetting {
+        Some(vt) => {
+            let carried = vt
+                .vetted_cases
+                .iter()
+                .filter_map(|canon_ref| {
+                    vt.cases.get(canon_ref).map(|a| CanonAdjudication {
+                        canon_path: canon_ref.clone(),
+                        compliance_summary: a.vetting_summary.clone(),
+                        compliance_score: a.vetting_score,
+                        status: VerdictStatus::from_score(a.vetting_score, threshold),
+                        annotations: Vec::new(),
+                    })
+                })
+                .collect();
+            (carried, vt.contested_cases.as_slice())
+        }
+        None => (Vec::new(), evidence.active_cases.as_slice()),
+    }
 }
 
 /// Executes the pure `audit` domain stage against an in-memory [`WorkspaceSnapshot`] and
@@ -195,7 +217,7 @@ pub fn execute_audit(
     workspace: &WorkspaceSnapshot,
     provider: &dyn StructuredModelProvider,
 ) -> Result<Caseload, AuditError> {
-    let (threshold, fastpass_threshold) = validate_audit_options(options)?;
+    let threshold = validate_audit_options(options)?;
 
     if caseload.verdict.is_some() {
         return Ok(caseload);
@@ -223,8 +245,11 @@ pub fn execute_audit(
         return Ok(caseload.with_verdict(CaseloadVerdict::default()));
     }
 
+    let (mut adjudications, trial_canon_refs) =
+        partition_vetted_and_trial_refs(caseload.vetting.as_ref(), evidence, threshold);
+
     let mut active_trials = Vec::new();
-    for canon_ref in &evidence.active_cases {
+    for canon_ref in trial_canon_refs {
         let canon =
             workspace
                 .canons
@@ -239,10 +264,15 @@ pub fn execute_audit(
     }
 
     if active_trials.is_empty() {
-        return Ok(caseload.with_verdict(CaseloadVerdict::default()));
+        return Ok(caseload.with_verdict(CaseloadVerdict::from_adjudications(adjudications)));
     }
 
     let config = caseload.config.as_ref().ok_or(AuditError::MissingConfig)?;
+    if model_provider(&config.auditor_model) == TYPESAFE_PROVIDER {
+        return Err(AuditError::DiscriminativeAuditorUnsupported {
+            specifier: config.auditor_model.clone(),
+        });
+    }
     let response_schema = build_audit_schema();
 
     let mut prepared_calls = Vec::with_capacity(active_trials.len());
@@ -274,30 +304,14 @@ pub fn execute_audit(
     let concurrency_limit = options
         .max_concurrent_calls
         .unwrap_or(DEFAULT_AUDIT_MAX_CONCURRENT_CALLS);
-    let uses_decision_tier = model_provider(&config.screener_model) == TYPESAFE_PROVIDER
-        || model_provider(&config.auditor_model) == TYPESAFE_PROVIDER;
-    let adjudications = if uses_decision_tier {
-        decision::execute_decision_assisted_trials(
-            &prepared_calls,
-            &decision::DecisionTrialParams {
-                screener_model: &config.screener_model,
-                auditor_model: &config.auditor_model,
-                threshold,
-                fastpass_threshold,
-                concurrency_limit,
-                trial_timeout_ms: options.timeout_ms,
-            },
-            provider,
-        )?
-    } else {
-        execute_trial_calls(
-            &prepared_calls,
-            concurrency_limit,
-            threshold,
-            &config.auditor_model,
-            provider,
-        )?
-    };
+    let trial_adjudications = execute_trial_calls(
+        &prepared_calls,
+        concurrency_limit,
+        threshold,
+        &config.auditor_model,
+        provider,
+    )?;
+    adjudications.extend(trial_adjudications);
 
     Ok(caseload.with_verdict(CaseloadVerdict::from_adjudications(adjudications)))
 }
@@ -820,6 +834,90 @@ mod tests {
                 verdict.adjudications[1].annotations.is_empty(),
                 "metadata-only violations must strip non-file `pr_title` annotations"
             );
+        }
+    }
+
+    mod vetting_fold_forward_and_contested_isolation {
+        use super::*;
+        use crate::caseload::{CanonVettingAssessment, CaseloadVetting, VettingStatus};
+
+        #[test]
+        fn test_folds_vetted_cases_and_evaluates_only_contested_cases_or_short_circuits_when_all_vetted()
+         {
+            let ws = sample_workspace();
+            let mut vetting_cases = BTreeMap::new();
+            vetting_cases.insert(
+                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                CanonVettingAssessment {
+                    vetting_summary: "Prima facie compliant via discriminative vetting."
+                        .to_string(),
+                    vetting_score: 0.96,
+                    vetting_status: VettingStatus::Vetted,
+                },
+            );
+            vetting_cases.insert(
+                ".canons/readme/feat-updates-readme.md".to_string(),
+                CanonVettingAssessment {
+                    vetting_summary: "Contested: missing README update.".to_string(),
+                    vetting_score: 0.14,
+                    vetting_status: VettingStatus::Contested,
+                },
+            );
+
+            let caseload =
+                sample_admitted_caseload().with_vetting(CaseloadVetting::from_cases(vetting_cases));
+            let mut routes = BTreeMap::new();
+            routes.insert(
+                ".canons/readme/feat-updates-readme.md".to_string(),
+                Ok(json!({
+                    "compliance_summary": "`feat(cli):` omits `README.md` update.",
+                    "compliance_score": 0.10,
+                    "annotations": [{
+                        "path": "src/cli/audit.rs",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "annotation_level": "failure",
+                        "message": "Update `README.md`."
+                    }]
+                })),
+            );
+            let provider = RoutingAuditProvider::new(routes);
+
+            let out = execute_audit(&AuditOptions::default(), caseload, &ws, &provider)
+                .expect("audit with vetting");
+            assert_eq!(
+                provider.captured_requests().len(),
+                1,
+                "only the 1 contested case must invoke auditor_model"
+            );
+            let verdict = out.verdict.expect("verdict");
+            assert_eq!(verdict.adjudications.len(), 2);
+            assert_eq!(verdict.passed_count(), 1);
+            assert_eq!(verdict.failed_count(), 1);
+
+            // All-vetted caseload short-circuits with zero provider calls and no .config required
+            let mut all_vetted = BTreeMap::new();
+            for c in [
+                ".canons/cli/cli-flags-kebab-case.md",
+                ".canons/readme/feat-updates-readme.md",
+            ] {
+                all_vetted.insert(
+                    c.to_string(),
+                    CanonVettingAssessment {
+                        vetting_summary: "Vetted.".to_string(),
+                        vetting_score: 0.95,
+                        vetting_status: VettingStatus::Vetted,
+                    },
+                );
+            }
+            let mut no_cfg =
+                sample_admitted_caseload().with_vetting(CaseloadVetting::from_cases(all_vetted));
+            no_cfg.config = None;
+            let zero_provider = RoutingAuditProvider::empty();
+            let clean = execute_audit(&AuditOptions::default(), no_cfg, &ws, &zero_provider)
+                .expect("all-vetted short-circuit");
+            assert!(zero_provider.captured_requests().is_empty());
+            assert_eq!(clean.verdict.expect("verdict").passed_count(), 2);
         }
     }
 }

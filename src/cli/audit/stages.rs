@@ -12,144 +12,114 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Guarded Branch A, JIT Branch B, and `docket` → `admit` → `audit` execution steps for `canon-clerk audit`.
+//! Guarded Branch A, JIT Branch B, and `docket` → `admit` → `vet` → `audit` execution steps for `canon-clerk audit`.
 
 use super::AuditArgs;
 use super::guards::{
-    has_admit_cli_overrides, has_docket_cli_overrides, resolve_audit_concurrency,
-    resolve_audit_fastpass_threshold,
+    has_admit_cli_overrides, has_docket_cli_overrides, has_vet_cli_overrides,
+    resolve_audit_concurrency,
 };
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::audit::{
-    AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit, resolve_canon_reference_paths,
+use crate::audit::{AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit};
+use crate::caseload::{
+    CanonAdjudication, Caseload, CaseloadEvidence, CaseloadVerdict, CaseloadVetting,
+    TYPESAFE_PROVIDER, VerdictStatus,
 };
-use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict};
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
-use crate::cli::args::CanonSelectionArgs;
-use crate::cli::closure::{ClosureBackend, has_provider_overrides, merge_metadata_onto_intake};
+use crate::cli::closure::{ClosureBackend, has_provider_overrides};
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, map_discover_error, resolve_branch_b_options, run_branch_b_configure,
+    build_live_model_provider, resolve_branch_b_options, run_branch_b_configure,
 };
-use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
+use crate::cli::vet::guards::resolve_vet_concurrency;
+use crate::cli::vet::stages::{
+    populate_live_case_and_reference_snapshots, populate_live_target_snapshots,
+};
+use crate::configure::model_provider;
+use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, execute_docket};
-use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
 use crate::telemetry::{PipelineStage, TelemetrySession};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::vet::{VetOptions, execute_vet};
+use std::collections::BTreeMap;
 
 pub(super) struct AuditCascadeOutcome {
     pub(super) caseload: Caseload,
     pub(super) configure_disp: StageDisposition,
     pub(super) docket_disp: StageDisposition,
     pub(super) admit_disp: StageDisposition,
+    pub(super) vet_disp: StageDisposition,
     pub(super) audit_disp: StageDisposition,
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct AuditCascadeThresholds {
-    pub(super) docket_threshold: f64,
-    pub(super) admit_threshold: f64,
-    pub(super) audit_threshold: f64,
+pub(crate) struct AuditCascadeThresholds {
+    pub(crate) docket_threshold: f64,
+    pub(crate) admit_threshold: f64,
+    pub(crate) vet_threshold: f64,
+    pub(crate) audit_threshold: f64,
 }
 
-pub(super) fn resolve_audit_intake(
-    intake_opts: &IntakeOptions,
-    incoming: Option<Caseload>,
-    telemetry: &TelemetrySession<'_>,
-) -> Result<(Caseload, StageDisposition, bool), CliError> {
-    if !intake_opts.has_designated_source() {
-        let existing = incoming.ok_or_else(|| {
-            CliError::usage("Missing upstream caseload or filing inputs for `audit`.")
-        })?;
-        return Ok((existing, StageDisposition::PrePopulated, false));
-    }
-
-    telemetry.run_stage(PipelineStage::Intake, |_scope| {
-        execute_audit_intake_body(intake_opts, incoming)
-    })
-}
-
-fn execute_audit_intake_body(
-    intake_opts: &IntakeOptions,
-    mut incoming: Option<Caseload>,
-) -> Result<(Caseload, StageDisposition, bool), CliError> {
-    let cli_has_targets = intake_opts.all_targets
-        || intake_opts.patch_content.is_some()
-        || intake_opts.target_paths.is_some();
-
-    if !cli_has_targets
-        && let Some(existing) = incoming.as_mut()
-        && let Some(prev_intake) = existing.intake.take()
-    {
-        let pr_meta_added = intake_opts
-            .pr_title
-            .as_deref()
-            .is_some_and(|s| !s.trim().is_empty())
-            || intake_opts
-                .pr_body
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
-        let merged = merge_metadata_onto_intake(prev_intake, intake_opts);
-        existing.docket = None;
-        existing.evidence = None;
-        existing.verdict = None;
-        existing.intake = Some(merged);
-        if pr_meta_added {
-            existing.discovery = None;
-            existing.validation = None;
-        }
-        return Ok((existing.clone(), StageDisposition::Executed, pr_meta_added));
-    }
-
-    let mut updated = execute_intake(intake_opts, incoming).map_err(|err| match err {
-        IntakeError::MissingInputSource | IntakeError::MalformedDiff(_) => {
-            CliError::usage(err.to_string())
-        }
-    })?;
-    updated.discovery = None;
-    updated.validation = None;
-    updated.docket = None;
-    updated.evidence = None;
-    updated.verdict = None;
-    Ok((updated, StageDisposition::Executed, true))
-}
-
-pub(super) fn resolve_audit_discover(
-    canons: &CanonSelectionArgs,
-    mut caseload: Caseload,
-    snapshot: &WorkspaceSnapshot,
-    intake_changed: bool,
-    telemetry: &TelemetrySession<'_>,
-) -> Result<(Caseload, StageDisposition), CliError> {
-    if caseload.discovery.is_some() && !intake_changed && canons.is_empty() {
-        return Ok((caseload, StageDisposition::PrePopulated));
-    }
-
-    caseload.discovery = None;
-    caseload.validation = None;
-    caseload.docket = None;
-    caseload.evidence = None;
-    caseload.verdict = None;
-
-    let discover_opts = DiscoverOptions {
-        all_canons: canons.all_canons,
-        canon_patterns: canons.canon.clone(),
-    };
-
-    let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {
-        execute_discover(&discover_opts, caseload, snapshot).map_err(map_discover_error)
-    })?;
-    Ok((updated, StageDisposition::Executed))
+fn fold_vetted_to_verdict(vetting: &CaseloadVetting, audit_threshold: f64) -> CaseloadVerdict {
+    let adjudications: Vec<CanonAdjudication> = vetting
+        .vetted_cases
+        .iter()
+        .filter_map(|canon_ref| {
+            vetting
+                .cases
+                .get(canon_ref)
+                .map(|assessment| CanonAdjudication {
+                    canon_path: canon_ref.clone(),
+                    compliance_summary: assessment.vetting_summary.clone(),
+                    compliance_score: assessment.vetting_score,
+                    status: VerdictStatus::from_score(assessment.vetting_score, audit_threshold),
+                    annotations: Vec::new(),
+                })
+        })
+        .collect();
+    CaseloadVerdict::from_adjudications(adjudications)
 }
 
 fn try_pre_populated_short_circuit(
     caseload: &Caseload,
     docket_pre_populated: bool,
     evidence_pre_populated: bool,
+    vetting_pre_populated: bool,
+    audit_threshold: f64,
 ) -> Option<AuditCascadeOutcome> {
+    if vetting_pre_populated
+        && let Some(vetting) = caseload.vetting.as_ref()
+        && vetting.is_all_vetted()
+    {
+        let cfg_disp = if caseload.config.is_some() {
+            StageDisposition::PrePopulated
+        } else {
+            StageDisposition::SkippedAllVetted
+        };
+        let doc_disp = if caseload.docket.is_some() {
+            StageDisposition::PrePopulated
+        } else {
+            StageDisposition::SkippedAllVetted
+        };
+        let adm_disp = if caseload.evidence.is_some() {
+            StageDisposition::PrePopulated
+        } else {
+            StageDisposition::SkippedAllVetted
+        };
+        return Some(AuditCascadeOutcome {
+            caseload: caseload
+                .clone()
+                .with_verdict(fold_vetted_to_verdict(vetting, audit_threshold)),
+            configure_disp: cfg_disp,
+            docket_disp: doc_disp,
+            admit_disp: adm_disp,
+            vet_disp: StageDisposition::PrePopulated,
+            audit_disp: StageDisposition::SkippedAllVetted,
+        });
+    }
+
     if evidence_pre_populated
         && caseload
             .evidence
@@ -171,6 +141,7 @@ fn try_pre_populated_short_circuit(
             configure_disp: cfg_disp,
             docket_disp: doc_disp,
             admit_disp: StageDisposition::PrePopulated,
+            vet_disp: StageDisposition::SkippedZeroEvidence,
             audit_disp: StageDisposition::SkippedZeroEvidence,
         });
     }
@@ -195,11 +166,18 @@ fn try_pre_populated_short_circuit(
             configure_disp: cfg_disp,
             docket_disp: StageDisposition::PrePopulated,
             admit_disp: StageDisposition::SkippedEmptyDocket,
+            vet_disp: StageDisposition::SkippedEmptyDocket,
             audit_disp: StageDisposition::SkippedEmptyDocket,
         });
     }
 
     None
+}
+
+struct PrePopulatedFlags {
+    docket: bool,
+    evidence: bool,
+    vetting: bool,
 }
 
 pub(super) fn execute_jit_configure_docket_admit_and_audit(
@@ -218,10 +196,16 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         && !has_admit_cli_overrides(args)
         && !has_docket_cli_overrides(args)
         && !provider_overridden;
+    let vetting_pre_populated =
+        caseload.vetting.is_some() && evidence_pre_populated && !has_vet_cli_overrides(args);
 
-    if let Some(short_circuit) =
-        try_pre_populated_short_circuit(&caseload, docket_pre_populated, evidence_pre_populated)
-    {
+    if let Some(short_circuit) = try_pre_populated_short_circuit(
+        &caseload,
+        docket_pre_populated,
+        evidence_pre_populated,
+        vetting_pre_populated,
+        thresholds.audit_threshold,
+    ) {
         return Ok(short_circuit);
     }
 
@@ -238,9 +222,14 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
         max_concurrent_calls: resolve_admit_concurrency(args.admit_concurrency, env, stored)?,
     };
+    let vet_opts = VetOptions {
+        threshold: thresholds.vet_threshold,
+        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
+        allow_oversized_contest_fallback: true,
+    };
     let audit_opts = AuditOptions {
         threshold: thresholds.audit_threshold,
-        fastpass_threshold: resolve_audit_fastpass_threshold(args.audit_fastpass_threshold, env)?,
         timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
         max_concurrent_calls: resolve_audit_concurrency(args.audit_concurrency, env, stored)?,
     };
@@ -268,9 +257,12 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     execute_configured_spine(
         configured,
         configure_disp,
-        docket_pre_populated,
-        evidence_pre_populated,
-        (&docket_opts, &admit_opts, &audit_opts),
+        PrePopulatedFlags {
+            docket: docket_pre_populated,
+            evidence: evidence_pre_populated,
+            vetting: vetting_pre_populated,
+        },
+        (&docket_opts, &admit_opts, &vet_opts, &audit_opts),
         snapshot,
         backend,
         active_provider,
@@ -285,37 +277,25 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
 fn execute_configured_spine(
     configured: Caseload,
     configure_disp: StageDisposition,
-    docket_pre_populated: bool,
-    evidence_pre_populated: bool,
-    stage_opts: (&DocketOptions, &AdmitOptions, &AuditOptions),
+    pre: PrePopulatedFlags,
+    stage_opts: (&DocketOptions, &AdmitOptions, &VetOptions, &AuditOptions),
     snapshot: &mut WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
     provider: &dyn StructuredModelProvider,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<AuditCascadeOutcome, CliError> {
-    let (docket_opts, admit_opts, audit_opts) = stage_opts;
+    let (docket_opts, admit_opts, vet_opts, audit_opts) = stage_opts;
 
-    let (after_docket, docket_disp) = if evidence_pre_populated || docket_pre_populated {
-        let disp = if configured.docket.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedZeroEvidence
-        };
-        (configured, disp)
-    } else {
-        let mut cleared = configured;
-        cleared.docket = None;
-        cleared.evidence = None;
-        let docketed = telemetry
-            .run_stage(PipelineStage::Docket, |scope| {
-                let instrumented = scope.instrument_provider(provider);
-                execute_docket(docket_opts, cleared, snapshot, &instrumented)
-            })
-            .map_err(|err| CliError::usage(err.to_string()))?;
-        (docketed, StageDisposition::Executed)
-    };
+    let (after_docket, docket_disp) = execute_docket_step(
+        configured,
+        pre.evidence || pre.docket,
+        docket_opts,
+        snapshot,
+        provider,
+        telemetry,
+    )?;
 
-    if !evidence_pre_populated
+    if !pre.evidence
         && after_docket
             .docket
             .as_ref()
@@ -328,16 +308,18 @@ fn execute_configured_spine(
             configure_disp,
             docket_disp,
             admit_disp: StageDisposition::SkippedEmptyDocket,
+            vet_disp: StageDisposition::SkippedEmptyDocket,
             audit_disp: StageDisposition::SkippedEmptyDocket,
         });
     }
 
-    let (after_admit, admit_disp) = if evidence_pre_populated {
+    let (after_admit, admit_disp) = if pre.evidence {
         (after_docket, StageDisposition::PrePopulated)
     } else {
         let mut cleared = after_docket;
         cleared.evidence = None;
-        populate_live_target_file_snapshots(&cleared, snapshot, backend);
+        cleared.vetting = None;
+        populate_live_target_snapshots(&cleared, snapshot, backend);
         let admitted = telemetry
             .run_stage(PipelineStage::Admit, |scope| {
                 let instrumented = scope.instrument_provider(provider);
@@ -357,15 +339,39 @@ fn execute_configured_spine(
             configure_disp,
             docket_disp,
             admit_disp,
+            vet_disp: StageDisposition::SkippedZeroEvidence,
             audit_disp: StageDisposition::SkippedZeroEvidence,
         });
     }
 
-    populate_live_audit_file_snapshots(&after_admit, snapshot, backend);
+    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend);
+    let (after_vet, vet_disp) = execute_vet_step(
+        after_admit,
+        pre.vetting,
+        vet_opts,
+        snapshot,
+        provider,
+        telemetry,
+    )?;
+
+    if let Some(vetting) = after_vet.vetting.as_ref()
+        && vetting.is_all_vetted()
+    {
+        let verdict = fold_vetted_to_verdict(vetting, audit_opts.threshold);
+        return Ok(AuditCascadeOutcome {
+            caseload: after_vet.with_verdict(verdict),
+            configure_disp,
+            docket_disp,
+            admit_disp,
+            vet_disp,
+            audit_disp: StageDisposition::SkippedAllVetted,
+        });
+    }
+
     let after_audit = telemetry
         .run_stage(PipelineStage::Audit, |scope| {
             let instrumented = scope.instrument_provider(provider);
-            execute_audit(audit_opts, after_admit, snapshot, &instrumented)
+            execute_audit(audit_opts, after_vet, snapshot, &instrumented)
         })
         .map_err(|err| CliError::usage(err.to_string()))?;
 
@@ -374,63 +380,65 @@ fn execute_configured_spine(
         configure_disp,
         docket_disp,
         admit_disp,
+        vet_disp,
         audit_disp: StageDisposition::Executed,
     })
 }
 
-fn populate_live_target_file_snapshots(
-    caseload: &Caseload,
-    snapshot: &mut WorkspaceSnapshot,
-    backend: &ClosureBackend<'_>,
-) {
-    let ClosureBackend::LiveDisk { workspace_root } = backend else {
-        return;
-    };
-    let Some(discovery) = &caseload.discovery else {
-        return;
-    };
-    let diffs = caseload.intake.as_ref().map(|i| &i.diffs);
-    let paths_to_load: Vec<String> = discovery
-        .target_files
-        .iter()
-        .filter(|path| {
-            diffs.is_none_or(|d| {
-                d.get(*path)
-                    .is_none_or(|art| art.patch.is_none() && art.content.is_none())
-            })
-        })
-        .cloned()
-        .collect();
-    if !paths_to_load.is_empty() {
-        snapshot.populate_file_contents_from_disk(workspace_root, &paths_to_load);
+fn execute_docket_step(
+    configured: Caseload,
+    skip_docket: bool,
+    docket_opts: &DocketOptions,
+    snapshot: &WorkspaceSnapshot,
+    provider: &dyn StructuredModelProvider,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition), CliError> {
+    if skip_docket {
+        let disp = if configured.docket.is_some() {
+            StageDisposition::PrePopulated
+        } else {
+            StageDisposition::SkippedZeroEvidence
+        };
+        return Ok((configured, disp));
     }
+    let mut cleared = configured;
+    cleared.docket = None;
+    cleared.evidence = None;
+    cleared.vetting = None;
+    let docketed = telemetry
+        .run_stage(PipelineStage::Docket, |scope| {
+            let instrumented = scope.instrument_provider(provider);
+            execute_docket(docket_opts, cleared, snapshot, &instrumented)
+        })
+        .map_err(|err| CliError::usage(err.to_string()))?;
+    Ok((docketed, StageDisposition::Executed))
 }
 
-fn populate_live_audit_file_snapshots(
-    caseload: &Caseload,
-    snapshot: &mut WorkspaceSnapshot,
-    backend: &ClosureBackend<'_>,
-) {
-    populate_live_target_file_snapshots(caseload, snapshot, backend);
-    let ClosureBackend::LiveDisk { workspace_root } = backend else {
-        return;
-    };
-    let Some(evidence) = &caseload.evidence else {
-        return;
-    };
-    let mut paths_to_load = BTreeSet::new();
-    for canon_ref in &evidence.active_cases {
-        for admitted in evidence.admitted_exhibits_for(canon_ref) {
-            paths_to_load.insert(admitted.file_path.clone());
-        }
-        if let Some(canon) = snapshot.canons.get(canon_ref) {
-            for ref_path in resolve_canon_reference_paths(canon, snapshot) {
-                paths_to_load.insert(ref_path);
-            }
-        }
+fn execute_vet_step(
+    after_admit: Caseload,
+    vetting_pre_populated: bool,
+    vet_opts: &VetOptions,
+    snapshot: &WorkspaceSnapshot,
+    provider: &dyn StructuredModelProvider,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<(Caseload, StageDisposition), CliError> {
+    if vetting_pre_populated {
+        return Ok((after_admit, StageDisposition::PrePopulated));
     }
-    let collected: Vec<String> = paths_to_load.into_iter().collect();
-    if !collected.is_empty() {
-        snapshot.populate_file_contents_from_disk(workspace_root, &collected);
+    let uses_discriminative_screener = after_admit
+        .config
+        .as_ref()
+        .is_some_and(|c| model_provider(&c.screener_model) == TYPESAFE_PROVIDER);
+    let mut cleared = after_admit;
+    cleared.vetting = None;
+    if !uses_discriminative_screener {
+        return Ok((cleared, StageDisposition::SkippedGenerativeScreener));
     }
+    let vetted = telemetry
+        .run_stage(PipelineStage::Vet, |scope| {
+            let instrumented = scope.instrument_provider(provider);
+            execute_vet(vet_opts, cleared, snapshot, &instrumented)
+        })
+        .map_err(|err| CliError::usage(err.to_string()))?;
+    Ok((vetted, StageDisposition::Executed))
 }
