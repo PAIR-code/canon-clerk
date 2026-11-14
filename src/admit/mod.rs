@@ -845,6 +845,79 @@ mod tests {
                     .system_instruction
                     .contains("Code Stratum vs. Documentation Stratum")
             );
+            assert!(
+                !reqs[0].user_prompt.contains("Modified Files in Filing ("),
+                "filing overview must not prime comma-joined filename lists"
+            );
+        }
+
+        #[test]
+        fn test_recovers_exact_comma_grouped_file_paths_while_rejecting_unknown_segments() {
+            let ws = sample_workspace();
+            let mut ok_routes = BTreeMap::new();
+            ok_routes.insert(
+                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                Ok(json!({
+                    "exhibits": [
+                        {
+                            "file_path": "pr_body, pr_title",
+                            "admissibility_summary": "Metadata planes do not define CLI option flags.",
+                            "admissibility_score": 0.10
+                        },
+                        {
+                            "file_path": "src/cli/admit.rs",
+                            "admissibility_summary": "Defines `--admit-threshold` CLI flag.",
+                            "admissibility_score": 0.94
+                        }
+                    ]
+                })),
+            );
+            let caseload = sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
+            let enriched = execute_admit(
+                &AdmitOptions::default(),
+                caseload.clone(),
+                &ws,
+                &RoutingMockProvider::new(ok_routes),
+            )
+            .expect("exact comma-grouped exhibits must expand cleanly");
+            let ev = enriched.evidence.expect("evidence");
+            assert_eq!(ev.admitted_exhibit_count(), 1);
+            assert_eq!(ev.excluded_exhibit_count(), 2);
+
+            let mut bad_routes = BTreeMap::new();
+            bad_routes.insert(
+                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                Ok(json!({
+                    "exhibits": [
+                        {
+                            "file_path": "pr_body, src/unknown.rs",
+                            "admissibility_summary": "Contains unknown path.",
+                            "admissibility_score": 0.10
+                        },
+                        {
+                            "file_path": "pr_title",
+                            "admissibility_summary": "Irrelevant.",
+                            "admissibility_score": 0.10
+                        },
+                        {
+                            "file_path": "src/cli/admit.rs",
+                            "admissibility_summary": "Defines CLI flag.",
+                            "admissibility_score": 0.94
+                        }
+                    ]
+                })),
+            );
+            let err = execute_admit(
+                &AdmitOptions::default(),
+                caseload,
+                &ws,
+                &RoutingMockProvider::new(bad_routes),
+            )
+            .expect_err("unknown segment inside comma-grouped file_path must fail");
+            assert!(matches!(
+                err,
+                AdmitError::Provider(ProviderError::SchemaDecode { .. })
+            ));
         }
     }
 }

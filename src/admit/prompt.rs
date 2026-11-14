@@ -26,7 +26,7 @@ You are the Clerk of the Court for Canon Clerk performing Micro Evidentiary Admi
 Given a single active Case (one governing engineering canon from the active docket) and a list of candidate exhibits (modified file diffs, target workspace files, and inspected pull request metadata planes such as `pr_title`, `pr_body`, or `linked_issues`), determine for EACH candidate exhibit in isolation whether it is admissible as direct, relevant evidence prior to judicial adjudication (`audit`).
 
 Evaluation Rules:
-1. Exact Domain Indirection: For each entry in `exhibits`, set `file_path` to the exact candidate exhibit identifier string presented under `### Candidate Exhibit:` (and listed under `## Required file_path Identifiers`) without modification.
+1. Exact Single-Item Domain Indirection: For each entry in `exhibits`, set `file_path` to ONE exact candidate exhibit identifier copied verbatim from `### Candidate Exhibit:` / `## Required file_path Identifiers`. NEVER comma-separate, group, or combine multiple file paths into a single `file_path` string—every candidate exhibit MUST have its own separate JSON object in `exhibits`.
 2. Construct-Grounded Contrastive Scratchpad (Reason First):
    - In `admissibility_summary`, you MUST explicitly name the specific construct and artifact stratum governed by the canon (e.g., boolean CLI option definitions in argument-parser code, `--help` usage examples, POSIX credential permission checks, `README.md` feature documentation, or `fix:` pull requests) AND state whether THIS individual exhibit itself defines, modifies, or directly evidences that construct.
    - NEVER write a generic description of what a file does in the PR without testing whether it instantiates or modifies the canon's governed construct.
@@ -39,7 +39,7 @@ Evaluation Rules:
    - Omission & Companion-Artifact Rules: When a canon's triggering precondition IS met (e.g., a `feat` PR required to update `README.md`, or a PR required to link its motivating issue) and the required companion artifact is absent from the diff, admit (`0.75 - 0.95`) the specific exhibits evidencing the triggering user-facing change (`pr_title`, `pr_body`, `linked_issues`, and primary entrypoint files), while still excluding unrelated internal helper modules.
    - Metadata Plane Hygiene: Admit `pr_title`, `pr_body`, or `linked_issues` (`0.75 - 0.95`) ONLY when the canon governs commits/PRs/workflow scope or declares `Exception` criteria grounded in PR/issue justification; exclude (`0.05 - 0.25`) metadata planes when the canon governs self-contained source-code structure, naming, or syntax.
    - Avoid ambiguous boundary scores in `0.35 - 0.65`: commit decisively to `>= 0.75` when directly relevant or `<= 0.25` when absent/orthogonal.
-4. Completeness & Uniqueness: Return an `exhibits` array containing one entry per candidate exhibit identifier in the exact order listed—no omissions, no duplicates, and no extra identifiers.";
+4. Completeness & 1-to-1 Cardinality: Return an `exhibits` array whose length equals the exact count in `## Required file_path Identifiers`, with one separate object per identifier in the exact order listed—never group multiple identifiers into one `file_path`, never omit an identifier, and never emit duplicates or unknown paths.";
 
 /// Builds a constant-size domain-indirected, reason-first JSON Schema enforcing
 /// `file_path`, `admissibility_summary`, then `admissibility_score` (`docs/architecture/nodes/admit.md` §4.4).
@@ -64,7 +64,7 @@ fn single_exhibit_schema() -> Value {
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Exact candidate exhibit identifier from the prompt (`### Candidate Exhibit: ...`), either a repository-relative file path or metadata plane token (`pr_title`, `pr_body`, `linked_issues`)."
+                "description": "SINGLE exact candidate exhibit identifier copied verbatim from `## Required file_path Identifiers` (either one repository-relative file path or one metadata plane token such as `pr_title`, `pr_body`, `linked_issues`). NEVER comma-separate or combine multiple paths into one string."
             },
             "admissibility_summary": {
                 "type": "string",
@@ -131,19 +131,16 @@ fn append_filing_overview(
     let _ = writeln!(out, "- Intake Scope: {}", intake.scope.as_str());
     let _ = writeln!(out, "- Discovery Mode: {}", discovery.mode.as_str());
     if !intake.diffs.is_empty() {
-        let touched: Vec<&str> = intake.diffs.keys().map(String::as_str).collect();
         let _ = writeln!(
             out,
-            "- Modified Files in Filing ({}): {}",
-            touched.len(),
-            touched.join(", ")
+            "- Total Modified Files in Filing: {}",
+            intake.diffs.len()
         );
     } else if !discovery.target_files.is_empty() {
         let _ = writeln!(
             out,
-            "- Target Files in Scope ({}): {}",
-            discovery.target_files.len(),
-            discovery.target_files.join(", ")
+            "- Total Target Files in Scope: {}",
+            discovery.target_files.len()
         );
     }
     if let Some(intent) = non_blank(intake.intent.as_deref()) {

@@ -54,7 +54,7 @@ pub(super) fn decode_case_exhibits(
         let pos_expected = same_len
             .then(|| candidate_exhibits.get(index).map(String::as_str))
             .flatten();
-        let assessment = decode_single_exhibit(
+        let assessments = decode_exhibit_entry(
             raw_item,
             index,
             canon_ref,
@@ -63,17 +63,16 @@ pub(super) fn decode_case_exhibits(
             threshold,
             model_specifier,
         )?;
-        if seen
-            .insert(assessment.file_path.clone(), assessment)
-            .is_some()
-        {
-            let dup = &exhibits_arr[index]["file_path"];
-            return Err(schema_decode_error(
-                model_specifier,
-                format!(
-                    "duplicate `file_path` {dup} in structured admit response for `{canon_ref}`"
-                ),
-            ));
+        for assessment in assessments {
+            let path_key = assessment.file_path.clone();
+            if seen.insert(path_key.clone(), assessment).is_some() {
+                return Err(schema_decode_error(
+                    model_specifier,
+                    format!(
+                        "duplicate `file_path` `{path_key}` in structured admit response for `{canon_ref}`"
+                    ),
+                ));
+            }
         }
     }
 
@@ -100,32 +99,56 @@ fn resolve_exhibit_id<'a>(
     expected: &BTreeSet<&'a str>,
     pos: Option<&'a str>,
 ) -> Option<&'a str> {
-    if let Some(&exact) = expected.get(raw_id) {
+    let cleaned = raw_id.trim().trim_matches('`');
+    if let Some(&exact) = expected.get(cleaned) {
         return Some(exact);
     }
     let pos = pos?;
-    if raw_id.rsplit('/').next() == pos.rsplit('/').next() {
+    if cleaned.rsplit('/').next() == pos.rsplit('/').next() {
         return Some(pos);
     }
-    let pref = raw_id
+    let pref = cleaned
         .bytes()
         .zip(pos.bytes())
         .take_while(|(a, b)| a == b)
         .count();
-    let suff = raw_id
+    let suff = cleaned
         .bytes()
         .rev()
         .zip(pos.bytes().rev())
         .take_while(|(a, b)| a == b)
         .count();
-    ((pref + suff) * 5 >= raw_id.len().max(pos.len()).max(1) * 4).then_some(pos)
+    ((pref + suff) * 5 >= cleaned.len().max(pos.len()).max(1) * 4).then_some(pos)
+}
+
+fn resolve_exhibit_ids<'a>(
+    raw_id: &'a str,
+    expected: &BTreeSet<&'a str>,
+    pos: Option<&'a str>,
+) -> Option<Vec<&'a str>> {
+    if let Some(single) = resolve_exhibit_id(raw_id, expected, pos) {
+        return Some(vec![single]);
+    }
+    if !raw_id.contains(',') {
+        return None;
+    }
+    let mut expanded = Vec::new();
+    for segment in raw_id.split(',') {
+        let cleaned = segment.trim().trim_matches('`');
+        if cleaned.is_empty() {
+            return None;
+        }
+        let &exact = expected.get(cleaned)?;
+        expanded.push(exact);
+    }
+    (expanded.len() >= 2).then_some(expanded)
 }
 
 #[allow(
     clippy::too_many_arguments,
     reason = "Internal decoder binding raw JSON entry, index, canon_ref, expected set, positional fallback, threshold, and model"
 )]
-fn decode_single_exhibit(
+fn decode_exhibit_entry(
     raw_item: &Value,
     index: usize,
     canon_ref: &str,
@@ -133,7 +156,7 @@ fn decode_single_exhibit(
     positional_expected: Option<&str>,
     threshold: f64,
     model: &str,
-) -> Result<ExhibitAssessment, AdmitError> {
+) -> Result<Vec<ExhibitAssessment>, AdmitError> {
     let entry = raw_item.as_object().ok_or_else(|| {
         schema_decode_error(
             model,
@@ -149,8 +172,8 @@ fn decode_single_exhibit(
                 format!("missing string `file_path` at `exhibits[{index}]` for `{canon_ref}`"),
             )
         })?;
-    let resolved_path =
-        resolve_exhibit_id(raw_path, expected, positional_expected).ok_or_else(|| {
+    let resolved_paths =
+        resolve_exhibit_ids(raw_path, expected, positional_expected).ok_or_else(|| {
             schema_decode_error(
                 model,
                 format!(
@@ -158,15 +181,14 @@ fn decode_single_exhibit(
                 ),
             )
         })?;
+    let label = resolved_paths[0];
     let raw_summary = entry
         .get("admissibility_summary")
         .and_then(Value::as_str)
         .ok_or_else(|| {
             schema_decode_error(
                 model,
-                format!(
-                    "missing string `admissibility_summary` for `{resolved_path}` in `{canon_ref}`"
-                ),
+                format!("missing string `admissibility_summary` for `{label}` in `{canon_ref}`"),
             )
         })?;
     let raw_score = entry
@@ -175,24 +197,25 @@ fn decode_single_exhibit(
         .ok_or_else(|| {
             schema_decode_error(
                 model,
-                format!(
-                    "missing numeric `admissibility_score` for `{resolved_path}` in `{canon_ref}`"
-                ),
+                format!("missing numeric `admissibility_score` for `{label}` in `{canon_ref}`"),
             )
         })?;
     let admissibility_score = normalize_admissibility_score(raw_score).map_err(|detail| {
         schema_decode_error(
             model,
-            format!(
-                "invalid `admissibility_score` for `{resolved_path}` in `{canon_ref}`: {detail}"
-            ),
+            format!("invalid `admissibility_score` for `{label}` in `{canon_ref}`: {detail}"),
         )
     })?;
+    let trimmed_summary = raw_summary.trim().to_string();
+    let status = AdmissibilityStatus::from_score(admissibility_score, threshold);
 
-    Ok(ExhibitAssessment {
-        file_path: resolved_path.to_string(),
-        admissibility_summary: raw_summary.trim().to_string(),
-        admissibility_score,
-        admissibility_status: AdmissibilityStatus::from_score(admissibility_score, threshold),
-    })
+    Ok(resolved_paths
+        .into_iter()
+        .map(|path| ExhibitAssessment {
+            file_path: path.to_string(),
+            admissibility_summary: trimmed_summary.clone(),
+            admissibility_score,
+            admissibility_status: status,
+        })
+        .collect())
 }
