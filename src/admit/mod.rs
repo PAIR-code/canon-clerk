@@ -820,6 +820,31 @@ mod tests {
                 enriched.evidence.expect("evidence").active_cases,
                 vec![".canons/cli/cli-flags-kebab-case.md".to_string()]
             );
+
+            let reqs = provider.captured_requests();
+            assert_eq!(reqs.len(), 1);
+            let canon_pos = reqs[0]
+                .user_prompt
+                .find("## Active Case Governing Canon:")
+                .expect("canon section present");
+            let overview_pos = reqs[0]
+                .user_prompt
+                .find("## Filing Overview")
+                .expect("overview section present");
+            let exhibits_pos = reqs[0]
+                .user_prompt
+                .find("## Candidate Exhibits")
+                .expect("exhibits section present");
+            assert!(
+                canon_pos < overview_pos && overview_pos < exhibits_pos,
+                "governing canon must lead the prompt to anchor construct and stratum attention"
+            );
+            assert!(reqs[0].user_prompt.contains("- Governing Invariant:"));
+            assert!(
+                reqs[0]
+                    .system_instruction
+                    .contains("Code Stratum vs. Documentation Stratum")
+            );
         }
     }
 }
