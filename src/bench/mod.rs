@@ -263,7 +263,6 @@ fn execute_single_trial(
                 threshold: spec.threshold,
                 timeout_ms: spec.timeout_ms,
                 max_concurrent_calls: spec.max_concurrent_calls,
-                allow_oversized_contest_fallback: false,
             };
             session
                 .run_stage(PipelineStage::Vet, |scope| {

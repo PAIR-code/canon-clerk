@@ -14,6 +14,7 @@
 
 //! Discriminative `Noul` prima facie compliance vetting for `vet` (`typesafe:jev-*`, `docs/architecture/nodes/vet.md` §4.3).
 
+use super::slices::DiscriminativeCasePlan;
 use super::{PreparedVettingCase, VetError};
 use crate::caseload::{CanonVettingAssessment, VettingStatus, normalize_vetting_score};
 use crate::provider::{
@@ -30,18 +31,22 @@ Evaluate the Admitted Exhibits (and any Statutory Grounding References) in `stat
 against the Governing Canon Statute's Normative Invariant (`What`) and Declared `Exception` clauses:\n\
 - `Rationale` (`Why`) and `Remediation` (`How`) are non-normative; NEVER fail code that satisfies \
   the Normative Invariant via a valid alternative mechanism.\n\
-- Do NOT invent extra requirements beyond the written Normative Invariant or speculate about un-admitted files.\n\
+- Do NOT invent extra requirements beyond the written Normative Invariant or speculate about un-admitted files \
+  (when `state` presents an exhibit slice, `## All Admitted File Exhibit Paths in Filing` lists all files admitted across the filing).\n\
 - If a prima facie violation satisfies the verifiable conditions of a declared `Exception`, treat the case as compliant.\n\n\
-Question: Do the Admitted Exhibits comply with the Governing Canon Statute with zero unexcused violations?\n\
+Question: Do the Admitted Exhibits in `state` comply with the Governing Canon Statute with zero unexcused violations?\n\
 - Answer YES only if the Admitted Exhibits comply (or satisfy a declared `Exception`) and require zero violation annotations.\n\
 - Answer NO if any unexcused statute violation or missing required companion update is present.";
+
+pub(super) const fn max_discriminative_state_chars() -> usize {
+    MAX_DECISION_BATCH_CHARS - VET_NOUL_INSTRUCTION.len() - 128
+}
 
 pub(super) struct DiscriminativeVetParams<'a> {
     pub(super) screener_model: &'a str,
     pub(super) threshold: f64,
     pub(super) concurrency_limit: usize,
     pub(super) timeout_ms: u64,
-    pub(super) allow_oversized_contest_fallback: bool,
 }
 
 type VetCaseSlot = Option<Result<(String, CanonVettingAssessment), VetError>>;
@@ -115,27 +120,61 @@ fn evaluate_single_decision_case(
     params: &DiscriminativeVetParams<'_>,
     provider: &dyn StructuredModelProvider,
 ) -> Result<CanonVettingAssessment, VetError> {
-    if case.user_prompt.len() + VET_NOUL_INSTRUCTION.len() + 64 > MAX_DECISION_BATCH_CHARS {
-        if params.allow_oversized_contest_fallback {
-            return Ok(oversized_contest_assessment());
-        }
-        let detail = format!(
-            "case `{}` admitted exhibits exceed discriminative context budget (`{MAX_DECISION_BATCH_CHARS}` chars)",
-            case.canon_ref
-        );
-        let diagnostic = format!(
-            "TypeSafe context window exceeded for `{}`: {detail}.\n  \
-             Hint: Run `canon-clerk audit` or pass `--screener-model flash-lite` for long-context filings.",
-            params.screener_model
-        );
-        return Err(VetError::Provider(ProviderError::HttpStatus {
-            model_specifier: params.screener_model.to_string(),
-            status_code: 400,
-            detail,
-            diagnostic,
-        }));
+    let DiscriminativeCasePlan::Slices(ref slices) = case.discriminative_plan else {
+        return Ok(oversized_contest_assessment());
+    };
+    if slices.is_empty() {
+        return Ok(oversized_contest_assessment());
     }
 
+    let mut min_score = 1.0_f64;
+    let mut resolved_model = params.screener_model.to_string();
+
+    for slice_state in slices {
+        match evaluate_slice(slice_state, &case.canon_ref, params, provider)? {
+            SliceOutcome::Scored { score, model } => {
+                min_score = min_score.min(score);
+                resolved_model = model;
+            }
+            SliceOutcome::OversizedContest => return Ok(oversized_contest_assessment()),
+        }
+    }
+
+    let status = VettingStatus::from_score(min_score, params.threshold);
+    let slice_note = if slices.len() > 1 {
+        format!(" across {} slices", slices.len())
+    } else {
+        String::new()
+    };
+    let summary = match status {
+        VettingStatus::Vetted => format!(
+            "Prima facie compliant via discriminative vetting{slice_note} (`{resolved_model}`: {min_score:.3} >= {:.2}).",
+            params.threshold
+        ),
+        VettingStatus::Contested => format!(
+            "Contested via discriminative vetting{slice_note} (`{resolved_model}`: {min_score:.3} < {:.2}); bound over for substantive `audit`.",
+            params.threshold
+        ),
+    };
+
+    Ok(CanonVettingAssessment {
+        vetting_summary: summary,
+        vetting_score: min_score,
+        vetting_status: status,
+    })
+}
+
+enum SliceOutcome {
+    Scored { score: f64, model: String },
+    OversizedContest,
+}
+
+fn evaluate_slice(
+    slice_state: &str,
+    canon_ref: &str,
+    params: &DiscriminativeVetParams<'_>,
+    provider: &dyn StructuredModelProvider,
+) -> Result<SliceOutcome, VetError> {
     let mut questions = BTreeMap::new();
     questions.insert(
         COMPLIANCE_QUESTION_KEY.to_string(),
@@ -143,7 +182,7 @@ fn evaluate_single_decision_case(
     );
     let decision_req = DecisionRequest {
         model_specifier: params.screener_model.to_string(),
-        state: case.user_prompt.clone(),
+        state: slice_state.to_string(),
         questions,
         timeout_ms: params.timeout_ms,
     };
@@ -154,8 +193,8 @@ fn evaluate_single_decision_case(
             status_code: 400,
             ref detail,
             ..
-        }) if params.allow_oversized_contest_fallback && detail.contains("max_tokens_exceeded") => {
-            return Ok(oversized_contest_assessment());
+        }) if detail.contains("max_tokens_exceeded") => {
+            return Ok(SliceOutcome::OversizedContest);
         }
         Err(err) => return Err(VetError::Provider(err)),
     };
@@ -167,37 +206,18 @@ fn evaluate_single_decision_case(
         .ok_or_else(|| {
             VetError::Provider(ProviderError::SchemaDecode {
                 model_specifier: params.screener_model.to_string(),
-                message: format!(
-                    "missing compliance `noul` score for active case `{}`",
-                    case.canon_ref
-                ),
+                message: format!("missing compliance `noul` score for active case `{canon_ref}`"),
             })
         })?;
-    let vetting_score = normalize_vetting_score(raw_score).map_err(|detail| {
+    let score = normalize_vetting_score(raw_score).map_err(|detail| {
         VetError::Provider(ProviderError::SchemaDecode {
             model_specifier: params.screener_model.to_string(),
-            message: format!(
-                "invalid compliance `noul` score for `{}`: {detail}",
-                case.canon_ref
-            ),
+            message: format!("invalid compliance `noul` score for `{canon_ref}`: {detail}"),
         })
     })?;
 
-    let status = VettingStatus::from_score(vetting_score, params.threshold);
-    let summary = match status {
-        VettingStatus::Vetted => format!(
-            "Prima facie compliant via discriminative vetting (`{}`: {:.3} >= {:.2}).",
-            decision_resp.resolved_model, vetting_score, params.threshold
-        ),
-        VettingStatus::Contested => format!(
-            "Contested via discriminative vetting (`{}`: {:.3} < {:.2}); bound over for substantive `audit`.",
-            decision_resp.resolved_model, vetting_score, params.threshold
-        ),
-    };
-
-    Ok(CanonVettingAssessment {
-        vetting_summary: summary,
-        vetting_score,
-        vetting_status: status,
+    Ok(SliceOutcome::Scored {
+        score,
+        model: decision_resp.resolved_model,
     })
 }

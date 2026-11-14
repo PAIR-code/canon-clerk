@@ -182,7 +182,7 @@ pub(crate) fn build_audit_case_user_prompt(
     (out, admitted_file_paths)
 }
 
-fn append_case_overview(
+pub(crate) fn append_case_overview(
     out: &mut String,
     canon_ref: &str,
     intake: &CaseloadIntake,
@@ -201,7 +201,7 @@ fn append_case_overview(
     out.push('\n');
 }
 
-fn append_governing_canon_statute(out: &mut String, canon_ref: &str, canon: &Canon) {
+pub(crate) fn append_governing_canon_statute(out: &mut String, canon_ref: &str, canon: &Canon) {
     let _ = writeln!(out, "## Governing Canon Statute: `{canon_ref}`");
     let _ = writeln!(out, "- ID: `{}`", canon.id);
     let _ = writeln!(out, "- Title: {}", canon.title);

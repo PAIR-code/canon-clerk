@@ -67,7 +67,7 @@ pub fn resolve_canon_reference_paths(canon: &Canon, workspace: &WorkspaceSnapsho
 }
 
 /// Renders a single admitted exhibit (`ExhibitAssessment`) into `out` with 1-based line numbers for file exhibits.
-pub(super) fn append_admitted_exhibit_section(
+pub(crate) fn append_admitted_exhibit_section(
     out: &mut String,
     exhibit: &ExhibitAssessment,
     intake: &CaseloadIntake,
@@ -221,7 +221,7 @@ fn append_diff_file_exhibit(
 }
 
 /// Appends resolved static `references:` files as authoritative statutory grounding context.
-pub(super) fn append_grounding_references_section(
+pub(crate) fn append_grounding_references_section(
     out: &mut String,
     reference_paths: &[String],
     admitted_file_paths: &BTreeSet<String>,
@@ -319,7 +319,7 @@ pub(crate) fn annotate_snapshot_lines(content: &str) -> String {
     out
 }
 
-pub(super) fn non_blank(text: Option<&str>) -> Option<&str> {
+pub(crate) fn non_blank(text: Option<&str>) -> Option<&str> {
     text.map(str::trim).filter(|s| !s.is_empty())
 }
 

@@ -15,6 +15,7 @@
 //! Core domain execution engine for the `vet` Caseload DAG stage (`docs/architecture/nodes/vet.md`).
 
 mod decision;
+mod slices;
 mod structured;
 
 use crate::audit::build_audit_case_user_prompt;
@@ -23,6 +24,7 @@ use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
+use slices::{DiscriminativeCasePlan, build_discriminative_case_plan};
 use std::fmt;
 
 /// Default high-confidence prima facie compliance threshold for `vet` (`docs/architecture/nodes/vet.md` §3).
@@ -46,9 +48,6 @@ pub struct VetOptions {
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case vetting calls (`>= 1`; defaults to [`DEFAULT_VET_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
-    /// When `true` (cascading inside `canon-clerk audit`), cases exceeding the discriminative context
-    /// window deterministically classify as `contested` so they escalate to `auditor_model`.
-    pub allow_oversized_contest_fallback: bool,
 }
 
 impl Default for VetOptions {
@@ -57,7 +56,6 @@ impl Default for VetOptions {
             threshold: DEFAULT_VET_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: None,
-            allow_oversized_contest_fallback: false,
         }
     }
 }
@@ -144,9 +142,10 @@ impl From<ProviderError> for VetError {
     }
 }
 
-pub(super) struct PreparedVettingCase {
-    pub(super) canon_ref: String,
-    pub(super) user_prompt: String,
+struct PreparedVettingCase {
+    canon_ref: String,
+    user_prompt: String,
+    discriminative_plan: DiscriminativeCasePlan,
 }
 
 fn validate_vet_options(options: &VetOptions) -> Result<f64, VetError> {
@@ -198,7 +197,7 @@ pub fn execute_vet(
         return Ok(caseload.with_vetting(CaseloadVetting::default()));
     }
 
-    let mut prepared_cases = Vec::new();
+    let mut active_entries = Vec::new();
     for canon_ref in &evidence.active_cases {
         let canon =
             workspace
@@ -209,26 +208,51 @@ pub fn execute_vet(
                 })?;
         let admitted = evidence.admitted_exhibits_for(canon_ref);
         if !admitted.is_empty() {
-            let (user_prompt, _) = build_audit_case_user_prompt(
-                canon_ref, canon, &admitted, intake, discovery, workspace,
-            );
-            prepared_cases.push(PreparedVettingCase {
-                canon_ref: canon_ref.clone(),
-                user_prompt,
-            });
+            active_entries.push((canon_ref.clone(), canon, admitted));
         }
     }
 
-    if prepared_cases.is_empty() {
+    if active_entries.is_empty() {
         return Ok(caseload.with_vetting(CaseloadVetting::default()));
     }
 
     let config = caseload.config.as_ref().ok_or(VetError::MissingConfig)?;
+    let is_discriminative = model_provider(&config.screener_model) == TYPESAFE_PROVIDER;
+    let max_state_chars = decision::max_discriminative_state_chars();
+
+    let prepared_cases: Vec<PreparedVettingCase> = active_entries
+        .into_iter()
+        .map(|(canon_ref, canon, admitted)| {
+            let (user_prompt, _) = build_audit_case_user_prompt(
+                &canon_ref, canon, &admitted, intake, discovery, workspace,
+            );
+            let discriminative_plan = if is_discriminative {
+                build_discriminative_case_plan(
+                    &canon_ref,
+                    canon,
+                    &admitted,
+                    &user_prompt,
+                    intake,
+                    discovery,
+                    workspace,
+                    max_state_chars,
+                )
+            } else {
+                DiscriminativeCasePlan::Slices(Vec::new())
+            };
+            PreparedVettingCase {
+                canon_ref,
+                user_prompt,
+                discriminative_plan,
+            }
+        })
+        .collect();
+
     let concurrency_limit = options
         .max_concurrent_calls
         .unwrap_or(DEFAULT_VET_MAX_CONCURRENT_CALLS);
 
-    let cases = if model_provider(&config.screener_model) == TYPESAFE_PROVIDER {
+    let cases = if is_discriminative {
         decision::execute_discriminative_vetting(
             &prepared_cases,
             &decision::DiscriminativeVetParams {
@@ -236,7 +260,6 @@ pub fn execute_vet(
                 threshold,
                 concurrency_limit,
                 timeout_ms: options.timeout_ms,
-                allow_oversized_contest_fallback: options.allow_oversized_contest_fallback,
             },
             provider,
         )?
@@ -276,6 +299,7 @@ mod tests {
 
     struct MockVetProvider {
         decision_scores: BTreeMap<String, f64>,
+        max_tokens_trigger: Option<String>,
         structured_routes: BTreeMap<String, Value>,
         decision_requests: Mutex<Vec<DecisionRequest>>,
         structured_requests: Mutex<Vec<GenerationRequest>>,
@@ -285,6 +309,7 @@ mod tests {
         fn empty() -> Self {
             Self {
                 decision_scores: BTreeMap::new(),
+                max_tokens_trigger: None,
                 structured_routes: BTreeMap::new(),
                 decision_requests: Mutex::new(Vec::new()),
                 structured_requests: Mutex::new(Vec::new()),
@@ -331,6 +356,16 @@ mod tests {
                 .lock()
                 .expect("lock")
                 .push(request.clone());
+            if let Some(ref trigger) = self.max_tokens_trigger
+                && request.state.contains(trigger)
+            {
+                return Err(ProviderError::HttpStatus {
+                    model_specifier: request.model_specifier.clone(),
+                    status_code: 400,
+                    detail: "max_tokens_exceeded".to_string(),
+                    diagnostic: "HTTP 400 max_tokens_exceeded".to_string(),
+                });
+            }
             let score = self
                 .decision_scores
                 .iter()
@@ -523,6 +558,164 @@ mod tests {
                 VettingStatus::Contested
             );
             assert!(provider.structured_requests.lock().unwrap().is_empty());
+        }
+
+        fn multi_slice_fixture(canon_ref: &str) -> (WorkspaceSnapshot, Caseload) {
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**\"\nreferences:\n  - \"README.md\"\n---\nDeveloped features MUST be reflected in README.md.\n",
+                    &ParseCanonOptions::with_source_ref(canon_ref),
+                )
+                .with_file_content("README.md", "# Project\n");
+            let mut diffs = BTreeMap::from([(
+                "README.md".to_string(),
+                FileArtifact {
+                    path: "README.md".to_string(),
+                    previous_path: None,
+                    status: FileChangeStatus::Modified,
+                    lines_added: 2,
+                    lines_deleted: 0,
+                    patch: Some("@@ -1,1 +1,3 @@\n+PINNED_README_DIFF_SENTINEL\n".to_string()),
+                    patch_omission_reason: None,
+                    content: None,
+                    content_omission_reason: None,
+                },
+            )]);
+            let mut admitted_items = vec![ExhibitAssessment {
+                file_path: "README.md".to_string(),
+                admissibility_summary: "companion doc".to_string(),
+                admissibility_score: 0.96,
+                admissibility_status: AdmissibilityStatus::Admitted,
+            }];
+            let big_body: String = (1..=350)
+                .map(|ln| format!("+pub fn generated_item_{ln}() -> usize {{ {ln} }}\n"))
+                .collect();
+            for idx in 1..=6 {
+                let path = format!("src/mod_{idx}.rs");
+                let marker = if idx == 5 {
+                    "// SLICE_VIOLATION_MARKER\n"
+                } else {
+                    ""
+                };
+                diffs.insert(
+                    path.clone(),
+                    FileArtifact {
+                        path: path.clone(),
+                        previous_path: None,
+                        status: FileChangeStatus::Added,
+                        lines_added: 351,
+                        lines_deleted: 0,
+                        patch: Some(format!("@@ -0,0 +1,351 @@\n+{marker}{big_body}")),
+                        patch_omission_reason: None,
+                        content: None,
+                        content_omission_reason: None,
+                    },
+                );
+                admitted_items.push(ExhibitAssessment {
+                    file_path: path,
+                    admissibility_summary: "domain module".to_string(),
+                    admissibility_score: 0.90,
+                    admissibility_status: AdmissibilityStatus::Admitted,
+                });
+            }
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    diffs,
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig {
+                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    reasoning_budget: None,
+                })
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "docketed".to_string(),
+                        colorability_score: 0.95,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    admitted_items,
+                )])));
+            (ws, caseload)
+        }
+
+        #[test]
+        fn test_multi_slice_discriminative_vetting_pins_admitted_references_and_takes_min_score() {
+            let canon_ref = ".canons/readme/broad-rule.md";
+            let (ws, caseload) = multi_slice_fixture(canon_ref);
+
+            let mut clean_provider = MockVetProvider::empty();
+            clean_provider
+                .decision_scores
+                .insert("SLICE_VIOLATION_MARKER".to_string(), 0.88);
+            let vetted_out = execute_vet(
+                &VetOptions::default(),
+                caseload.clone(),
+                &ws,
+                &clean_provider,
+            )
+            .expect("multi-slice clean vet");
+            let reqs = clean_provider.decision_requests.lock().unwrap();
+            assert!(reqs.len() >= 2, "expected multiple context-budgeted slices");
+            assert!(
+                reqs.iter().all(|r| {
+                    r.state.contains("src/mod_1.rs")
+                        && r.state.contains("src/mod_6.rs")
+                        && r.state.contains("PINNED_README_DIFF_SENTINEL")
+                }),
+                "every slice must carry the full path manifest and pinned reference diffs"
+            );
+            let clean_assessment = &vetted_out.vetting.unwrap().cases[canon_ref];
+            assert_eq!(clean_assessment.vetting_status, VettingStatus::Vetted);
+            assert!((clean_assessment.vetting_score - 0.88).abs() < 1e-9);
+            assert!(clean_assessment.vetting_summary.contains("across"));
+
+            let mut failing_provider = MockVetProvider::empty();
+            failing_provider
+                .decision_scores
+                .insert("SLICE_VIOLATION_MARKER".to_string(), 0.22);
+            let contested_out =
+                execute_vet(&VetOptions::default(), caseload, &ws, &failing_provider)
+                    .expect("multi-slice contested vet");
+            let contested_assessment = &contested_out.vetting.unwrap().cases[canon_ref];
+            assert_eq!(
+                contested_assessment.vetting_status,
+                VettingStatus::Contested
+            );
+            assert!((contested_assessment.vetting_score - 0.22).abs() < 1e-9);
+        }
+
+        #[test]
+        fn test_max_tokens_exceeded_binds_case_over_as_contested_without_aborting_siblings() {
+            let (ws, caseload) = sample_fixture(DEFAULT_JEV_MODEL);
+            let mut provider = MockVetProvider::empty();
+            provider.max_tokens_trigger = Some(".canons/cli/contested-rule.md".to_string());
+
+            let out = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
+                .expect("oversized case falls back to contested without aborting");
+            let vetting = out.vetting.expect("vetting");
+            assert_eq!(
+                vetting.vetted_cases,
+                vec![".canons/cli/clean-rule.md".to_string()]
+            );
+            assert_eq!(
+                vetting.contested_cases,
+                vec![".canons/cli/contested-rule.md".to_string()]
+            );
+            assert_eq!(
+                vetting.cases[".canons/cli/contested-rule.md"].vetting_score,
+                0.0
+            );
         }
 
         #[test]

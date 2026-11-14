@@ -19,7 +19,12 @@ mod exhibits;
 mod prompt;
 
 pub use exhibits::resolve_canon_reference_paths;
-pub(crate) use prompt::build_audit_case_user_prompt;
+pub(crate) use exhibits::{
+    append_admitted_exhibit_section, append_grounding_references_section, is_metadata_plane_id,
+};
+pub(crate) use prompt::{
+    append_case_overview, append_governing_canon_statute, build_audit_case_user_prompt,
+};
 
 use crate::caseload::{
     CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_MODEL, TYPESAFE_PROVIDER,
