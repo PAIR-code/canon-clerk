@@ -71,8 +71,9 @@ pub use runners::{
     run_branch_a_intake, run_branch_a_validate, run_branch_b_configure,
 };
 pub use telemetry::{
-    ENV_LOG_FILE, ENV_VERBOSE, StderrProgressSink, StderrTelemetryOptions,
-    build_cli_telemetry_sink, open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag,
+    DEFAULT_VERBOSE_LOG_FILTER, ENV_LOG_FILE, ENV_VERBOSE, StderrProgressSink,
+    StderrTelemetryOptions, build_cli_telemetry_sink, build_log_env_filter, open_jsonl_log_sink,
+    resolve_log_file_path, resolve_log_filter_directive, resolve_verbose_flag,
 };
 pub use validate::{
     ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace,
@@ -259,16 +260,11 @@ pub fn init_logging(verbose: bool) {
     let env_map: BTreeMap<String, String> = std::env::vars().collect();
     let stderr_opts =
         StderrTelemetryOptions::from_env(std::io::stderr().is_terminal(), verbose, false, &env_map);
-    init_logging_with_ansi(verbose, stderr_opts.use_ansi_color());
+    init_logging_with_env(verbose, stderr_opts.use_ansi_color(), &env_map);
 }
 
-fn init_logging_with_ansi(verbose: bool, use_ansi: bool) {
-    let env_filter = if verbose {
-        tracing_subscriber::EnvFilter::new("debug")
-    } else {
-        tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
-    };
+fn init_logging_with_env(verbose: bool, use_ansi: bool, env_map: &BTreeMap<String, String>) {
+    let env_filter = build_log_env_filter(verbose, env_map);
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -303,7 +299,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         subcommand_quiet,
         &env_map,
     );
-    init_logging_with_ansi(effective_verbose, stderr_opts.use_ansi_color());
+    init_logging_with_env(effective_verbose, stderr_opts.use_ansi_color(), &env_map);
 
     tracing::debug!("Initialized Canon Clerk CLI runtime");
 

@@ -275,6 +275,10 @@ pub trait StructuredModelProvider: Send + Sync {
             model_specifier: request.model_specifier.clone(),
         })
     }
+
+    /// Reports completion of an incremental stage work unit (`completed` of `total`) when
+    /// observed by an active telemetry decorator.
+    fn record_progress(&self, _completed: usize, _total: usize, _label: &str) {}
 }
 
 #[cfg(test)]

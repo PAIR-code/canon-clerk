@@ -394,10 +394,11 @@ fn execute_trial_calls(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> Result<Vec<CanonAdjudication>, AuditError> {
-    let worker_count = concurrency_limit.min(prepared_calls.len()).max(1);
+    let total = prepared_calls.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
-        let mut results = Vec::with_capacity(prepared_calls.len());
-        for call in prepared_calls {
+        let mut results = Vec::with_capacity(total);
+        for (idx, call) in prepared_calls.iter().enumerate() {
             let response = provider.generate_structured(&call.request)?;
             let adjudication = decode_case_adjudication(
                 &response.payload,
@@ -408,6 +409,8 @@ fn execute_trial_calls(
                 threshold,
                 model_specifier,
             )?;
+            let label = format!("{} ({})", call.canon_ref, adjudication.status.as_str());
+            provider.record_progress(idx + 1, total, &label);
             results.push(adjudication);
         }
         return Ok(results);
@@ -415,8 +418,8 @@ fn execute_trial_calls(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<TrialResult>>> =
-        Mutex::new((0..prepared_calls.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<TrialResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -426,7 +429,7 @@ fn execute_trial_calls(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared_calls.len() {
+                    if idx >= total {
                         break;
                     }
                     let call = &prepared_calls[idx];
@@ -445,19 +448,27 @@ fn execute_trial_calls(
                             )
                             .map_err(Into::into)
                         });
-                    if res.is_err() {
+                    let status_label = res
+                        .as_ref()
+                        .ok()
+                        .map(|adj| format!("{} ({})", call.canon_ref, adj.status.as_str()));
+                    if status_label.is_none() {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if let Some(ref label) = status_label {
+                            guard.0 += 1;
+                            provider.record_progress(guard.0, total, label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
-    let mut results = Vec::with_capacity(prepared_calls.len());
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
+    let mut results = Vec::with_capacity(total);
     for slot in collected.into_iter().flatten() {
         results.push(slot?);
     }

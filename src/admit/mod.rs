@@ -284,10 +284,11 @@ fn execute_case_calls(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> Result<BTreeMap<String, Vec<ExhibitAssessment>>, AdmitError> {
-    let worker_count = concurrency_limit.min(prepared_calls.len()).max(1);
+    let total = prepared_calls.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut combined = BTreeMap::new();
-        for call in prepared_calls {
+        for (idx, call) in prepared_calls.iter().enumerate() {
             let response = provider.generate_structured(&call.request)?;
             let decoded = decode_case_exhibits(
                 &response.payload,
@@ -296,6 +297,7 @@ fn execute_case_calls(
                 threshold,
                 model_specifier,
             )?;
+            provider.record_progress(idx + 1, total, &call.canon_ref);
             combined.insert(call.canon_ref.clone(), decoded);
         }
         return Ok(combined);
@@ -303,8 +305,8 @@ fn execute_case_calls(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<CaseResult>>> =
-        Mutex::new((0..prepared_calls.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<CaseResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -314,7 +316,7 @@ fn execute_case_calls(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared_calls.len() {
+                    if idx >= total {
                         break;
                     }
                     let call = &prepared_calls[idx];
@@ -331,18 +333,23 @@ fn execute_case_calls(
                             )?;
                             Ok((call.canon_ref.clone(), decoded))
                         });
-                    if res.is_err() {
+                    let succeeded = res.is_ok();
+                    if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if succeeded {
+                            guard.0 += 1;
+                            provider.record_progress(guard.0, total, &call.canon_ref);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         let (canon_ref, items) = slot?;

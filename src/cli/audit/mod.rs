@@ -904,5 +904,194 @@ mod tests {
 
             let _ = fs::remove_dir_all(&tmp_dir);
         }
+
+        #[test]
+        fn test_vet_handoff_surfaces_immediate_audit_entry_incremental_progress_and_pure_stdout_across_formats()
+         {
+            use crate::caseload::{
+                AdmissibilityStatus, CanonDocketAssessment, CanonVettingAssessment, CaseloadConfig,
+                CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
+                CaseloadValidation, CaseloadVetting, ColorabilityStatus, DEFAULT_AUDITOR_MODEL,
+                DEFAULT_SCREENER_MODEL, DiscoveryMode, ExhibitAssessment, VettingStatus,
+            };
+            use crate::cli::telemetry::{StderrProgressSink, StderrTelemetryOptions};
+
+            let ws = sample_workspace().with_canon_markdown(
+                "---\ntriggers:\n  - \"src/cli/**\"\ninspect:\n  - diff\n---\n# CLI Help Grouping\n\nCLI flags MUST group by concern.\n",
+                &ParseCanonOptions::with_source_ref(".canons/cli/cli-help-grouping.md"),
+            );
+
+            let provider = FullCascadeProvider::new(
+                json!({}),
+                json!({}),
+                json!({
+                    "compliance_summary": "Flags comply with CLI rules.",
+                    "compliance_score": 0.94,
+                    "annotations": []
+                }),
+            );
+
+            let rule_a = ".canons/cli/cli-flags-kebab-case.md";
+            let rule_b = ".canons/cli/cli-help-grouping.md";
+            let admitted_item = ExhibitAssessment {
+                file_path: "src/cli/audit.rs".to_string(),
+                admissibility_summary: "CLI flag definition.".to_string(),
+                admissibility_score: 0.95,
+                admissibility_status: AdmissibilityStatus::Admitted,
+            };
+            let docket_cases = BTreeMap::from([
+                (
+                    rule_a.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "ok".to_string(),
+                        colorability_score: 0.9,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                ),
+                (
+                    rule_b.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "ok".to_string(),
+                        colorability_score: 0.9,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                ),
+            ]);
+            let evidence_exhibits = BTreeMap::from([
+                (rule_a.to_string(), vec![admitted_item.clone()]),
+                (rule_b.to_string(), vec![admitted_item]),
+            ]);
+            let contested_cases = BTreeMap::from([
+                (
+                    rule_a.to_string(),
+                    CanonVettingAssessment {
+                        vetting_summary: "Contested in vet.".to_string(),
+                        vetting_score: 0.35,
+                        vetting_status: VettingStatus::Contested,
+                        contested_exhibits: Vec::new(),
+                    },
+                ),
+                (
+                    rule_b.to_string(),
+                    CanonVettingAssessment {
+                        vetting_summary: "Contested in vet.".to_string(),
+                        vetting_score: 0.40,
+                        vetting_status: VettingStatus::Contested,
+                        contested_exhibits: Vec::new(),
+                    },
+                ),
+            ]);
+            let handoff_caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/cli/audit.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    target_files: vec!["src/cli/audit.rs".to_string()],
+                    candidate_canons: vec![rule_a.to_string(), rule_b.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig {
+                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
+                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    reasoning_budget: Some(4096),
+                })
+                .with_docket(CaseloadDocket::from_cases(docket_cases))
+                .with_evidence(CaseloadEvidence::from_exhibits(evidence_exhibits))
+                .with_vetting(CaseloadVetting::from_cases(contested_cases));
+            let handoff_bytes = serde_json::to_vec(&handoff_caseload).expect("serialize handoff");
+
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GEMINI_API_KEY.to_string(), "test-key".to_string());
+
+            // 1. Interactive TTY (without -v) immediately emits `-> audit started` and 1/2, 2/2 progress
+            let tty_sink = StderrProgressSink::new(
+                Vec::<u8>::new(),
+                StderrTelemetryOptions {
+                    is_tty: true,
+                    verbose: false,
+                    quiet: false,
+                    is_ci: false,
+                    no_color: true,
+                },
+            );
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 25);
+            let tty_session = TelemetrySession::new(&tty_sink, &clock);
+            let mut stylish_stdout = Vec::new();
+            let args_stylish = parse_audit(&["canon-clerk", "audit", "--caseload", "-"]);
+            run_audit_with_telemetry(
+                &args_stylish,
+                &mut Cursor::new(&handoff_bytes),
+                &mut stylish_stdout,
+                &ws,
+                &env,
+                &provider,
+                &tty_session,
+            )
+            .expect("interactive handoff audit");
+            tty_session.finish_pipeline();
+
+            let tty_stderr = String::from_utf8(tty_sink.into_inner()).expect("utf8 stderr");
+            let stderr_lines: Vec<&str> = tty_stderr.lines().collect();
+            assert_eq!(
+                stderr_lines[0], "[telemetry] -> audit started",
+                "handoff into audit must immediately announce stage entry before trials return: {tty_stderr}"
+            );
+            assert!(tty_stderr.contains("[telemetry] [audit 1/2]"));
+            assert!(tty_stderr.contains("[telemetry] [audit 2/2]"));
+            assert!(tty_stderr.contains("[telemetry] ok audit"));
+
+            let stylish_text = String::from_utf8(stylish_stdout).expect("utf8 stylish");
+            assert!(!stylish_text.contains("[telemetry]"));
+
+            // 2. Verify stdout remains 100% pure across compact, json, and github formats under -v
+            for fmt_name in ["compact", "json", "github"] {
+                let verbose_sink = StderrProgressSink::new(
+                    Vec::<u8>::new(),
+                    StderrTelemetryOptions {
+                        is_tty: false,
+                        verbose: true,
+                        quiet: false,
+                        is_ci: false,
+                        no_color: true,
+                    },
+                );
+                let v_session = TelemetrySession::new(&verbose_sink, &clock);
+                let mut fmt_stdout = Vec::new();
+                let fmt_args = parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--caseload",
+                    "-",
+                    "--format",
+                    fmt_name,
+                ]);
+                run_audit_with_telemetry(
+                    &fmt_args,
+                    &mut Cursor::new(&handoff_bytes),
+                    &mut fmt_stdout,
+                    &ws,
+                    &env,
+                    &provider,
+                    &v_session,
+                )
+                .expect("format audit run");
+                let out_str = String::from_utf8(fmt_stdout).expect("utf8 stdout");
+                assert!(
+                    !out_str.contains("[telemetry]"),
+                    "stdout in `{fmt_name}` format must remain 100% free of stderr telemetry"
+                );
+                if fmt_name == "json" {
+                    let _: Caseload =
+                        serde_json::from_str(&out_str).expect("pure valid Caseload JSON on stdout");
+                }
+                let v_stderr = String::from_utf8(verbose_sink.into_inner()).expect("utf8 stderr");
+                assert!(v_stderr.contains("[telemetry] -> audit started"));
+                assert!(v_stderr.contains("[telemetry] [audit 1/2]"));
+                assert!(v_stderr.contains("[telemetry] [audit 2/2]"));
+            }
+        }
     }
 }

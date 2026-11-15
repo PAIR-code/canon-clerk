@@ -154,6 +154,18 @@ impl<'a> StageScope<'a> {
         }
     }
 
+    /// Emits a `TelemetryEvent::StageProgress` completion tick (`completed` of `total`) for this stage.
+    pub fn record_progress(&self, completed: usize, total: usize, label: &str) {
+        if self.enabled && total > 0 {
+            self.sink.emit(&TelemetryEvent::StageProgress {
+                stage: self.stage,
+                completed,
+                total,
+                label: label.to_string(),
+            });
+        }
+    }
+
     /// Accumulates [`TokenUsage`] from a completed model generation turn into this stage's summary.
     pub fn record_usage(&self, turn_usage: TokenUsage) {
         if !self.enabled {
@@ -225,6 +237,10 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
         let response = self.inner.evaluate_decisions(request)?;
         self.scope.record_decision(&response);
         Ok(response)
+    }
+
+    fn record_progress(&self, completed: usize, total: usize, label: &str) {
+        self.scope.record_progress(completed, total, label);
     }
 }
 
