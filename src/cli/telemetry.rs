@@ -284,6 +284,35 @@ impl<W: Write + Send> StderrProgressSink<W> {
                     None
                 }
             }
+            TelemetryEvent::ModelCall {
+                stage,
+                label,
+                resolved_model,
+                latency_ms,
+                usage,
+            } => {
+                if self.options.verbose {
+                    let trimmed = label.trim();
+                    let subject = if trimmed.is_empty() {
+                        format!("[{stage}:call]")
+                    } else {
+                        format!("[{stage}:call] {trimmed}")
+                    };
+                    if usage.reasoning_tokens > 0 {
+                        Some(format!(
+                            "{pfx} {subject} ({resolved_model}, {latency_ms}ms, {} tokens, {} reasoning)",
+                            usage.total_tokens, usage.reasoning_tokens
+                        ))
+                    } else {
+                        Some(format!(
+                            "{pfx} {subject} ({resolved_model}, {latency_ms}ms, {} tokens)",
+                            usage.total_tokens
+                        ))
+                    }
+                } else {
+                    None
+                }
+            }
             TelemetryEvent::StageFinish {
                 stage,
                 duration_ms,
@@ -576,6 +605,18 @@ mod tests {
                 stage: PipelineStage::Apprise,
                 delta: "First line\nsecond line".to_string(),
             });
+            sink.emit(&TelemetryEvent::ModelCall {
+                stage: PipelineStage::Apprise,
+                label: "batch 1/2".to_string(),
+                resolved_model: "gemini-4-hydrogen".to_string(),
+                latency_ms: 195,
+                usage: TokenUsage {
+                    prompt_tokens: 100,
+                    completion_tokens: 40,
+                    reasoning_tokens: 10,
+                    total_tokens: 150,
+                },
+            });
             sink.emit(&TelemetryEvent::StageFinish {
                 stage: PipelineStage::Apprise,
                 duration_ms: 210,
@@ -596,6 +637,9 @@ mod tests {
             assert!(rendered.contains("[telemetry] -> apprise started"));
             assert!(rendered.contains("[telemetry] [apprise 1/2] batch 1 (8 canon(s))"));
             assert!(rendered.contains("[telemetry] [apprise:thought] First line second line"));
+            assert!(rendered.contains(
+                "[telemetry] [apprise:call] batch 1/2 (gemini-4-hydrogen, 195ms, 150 tokens, 10 reasoning)"
+            ));
             assert!(rendered.contains("[telemetry] ok apprise (210ms, 150 tokens)"));
             assert!(rendered.contains("[telemetry] done (220ms, 150 total tokens)"));
         }

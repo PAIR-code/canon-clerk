@@ -257,6 +257,7 @@ fn run_admit_core(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
+    args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
     let docket_threshold = resolve_docket_threshold(args.docket_threshold, env)?;

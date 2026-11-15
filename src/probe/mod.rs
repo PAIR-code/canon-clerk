@@ -14,8 +14,12 @@
 
 //! Core domain execution engine and hexagonal endpoint prober for the `probe` diagnostic stage (`docs/architecture/nodes/probe.md`).
 
+mod typesafe;
+
+pub use typesafe::TypesafeEndpointProber;
+
 use crate::caseload::{
-    Caseload, CaseloadProbe, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER,
+    Caseload, CaseloadProbe, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel,
 };
 use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
 use crate::provider::gemini::post_gemini_json;
@@ -24,12 +28,10 @@ pub use crate::provider::{
     strip_provider_prefix,
 };
 use crate::provider::{
-    TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
-    classify_gemini_http_error, classify_typesafe_http_error, extract_gemini_error_detail,
-    extract_typesafe_error_detail, post_typesafe_json, strip_typesafe_prefix,
+    GeminiThinkingConfig, build_probe_thinking_config, classify_gemini_http_error,
+    extract_gemini_error_detail,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt;
 
 /// Default per-endpoint timeout in milliseconds for `canon-clerk probe` (`docs/architecture/nodes/probe.md` §5).
@@ -119,6 +121,18 @@ pub trait EndpointProber: Send + Sync {
         api_key: &str,
         timeout_ms: u64,
     ) -> ProbeEndpointResult;
+
+    /// Probes a model specifier with optional thinking configuration overrides (`probe.md` §4).
+    fn probe_endpoint_with_thinking(
+        &self,
+        model_specifier: &str,
+        api_key: &str,
+        timeout_ms: u64,
+        _thinking_level: Option<ThinkingLevel>,
+        _reasoning_budget: Option<u32>,
+    ) -> ProbeEndpointResult {
+        self.probe_endpoint(model_specifier, api_key, timeout_ms)
+    }
 }
 
 /// Executes the `probe` diagnostic stage concurrently across `.config.screener_model` and
@@ -143,6 +157,8 @@ pub fn execute_probe(
     let config = caseload.config.as_ref().ok_or(ProbeError::MissingConfig)?;
     let screener_spec = config.screener_model.clone();
     let auditor_spec = config.auditor_model.clone();
+    let auditor_thinking_level = config.thinking_level;
+    let auditor_reasoning_budget = config.reasoning_budget;
     let screener_key = resolve_endpoint_probe_key(&screener_spec, options)?;
     let auditor_key = resolve_endpoint_probe_key(&auditor_spec, options)?;
     let timeout_ms = options.timeout_ms;
@@ -150,10 +166,18 @@ pub fn execute_probe(
     let (screener_result, auditor_result) = std::thread::scope(|scope| {
         let screener_ref = &screener_spec;
         let auditor_ref = &auditor_spec;
-        let screener_handle =
-            scope.spawn(move || prober.probe_endpoint(screener_ref, screener_key, timeout_ms));
-        let auditor_handle =
-            scope.spawn(move || prober.probe_endpoint(auditor_ref, auditor_key, timeout_ms));
+        let screener_handle = scope.spawn(move || {
+            prober.probe_endpoint_with_thinking(screener_ref, screener_key, timeout_ms, None, None)
+        });
+        let auditor_handle = scope.spawn(move || {
+            prober.probe_endpoint_with_thinking(
+                auditor_ref,
+                auditor_key,
+                timeout_ms,
+                auditor_thinking_level,
+                auditor_reasoning_budget,
+            )
+        });
 
         let screener = screener_handle
             .join()
@@ -230,6 +254,8 @@ struct GeminiGenerationConfig {
     #[serde(rename = "maxOutputTokens")]
     max_output_tokens: u32,
     temperature: f32,
+    #[serde(rename = "thinkingConfig", skip_serializing_if = "Option::is_none")]
+    thinking_config: Option<GeminiThinkingConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -314,13 +340,29 @@ impl EndpointProber for GeminiEndpointProber {
         api_key: &str,
         timeout_ms: u64,
     ) -> ProbeEndpointResult {
+        self.probe_endpoint_with_thinking(model_specifier, api_key, timeout_ms, None, None)
+    }
+
+    fn probe_endpoint_with_thinking(
+        &self,
+        model_specifier: &str,
+        api_key: &str,
+        timeout_ms: u64,
+        thinking_level: Option<ThinkingLevel>,
+        reasoning_budget: Option<u32>,
+    ) -> ProbeEndpointResult {
         let payload = GeminiGenerateContentRequest {
             contents: vec![GeminiContent {
                 parts: vec![GeminiPart { text: "ping" }],
             }],
             generation_config: GeminiGenerationConfig {
-                max_output_tokens: 1,
+                max_output_tokens: 16,
                 temperature: 0.0,
+                thinking_config: build_probe_thinking_config(
+                    model_specifier,
+                    thinking_level,
+                    reasoning_budget,
+                ),
             },
         };
 
@@ -333,108 +375,6 @@ impl EndpointProber for GeminiEndpointProber {
             &payload,
         ) {
             Ok(outcome) => decode_gemini_probe_response(
-                outcome.status_code,
-                &outcome.body,
-                model_specifier,
-                outcome.latency_ms,
-            ),
-            Err((err, latency_ms)) => ProbeEndpointResult {
-                status: ProbeStatus::Error,
-                latency_ms,
-                model: model_specifier.to_string(),
-                error: Some(err.to_string()),
-            },
-        }
-    }
-}
-
-/// Decodes and classifies an HTTP status code and response payload from a TypeSafe AI `/v1/systemone` probe.
-fn decode_typesafe_probe_response(
-    status_code: u16,
-    body: &str,
-    model_specifier: &str,
-    latency_ms: u64,
-) -> ProbeEndpointResult {
-    if (200..300).contains(&status_code) {
-        let resolved_model = serde_json::from_str::<TypesafeSystemOneResponse>(body)
-            .ok()
-            .and_then(|resp| resp.model)
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| model_specifier.to_string());
-
-        return ProbeEndpointResult {
-            status: ProbeStatus::Ok,
-            latency_ms,
-            model: resolved_model,
-            error: None,
-        };
-    }
-
-    let upstream_detail = extract_typesafe_error_detail(body);
-    let diagnostic = classify_typesafe_http_error(status_code, model_specifier, &upstream_detail);
-    ProbeEndpointResult {
-        status: ProbeStatus::Error,
-        latency_ms,
-        model: model_specifier.to_string(),
-        error: Some(diagnostic),
-    }
-}
-
-/// Live TypeSafe AI HTTPS implementation of [`EndpointProber`] (`POST /v1/systemone`).
-#[derive(Debug, Clone)]
-pub struct TypesafeEndpointProber {
-    base_url: String,
-}
-
-impl Default for TypesafeEndpointProber {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TypesafeEndpointProber {
-    /// Constructs a new live [`TypesafeEndpointProber`] targeting [`DEFAULT_TYPESAFE_BASE_URL`].
-    pub fn new() -> Self {
-        Self {
-            base_url: DEFAULT_TYPESAFE_BASE_URL.to_string(),
-        }
-    }
-
-    /// Constructs a [`TypesafeEndpointProber`] with a custom base URL.
-    pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-        }
-    }
-}
-
-impl EndpointProber for TypesafeEndpointProber {
-    fn probe_endpoint(
-        &self,
-        model_specifier: &str,
-        api_key: &str,
-        timeout_ms: u64,
-    ) -> ProbeEndpointResult {
-        let mut questions = BTreeMap::new();
-        questions.insert(
-            "ping".to_string(),
-            TypesafeNoulQuestion::new("Is the input non-empty?"),
-        );
-        let payload = TypesafeSystemOneRequest {
-            model: strip_typesafe_prefix(model_specifier).to_string(),
-            state: "ping".to_string(),
-            questions,
-        };
-
-        match post_typesafe_json(
-            &self.base_url,
-            model_specifier,
-            api_key,
-            timeout_ms,
-            &payload,
-        ) {
-            Ok(outcome) => decode_typesafe_probe_response(
                 outcome.status_code,
                 &outcome.body,
                 model_specifier,
@@ -472,12 +412,28 @@ impl EndpointProber for MultiProviderEndpointProber {
         api_key: &str,
         timeout_ms: u64,
     ) -> ProbeEndpointResult {
+        self.probe_endpoint_with_thinking(model_specifier, api_key, timeout_ms, None, None)
+    }
+
+    fn probe_endpoint_with_thinking(
+        &self,
+        model_specifier: &str,
+        api_key: &str,
+        timeout_ms: u64,
+        thinking_level: Option<ThinkingLevel>,
+        reasoning_budget: Option<u32>,
+    ) -> ProbeEndpointResult {
         if model_provider(model_specifier) == TYPESAFE_PROVIDER {
             self.typesafe
                 .probe_endpoint(model_specifier, api_key, timeout_ms)
         } else {
-            self.gemini
-                .probe_endpoint(model_specifier, api_key, timeout_ms)
+            self.gemini.probe_endpoint_with_thinking(
+                model_specifier,
+                api_key,
+                timeout_ms,
+                thinking_level,
+                reasoning_budget,
+            )
         }
     }
 }
@@ -590,6 +546,34 @@ mod tests {
             let err404 = r404.error.expect("404 error");
             assert!(err404.contains("HTTP 404"));
             assert!(err404.contains("--screener-model"));
+        }
+
+        #[test]
+        fn test_probe_thinking_config_defaults_gemini_4_to_low_and_omits_legacy_when_unspecified() {
+            assert_eq!(
+                build_probe_thinking_config("google:gemini-4-carbon", None, None),
+                Some(GeminiThinkingConfig {
+                    include_thoughts: false,
+                    thinking_level: Some("LOW"),
+                    thinking_budget: None,
+                })
+            );
+            assert_eq!(
+                build_probe_thinking_config(
+                    "google:gemini-4-carbon",
+                    Some(ThinkingLevel::Medium),
+                    None
+                ),
+                Some(GeminiThinkingConfig {
+                    include_thoughts: false,
+                    thinking_level: Some("MEDIUM"),
+                    thinking_budget: None,
+                })
+            );
+            assert_eq!(
+                build_probe_thinking_config("google:gemini-pro-latest", None, None),
+                None
+            );
         }
 
         #[test]
@@ -803,10 +787,11 @@ mod tests {
             assert_eq!(enriched.config, full_upstream.config);
             assert!(enriched.probe.is_some());
 
-            // Hybrid screener=typesafe:jev-latest + auditor=google:gemini-pro-latest requires typesafe_api_key
+            // Hybrid screener=typesafe:jev-latest + auditor=google:gemini-4-carbon requires typesafe_api_key
             let hybrid_cfg = Caseload::new().with_config(CaseloadConfig {
                 screener_model: "typesafe:jev-latest".to_string(),
                 auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                thinking_level: None,
                 reasoning_budget: None,
             });
             let err_ts = execute_probe(

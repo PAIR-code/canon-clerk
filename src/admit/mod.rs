@@ -251,8 +251,10 @@ pub fn execute_admit(
             system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
+            thinking_level: None,
             reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: options.timeout_ms,
+            call_label: Some(canon_ref.clone()),
         };
         prepared_calls.push(PreparedCaseCall {
             canon_ref,

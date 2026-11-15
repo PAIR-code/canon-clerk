@@ -177,6 +177,9 @@ fn verified_credentials_label(config: &CaseloadConfig) -> String {
 fn render_compact_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std::io::Result<()> {
     writeln!(stdout, "screener_model\t{}", config.screener_model)?;
     writeln!(stdout, "auditor_model\t{}", config.auditor_model)?;
+    if let Some(level) = config.thinking_level {
+        writeln!(stdout, "thinking_level\t{level}")?;
+    }
     if let Some(budget) = config.reasoning_budget {
         writeln!(stdout, "reasoning_budget\t{budget}")?;
     }
@@ -192,9 +195,10 @@ fn render_stylish_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std
     writeln!(stdout, "Configuration Summary (READY):")?;
     writeln!(stdout, "  Screener Model   : {}", config.screener_model)?;
     writeln!(stdout, "  Auditor Model    : {}", config.auditor_model)?;
-    match config.reasoning_budget {
-        Some(budget) => writeln!(stdout, "  Reasoning Budget : {budget} tokens")?,
-        None => writeln!(stdout, "  Reasoning Budget : default (unbounded)")?,
+    match (config.thinking_level, config.reasoning_budget) {
+        (Some(level), _) => writeln!(stdout, "  Thinking Level   : {level}")?,
+        (None, Some(budget)) => writeln!(stdout, "  Reasoning Budget : {budget} tokens")?,
+        (None, None) => writeln!(stdout, "  Thinking Level   : medium (audit default)")?,
     }
     writeln!(
         stdout,
@@ -259,8 +263,9 @@ mod tests {
             let secret = "synthetic-top-secret-never-echo-999";
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("flash-lite".to_string()),
-                    auditor_model: Some("pro".to_string()),
+                    screener_model: Some("hydrogen".to_string()),
+                    auditor_model: Some("carbon".to_string()),
+                    thinking_level: None,
                     reasoning_budget: Some(2048),
                     gemini_api_key: Some(secret.to_string()),
                     typesafe_api_key: None,
@@ -287,6 +292,7 @@ mod tests {
                 Some(CaseloadConfig {
                     screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
                     reasoning_budget: Some(2048),
                 })
             );
@@ -323,8 +329,8 @@ mod tests {
             run_configure_with_env(&compact_args, &mut stdin, &mut compact_out, &env)
                 .expect("compact configure");
             let compact_str = String::from_utf8(compact_out).expect("utf8");
-            assert!(compact_str.contains("screener_model\tgoogle:gemini-flash-lite-latest"));
-            assert!(compact_str.contains("auditor_model\tgoogle:gemini-pro-latest"));
+            assert!(compact_str.contains("screener_model\tgoogle:gemini-4-hydrogen"));
+            assert!(compact_str.contains("auditor_model\tgoogle:gemini-4-carbon"));
             assert!(compact_str.contains("reasoning_budget\t1024"));
             assert!(!compact_str.contains(secret));
         }
@@ -373,10 +379,29 @@ mod tests {
         }
 
         #[test]
+        fn test_conflicting_thinking_flags_exit_with_code_2_and_hint() {
+            let args = ConfigureArgs {
+                provider: ProviderConfigArgs {
+                    thinking_level: Some("low".to_string()),
+                    reasoning_budget: Some(2048),
+                    ..ProviderConfigArgs::default()
+                },
+                ..ConfigureArgs::default()
+            };
+            let mut stdin = Cursor::new(b"");
+            let mut stdout = Vec::new();
+            let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &test_env())
+                .expect_err("conflicting thinking flags must fail");
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("Hint:"));
+        }
+
+        #[test]
         fn test_caseload_stdin_fast_forwards_when_config_already_present() {
             let upstream = Caseload::new().with_config(CaseloadConfig {
                 screener_model: "google:gemini-2.5-flash-lite".to_string(),
                 auditor_model: "google:gemini-2.5-pro".to_string(),
+                thinking_level: None,
                 reasoning_budget: Some(4096),
             });
             let upstream_json = serde_json::to_string(&upstream).expect("serialize upstream");

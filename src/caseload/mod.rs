@@ -29,8 +29,9 @@ pub use apprisal::{
     ApprisalStatus, CanonApprisalAssessment, CaseloadApprisal, normalize_unit_score,
 };
 pub use config::{
-    CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
-    DEFAULT_SCREENER_REASONING_BUDGET, TYPESAFE_PROVIDER,
+    CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_AUDITOR_THINKING_LEVEL,
+    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
+    DEFAULT_SCREENER_REASONING_BUDGET, TYPESAFE_PROVIDER, ThinkingLevel,
 };
 pub use discovery::{ActiveExhibits, CaseloadDiscovery, DiscoveryMode};
 pub use docket::{

@@ -295,6 +295,7 @@ fn run_audit_core(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
+    args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let thresholds = resolve_and_validate_audit_cli_params(args, env)?;
 
@@ -996,6 +997,7 @@ mod tests {
                 .with_config(CaseloadConfig {
                     screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
                     reasoning_budget: Some(4096),
                 })
                 .with_docket(CaseloadDocket::from_cases(docket_cases))

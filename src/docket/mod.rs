@@ -255,18 +255,22 @@ pub fn execute_docket(
     let batches =
         partition_candidate_canons(&discovery.candidate_canons, options.max_canons_per_call);
 
-    let mut prepared_batches = Vec::with_capacity(batches.len());
-    for batch_canons in batches {
+    let total_batches = batches.len();
+    let mut prepared_batches = Vec::with_capacity(total_batches);
+    for (idx, batch_canons) in batches.into_iter().enumerate() {
         let user_prompt =
             build_docket_batch_user_prompt(&filing_prefix, &batch_canons, discovery, workspace)
                 .map_err(|canon_ref| DocketError::MissingCandidateCanon { canon_ref })?;
+        let call_label = (total_batches > 1).then(|| format!("batch {}/{total_batches}", idx + 1));
         let request = GenerationRequest {
             model_specifier: config.screener_model.clone(),
             system_instruction: DOCKET_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
+            thinking_level: None,
             reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: options.timeout_ms,
+            call_label,
         };
         prepared_batches.push((batch_canons, request));
     }

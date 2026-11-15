@@ -119,6 +119,21 @@ pub enum TelemetryEvent {
         /// Extracted reasoning text summary or delta chunk.
         delta: String,
     },
+    /// Records per-call latency, model version, and token accounting (including `reasoning_tokens`)
+    /// immediately as an individual provider request completes.
+    ModelCall {
+        /// Active pipeline stage executing the model call.
+        stage: PipelineStage,
+        /// Concise work-unit identifier (e.g., `canon_path` or slice label), omitted when empty.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        label: String,
+        /// Concrete model version identifier reported by the upstream provider endpoint.
+        resolved_model: String,
+        /// End-to-end request roundtrip latency in milliseconds.
+        latency_ms: u64,
+        /// Token accounting metrics expended by this individual call.
+        usage: TokenUsage,
+    },
     /// Records stage completion with elapsed wall-clock `duration_ms` and optional token `usage`.
     StageFinish {
         /// Completed pipeline stage.

@@ -352,7 +352,10 @@ mod tests {
             _api_key: &str,
             _timeout_ms: u64,
         ) -> ProbeEndpointResult {
-            if model_specifier.contains("flash") || model_specifier.contains("jev") {
+            if model_specifier.contains("hydrogen")
+                || model_specifier.contains("flash")
+                || model_specifier.contains("jev")
+            {
                 self.screener.clone()
             } else {
                 self.auditor.clone()

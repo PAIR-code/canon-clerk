@@ -241,6 +241,7 @@ fn run_docket_core(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
+    args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let threshold = resolve_docket_threshold(args.docket_threshold, env)?;
     let _validated_batch_size = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
@@ -942,9 +943,7 @@ index 0000000..1111111
             assert!(
                 text.contains("✓ validate  : 2 candidate canon(s) valid (0 errors, 0 warnings)")
             );
-            assert!(
-                text.contains("✓ configure : screener model 'google:gemini-flash-lite-latest'")
-            );
+            assert!(text.contains("✓ configure : screener model 'google:gemini-4-hydrogen'"));
             assert!(
                 text.contains("✓ docket    : 1 case(s) colorable (1 dismissed, threshold 0.50)")
             );

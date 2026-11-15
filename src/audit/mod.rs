@@ -15,11 +15,13 @@
 //! Core domain execution engine for the `audit` Caseload DAG stage (`docs/architecture/nodes/audit.md`).
 
 mod decode;
+mod error;
 mod exhibits;
 mod fold;
 mod prompt;
 mod slices;
 
+pub use error::AuditError;
 pub(crate) use exhibits::is_metadata_plane_id;
 pub use exhibits::resolve_canon_reference_paths;
 pub(crate) use prompt::build_audit_case_user_prompt;
@@ -30,19 +32,18 @@ pub(crate) use slices::{
 };
 
 use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_MODEL, TYPESAFE_PROVIDER,
-    VerdictStatus, normalize_compliance_score,
+    CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_THINKING_LEVEL,
+    TYPESAFE_PROVIDER, VerdictStatus, normalize_compliance_score,
 };
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
-use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
+use crate::provider::{GenerationRequest, StructuredModelProvider};
 use decode::decode_case_adjudication;
 use fold::fold_case_slice_adjudications;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
 use slices::{MAX_AUDIT_TRIAL_CHARS, build_audit_case_slices};
 use std::collections::BTreeSet;
-use std::fmt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -52,8 +53,8 @@ pub const DEFAULT_AUDIT_THRESHOLD: f64 = 0.5;
 /// Default maximum concurrent in-flight per-case trial calls during `audit`.
 pub const DEFAULT_AUDIT_MAX_CONCURRENT_CALLS: usize = 4;
 
-/// Default per-trial timeout ceiling in milliseconds (`180_000ms` / 3 minutes) accommodating extended auditor reasoning.
-pub const DEFAULT_AUDIT_TIMEOUT_MS: u64 = 180_000;
+/// Default per-trial timeout ceiling in milliseconds (`60_000ms` / 60 seconds) for bounded slice trials.
+pub const DEFAULT_AUDIT_TIMEOUT_MS: u64 = 60_000;
 
 /// Environment variable name for overriding `--audit-threshold` (`docs/architecture/nodes/audit.md` §5).
 pub const ENV_AUDIT_THRESHOLD: &str = "CANON_CLERK_AUDIT_THRESHOLD";
@@ -82,100 +83,11 @@ impl Default for AuditOptions {
     }
 }
 
-/// Domain errors produced during `audit` execution.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuditError {
-    /// Configured threshold is non-finite or outside `[0.0, 1.0]`.
-    InvalidThreshold { detail: String },
-    /// Configured `max_concurrent_calls` is zero (`0`).
-    InvalidConcurrency { detail: String },
-    /// Case-or-Controversy violation: `.intake` is missing from the incoming `Caseload`.
-    MissingIntake,
-    /// Prerequisite `.discovery` namespace is missing from the incoming `Caseload`.
-    MissingDiscovery,
-    /// Upstream `.validation` recorded one or more candidate canon lint errors.
-    ValidationFailed,
-    /// Direct prerequisite `.evidence` namespace is missing from the incoming `Caseload`.
-    MissingEvidence,
-    /// Prerequisite `.config` namespace is missing when active cases require trial adjudication.
-    MissingConfig,
-    /// Configured `auditor_model` is a discriminative classifier incapable of structured decrees or line annotations.
-    DiscriminativeAuditorUnsupported { specifier: String },
-    /// An active canon listed in `.evidence.active_cases` is absent from the workspace snapshot.
-    MissingActiveCanon { canon_ref: String },
-    /// Structured model provider returned a transport, HTTP, block, or schema decoding error.
-    Provider(ProviderError),
-}
-
-impl fmt::Display for AuditError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidThreshold { detail } => write!(
-                f,
-                "Invalid audit threshold: {detail}.\n  \
-                 Hint: Pass a finite threshold in `[0.0, 1.0]` via `--audit-threshold <FLOAT>` \
-                 or `{ENV_AUDIT_THRESHOLD}` (default: `{DEFAULT_AUDIT_THRESHOLD}`)."
-            ),
-            Self::InvalidConcurrency { detail } => write!(
-                f,
-                "Invalid audit concurrency limit: {detail}.\n  \
-                 Hint: Pass a positive integer (`>= 1`) via `--audit-concurrency <COUNT>` \
-                 or `{ENV_AUDIT_CONCURRENCY}` (default: `{DEFAULT_AUDIT_MAX_CONCURRENT_CALLS}`)."
-            ),
-            Self::MissingIntake => write!(
-                f,
-                "Substantive adjudication (`audit`) requires an underlying filing in `.intake` (Case-or-Controversy invariant).\n  \
-                 Hint: Pipe a diff (`--diff -`), specify target paths (`src/...`, `-`, `--all-targets`), \
-                 or pass `--caseload <PATH|->` with `.intake` populated."
-            ),
-            Self::MissingDiscovery => write!(
-                f,
-                "Substantive adjudication (`audit`) requires a resolved `.discovery` namespace.\n  \
-                 Hint: Run `canon-clerk discover` first or invoke `canon-clerk audit` with a filing source."
-            ),
-            Self::ValidationFailed => write!(
-                f,
-                "Cannot execute `audit` because one or more candidate canons failed static validation.\n  \
-                 Hint: Run `canon-clerk validate` to inspect and repair malformed candidate canons."
-            ),
-            Self::MissingEvidence => write!(
-                f,
-                "Substantive adjudication (`audit`) requires a resolved `.evidence` namespace from `admit`.\n  \
-                 Hint: Run `canon-clerk admit` first or invoke `canon-clerk audit` directly to execute screening upstream."
-            ),
-            Self::MissingConfig => write!(
-                f,
-                "Cannot execute `audit` trials without a resolved `.config` namespace on the Caseload.\n  \
-                 Hint: Run `canon-clerk configure` first or invoke `canon-clerk audit` directly to resolve configuration JIT."
-            ),
-            Self::DiscriminativeAuditorUnsupported { specifier } => write!(
-                f,
-                "Discriminative model `{specifier}` cannot adjudicate `audit` trials \
-                 (`audit` requires a generative model for exception rulings, remediation guidance, and line annotations).\n  \
-                 Hint: Use `canon-clerk vet --screener-model jev` for discriminative vetting, or configure \
-                 `{DEFAULT_AUDITOR_MODEL}` (`pro`) as `--auditor-model`."
-            ),
-            Self::MissingActiveCanon { canon_ref } => write!(
-                f,
-                "Active case canon `{canon_ref}` referenced in `.evidence.active_cases` was not found in the workspace snapshot.\n  \
-                 Hint: Re-run `canon-clerk admit` or `canon-clerk audit` against the current workspace."
-            ),
-            Self::Provider(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl std::error::Error for AuditError {}
-
-impl From<ProviderError> for AuditError {
-    fn from(err: ProviderError) -> Self {
-        Self::Provider(err)
-    }
-}
-
 pub(super) struct PreparedTrialCall {
     pub(super) canon_ref: String,
     pub(super) canon_id: String,
+    pub(super) slice_index: usize,
+    pub(super) slice_count: usize,
     pub(super) annotatable_file_paths: BTreeSet<String>,
     pub(super) primary_fallback_path: Option<String>,
     pub(super) request: GenerationRequest,
@@ -348,6 +260,16 @@ fn prepare_all_trial_calls(
     workspace: &WorkspaceSnapshot,
 ) -> (Vec<PreparedTrialCall>, Vec<(String, usize)>) {
     let response_schema = build_audit_schema();
+    let effective_thinking_level = match (config.thinking_level, config.reasoning_budget) {
+        (Some(level), _) => Some(level),
+        (None, Some(_)) => None,
+        (None, None) => Some(DEFAULT_AUDITOR_THINKING_LEVEL),
+    };
+    let effective_reasoning_budget = if effective_thinking_level.is_some() {
+        None
+    } else {
+        config.reasoning_budget
+    };
     let mut prepared_calls = Vec::with_capacity(active_trials.len());
     let mut case_slice_counts = Vec::with_capacity(active_trials.len());
 
@@ -363,18 +285,28 @@ fn prepare_all_trial_calls(
             MAX_AUDIT_TRIAL_CHARS,
         );
         let slice_count = slices.len();
-        for slice in slices {
+        for (idx, slice) in slices.into_iter().enumerate() {
+            let slice_index = idx + 1;
+            let call_label = if slice_count > 1 {
+                format!("{canon_ref} [slice {slice_index}/{slice_count}]")
+            } else {
+                canon_ref.clone()
+            };
             let request = GenerationRequest {
                 model_specifier: config.auditor_model.clone(),
                 system_instruction: AUDIT_SYSTEM_INSTRUCTION.to_string(),
                 user_prompt: slice.user_prompt,
                 response_schema: response_schema.clone(),
-                reasoning_budget: config.reasoning_budget,
+                thinking_level: effective_thinking_level,
+                reasoning_budget: effective_reasoning_budget,
                 timeout_ms,
+                call_label: Some(call_label),
             };
             prepared_calls.push(PreparedTrialCall {
                 canon_ref: canon_ref.clone(),
                 canon_id: canon.id.clone(),
+                slice_index,
+                slice_count,
                 annotatable_file_paths: slice.annotatable_file_paths,
                 primary_fallback_path: slice.primary_fallback_path,
                 request,
@@ -386,6 +318,29 @@ fn prepare_all_trial_calls(
 }
 
 type TrialResult = Result<CanonAdjudication, AuditError>;
+
+fn evaluate_single_trial_call(
+    call: &PreparedTrialCall,
+    threshold: f64,
+    model_specifier: &str,
+    provider: &dyn StructuredModelProvider,
+) -> TrialResult {
+    let response = provider.generate_structured(&call.request).map_err(|err| {
+        AuditError::from_case_call(&call.canon_ref, call.slice_index, call.slice_count, err)
+    })?;
+    decode_case_adjudication(
+        &response.payload,
+        &call.canon_ref,
+        &call.canon_id,
+        &call.annotatable_file_paths,
+        call.primary_fallback_path.as_deref(),
+        threshold,
+        model_specifier,
+    )
+    .map_err(|err| {
+        AuditError::from_case_call(&call.canon_ref, call.slice_index, call.slice_count, err)
+    })
+}
 
 fn execute_trial_calls(
     prepared_calls: &[PreparedTrialCall],
@@ -399,16 +354,8 @@ fn execute_trial_calls(
     if worker_count == 1 {
         let mut results = Vec::with_capacity(total);
         for (idx, call) in prepared_calls.iter().enumerate() {
-            let response = provider.generate_structured(&call.request)?;
-            let adjudication = decode_case_adjudication(
-                &response.payload,
-                &call.canon_ref,
-                &call.canon_id,
-                &call.annotatable_file_paths,
-                call.primary_fallback_path.as_deref(),
-                threshold,
-                model_specifier,
-            )?;
+            let adjudication =
+                evaluate_single_trial_call(call, threshold, model_specifier, provider)?;
             let label = format!("{} ({})", call.canon_ref, adjudication.status.as_str());
             provider.record_progress(idx + 1, total, &label);
             results.push(adjudication);
@@ -433,21 +380,8 @@ fn execute_trial_calls(
                         break;
                     }
                     let call = &prepared_calls[idx];
-                    let res = provider
-                        .generate_structured(&call.request)
-                        .map_err(Into::into)
-                        .and_then(|response| {
-                            decode_case_adjudication(
-                                &response.payload,
-                                &call.canon_ref,
-                                &call.canon_id,
-                                &call.annotatable_file_paths,
-                                call.primary_fallback_path.as_deref(),
-                                threshold,
-                                model_specifier,
-                            )
-                            .map_err(Into::into)
-                        });
+                    let res =
+                        evaluate_single_trial_call(call, threshold, model_specifier, provider);
                     let status_label = res
                         .as_ref()
                         .ok()
@@ -483,9 +417,9 @@ mod tests {
         AdmissibilityStatus, AnnotationLevel, CanonDocketAssessment, CaseloadConfig,
         CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake, CaseloadValidation,
         ColorabilityStatus, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, DiscoveryMode,
-        ExhibitAssessment, FileArtifact, FileChangeStatus, VerdictStatus,
+        ExhibitAssessment, FileArtifact, FileChangeStatus, ThinkingLevel, VerdictStatus,
     };
-    use crate::provider::{GenerationResponse, TokenUsage};
+    use crate::provider::{GenerationResponse, ProviderError, TokenUsage};
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
@@ -674,6 +608,7 @@ mod tests {
             .with_config(CaseloadConfig {
                 screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                 auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                thinking_level: None,
                 reasoning_budget: Some(4096),
             })
             .with_docket(CaseloadDocket::from_cases(docket_cases))
@@ -1160,6 +1095,7 @@ mod tests {
                 .with_config(CaseloadConfig {
                     screener_model: DEFAULT_JEV_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
                     reasoning_budget: Some(2048),
                 })
                 .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
@@ -1382,6 +1318,94 @@ mod tests {
             assert!(pass_adj.annotations.is_empty());
             assert!(pass_adj.compliance_summary.contains("Compliant across"));
             assert!(pass_adj.compliance_summary.contains("Exception"));
+        }
+
+        #[test]
+        fn test_bounded_default_thinking_timeout_ceiling_and_contextual_slice_timeout_errors() {
+            struct FailingSliceProvider;
+            impl StructuredModelProvider for FailingSliceProvider {
+                fn generate_structured(
+                    &self,
+                    request: &GenerationRequest,
+                ) -> Result<GenerationResponse, ProviderError> {
+                    if request.user_prompt.contains("src/mod_4.rs")
+                        || request.user_prompt.contains("src/mod_5.rs")
+                    {
+                        Err(ProviderError::Timeout {
+                            model_specifier: request.model_specifier.clone(),
+                            timeout_ms: request.timeout_ms,
+                        })
+                    } else {
+                        Ok(GenerationResponse {
+                            payload: json!({
+                                "compliance_summary": "Compliant.",
+                                "compliance_score": 0.95,
+                                "annotations": []
+                            }),
+                            resolved_model: "gemini-4-carbon".to_string(),
+                            latency_ms: 800,
+                            usage: TokenUsage::default(),
+                            thoughts: Vec::new(),
+                        })
+                    }
+                }
+            }
+
+            assert_eq!(DEFAULT_AUDIT_TIMEOUT_MS, 60_000);
+            let canon_ref = ".canons/readme/broad-cli-rule.md";
+            let (ws, fixture_caseload) = large_multi_module_fixture(canon_ref, 6);
+            let caseload = fixture_caseload.with_config(CaseloadConfig::default());
+
+            // Default CaseloadConfig (no thinking_level or reasoning_budget) injects MEDIUM thinking.
+            let capture_provider = DualStageMockProvider {
+                vet_violation_marker: String::new(),
+                audit_requests: Mutex::new(Vec::new()),
+                audit_routes: Vec::new(),
+                default_audit_payload: json!({
+                    "compliance_summary": "Compliant.",
+                    "compliance_score": 0.94,
+                    "annotations": []
+                }),
+            };
+            execute_audit(
+                &AuditOptions::default(),
+                caseload.clone(),
+                &ws,
+                &capture_provider,
+            )
+            .expect("default audit succeeds");
+            let reqs = capture_provider.audit_requests.lock().unwrap();
+            assert!(
+                reqs.iter()
+                    .all(|r| r.thinking_level == Some(ThinkingLevel::Medium)
+                        && r.reasoning_budget.is_none()
+                        && r.timeout_ms == 60_000)
+            );
+            assert!(
+                reqs[0]
+                    .call_label
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("[slice 1/")
+            );
+            drop(reqs);
+
+            // Multi-slice timeout error identifies both canon_ref and slice k/N.
+            let err = execute_audit(
+                &AuditOptions::default(),
+                caseload,
+                &ws,
+                &FailingSliceProvider,
+            )
+            .expect_err("stalled slice must fail");
+            let rendered = err.to_string();
+            assert!(rendered.contains(canon_ref), "got: {rendered}");
+            assert!(rendered.contains("(slice "), "got: {rendered}");
+            assert!(
+                rendered.contains("timed out after 60000ms"),
+                "got: {rendered}"
+            );
+            assert!(rendered.contains("Hint:"), "got: {rendered}");
         }
     }
 }

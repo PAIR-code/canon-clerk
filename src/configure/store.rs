@@ -77,6 +77,10 @@ pub struct StoredConfig {
     #[serde(alias = "auditorModel", alias = "auditor_model")]
     pub auditor_model: Option<StoredTierModel>,
 
+    /// Default qualitative thinking level (`thinkingLevel` or `thinking_level`: `minimal`, `low`, `medium`, `high`).
+    #[serde(alias = "thinkingLevel", alias = "thinking_level")]
+    pub thinking_level: Option<String>,
+
     /// Default reasoning budget in tokens (`reasoningBudget` or `reasoning_budget`).
     #[serde(alias = "reasoningBudget", alias = "reasoning_budget")]
     pub reasoning_budget: Option<u32>,

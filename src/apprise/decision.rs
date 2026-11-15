@@ -105,6 +105,7 @@ pub(super) fn execute_apprise_decisions(
                 state: shared_state.clone(),
                 questions,
                 timeout_ms: options.timeout_ms,
+                call_label: None,
             },
         ));
     }

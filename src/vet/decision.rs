@@ -225,6 +225,7 @@ fn evaluate_slice(
         state: slice_state.to_string(),
         questions,
         timeout_ms: params.timeout_ms,
+        call_label: Some(canon_ref.to_string()),
     };
 
     let decision_resp = match provider.evaluate_decisions(&decision_req) {

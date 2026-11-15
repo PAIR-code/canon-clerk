@@ -14,11 +14,12 @@
 
 //! Composable Clap argument groups for Caseload DAG stage subcommands.
 
-use crate::caseload::Caseload;
+use crate::caseload::{Caseload, ThinkingLevel};
 use crate::cli::CliError;
 use crate::cli::io::{
     read_caseload_operand, read_operand_source, resolve_target_operands, write_caseload_file,
 };
+use crate::configure::{ConfigureError, parse_thinking_level};
 use crate::intake::IntakeOptions;
 use clap::Args;
 use std::io::Read;
@@ -148,10 +149,10 @@ impl CanonSelectionArgs {
     }
 }
 
-/// Composable CLI argument group for model configuration, reasoning budgets, and provider credentials (Branch B).
+/// Composable CLI argument group for model configuration, reasoning effort, and provider credentials (Branch B).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderConfigArgs {
-    /// Custom screener model specifier or shorthand alias (`flash-lite`, `flash`, `pro`, `jev`; env: `CANON_CLERK_SCREENER_MODEL`).
+    /// Custom screener model specifier or shorthand alias (`hydrogen`, `argon`, `carbon`, `flash-lite`, `flash`, `pro`, `jev`; env: `CANON_CLERK_SCREENER_MODEL`).
     #[arg(
         long = "screener-model",
         value_name = "MODEL",
@@ -160,7 +161,7 @@ pub struct ProviderConfigArgs {
     )]
     pub screener_model: Option<String>,
 
-    /// Custom auditor model specifier or shorthand alias (`pro`, `flash`, `flash-lite`; env: `CANON_CLERK_AUDITOR_MODEL`).
+    /// Custom auditor model specifier or shorthand alias (`carbon`, `argon`, `hydrogen`, `pro`, `flash`, `flash-lite`; env: `CANON_CLERK_AUDITOR_MODEL`).
     #[arg(
         long = "auditor-model",
         value_name = "MODEL",
@@ -168,6 +169,15 @@ pub struct ProviderConfigArgs {
         help = "Auditor model specifier or alias (fallback env: CANON_CLERK_AUDITOR_MODEL)"
     )]
     pub auditor_model: Option<String>,
+
+    /// Qualitative reasoning effort tier (`minimal`, `low`, `medium`, `high`) for `audit` trials (env: `CANON_CLERK_THINKING_LEVEL`).
+    #[arg(
+        long = "thinking-level",
+        value_name = "LEVEL",
+        help_heading = "Model & Reasoning Options",
+        help = "Qualitative reasoning effort tier: minimal, low, medium, or high (fallback env: CANON_CLERK_THINKING_LEVEL)"
+    )]
+    pub thinking_level: Option<String>,
 
     /// Maximum reasoning budget in tokens for extended thinking during `audit` trials (env: `CANON_CLERK_REASONING_BUDGET`).
     #[arg(
@@ -195,6 +205,27 @@ pub struct ProviderConfigArgs {
         help = "TypeSafe AI API key for Jev models (fallback env: TYPESAFE_API_KEY)"
     )]
     pub typesafe_api_key: Option<String>,
+}
+
+impl ProviderConfigArgs {
+    /// Validates `--thinking-level` syntax and mutual exclusivity against `--reasoning-budget`.
+    pub fn validate_thinking_flags(&self) -> Result<Option<ThinkingLevel>, CliError> {
+        let parsed_level = match self.thinking_level.as_deref() {
+            Some(raw) => {
+                Some(parse_thinking_level(raw).map_err(|err| CliError::usage(err.to_string()))?)
+            }
+            None => None,
+        };
+        if parsed_level.is_some() && self.reasoning_budget.is_some() {
+            return Err(CliError::usage(
+                ConfigureError::ConflictingThinkingOptions {
+                    source: "CLI flags (`--thinking-level` and `--reasoning-budget`)".to_string(),
+                }
+                .to_string(),
+            ));
+        }
+        Ok(parsed_level)
+    }
 }
 
 /// Composable CLI argument group for Caseload envelope I/O across all stage subcommands.

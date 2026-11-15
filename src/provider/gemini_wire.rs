@@ -14,11 +14,21 @@
 
 //! Encapsulated Google Gemini v1beta `:generateContent` wire schemas, request serialization, and response decoding.
 
-use crate::provider::gemini::{classify_gemini_http_error, extract_gemini_error_detail};
+use crate::caseload::{DEFAULT_PROBE_THINKING_LEVEL, ThinkingLevel};
+use crate::provider::gemini::{
+    classify_gemini_http_error, extract_gemini_error_detail, strip_provider_prefix,
+};
 use crate::provider::{GenerationRequest, GenerationResponse, ProviderError, TokenUsage};
 use serde::{Deserialize, Serialize};
 
 pub(super) const JSON_MIME_TYPE: &str = "application/json";
+
+/// Returns `true` when `model_specifier` targets Google's Gemini 4 model family (`gemini-4-*`),
+/// which requires `thinkingConfig.thinkingLevel` (`"LOW"`, `"MEDIUM"`, `"HIGH"`) rather than
+/// `thinkingBudget: 0` or `"MINIMAL"`.
+pub(crate) fn is_gemini_4_model(model_specifier: &str) -> bool {
+    strip_provider_prefix(model_specifier).starts_with("gemini-4")
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct GeminiGenerateRequest<'a> {
@@ -56,12 +66,14 @@ struct GeminiGenerationConfig<'a> {
     thinking_config: Option<GeminiThinkingConfig>,
 }
 
-#[derive(Debug, Serialize)]
-struct GeminiThinkingConfig {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct GeminiThinkingConfig {
     #[serde(rename = "includeThoughts")]
-    include_thoughts: bool,
-    #[serde(rename = "thinkingBudget")]
-    thinking_budget: u32,
+    pub(crate) include_thoughts: bool,
+    #[serde(rename = "thinkingLevel", skip_serializing_if = "Option::is_none")]
+    pub(crate) thinking_level: Option<&'static str>,
+    #[serde(rename = "thinkingBudget", skip_serializing_if = "Option::is_none")]
+    pub(crate) thinking_budget: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,6 +123,84 @@ struct GeminiUsageMetadata {
     total_token_count: Option<u64>,
 }
 
+fn build_request_thinking_config(request: &GenerationRequest) -> Option<GeminiThinkingConfig> {
+    let gemini_4 = is_gemini_4_model(&request.model_specifier);
+    if let Some(level) = request.thinking_level {
+        if level == ThinkingLevel::Minimal && gemini_4 {
+            return Some(GeminiThinkingConfig {
+                include_thoughts: false,
+                thinking_level: Some(ThinkingLevel::Low.gemini_wire_str()),
+                thinking_budget: None,
+            });
+        }
+        return Some(GeminiThinkingConfig {
+            include_thoughts: level != ThinkingLevel::Minimal,
+            thinking_level: Some(level.gemini_wire_str()),
+            thinking_budget: None,
+        });
+    }
+
+    request.reasoning_budget.map(|budget| {
+        if budget == 0 && gemini_4 {
+            GeminiThinkingConfig {
+                include_thoughts: false,
+                thinking_level: Some(ThinkingLevel::Low.gemini_wire_str()),
+                thinking_budget: None,
+            }
+        } else {
+            GeminiThinkingConfig {
+                include_thoughts: budget > 0,
+                thinking_level: None,
+                thinking_budget: Some(budget),
+            }
+        }
+    })
+}
+
+/// Builds the minimal `thinkingConfig` for `canon-clerk probe` health pings (`includeThoughts: false`),
+/// defaulting Gemini 4 models to `"LOW"` when neither `thinking_level` nor `reasoning_budget` is specified.
+pub(crate) fn build_probe_thinking_config(
+    model_specifier: &str,
+    thinking_level: Option<ThinkingLevel>,
+    reasoning_budget: Option<u32>,
+) -> Option<GeminiThinkingConfig> {
+    let gemini_4 = is_gemini_4_model(model_specifier);
+    if let Some(level) = thinking_level {
+        let wire_level = if level == ThinkingLevel::Minimal && gemini_4 {
+            ThinkingLevel::Low.gemini_wire_str()
+        } else {
+            level.gemini_wire_str()
+        };
+        return Some(GeminiThinkingConfig {
+            include_thoughts: false,
+            thinking_level: Some(wire_level),
+            thinking_budget: None,
+        });
+    }
+    if let Some(budget) = reasoning_budget {
+        if budget == 0 && gemini_4 {
+            return Some(GeminiThinkingConfig {
+                include_thoughts: false,
+                thinking_level: Some(ThinkingLevel::Low.gemini_wire_str()),
+                thinking_budget: None,
+            });
+        }
+        return Some(GeminiThinkingConfig {
+            include_thoughts: false,
+            thinking_level: None,
+            thinking_budget: Some(budget),
+        });
+    }
+    if gemini_4 {
+        return Some(GeminiThinkingConfig {
+            include_thoughts: false,
+            thinking_level: Some(DEFAULT_PROBE_THINKING_LEVEL.gemini_wire_str()),
+            thinking_budget: None,
+        });
+    }
+    None
+}
+
 pub(super) fn build_request_payload(request: &GenerationRequest) -> GeminiGenerateRequest<'_> {
     let system_instruction = if request.system_instruction.trim().is_empty() {
         None
@@ -122,10 +212,7 @@ pub(super) fn build_request_payload(request: &GenerationRequest) -> GeminiGenera
         })
     };
 
-    let thinking_config = request.reasoning_budget.map(|budget| GeminiThinkingConfig {
-        include_thoughts: budget > 0,
-        thinking_budget: budget,
-    });
+    let thinking_config = build_request_thinking_config(request);
 
     GeminiGenerateRequest {
         system_instruction,
