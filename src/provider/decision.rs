@@ -14,6 +14,7 @@
 
 //! Hexagonal outbound port and TypeSafe AI Jev adapter for discriminative `Noul` evaluations.
 
+use super::runtime::build_pooled_http_client;
 use super::typesafe::{
     DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
     TypesafeSystemOneResponse, classify_typesafe_http_error, extract_typesafe_error_detail,
@@ -124,6 +125,7 @@ pub trait DecisionModelProvider: Send + Sync {
 pub struct TypesafeDecisionProvider {
     api_key: String,
     base_url: String,
+    client: reqwest::Client,
 }
 
 impl fmt::Debug for TypesafeDecisionProvider {
@@ -143,23 +145,40 @@ impl fmt::Debug for TypesafeDecisionProvider {
 impl TypesafeDecisionProvider {
     /// Constructs a [`TypesafeDecisionProvider`] targeting [`DEFAULT_TYPESAFE_BASE_URL`].
     pub fn new(api_key: impl Into<String>) -> Self {
-        Self {
-            api_key: api_key.into(),
-            base_url: DEFAULT_TYPESAFE_BASE_URL.to_string(),
-        }
+        Self::with_base_url(api_key, DEFAULT_TYPESAFE_BASE_URL)
     }
 
     /// Constructs a [`TypesafeDecisionProvider`] with a custom base URL (for loopback tests or proxies).
     pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        Self::with_client_and_base_url(api_key, build_pooled_http_client(), base_url)
+    }
+
+    /// Constructs a [`TypesafeDecisionProvider`] with a caller-supplied reusable [`reqwest::Client`].
+    pub fn with_client(api_key: impl Into<String>, client: reqwest::Client) -> Self {
+        Self::with_client_and_base_url(api_key, client, DEFAULT_TYPESAFE_BASE_URL)
+    }
+
+    /// Constructs a [`TypesafeDecisionProvider`] with a custom [`reqwest::Client`] and base URL.
+    pub fn with_client_and_base_url(
+        api_key: impl Into<String>,
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             api_key: api_key.into(),
             base_url: base_url.into(),
+            client,
         }
     }
 
     /// Returns the configured TypeSafe AI v1 base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Returns a reference to the reusable, pooled [`reqwest::Client`].
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
     }
 }
 
@@ -202,6 +221,7 @@ impl DecisionModelProvider for TypesafeDecisionProvider {
         };
 
         let outcome = post_typesafe_json(
+            &self.client,
             &self.base_url,
             &request.model_specifier,
             api_key,
@@ -448,5 +468,92 @@ mod tests {
         assert_eq!(by_count[0].len(), 2);
         assert_eq!(by_count[1].len(), 2);
         assert_eq!(by_count[2].len(), 1);
+    }
+
+    #[test]
+    fn test_typesafe_provider_reuses_pooled_connection_across_distinct_threads() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept single pooled socket");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("set read timeout");
+            for idx in 1..=2 {
+                let mut raw = Vec::new();
+                let mut buf = [0_u8; 4096];
+                loop {
+                    let n = stream.read(&mut buf).expect("read request");
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&raw);
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let expected_len = head
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                k.eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse::<usize>().ok())
+                                    .flatten()
+                            })
+                            .unwrap_or(0);
+                        if body.len() >= expected_len {
+                            break;
+                        }
+                    }
+                }
+                let score = if idx == 1 { 0.92 } else { 0.14 };
+                let body = format!(
+                    r#"{{"model":"jev-1.14.0","answers":{{"q_0":{{"type":"noul","noul":{score}}}}},"usage":{{"input_tokens":20,"output_tokens":0}}}}"#
+                );
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(resp.as_bytes()).expect("write response");
+                stream.flush().expect("flush response");
+            }
+        });
+
+        let custom_client = build_pooled_http_client();
+        let provider = TypesafeDecisionProvider::with_client_and_base_url(
+            "synthetic-typesafe-key",
+            custom_client,
+            format!("http://{addr}/v1"),
+        );
+        assert!(provider.client().post("http://127.0.0.1").build().is_ok());
+
+        let req = DecisionRequest {
+            model_specifier: "typesafe:jev-latest".to_string(),
+            state: "diff".to_string(),
+            questions: BTreeMap::from([("rule".to_string(), "Is it colorable?".to_string())]),
+            timeout_ms: 500,
+            call_label: None,
+        };
+
+        let prov1 = provider.clone();
+        let req1 = req.clone();
+        let res1 = thread::spawn(move || prov1.evaluate_decisions(&req1))
+            .join()
+            .expect("worker 1 joined")
+            .expect("call 1 succeeded");
+        assert_eq!(res1.scores["rule"], 0.92);
+
+        let res2 = thread::spawn(move || provider.evaluate_decisions(&req))
+            .join()
+            .expect("worker 2 joined")
+            .expect("call 2 reused pooled socket after worker 1 exited");
+        assert_eq!(res2.scores["rule"], 0.14);
+
+        server.join().expect("server joined");
     }
 }

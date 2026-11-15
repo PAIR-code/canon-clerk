@@ -22,6 +22,7 @@ use crate::caseload::{
     CanonDocketAssessment, Caseload, CaseloadDocket, ColorabilityStatus,
     normalize_colorability_score,
 };
+use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DecisionRequest, DecisionResponse, MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL,
@@ -29,8 +30,6 @@ use crate::provider::{
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const DOCKET_NOUL_QUERY_SUFFIX: &str = "\
 Question: Does this candidate canon have a colorable claim of subject-matter jurisdiction over \
@@ -138,10 +137,11 @@ fn run_decision_batches(
     provider: &dyn StructuredModelProvider,
 ) -> BatchResult {
     let total = prepared.len();
-    let worker_count = concurrency_limit.min(total).max(1);
-    if worker_count == 1 {
-        let mut combined = BTreeMap::new();
-        for (idx, (batch_canons, request)) in prepared.iter().enumerate() {
+    let batch_maps = execute_bounded_stage_work(
+        prepared,
+        concurrency_limit,
+        provider,
+        |idx, (batch_canons, request)| {
             let batch_cases = provider
                 .evaluate_decisions(request)
                 .and_then(|response| {
@@ -149,56 +149,13 @@ fn run_decision_batches(
                 })
                 .map_err(|err| DocketError::from_batch_call(idx + 1, total, err))?;
             let label = format_canon_batch_label(idx, total, batch_canons.len());
-            provider.record_progress(idx + 1, total, &label);
-            combined.extend(batch_cases);
-        }
-        return Ok(combined);
-    }
+            Ok::<_, DocketError>((batch_cases, label))
+        },
+    )?;
 
-    let next_index = AtomicUsize::new(0);
-    let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<(usize, Vec<Option<BatchResult>>)> =
-        Mutex::new((0, (0..total).map(|_| None).collect()));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| {
-                loop {
-                    if aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total {
-                        break;
-                    }
-                    let (batch_canons, request) = &prepared[idx];
-                    let res = provider
-                        .evaluate_decisions(request)
-                        .and_then(|resp| {
-                            fold_decision_cases(&resp, batch_canons, threshold, model_specifier)
-                        })
-                        .map_err(|err| DocketError::from_batch_call(idx + 1, total, err));
-                    let succeeded = res.is_ok();
-                    if !succeeded {
-                        aborted.store(true, Ordering::Relaxed);
-                    }
-                    if let Ok(mut guard) = outcomes.lock() {
-                        guard.1[idx] = Some(res);
-                        if succeeded {
-                            guard.0 += 1;
-                            let label = format_canon_batch_label(idx, total, batch_canons.len());
-                            provider.record_progress(guard.0, total, &label);
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = BTreeMap::new();
-    for slot in collected.into_iter().flatten() {
-        combined.extend(slot?);
+    for batch_cases in batch_maps {
+        combined.extend(batch_cases);
     }
     Ok(combined)
 }

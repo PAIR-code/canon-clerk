@@ -35,6 +35,7 @@ use crate::caseload::{
     CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_THINKING_LEVEL,
     TYPESAFE_PROVIDER, VerdictStatus, normalize_compliance_score,
 };
+use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
@@ -44,8 +45,6 @@ use fold::fold_case_slice_adjudications;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
 use slices::{MAX_AUDIT_TRIAL_CHARS, build_audit_case_slices};
 use std::collections::BTreeSet;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Default substantive compliance threshold for `audit` (`docs/architecture/nodes/audit.md` §4.5).
 pub const DEFAULT_AUDIT_THRESHOLD: f64 = 0.5;
@@ -349,64 +348,11 @@ fn execute_trial_calls(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> Result<Vec<CanonAdjudication>, AuditError> {
-    let total = prepared_calls.len();
-    let worker_count = concurrency_limit.min(total).max(1);
-    if worker_count == 1 {
-        let mut results = Vec::with_capacity(total);
-        for (idx, call) in prepared_calls.iter().enumerate() {
-            let adjudication =
-                evaluate_single_trial_call(call, threshold, model_specifier, provider)?;
-            let label = format!("{} ({})", call.canon_ref, adjudication.status.as_str());
-            provider.record_progress(idx + 1, total, &label);
-            results.push(adjudication);
-        }
-        return Ok(results);
-    }
-
-    let next_index = AtomicUsize::new(0);
-    let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<(usize, Vec<Option<TrialResult>>)> =
-        Mutex::new((0, (0..total).map(|_| None).collect()));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| {
-                loop {
-                    if aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total {
-                        break;
-                    }
-                    let call = &prepared_calls[idx];
-                    let res =
-                        evaluate_single_trial_call(call, threshold, model_specifier, provider);
-                    let status_label = res
-                        .as_ref()
-                        .ok()
-                        .map(|adj| format!("{} ({})", call.canon_ref, adj.status.as_str()));
-                    if status_label.is_none() {
-                        aborted.store(true, Ordering::Relaxed);
-                    }
-                    if let Ok(mut guard) = outcomes.lock() {
-                        guard.1[idx] = Some(res);
-                        if let Some(ref label) = status_label {
-                            guard.0 += 1;
-                            provider.record_progress(guard.0, total, label);
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    let (_, collected) = outcomes.into_inner().unwrap_or_default();
-    let mut results = Vec::with_capacity(total);
-    for slot in collected.into_iter().flatten() {
-        results.push(slot?);
-    }
-    Ok(results)
+    execute_bounded_stage_work(prepared_calls, concurrency_limit, provider, |_idx, call| {
+        let adjudication = evaluate_single_trial_call(call, threshold, model_specifier, provider)?;
+        let label = format!("{} ({})", call.canon_ref, adjudication.status.as_str());
+        Ok((adjudication, label))
+    })
 }
 
 #[cfg(test)]
@@ -422,6 +368,7 @@ mod tests {
     use crate::provider::{GenerationResponse, ProviderError, TokenUsage};
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
+    use std::sync::Mutex;
 
     struct RoutingAuditProvider {
         requests: Mutex<Vec<GenerationRequest>>,

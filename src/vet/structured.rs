@@ -19,12 +19,11 @@ use crate::caseload::{
     CanonVettingAssessment, DEFAULT_SCREENER_REASONING_BUDGET, VettingStatus,
     normalize_vetting_score,
 };
+use crate::concurrency::execute_bounded_stage_work;
 use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const VET_SYSTEM_INSTRUCTION: &str = "\
 You are the Clerk of the Court for Canon Clerk performing Prima Facie Compliance Vetting (`vet`).
@@ -105,33 +104,34 @@ pub(super) struct GenerativeVetParams<'a> {
     pub(super) timeout_ms: u64,
 }
 
-type VetCaseSlot = Option<Result<(String, CanonVettingAssessment), VetError>>;
-
 pub(super) fn execute_generative_vetting(
     prepared_cases: &[PreparedVettingCase],
     params: &GenerativeVetParams<'_>,
     provider: &dyn StructuredModelProvider,
 ) -> Result<BTreeMap<String, CanonVettingAssessment>, VetError> {
     let response_schema = build_vet_schema();
-    let requests: Vec<GenerationRequest> = prepared_cases
+    let prepared: Vec<(&PreparedVettingCase, GenerationRequest)> = prepared_cases
         .iter()
-        .map(|case| GenerationRequest {
-            model_specifier: params.screener_model.to_string(),
-            system_instruction: VET_SYSTEM_INSTRUCTION.to_string(),
-            user_prompt: case.user_prompt.clone(),
-            response_schema: response_schema.clone(),
-            thinking_level: None,
-            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
-            timeout_ms: params.timeout_ms,
-            call_label: Some(case.canon_ref.clone()),
+        .map(|case| {
+            let req = GenerationRequest {
+                model_specifier: params.screener_model.to_string(),
+                system_instruction: VET_SYSTEM_INSTRUCTION.to_string(),
+                user_prompt: case.user_prompt.clone(),
+                response_schema: response_schema.clone(),
+                thinking_level: None,
+                reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
+                timeout_ms: params.timeout_ms,
+                call_label: Some(case.canon_ref.clone()),
+            };
+            (case, req)
         })
         .collect();
 
-    let total = prepared_cases.len();
-    let worker_count = params.concurrency_limit.min(total).max(1);
-    if worker_count == 1 {
-        let mut cases = BTreeMap::new();
-        for (idx, (case, req)) in prepared_cases.iter().zip(&requests).enumerate() {
+    let evaluated = execute_bounded_stage_work(
+        &prepared,
+        params.concurrency_limit,
+        provider,
+        |_idx, (case, req)| {
             let resp = provider.generate_structured(req)?;
             let decoded = decode_vet_payload(
                 &resp.payload,
@@ -140,65 +140,9 @@ pub(super) fn execute_generative_vetting(
                 params.screener_model,
             )?;
             let label = format!("{} ({})", case.canon_ref, decoded.vetting_status.as_str());
-            provider.record_progress(idx + 1, total, &label);
-            cases.insert(case.canon_ref.clone(), decoded);
-        }
-        return Ok(cases);
-    }
+            Ok::<_, VetError>(((case.canon_ref.clone(), decoded), label))
+        },
+    )?;
 
-    let next_index = AtomicUsize::new(0);
-    let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<(usize, Vec<VetCaseSlot>)> =
-        Mutex::new((0, (0..total).map(|_| None).collect()));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| {
-                loop {
-                    if aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total {
-                        break;
-                    }
-                    let case = &prepared_cases[idx];
-                    let req = &requests[idx];
-                    let res = provider
-                        .generate_structured(req)
-                        .map_err(Into::into)
-                        .and_then(|resp| {
-                            decode_vet_payload(
-                                &resp.payload,
-                                &case.canon_ref,
-                                params.threshold,
-                                params.screener_model,
-                            )
-                            .map(|decoded| (case.canon_ref.clone(), decoded))
-                        });
-                    let status_label = res.as_ref().ok().map(|(_, d)| {
-                        format!("{} ({})", case.canon_ref, d.vetting_status.as_str())
-                    });
-                    if status_label.is_none() {
-                        aborted.store(true, Ordering::Relaxed);
-                    }
-                    if let Ok(mut guard) = outcomes.lock() {
-                        guard.1[idx] = Some(res);
-                        if let Some(ref label) = status_label {
-                            guard.0 += 1;
-                            provider.record_progress(guard.0, total, label);
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    let (_, collected) = outcomes.into_inner().unwrap_or_default();
-    let mut cases = BTreeMap::new();
-    for slot in collected.into_iter().flatten() {
-        let (canon_ref, assessment) = slot?;
-        cases.insert(canon_ref, assessment);
-    }
-    Ok(cases)
+    Ok(evaluated.into_iter().collect())
 }

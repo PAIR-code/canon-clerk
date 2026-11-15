@@ -22,6 +22,7 @@ use crate::caseload::{
     AdmissibilityStatus, Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake,
     ExhibitAssessment, normalize_admissibility_score,
 };
+use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DecisionRequest, DecisionResponse, MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL,
@@ -29,8 +30,6 @@ use crate::provider::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Clone)]
 struct PairSubject {
@@ -260,63 +259,21 @@ fn run_pair_batches(
     provider: &dyn StructuredModelProvider,
 ) -> PairBatchResult {
     let total = prepared.len();
-    let worker_count = concurrency_limit.min(total).max(1);
-    if worker_count == 1 {
-        let mut combined = Vec::new();
-        for (idx, (batch_pairs, request)) in prepared.iter().enumerate() {
+    let batches = execute_bounded_stage_work(
+        prepared,
+        concurrency_limit,
+        provider,
+        |idx, (batch_pairs, request)| {
             let response = provider.evaluate_decisions(request)?;
             let decoded = fold_pair_batch(&response, batch_pairs, threshold, model_specifier)?;
             let label = format_admit_batch_label(idx, total, batch_pairs.len());
-            provider.record_progress(idx + 1, total, &label);
-            combined.extend(decoded);
-        }
-        return Ok(combined);
-    }
+            Ok::<_, AdmitError>((decoded, label))
+        },
+    )?;
 
-    let next_index = AtomicUsize::new(0);
-    let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<(usize, Vec<Option<PairBatchResult>>)> =
-        Mutex::new((0, (0..total).map(|_| None).collect()));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| {
-                loop {
-                    if aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total {
-                        break;
-                    }
-                    let (batch_pairs, request) = &prepared[idx];
-                    let res = provider
-                        .evaluate_decisions(request)
-                        .map_err(AdmitError::from)
-                        .and_then(|resp| {
-                            fold_pair_batch(&resp, batch_pairs, threshold, model_specifier)
-                        });
-                    let succeeded = res.is_ok();
-                    if !succeeded {
-                        aborted.store(true, Ordering::Relaxed);
-                    }
-                    if let Ok(mut guard) = outcomes.lock() {
-                        guard.1[idx] = Some(res);
-                        if succeeded {
-                            guard.0 += 1;
-                            let label = format_admit_batch_label(idx, total, batch_pairs.len());
-                            provider.record_progress(guard.0, total, &label);
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = Vec::new();
-    for slot in collected.into_iter().flatten() {
-        combined.extend(slot?);
+    for batch in batches {
+        combined.extend(batch);
     }
     Ok(combined)
 }
