@@ -529,7 +529,7 @@ mod tests {
                 "--apprise-concurrency",
                 "3",
                 "--screener-model",
-                "flash-lite",
+                "gemini-2.5-flash-lite",
                 "--format",
                 "compact",
             ])
@@ -542,7 +542,10 @@ mod tests {
                     assert_eq!(args.apprise_threshold, Some(0.65));
                     assert_eq!(args.apprise_batch_size, Some(15));
                     assert_eq!(args.apprise_concurrency, Some(3));
-                    assert_eq!(args.provider.screener_model.as_deref(), Some("flash-lite"));
+                    assert_eq!(
+                        args.provider.screener_model.as_deref(),
+                        Some("gemini-2.5-flash-lite")
+                    );
                     assert_eq!(args.format, AppriseFormat::Compact);
                 }
                 _ => panic!("expected Apprise subcommand"),
@@ -1514,7 +1517,7 @@ mod tests {
             jev_env.insert(ENV_TYPESAFE_API_KEY.to_string(), "test-jev-key".to_string());
             let jev_args = AppriseArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("jev".to_string()),
+                    screener_model: Some("jev-latest".to_string()),
                     ..ProviderConfigArgs::default()
                 },
                 ..gen_args

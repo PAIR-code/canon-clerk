@@ -75,7 +75,7 @@ The CLI exposes `probe` as an imperative subcommand:
 canon-clerk probe
 
 # Probe TypeSafe Jev screener alongside Gemini 4 Carbon auditor:
-canon-clerk probe --screener-model jev
+canon-clerk probe --screener-model jev-latest
 
 # Emit structured JSON probe record:
 canon-clerk probe --json
@@ -83,8 +83,8 @@ canon-clerk probe --json
 
 ### CLI Flags & Options
 - `--timeout <ms>`: Request timeout in milliseconds (default: `5000ms`).
-- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier or alias.
-- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier or alias.
+- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier (`gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`).
+- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier (`gemini-*`, `google:gemini-*`).
 - `--thinking-level <minimal|low|medium|high>` (fallback env: `CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier (mutually exclusive with `--reasoning-budget`).
 - `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens (mutually exclusive with `--thinking-level`).
 - `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.

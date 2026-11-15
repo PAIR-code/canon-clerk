@@ -57,22 +57,8 @@ pub const ENV_THINKING_LEVEL: &str = "CANON_CLERK_THINKING_LEVEL";
 /// Environment variable name for overriding the maximum reasoning budget in tokens.
 pub const ENV_REASONING_BUDGET: &str = "CANON_CLERK_REASONING_BUDGET";
 
-/// Canonical Google Gemini 4 Argon model specifier expanded from the `argon` shorthand alias.
-pub const DEFAULT_ARGON_MODEL: &str = "google:gemini-4-argon";
-
-/// Canonical Google Gemini Flash-Lite model specifier expanded from the `flash-lite` shorthand alias.
-pub const DEFAULT_FLASH_LITE_MODEL: &str = "google:gemini-flash-lite-latest";
-
-/// Canonical Google Gemini Flash model specifier expanded from the `flash` shorthand alias.
-pub const DEFAULT_FLASH_MODEL: &str = "google:gemini-flash-latest";
-
-/// Canonical Google Gemini Pro 3.x/2.5 model specifier expanded from the `pro` shorthand alias.
-pub const DEFAULT_PRO_MODEL: &str = "google:gemini-pro-latest";
-
-/// Canonical TypeSafe AI Jev model specifier expanded from the `jev` shorthand alias.
+/// Default canonical TypeSafe AI Jev model specifier (`docs/architecture/nodes/configure.md` §4).
 pub const DEFAULT_JEV_MODEL: &str = "typesafe:jev-latest";
-
-const JEV_MODEL_ALIAS: &str = "jev";
 
 /// Domain input parameters, environment snapshot, and optional user config store for `configure`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -177,15 +163,15 @@ impl fmt::Display for ConfigureError {
             Self::InvalidModelSpecifier { specifier, reason } => write!(
                 f,
                 "Invalid model specifier `{specifier}`: {reason}\n  \
-                 Hint: Specify a canonical model such as `{DEFAULT_SCREENER_MODEL}`, \
-                 `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or shorthand aliases `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro`, `jev`."
+                 Hint: Specify an exact upstream model identifier such as `{DEFAULT_SCREENER_MODEL}`, \
+                 `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or unprefixed `gemini-4-hydrogen`, `gemini-4-carbon`, `jev-latest`."
             ),
             Self::DiscriminativeAuditorUnsupported { specifier } => write!(
                 f,
                 "Discriminative model `{specifier}` cannot be configured as `auditor_model` \
                  (`audit` requires structured generative output for exception rulings, remediation guidance, and line annotations).\n  \
-                 Hint: Pass `--screener-model jev` (e.g. `canon-clerk vet --screener-model jev`) \
-                 and keep a generative auditor such as `{DEFAULT_AUDITOR_MODEL}` (`carbon`) on `--auditor-model`."
+                 Hint: Pass `--screener-model jev-latest` (e.g. `canon-clerk vet --screener-model jev-latest`) \
+                 and keep a generative auditor such as `{DEFAULT_AUDITOR_MODEL}` (`gemini-4-carbon`) on `--auditor-model`."
             ),
             Self::InvalidThinkingLevel { raw } => write!(
                 f,
@@ -233,23 +219,10 @@ pub(crate) fn model_provider(specifier: &str) -> &str {
     }
 }
 
-fn expand_google_alias(alias: &str) -> Option<&'static str> {
-    match alias {
-        "carbon" => Some(DEFAULT_AUDITOR_MODEL),
-        "argon" => Some(DEFAULT_ARGON_MODEL),
-        "hydrogen" => Some(DEFAULT_SCREENER_MODEL),
-        "flash-lite" => Some(DEFAULT_FLASH_LITE_MODEL),
-        "flash" => Some(DEFAULT_FLASH_MODEL),
-        "pro" => Some(DEFAULT_PRO_MODEL),
-        _ => None,
-    }
-}
-
-/// Normalizes a raw model alias or specifier into a canonical `<provider>:<model>` identifier.
+/// Normalizes a raw upstream model identifier into a canonical `<provider>:<model>` specifier.
 ///
 /// Supported forms:
-/// - Shorthand aliases: `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro` (-> `google:*`), `jev` (-> `typesafe:jev-latest`)
-/// - Unqualified models: `gemini-*` -> `google:gemini-*`, `jev-*` -> `typesafe:jev-*`
+/// - Unqualified upstream model IDs: `gemini-*` -> `google:gemini-*`, `jev-*` -> `typesafe:jev-*`
 /// - Canonical specifiers: `google:gemini-*`, `typesafe:jev-*`
 pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
     let trimmed = raw.trim();
@@ -268,17 +241,13 @@ pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
     }
 
     let Some((provider, model_part)) = trimmed.split_once(':') else {
-        if let Some(expanded) = expand_google_alias(trimmed) {
-            return Ok(expanded.to_string());
-        }
         return match trimmed {
-            JEV_MODEL_ALIAS => Ok(DEFAULT_JEV_MODEL.to_string()),
             name if is_valid_gemini_model_name(name) => Ok(format!("{DEFAULT_PROVIDER}:{name}")),
             name if is_valid_jev_model_name(name) => Ok(format!("{TYPESAFE_PROVIDER}:{name}")),
             _ => Err(ConfigureError::InvalidModelSpecifier {
                 specifier: raw.to_string(),
                 reason: format!(
-                    "unrecognized model `{trimmed}` (expected `gemini-*`, `jev-*`, or alias `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro`, `jev`)."
+                    "unrecognized model `{trimmed}` (expected `gemini-*`, `jev-*`, `google:gemini-*`, or `typesafe:jev-*`)."
                 ),
             }),
         };
@@ -299,26 +268,23 @@ pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
 
     match provider {
         DEFAULT_PROVIDER => {
-            if let Some(expanded) = expand_google_alias(model_part) {
-                Ok(expanded.to_string())
-            } else if is_valid_gemini_model_name(model_part) {
+            if is_valid_gemini_model_name(model_part) {
                 Ok(format!("{DEFAULT_PROVIDER}:{model_part}"))
             } else {
                 Err(ConfigureError::InvalidModelSpecifier {
                     specifier: raw.to_string(),
                     reason: format!(
-                        "unrecognized Google model `{model_part}` (expected `gemini-*` or alias `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro`)."
+                        "unrecognized Google model `{model_part}` (expected `gemini-*`, e.g. `gemini-4-hydrogen` or `gemini-4-carbon`)."
                     ),
                 })
             }
         }
         TYPESAFE_PROVIDER => match model_part {
-            JEV_MODEL_ALIAS => Ok(DEFAULT_JEV_MODEL.to_string()),
             name if is_valid_jev_model_name(name) => Ok(format!("{TYPESAFE_PROVIDER}:{name}")),
             _ => Err(ConfigureError::InvalidModelSpecifier {
                 specifier: raw.to_string(),
                 reason: format!(
-                    "unrecognized TypeSafe model `{model_part}` (expected `jev-*` or alias `jev`)."
+                    "unrecognized TypeSafe model `{model_part}` (expected `jev-*`, e.g. `jev-latest`)."
                 ),
             }),
         },
@@ -485,55 +451,21 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_shorthand_aliases_normalize_to_canonical_google_specifiers() {
-            assert_eq!(
-                normalize_model_specifier("carbon").expect("carbon alias"),
-                DEFAULT_AUDITOR_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("google:carbon").expect("prefixed carbon"),
-                DEFAULT_AUDITOR_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("argon").expect("argon alias"),
-                DEFAULT_ARGON_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("google:argon").expect("prefixed argon"),
-                DEFAULT_ARGON_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("hydrogen").expect("hydrogen alias"),
-                DEFAULT_SCREENER_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("google:hydrogen").expect("prefixed hydrogen"),
-                DEFAULT_SCREENER_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("flash-lite").expect("flash-lite alias"),
-                DEFAULT_FLASH_LITE_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("google:flash-lite").expect("prefixed flash-lite"),
-                DEFAULT_FLASH_LITE_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("flash").expect("flash alias"),
-                DEFAULT_FLASH_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("pro").expect("pro alias"),
-                DEFAULT_PRO_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("google:pro").expect("prefixed pro"),
-                DEFAULT_PRO_MODEL
-            );
-        }
-
-        #[test]
         fn test_unqualified_and_canonical_gemini_models_normalize() {
+            assert_eq!(
+                normalize_model_specifier("gemini-4-carbon").expect("unqualified gemini-4-carbon"),
+                DEFAULT_AUDITOR_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("google:gemini-4-carbon")
+                    .expect("canonical gemini-4-carbon"),
+                DEFAULT_AUDITOR_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("gemini-4-hydrogen")
+                    .expect("unqualified gemini-4-hydrogen"),
+                DEFAULT_SCREENER_MODEL
+            );
             assert_eq!(
                 normalize_model_specifier("gemini-2.5-pro").expect("unqualified gemini"),
                 "google:gemini-2.5-pro"
@@ -546,18 +478,14 @@ mod tests {
         }
 
         #[test]
-        fn test_typesafe_jev_aliases_and_specifiers_normalize() {
-            assert_eq!(
-                normalize_model_specifier("jev").expect("jev shorthand alias"),
-                DEFAULT_JEV_MODEL
-            );
-            assert_eq!(
-                normalize_model_specifier("typesafe:jev").expect("prefixed jev alias"),
-                DEFAULT_JEV_MODEL
-            );
+        fn test_typesafe_jev_specifiers_normalize() {
             assert_eq!(
                 normalize_model_specifier("jev-latest").expect("unqualified jev-latest"),
-                "typesafe:jev-latest"
+                DEFAULT_JEV_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("typesafe:jev-latest").expect("canonical jev-latest"),
+                DEFAULT_JEV_MODEL
             );
             assert_eq!(
                 normalize_model_specifier("jev-1.14.0").expect("unqualified versioned jev"),
@@ -570,6 +498,31 @@ mod tests {
             );
             assert_eq!(model_provider("typesafe:jev-latest"), "typesafe");
             assert_eq!(model_provider("google:gemini-2.5-pro"), "google");
+        }
+
+        #[test]
+        fn test_retired_pet_name_aliases_are_rejected_with_remediation_hint() {
+            for retired in [
+                "carbon",
+                "argon",
+                "hydrogen",
+                "flash-lite",
+                "flash",
+                "pro",
+                "jev",
+                "google:carbon",
+                "google:argon",
+                "google:hydrogen",
+                "google:flash-lite",
+                "google:flash",
+                "google:pro",
+                "typesafe:jev",
+            ] {
+                let err = normalize_model_specifier(retired)
+                    .expect_err(&format!("retired alias `{retired}` must be rejected"));
+                assert!(matches!(err, ConfigureError::InvalidModelSpecifier { .. }));
+                assert!(err.to_string().contains("Hint:"));
+            }
         }
 
         #[test]
@@ -638,7 +591,9 @@ mod tests {
             );
             let stored = StoredConfig {
                 providers,
-                screener_model: Some(StoredTierModel::Specifier("flash".to_string())),
+                screener_model: Some(StoredTierModel::Specifier(
+                    "gemini-2.5-flash-lite".to_string(),
+                )),
                 auditor_model: Some(StoredTierModel::Specifier("gemini-2.5-pro".to_string())),
                 reasoning_budget: Some(2048),
                 ..StoredConfig::default()
@@ -656,7 +611,7 @@ mod tests {
             assert_eq!(
                 from_store.config,
                 Some(CaseloadConfig {
-                    screener_model: DEFAULT_FLASH_MODEL.to_string(),
+                    screener_model: "google:gemini-2.5-flash-lite".to_string(),
                     auditor_model: "google:gemini-2.5-pro".to_string(),
                     thinking_level: None,
                     reasoning_budget: Some(2048),
@@ -665,7 +620,10 @@ mod tests {
 
             // 2. Environment variables override stored config
             let mut env = BTreeMap::new();
-            env.insert(ENV_SCREENER_MODEL.to_string(), "hydrogen".to_string());
+            env.insert(
+                ENV_SCREENER_MODEL.to_string(),
+                "gemini-4-hydrogen".to_string(),
+            );
             env.insert(ENV_REASONING_BUDGET.to_string(), "4096".to_string());
             let from_env = execute_configure(
                 &ConfigureOptions {
@@ -698,8 +656,8 @@ mod tests {
             env.insert(ENV_REASONING_BUDGET.to_string(), "1024".to_string());
 
             let opts = ConfigureOptions {
-                screener_model: Some("hydrogen".to_string()),
-                auditor_model: Some("carbon".to_string()),
+                screener_model: Some("gemini-4-hydrogen".to_string()),
+                auditor_model: Some("gemini-4-carbon".to_string()),
                 reasoning_budget: Some(4096),
                 env,
                 ..ConfigureOptions::default()
@@ -840,7 +798,7 @@ mod tests {
             let mut blank_env = BTreeMap::new();
             blank_env.insert(ENV_GEMINI_API_KEY.to_string(), "   ".to_string());
             let blank_pinned_opts = ConfigureOptions {
-                screener_model: Some("hydrogen".to_string()),
+                screener_model: Some("gemini-4-hydrogen".to_string()),
                 env: blank_env,
                 ..ConfigureOptions::default()
             };
@@ -878,19 +836,19 @@ mod tests {
 
         #[test]
         fn test_hybrid_auto_selection_and_explicit_pin_precedence() {
-            // 1. Explicit screener=jev without TYPESAFE_API_KEY fails fast with MissingTypesafeApiKey
+            // 1. Explicit screener=jev-latest without TYPESAFE_API_KEY fails fast with MissingTypesafeApiKey
             let missing_typesafe = ConfigureOptions {
-                screener_model: Some("jev".to_string()),
+                screener_model: Some("jev-latest".to_string()),
                 env: env_with_key(),
                 ..ConfigureOptions::default()
             };
             let err_ts = execute_configure(&missing_typesafe, None)
-                .expect_err("explicit jev without TYPESAFE_API_KEY must fail");
+                .expect_err("explicit jev-latest without TYPESAFE_API_KEY must fail");
             assert_eq!(err_ts, ConfigureError::MissingTypesafeApiKey);
             assert!(err_ts.to_string().contains(ENV_TYPESAFE_API_KEY));
             assert!(err_ts.to_string().contains("Hint:"));
 
-            // 2. Unpinned hybrid env (TYPESAFE_API_KEY + GEMINI_API_KEY) auto-selects jev + carbon
+            // 2. Unpinned hybrid env (TYPESAFE_API_KEY + GEMINI_API_KEY) auto-selects jev-latest + gemini-4-carbon
             let mut both_env = env_with_key();
             both_env.insert(
                 ENV_TYPESAFE_API_KEY.to_string(),
@@ -903,7 +861,7 @@ mod tests {
                 },
                 None,
             )
-            .expect("unpinned hybrid configure should auto-select jev + carbon");
+            .expect("unpinned hybrid configure should auto-select jev-latest + gemini-4-carbon");
             assert_eq!(
                 hybrid_ok.config,
                 Some(CaseloadConfig {
@@ -917,20 +875,23 @@ mod tests {
             // 3. Explicit pins (CLI, env, or config.json) override credential-inferred hybrid defaults
             let cli_pinned = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("hydrogen".to_string()),
+                    screener_model: Some("gemini-4-hydrogen".to_string()),
                     env: both_env.clone(),
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect("CLI --screener-model hydrogen overrides ambient TYPESAFE_API_KEY");
+            .expect("CLI --screener-model gemini-4-hydrogen overrides ambient TYPESAFE_API_KEY");
             assert_eq!(
                 cli_pinned.config.expect("config").screener_model,
                 DEFAULT_SCREENER_MODEL
             );
 
             let mut env_pinned_map = both_env.clone();
-            env_pinned_map.insert(ENV_SCREENER_MODEL.to_string(), "flash-lite".to_string());
+            env_pinned_map.insert(
+                ENV_SCREENER_MODEL.to_string(),
+                "gemini-2.5-flash-lite".to_string(),
+            );
             let env_pinned = execute_configure(
                 &ConfigureOptions {
                     env: env_pinned_map,
@@ -941,14 +902,16 @@ mod tests {
             .expect("CANON_CLERK_SCREENER_MODEL overrides ambient TYPESAFE_API_KEY");
             assert_eq!(
                 env_pinned.config.expect("config").screener_model,
-                DEFAULT_FLASH_LITE_MODEL
+                "google:gemini-2.5-flash-lite"
             );
 
             let store_pinned = execute_configure(
                 &ConfigureOptions {
                     env: both_env,
                     stored_config: Some(StoredConfig {
-                        screener_model: Some(StoredTierModel::Specifier("argon".to_string())),
+                        screener_model: Some(StoredTierModel::Specifier(
+                            "gemini-4-argon".to_string(),
+                        )),
                         ..StoredConfig::default()
                     }),
                     ..ConfigureOptions::default()
@@ -958,7 +921,7 @@ mod tests {
             .expect("config.json screenerModel overrides ambient TYPESAFE_API_KEY");
             assert_eq!(
                 store_pinned.config.expect("config").screener_model,
-                DEFAULT_ARGON_MODEL
+                "google:gemini-4-argon"
             );
         }
 
@@ -1007,14 +970,14 @@ mod tests {
             // 3. Explicit Google screener pin on screener-only closure with ONLY TYPESAFE_API_KEY fails fast
             let err_explicit_google = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("hydrogen".to_string()),
+                    screener_model: Some("gemini-4-hydrogen".to_string()),
                     screener_only_closure: true,
                     env: ts_only_env.clone(),
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect_err("explicit hydrogen pin without GEMINI_API_KEY must fail");
+            .expect_err("explicit gemini-4-hydrogen pin without GEMINI_API_KEY must fail");
             assert_eq!(err_explicit_google, ConfigureError::MissingApiKey);
 
             // 4. Full closure (audit/configure/probe) with ONLY TYPESAFE_API_KEY fails fast with generative auditor hint

@@ -40,10 +40,10 @@ Examples:
   canon-clerk probe --json
 
   # Explicitly pin TypeSafe Jev screener alongside Gemini 4 Carbon auditor:
-  canon-clerk probe --screener-model jev --auditor-model carbon
+  canon-clerk probe --screener-model jev-latest --auditor-model gemini-4-carbon
 
   # Override timeout and model tiers for diagnostic verification:
-  canon-clerk probe --timeout 3000 --screener-model hydrogen --auditor-model carbon";
+  canon-clerk probe --timeout 3000 --screener-model gemini-4-hydrogen --auditor-model gemini-4-carbon";
 
 /// Output presentation format for `canon-clerk probe`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -390,9 +390,9 @@ mod tests {
                 "--timeout",
                 "3500",
                 "--screener-model",
-                "flash-lite",
+                "gemini-2.5-flash-lite",
                 "--auditor-model",
-                "pro",
+                "gemini-2.5-pro",
                 "--json",
             ])
             .expect("parse probe subcommand");
@@ -400,8 +400,14 @@ mod tests {
             match cli.command {
                 Some(Commands::Probe(args)) => {
                     assert_eq!(args.timeout, Some(3500));
-                    assert_eq!(args.provider.screener_model.as_deref(), Some("flash-lite"));
-                    assert_eq!(args.provider.auditor_model.as_deref(), Some("pro"));
+                    assert_eq!(
+                        args.provider.screener_model.as_deref(),
+                        Some("gemini-2.5-flash-lite")
+                    );
+                    assert_eq!(
+                        args.provider.auditor_model.as_deref(),
+                        Some("gemini-2.5-pro")
+                    );
                     assert!(args.io.json);
                 }
                 _ => panic!("expected Probe subcommand"),

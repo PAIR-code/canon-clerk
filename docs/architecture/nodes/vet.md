@@ -97,14 +97,14 @@ The CLI exposes `vet` as a fast pre-flight compliance gate (analogous to `go vet
 
 ```bash
 # 1. Fast pre-flight compliance check using TypeSafe Jev (0 output tokens):
-git diff origin/main | canon-clerk vet --diff - --screener-model jev
+git diff origin/main | canon-clerk vet --diff - --screener-model jev-latest
 
 # 2. Vet explicit target paths or newline-delimited stdin paths:
-canon-clerk vet src/cli src/vet --screener-model jev
-git diff origin/main --name-only | canon-clerk vet - --screener-model jev
+canon-clerk vet src/cli src/vet --screener-model jev-latest
+git diff origin/main --name-only | canon-clerk vet - --screener-model jev-latest
 
 # 3. Chain vet into audit only when contested cases require remediation & line annotations:
-git diff origin/main | canon-clerk vet --diff - --screener-model jev --output-caseload caseload.json \
+git diff origin/main | canon-clerk vet --diff - --screener-model jev-latest --output-caseload caseload.json \
   || canon-clerk audit --caseload caseload.json
 
 # 4. Emit tab-separated compact records strictly for contested cases:

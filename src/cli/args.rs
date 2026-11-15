@@ -152,21 +152,21 @@ impl CanonSelectionArgs {
 /// Composable CLI argument group for model configuration, reasoning effort, and provider credentials (Branch B).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderConfigArgs {
-    /// Custom screener model specifier or shorthand alias (`hydrogen`, `argon`, `carbon`, `flash-lite`, `flash`, `pro`, `jev`; env: `CANON_CLERK_SCREENER_MODEL`).
+    /// Custom screener model specifier (`gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`; env: `CANON_CLERK_SCREENER_MODEL`).
     #[arg(
         long = "screener-model",
         value_name = "MODEL",
         help_heading = "Model & Reasoning Options",
-        help = "Screener model specifier or alias (fallback env: CANON_CLERK_SCREENER_MODEL)"
+        help = "Screener model specifier (fallback env: CANON_CLERK_SCREENER_MODEL)"
     )]
     pub screener_model: Option<String>,
 
-    /// Custom auditor model specifier or shorthand alias (`carbon`, `argon`, `hydrogen`, `pro`, `flash`, `flash-lite`; env: `CANON_CLERK_AUDITOR_MODEL`).
+    /// Custom auditor model specifier (`gemini-*`, `google:gemini-*`; env: `CANON_CLERK_AUDITOR_MODEL`).
     #[arg(
         long = "auditor-model",
         value_name = "MODEL",
         help_heading = "Model & Reasoning Options",
-        help = "Auditor model specifier or alias (fallback env: CANON_CLERK_AUDITOR_MODEL)"
+        help = "Auditor model specifier (fallback env: CANON_CLERK_AUDITOR_MODEL)"
     )]
     pub auditor_model: Option<String>,
 

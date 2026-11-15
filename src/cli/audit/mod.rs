@@ -57,7 +57,7 @@ Examples:
   git diff origin/main | canon-clerk audit --diff - --format github --output-caseload caseload.json
 
   # Use TypeSafe Jev across docket, admit, and vet before escalating contested cases:
-  git diff origin/main | canon-clerk audit --diff - --screener-model jev";
+  git diff origin/main | canon-clerk audit --diff - --screener-model jev-latest";
 
 /// Output presentation format for `canon-clerk audit`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]

@@ -90,7 +90,7 @@ git diff origin/main | canon-clerk audit --diff -
 git diff origin/main | canon-clerk vet --diff -
 
 # Explicitly pin screener and auditor model tiers via flags:
-git diff origin/main | canon-clerk audit --diff - --screener-model jev --auditor-model carbon
+git diff origin/main | canon-clerk audit --diff - --screener-model jev-latest --auditor-model gemini-4-carbon
 
 # Audit explicit target paths or run in GitHub Actions annotation mode with Caseload archival:
 canon-clerk audit src/cli
