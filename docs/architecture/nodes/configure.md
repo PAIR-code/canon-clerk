@@ -54,7 +54,7 @@ flowchart LR
 
 - **Screener Model Specifier (`screener_model`):** Canonical provider-prefixed model identifier used by fast heuristic screening and prima facie vetting stages (`apprise`, `docket`, `admit`, `vet`; defaults to `"google:gemini-4-hydrogen"`).
 - **Auditor Model Specifier (`auditor_model`):** Canonical provider-prefixed generative model identifier used for substantive trial adjudication (`audit`; defaults to `"google:gemini-4-carbon"`). Discriminative-only classifiers (`typesafe:*` / `jev`) are disallowed on `auditor_model` because `audit` requires structured prose decrees, `Remediation` synthesis, and 1-based `CodeAnnotation` spans.
-- **Thinking Level (`thinking_level`):** Optional discrete qualitative reasoning effort tier (`"minimal"`, `"low"`, `"medium"`, `"high"`) governing extended thinking during `audit` trials (mutually exclusive with `reasoning_budget`; when both are omitted on `.config`, `audit` defaults to bounded `"medium"` thinking and `probe` defaults to `"low"`).
+- **Thinking Level (`thinking_level`):** Optional discrete qualitative reasoning effort tier (`"minimal"`, `"low"`, `"medium"`, `"high"`) governing extended thinking during `audit` trials (mutually exclusive with `reasoning_budget`; when both are omitted on `.config`, both `audit` and `probe` default to bounded `"low"` thinking).
 - **Reasoning Budget (`reasoning_budget`):** Optional integer token ceiling governing extended thinking during `audit` trials (mutually exclusive with `thinking_level`).
 
 ### Data Plane & Security Invariants
