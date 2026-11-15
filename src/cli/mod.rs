@@ -190,6 +190,21 @@ impl Commands {
             | Self::Audit(_) => false,
         }
     }
+
+    pub(crate) const fn apply_global_verbose(&mut self, verbose: bool) {
+        match self {
+            Self::Validate(args) => args.verbose |= verbose,
+            Self::Vet(args) => args.verbose |= verbose,
+            Self::Audit(args) => args.verbose |= verbose,
+            Self::Intake(_)
+            | Self::Discover(_)
+            | Self::Configure(_)
+            | Self::Probe(_)
+            | Self::Apprise(_)
+            | Self::Docket(_)
+            | Self::Admit(_) => {}
+        }
+    }
 }
 
 /// Structured CLI error carrying a standardized POSIX exit code (`1` runtime/predicate, `2` usage/input).
@@ -287,7 +302,7 @@ fn current_workspace_dir() -> Result<PathBuf, CliError> {
 }
 
 /// Executes the CLI application logic and routes subcommands.
-pub fn run(cli: Cli) -> Result<(), CliError> {
+pub fn run(mut cli: Cli) -> Result<(), CliError> {
     let env_map: BTreeMap<String, String> = std::env::vars().collect();
     let effective_verbose = resolve_verbose_flag(cli.verbose, &env_map)?;
     let log_file_path = resolve_log_file_path(cli.log_file.as_deref(), &env_map)?;
@@ -303,7 +318,8 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
 
     tracing::debug!("Initialized Canon Clerk CLI runtime");
 
-    if let Some(command) = &cli.command {
+    if let Some(command) = &mut cli.command {
+        command.apply_global_verbose(effective_verbose);
         let sink = build_cli_telemetry_sink(log_file_path.as_deref(), stderr_opts)?;
         let clock = SystemTelemetryClock::new();
         let session = TelemetrySession::new(&sink, &clock);
@@ -343,7 +359,9 @@ fn dispatch_subcommand(
         }
         Commands::Validate(args) => {
             let cwd = current_workspace_dir()?;
-            run_validate_with_telemetry(args, stdin, stdout, &cwd, session)?;
+            validate::run_validate_with_env_and_telemetry(
+                args, stdin, stdout, &cwd, env_map, session,
+            )?;
         }
         Commands::Configure(args) => {
             run_configure_with_telemetry(args, stdin, stdout, env_map, session)?;
@@ -467,6 +485,20 @@ mod tests {
             let cli_long = Cli::try_parse_from(["canon-clerk", "--verbose"])
                 .expect("--verbose should succeed");
             assert!(cli_long.verbose);
+
+            let mut cli_validate =
+                Cli::try_parse_from(["canon-clerk", "validate", "--all-canons", "-v"])
+                    .expect("validate -v should parse");
+            assert!(cli_validate.verbose);
+            cli_validate
+                .command
+                .as_mut()
+                .expect("command")
+                .apply_global_verbose(cli_validate.verbose);
+            assert!(matches!(
+                cli_validate.command,
+                Some(Commands::Validate(args)) if args.verbose
+            ));
         }
 
         #[test]

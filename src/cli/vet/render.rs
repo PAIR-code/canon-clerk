@@ -16,7 +16,7 @@
 
 use super::{VetArgs, VetFormat};
 use crate::caseload::{
-    Caseload, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadVetting,
+    Caseload, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadVetting, VettingStatus,
 };
 use crate::cli::CliError;
 use crate::cli::provenance::{
@@ -24,6 +24,8 @@ use crate::cli::provenance::{
     write_discover_provenance, write_docket_provenance, write_filing_intake_provenance,
     write_validate_provenance, write_vet_provenance,
 };
+use crate::cli::telemetry::resolve_verbose_flag;
+use std::collections::BTreeMap;
 use std::io::Write;
 
 /// Complete provenance watermarks across the 7-stage `[intake, discover, validate, configure, docket, admit, vet]` closure.
@@ -68,8 +70,10 @@ pub(super) fn render_vet_output(
     args: &VetArgs,
     caseload: &Caseload,
     watermarks: &VetWatermarks,
+    env: &BTreeMap<String, String>,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
+    let verbose = resolve_verbose_flag(args.verbose, env)?;
     let effective_format = if args.io.json {
         VetFormat::Json
     } else {
@@ -92,7 +96,7 @@ pub(super) fn render_vet_output(
             }
         }
         VetFormat::Stylish => {
-            render_stylish_output(caseload, watermarks, stdout).map_err(|err| {
+            render_stylish_output(caseload, watermarks, verbose, stdout).map_err(|err| {
                 CliError::runtime(format!("Failed to write stylish output: {err}"))
             })?;
         }
@@ -103,6 +107,9 @@ pub(super) fn render_vet_output(
 
 fn render_compact_output(vetting: &CaseloadVetting, stdout: &mut dyn Write) -> std::io::Result<()> {
     for (canon_ref, assessment) in &vetting.cases {
+        if assessment.vetting_status == VettingStatus::Vetted {
+            continue;
+        }
         let single_line = assessment
             .vetting_summary
             .split_whitespace()
@@ -121,6 +128,7 @@ fn render_compact_output(vetting: &CaseloadVetting, stdout: &mut dyn Write) -> s
 fn render_stylish_output(
     caseload: &Caseload,
     wm: &VetWatermarks,
+    verbose: bool,
     stdout: &mut dyn Write,
 ) -> std::io::Result<()> {
     writeln!(stdout, "Pipeline Provenance:")?;
@@ -161,6 +169,7 @@ fn render_stylish_output(
             caseload.docket.as_ref(),
             caseload.evidence.as_ref(),
             wm.vet_threshold,
+            verbose,
             stdout,
         )?;
     }
@@ -174,6 +183,7 @@ fn write_vetting_summary(
     docket: Option<&CaseloadDocket>,
     evidence: Option<&CaseloadEvidence>,
     threshold: f64,
+    verbose: bool,
     stdout: &mut dyn Write,
 ) -> std::io::Result<()> {
     let vetted = vetting.vetted_count();
@@ -204,6 +214,9 @@ fn write_vetting_summary(
         "Vetting: {banner} ({vetted} vetted, {contested} contested at threshold {threshold:.2})"
     )?;
     for (canon_ref, item) in &vetting.cases {
+        if !verbose && item.vetting_status == VettingStatus::Vetted {
+            continue;
+        }
         writeln!(
             stdout,
             "  - {canon_ref} [{}] (score: {:.2})",

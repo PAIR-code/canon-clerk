@@ -16,13 +16,16 @@
 
 use super::stages::AuditCascadeThresholds;
 use super::{AuditArgs, AuditFormat};
-use crate::caseload::{AnnotationLevel, Caseload, CaseloadVerdict, CodeAnnotation, VerdictStatus};
+use crate::caseload::{
+    AnnotationLevel, CanonAdjudication, Caseload, CaseloadVerdict, CodeAnnotation, VerdictStatus,
+};
 use crate::cli::CliError;
 use crate::cli::provenance::{
     StageDisposition, write_admit_provenance, write_audit_configure_provenance,
     write_audit_provenance, write_discover_provenance, write_docket_provenance,
     write_filing_intake_provenance, write_validate_provenance, write_vet_provenance,
 };
+use crate::cli::telemetry::resolve_verbose_flag;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -143,6 +146,7 @@ pub(super) fn render_audit_output(
     env: &BTreeMap<String, String>,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
+    let verbose = resolve_verbose_flag(args.verbose, env)?;
     let effective_format = resolve_effective_format(args, env);
 
     match effective_format {
@@ -175,7 +179,7 @@ pub(super) fn render_audit_output(
             }
         }
         AuditFormat::Stylish => {
-            render_stylish_output(caseload, watermarks, stdout).map_err(|err| {
+            render_stylish_output(caseload, watermarks, verbose, stdout).map_err(|err| {
                 CliError::runtime(format!("Failed to write stylish output: {err}"))
             })?;
         }
@@ -186,14 +190,15 @@ pub(super) fn render_audit_output(
 
 fn render_compact_output(verdict: &CaseloadVerdict, stdout: &mut dyn Write) -> std::io::Result<()> {
     for adj in &verdict.adjudications {
+        if adj.status == VerdictStatus::Pass {
+            continue;
+        }
         if adj.annotations.is_empty() {
             let summary = collapse_whitespace(&adj.compliance_summary);
             writeln!(
                 stdout,
-                "{}\t0:0\t{}\t{:.2}\t{summary}",
-                adj.canon_path,
-                adj.status.as_str(),
-                adj.compliance_score
+                "{}\t0:0\tfailure\t{}\t{summary}",
+                adj.canon_path, adj.canon_path
             )?;
         } else {
             for ann in &adj.annotations {
@@ -304,19 +309,46 @@ fn append_github_step_summary(
     if let Some(verdict) = &caseload.verdict
         && !verdict.adjudications.is_empty()
     {
-        writeln!(file, "| Case (`canon_path`) | Status | Score | Decree |")?;
-        writeln!(file, "| :--- | :--- | ---: | :--- |")?;
-        for adj in &verdict.adjudications {
-            let decree = collapse_whitespace(&adj.compliance_summary).replace('|', "\\|");
+        let (failing, passing): (Vec<&CanonAdjudication>, Vec<&CanonAdjudication>) = verdict
+            .adjudications
+            .iter()
+            .partition(|adj| adj.status == VerdictStatus::Fail);
+
+        if !failing.is_empty() {
+            write_markdown_decree_table(&failing, &mut file)?;
+            if !passing.is_empty() {
+                writeln!(file)?;
+            }
+        }
+        if !passing.is_empty() {
             writeln!(
                 file,
-                "| `{}` | `{}` | `{:.2}` | {} |",
-                adj.canon_path,
-                adj.status.as_str(),
-                adj.compliance_score,
-                decree
+                "<details>\n<summary>Passing cases ({})</summary>\n",
+                passing.len()
             )?;
+            write_markdown_decree_table(&passing, &mut file)?;
+            writeln!(file, "\n</details>")?;
         }
+    }
+    Ok(())
+}
+
+fn write_markdown_decree_table(
+    adjudications: &[&CanonAdjudication],
+    out: &mut dyn Write,
+) -> std::io::Result<()> {
+    writeln!(out, "| Case (`canon_path`) | Status | Score | Decree |")?;
+    writeln!(out, "| :--- | :--- | ---: | :--- |")?;
+    for adj in adjudications {
+        let decree = collapse_whitespace(&adj.compliance_summary).replace('|', "\\|");
+        writeln!(
+            out,
+            "| `{}` | `{}` | `{:.2}` | {} |",
+            adj.canon_path,
+            adj.status.as_str(),
+            adj.compliance_score,
+            decree
+        )?;
     }
     Ok(())
 }
@@ -368,23 +400,31 @@ fn write_seven_stage_provenance(
 fn render_stylish_output(
     caseload: &Caseload,
     wm: &AuditWatermarks,
+    verbose: bool,
     stdout: &mut dyn Write,
 ) -> std::io::Result<()> {
     write_seven_stage_provenance(caseload, wm, stdout)?;
     writeln!(stdout)?;
 
     if let Some(verdict) = &caseload.verdict {
-        write_verdict_report(verdict, stdout)?;
+        write_verdict_report(verdict, verbose, stdout)?;
     }
 
     Ok(())
 }
 
-fn write_verdict_report(verdict: &CaseloadVerdict, stdout: &mut dyn Write) -> std::io::Result<()> {
+fn write_verdict_report(
+    verdict: &CaseloadVerdict,
+    verbose: bool,
+    stdout: &mut dyn Write,
+) -> std::io::Result<()> {
     let banner = if verdict.is_pass() { "PASS" } else { "FAIL" };
     writeln!(stdout, "Verdict: {banner} ({})", verdict.summary)?;
 
     for adj in &verdict.adjudications {
+        if !verbose && adj.status == VerdictStatus::Pass {
+            continue;
+        }
         writeln!(
             stdout,
             "  - {} [{}] (score: {:.2})",

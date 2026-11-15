@@ -19,8 +19,10 @@ use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::runners::run_branch_a_validate;
+use crate::cli::telemetry::resolve_verbose_flag;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
@@ -102,6 +104,10 @@ pub struct ValidateArgs {
 
     #[command(flatten)]
     pub io: CaseloadIoArgs,
+
+    /// Propagated top-level `-v` / `--verbose` flag (`CANON_CLERK_VERBOSE`).
+    #[arg(skip)]
+    pub verbose: bool,
 }
 
 /// Executes the `validate` CLI subcommand against `workspace_root` with an explicit [`TelemetrySession`].
@@ -112,7 +118,20 @@ pub fn run_validate_with_telemetry(
     workspace_root: &Path,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
+    let env_map: BTreeMap<String, String> = env::vars().collect();
+    run_validate_with_env_and_telemetry(args, stdin, stdout, workspace_root, &env_map, telemetry)
+}
+
+pub(crate) fn run_validate_with_env_and_telemetry(
+    args: &ValidateArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    workspace_root: &Path,
+    env: &BTreeMap<String, String>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, CliError> {
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    let verbose = resolve_verbose_flag(args.verbose, env)?;
 
     let incoming_caseload = args.io.read_caseload(stdin)?;
     let caseload = run_branch_a_validate(
@@ -129,7 +148,7 @@ pub fn run_validate_with_telemetry(
     args.io.write_output_caseload(&caseload)?;
 
     let validation = caseload.validation.clone().unwrap_or_default();
-    render_validate_output(args, &caseload, &validation, stdout)?;
+    render_validate_output(args, &caseload, &validation, env, verbose, stdout)?;
 
     if validation.has_errors {
         return Err(CliError::silent(1));
@@ -172,13 +191,15 @@ fn render_validate_output(
     args: &ValidateArgs,
     caseload: &Caseload,
     validation: &CaseloadValidation,
+    env: &BTreeMap<String, String>,
+    verbose: bool,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
     let effective_format = if args.io.json {
         ValidateFormat::Json
     } else if let Some(explicit) = args.format {
         explicit
-    } else if env::var("GITHUB_ACTIONS").ok().as_deref() == Some("true") {
+    } else if env.get("GITHUB_ACTIONS").map(String::as_str) == Some("true") {
         ValidateFormat::Github
     } else {
         ValidateFormat::Stylish
@@ -196,15 +217,17 @@ fn render_validate_output(
             render_compact_or_github(validation, args.quiet, effective_format, stdout)
                 .map_err(|e| CliError::runtime(format!("Failed to write output to stdout: {e}")))?;
             if effective_format == ValidateFormat::Github
-                && let Ok(summary_path) = env::var("GITHUB_STEP_SUMMARY")
-                && !summary_path.trim().is_empty()
+                && let Some(summary_path) = env
+                    .get("GITHUB_STEP_SUMMARY")
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
             {
-                let _ = append_github_step_summary(Path::new(&summary_path), validation);
+                let _ = append_github_step_summary(Path::new(summary_path), validation);
             }
         }
         ValidateFormat::Stylish => {
             if !args.quiet || validation.has_errors {
-                render_stylish_output(validation, args.quiet, stdout).map_err(|e| {
+                render_stylish_output(validation, args.quiet, verbose, stdout).map_err(|e| {
                     CliError::runtime(format!("Failed to write summary to stdout: {e}"))
                 })?;
             }
@@ -286,6 +309,7 @@ fn append_github_step_summary(
 fn render_stylish_output(
     validation: &CaseloadValidation,
     quiet: bool,
+    verbose: bool,
     stdout: &mut dyn Write,
 ) -> std::io::Result<()> {
     let (total_errors, total_warnings) = tally_counts(validation);
@@ -307,8 +331,16 @@ fn render_stylish_output(
     }
 
     for (canon_ref, meta) in &validation.results {
-        if quiet && meta.error_count == 0 {
-            continue;
+        if quiet {
+            if meta.error_count == 0 {
+                continue;
+            }
+        } else {
+            let has_findings =
+                meta.error_count > 0 || meta.warning_count > 0 || !meta.diagnostics.is_empty();
+            if !has_findings && !verbose {
+                continue;
+            }
         }
         writeln!(
             stdout,
@@ -429,6 +461,188 @@ mod tests {
                 format_github_annotation(&diag),
                 "::error file=.canons/security/rule.md,line=14,col=5,title=RFC 2119 Violation::Normative keyword 'must' must be uppercase 'MUST'."
             );
+        }
+
+        #[test]
+        fn test_stylish_clean_corpus_suppresses_pass_rows_unless_verbose() {
+            use crate::caseload::{CaseloadDiscovery, ValidatedCanonMetadata, ValidationOutcome};
+
+            let clean_canon = ".canons/cli/clean-rule.md";
+            let all_clean_caseload = Caseload::new()
+                .with_discovery(CaseloadDiscovery {
+                    candidate_canons: vec![clean_canon.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation {
+                    has_errors: false,
+                    results: BTreeMap::from([(
+                        clean_canon.to_string(),
+                        ValidatedCanonMetadata {
+                            result: ValidationOutcome::Pass,
+                            warning_count: 0,
+                            error_count: 0,
+                            diagnostics: Vec::new(),
+                        },
+                    )]),
+                });
+            let clean_bytes = serde_json::to_vec(&all_clean_caseload).expect("serialize clean");
+            let caseload_args = ValidateArgs {
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
+                ..ValidateArgs::default()
+            };
+
+            let mut default_clean_out = Vec::new();
+            run_validate_with_env_and_telemetry(
+                &caseload_args,
+                &mut Cursor::new(&clean_bytes),
+                &mut default_clean_out,
+                Path::new("."),
+                &BTreeMap::new(),
+                &TelemetrySession::noop(),
+            )
+            .expect("clean validate exits 0");
+            let default_clean_text = String::from_utf8(default_clean_out).expect("utf8");
+            assert!(default_clean_text.contains("Validation Summary (PASS):"));
+            assert!(default_clean_text.contains("Canons Evaluated : 1 canon(s)"));
+            assert!(!default_clean_text.contains("[pass]"));
+
+            let mut verbose_clean_out = Vec::new();
+            run_validate_with_env_and_telemetry(
+                &ValidateArgs {
+                    verbose: true,
+                    ..caseload_args
+                },
+                &mut Cursor::new(&clean_bytes),
+                &mut verbose_clean_out,
+                Path::new("."),
+                &BTreeMap::new(),
+                &TelemetrySession::noop(),
+            )
+            .expect("verbose clean validate exits 0");
+            assert!(
+                String::from_utf8(verbose_clean_out)
+                    .expect("utf8")
+                    .contains("    - .canons/cli/clean-rule.md [pass] (0 error(s), 0 warning(s))")
+            );
+        }
+
+        fn mixed_validation_caseload_bytes() -> Vec<u8> {
+            use crate::caseload::{CaseloadDiscovery, ValidatedCanonMetadata, ValidationOutcome};
+
+            let clean_canon = ".canons/cli/clean-rule.md";
+            let warn_canon = ".canons/cli/warn-rule.md";
+            let err_canon = ".canons/cli/broken-rule.md";
+
+            let mixed_caseload = Caseload::new()
+                .with_discovery(CaseloadDiscovery {
+                    candidate_canons: vec![
+                        err_canon.to_string(),
+                        clean_canon.to_string(),
+                        warn_canon.to_string(),
+                    ],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation {
+                    has_errors: true,
+                    results: BTreeMap::from([
+                        (
+                            err_canon.to_string(),
+                            ValidatedCanonMetadata {
+                                result: ValidationOutcome::Fail,
+                                warning_count: 0,
+                                error_count: 1,
+                                diagnostics: vec![CodeAnnotation {
+                                    path: err_canon.to_string(),
+                                    start_line: 3,
+                                    end_line: 3,
+                                    start_column: Some(1),
+                                    end_column: None,
+                                    annotation_level: AnnotationLevel::Failure,
+                                    message: "Unknown frontmatter key.".to_string(),
+                                    title: Some("frontmatter-schema".to_string()),
+                                }],
+                            },
+                        ),
+                        (
+                            clean_canon.to_string(),
+                            ValidatedCanonMetadata {
+                                result: ValidationOutcome::Pass,
+                                warning_count: 0,
+                                error_count: 0,
+                                diagnostics: Vec::new(),
+                            },
+                        ),
+                        (
+                            warn_canon.to_string(),
+                            ValidatedCanonMetadata {
+                                result: ValidationOutcome::Pass,
+                                warning_count: 1,
+                                error_count: 0,
+                                diagnostics: vec![CodeAnnotation {
+                                    path: warn_canon.to_string(),
+                                    start_line: 8,
+                                    end_line: 8,
+                                    start_column: Some(5),
+                                    end_column: None,
+                                    annotation_level: AnnotationLevel::Warning,
+                                    message: "Lowercase normative keyword.".to_string(),
+                                    title: Some("rfc2119".to_string()),
+                                }],
+                            },
+                        ),
+                    ]),
+                });
+            serde_json::to_vec(&mixed_caseload).expect("serialize mixed")
+        }
+
+        #[test]
+        fn test_stylish_mixed_corpus_surfaces_warnings_and_errors_while_honoring_quiet() {
+            let mixed_bytes = mixed_validation_caseload_bytes();
+            let caseload_args = ValidateArgs {
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
+                ..ValidateArgs::default()
+            };
+
+            let mut mixed_default_out = Vec::new();
+            let err = run_validate_with_env_and_telemetry(
+                &caseload_args,
+                &mut Cursor::new(&mixed_bytes),
+                &mut mixed_default_out,
+                Path::new("."),
+                &BTreeMap::new(),
+                &TelemetrySession::noop(),
+            )
+            .expect_err("mixed validate with error must exit 1");
+            assert_eq!(err.exit_code(), 1);
+            let mixed_default_text = String::from_utf8(mixed_default_out).expect("utf8");
+            assert!(mixed_default_text.contains(".canons/cli/broken-rule.md"));
+            assert!(mixed_default_text.contains(".canons/cli/warn-rule.md"));
+            assert!(!mixed_default_text.contains(".canons/cli/clean-rule.md"));
+
+            let mut quiet_out = Vec::new();
+            let _ = run_validate_with_env_and_telemetry(
+                &ValidateArgs {
+                    quiet: true,
+                    verbose: true,
+                    ..caseload_args
+                },
+                &mut Cursor::new(&mixed_bytes),
+                &mut quiet_out,
+                Path::new("."),
+                &BTreeMap::new(),
+                &TelemetrySession::noop(),
+            )
+            .expect_err("quiet validate with error must exit 1");
+            let quiet_text = String::from_utf8(quiet_out).expect("utf8");
+            assert!(quiet_text.contains(".canons/cli/broken-rule.md"));
+            assert!(!quiet_text.contains(".canons/cli/warn-rule.md"));
+            assert!(!quiet_text.contains(".canons/cli/clean-rule.md"));
         }
     }
 }
