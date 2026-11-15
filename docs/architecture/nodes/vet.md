@@ -107,7 +107,7 @@ git diff origin/main --name-only | canon-clerk vet - --screener-model jev
 git diff origin/main | canon-clerk vet --diff - --screener-model jev --output-caseload caseload.json \
   || canon-clerk audit --caseload caseload.json
 
-# 4. Emit tab-separated compact vetting records for shell scripting:
+# 4. Emit tab-separated compact records strictly for contested cases:
 git diff origin/main | canon-clerk vet --diff - --format compact
 ```
 
@@ -129,16 +129,16 @@ Conversely, when an explicitly designated stream yields zero changes, `discover`
 - `--admit-threshold <FLOAT>` (`CANON_CLERK_ADMIT_THRESHOLD`), `--admit-concurrency <COUNT>` / `--max-concurrent-calls <COUNT>` (`CANON_CLERK_ADMIT_CONCURRENCY`): Upstream micro evidentiary admissibility options accepted transitively.
 - `--docket-threshold <FLOAT>` (`CANON_CLERK_DOCKET_THRESHOLD`), `--docket-batch-size <COUNT>` / `--max-canons-per-call <COUNT>` (`CANON_CLERK_DOCKET_BATCH_SIZE`), `--docket-concurrency <COUNT>` (`CANON_CLERK_DOCKET_CONCURRENCY`): Upstream macro jurisdiction triage options accepted transitively.
 - `--screener-model <MODEL>` (`CANON_CLERK_SCREENER_MODEL`), `--auditor-model <MODEL>` (`CANON_CLERK_AUDITOR_MODEL`), `--thinking-level <minimal|low|medium|high>` (`CANON_CLERK_THINKING_LEVEL`), `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Shared model configuration and credential options (resolved JIT and gated strictly on `screener_model` credentials so `TYPESAFE_API_KEY` alone suffices when running `canon-clerk vet --screener-model jev`).
-- `-v` / `--verbose` (`CANON_CLERK_VERBOSE`), `--log-file <PATH>` (`CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options.
+- `-v` / `--verbose` (`CANON_CLERK_VERBOSE`), `--log-file <PATH>` (`CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options; in `--format stylish`, `-v` additionally expands prima facie compliant (`[vetted]`) per-case detail blocks on `stdout`.
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload` JSON from file or `-` for standard input.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of terminal `stdout` on both `vetted` (`0`) and `contested` (`1`) outcomes.
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes
-- **`stylish` (Default):** Renders the 7-stage **Pipeline Funnel Provenance Receipt** (`intake` $\to$ `discover` $\to$ `validate` $\to$ `configure` $\to$ `docket` $\to$ `admit` $\to$ `vet`) followed by the Vetting Gate summary (`PASS` when all cases are `vetted`, `CONTESTED` when one or more cases require `audit`) and per-case `vetting_summary` details.
-- **`compact`:** Emits unadorned tab-separated `<canon>\t<status>\t<score>\t<summary>` records in deterministic lexicographical order by `canon_path`.
-- **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing the populated `.vetting` container.
+- **`stylish` (Default):** Renders the 7-stage **Pipeline Funnel Provenance Receipt** (`intake` $\to$ `discover` $\to$ `validate` $\to$ `configure` $\to$ `docket` $\to$ `admit` $\to$ `vet`) followed by the Vetting Gate summary banner (`PASS` when all cases are `vetted`, `CONTESTED` when one or more cases require `audit`, with aggregate `vetted`/`contested` counts). By default, per-case `vetting_summary` detail blocks are listed **strictly for `contested` cases**, omitting `[vetted]` per-case blocks unless `-v` (`--verbose` / `CANON_CLERK_VERBOSE`) is active.
+- **`compact`:** Emits unadorned tab-separated `<canon>\tcontested\t<score>\t<summary>` diagnostic records in deterministic lexicographical order by `canon_path` strictly for `contested` cases, omitting `vetted` cases (exiting `0` with empty `stdout` when all cases are prima facie compliant).
+- **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON envelope containing the full `.vetting` container (`vetted_cases`, `contested_cases`, and all per-case `cases` assessments).
 
 ### CLI Exit Codes
 - **0:** All active cases are prima facie compliant (`contested_cases` is empty), or 0 active cases remain after clean upstream short-circuits (0 changes, 0 candidate canons, empty docket, or 0 admitted exhibits).

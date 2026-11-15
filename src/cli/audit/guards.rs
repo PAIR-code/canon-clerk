@@ -29,6 +29,7 @@ use crate::cli::docket::guards::{
     has_concrete_cli_filing, resolve_docket_batch_size, resolve_docket_concurrency,
     resolve_docket_threshold,
 };
+use crate::cli::telemetry::resolve_verbose_flag;
 use crate::cli::vet::guards::{resolve_vet_concurrency, resolve_vet_threshold};
 use crate::configure::StoredConfig;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
@@ -39,6 +40,7 @@ pub(super) fn resolve_and_validate_audit_cli_params(
     args: &AuditArgs,
     env: &BTreeMap<String, String>,
 ) -> Result<AuditCascadeThresholds, CliError> {
+    let _ = resolve_verbose_flag(args.verbose, env)?;
     let thresholds = AuditCascadeThresholds {
         docket_threshold: resolve_docket_threshold(args.docket_threshold, env)?,
         admit_threshold: resolve_admit_threshold(args.admit_threshold, env)?,

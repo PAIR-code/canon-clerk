@@ -31,6 +31,7 @@ use crate::cli::docket::guards::{
 };
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::provenance::StageDisposition;
+use crate::cli::telemetry::resolve_verbose_flag;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
@@ -58,18 +59,18 @@ Examples:
   git diff origin/main | canon-clerk vet --diff - --screener-model jev --output-caseload caseload.json \\
     || canon-clerk audit --caseload caseload.json
 
-  # Emit tab-separated compact vetting assessments for shell scripting:
+  # Emit tab-separated compact records strictly for contested cases:
   git diff origin/main | canon-clerk vet --diff - --format compact";
 
 /// Output presentation format for `canon-clerk vet`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum VetFormat {
-    /// Human-readable 7-stage Pipeline Funnel Provenance receipt and Vetting Gate summary.
+    /// Human-readable 7-stage Pipeline Funnel Provenance receipt, Vetting Gate summary, and contested cases.
     #[default]
     Stylish,
     /// Full cumulative `Caseload` JSON envelope.
     Json,
-    /// Tab-separated (`<canon>\t<status>\t<score>\t<summary>`) output.
+    /// Tab-separated (`<canon>\tcontested\t<score>\t<summary>`) diagnostic lines for contested cases.
     Compact,
 }
 
@@ -194,6 +195,10 @@ pub struct VetArgs {
 
     #[command(flatten)]
     pub io: CaseloadIoArgs,
+
+    /// Propagated top-level `-v` / `--verbose` flag (`CANON_CLERK_VERBOSE`).
+    #[arg(skip)]
+    pub verbose: bool,
 }
 
 impl Eq for VetArgs {}
@@ -288,6 +293,7 @@ fn run_vet_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    let _ = resolve_verbose_flag(args.verbose, env)?;
 
     let thresholds = VetCascadeThresholds {
         docket_threshold: resolve_docket_threshold(args.docket_threshold, env)?,
@@ -311,7 +317,7 @@ fn run_vet_core(
             thresholds.admit_threshold,
             thresholds.vet_threshold,
         );
-        return finalize_vetting_and_exit_code(args, completed, &wm, stdout);
+        return finalize_vetting_and_exit_code(args, completed, &wm, env, stdout);
     }
 
     enforce_filing_and_case_guard(&intake_opts, &args.canons, incoming.as_ref())?;
@@ -343,6 +349,7 @@ fn run_vet_core(
             intake_disp,
             total_workspace_canons,
             thresholds,
+            env,
             stdout,
         );
     }
@@ -363,6 +370,7 @@ fn run_vet_core(
             discover_disp,
             total_workspace_canons,
             thresholds,
+            env,
             stdout,
         );
     }
@@ -391,17 +399,18 @@ fn run_vet_core(
         admit_threshold: thresholds.admit_threshold,
         vet_threshold: thresholds.vet_threshold,
     };
-    finalize_vetting_and_exit_code(args, outcome.caseload, &wm, stdout)
+    finalize_vetting_and_exit_code(args, outcome.caseload, &wm, env, stdout)
 }
 
 fn finalize_vetting_and_exit_code(
     args: &VetArgs,
     caseload: Caseload,
     wm: &VetWatermarks,
+    env: &BTreeMap<String, String>,
     stdout: &mut dyn Write,
 ) -> Result<Caseload, CliError> {
     args.io.write_output_caseload(&caseload)?;
-    render_vet_output(args, &caseload, wm, stdout)?;
+    render_vet_output(args, &caseload, wm, env, stdout)?;
     if caseload
         .vetting
         .as_ref()
@@ -418,6 +427,7 @@ fn finish_zero_candidate_vet(
     intake_disp: StageDisposition,
     total_workspace_canons: Option<usize>,
     thresholds: VetCascadeThresholds,
+    env: &BTreeMap<String, String>,
     stdout: &mut dyn Write,
 ) -> Result<Caseload, CliError> {
     let enriched = caseload
@@ -437,9 +447,13 @@ fn finish_zero_candidate_vet(
         admit_threshold: thresholds.admit_threshold,
         vet_threshold: thresholds.vet_threshold,
     };
-    finalize_vetting_and_exit_code(args, enriched, &wm, stdout)
+    finalize_vetting_and_exit_code(args, enriched, &wm, env, stdout)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal CLI helper formatting validation failure provenance watermarks across the 7-stage vet closure"
+)]
 fn handle_validation_failure(
     args: &VetArgs,
     caseload: &Caseload,
@@ -447,6 +461,7 @@ fn handle_validation_failure(
     discover_disp: StageDisposition,
     total_workspace_canons: Option<usize>,
     thresholds: VetCascadeThresholds,
+    env: &BTreeMap<String, String>,
     stdout: &mut dyn Write,
 ) -> Result<Caseload, CliError> {
     args.io.write_output_caseload(caseload)?;
@@ -463,7 +478,7 @@ fn handle_validation_failure(
         admit_threshold: thresholds.admit_threshold,
         vet_threshold: thresholds.vet_threshold,
     };
-    render_vet_output(args, caseload, &wm, stdout)?;
+    render_vet_output(args, caseload, &wm, env, stdout)?;
     Err(CliError::silent(1))
 }
 
@@ -634,6 +649,10 @@ mod tests {
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains("✓ vet       : 1 case(s) vetted, 0 contested"));
             assert!(rendered.contains("Vetting: PASS"));
+            assert!(
+                !rendered.contains("[vetted]"),
+                "default stylish output must omit `[vetted]` detail blocks: {rendered}"
+            );
 
             let stages: Vec<PipelineStage> = sink
                 .events()
@@ -654,6 +673,27 @@ mod tests {
                     PipelineStage::Admit,
                     PipelineStage::Vet,
                 ]
+            );
+
+            // All-vetted `compact` exits 0 with empty stdout
+            let mut compact_pass_out = Vec::new();
+            run_vet_with_snapshot_and_provider(
+                &VetArgs {
+                    format: VetFormat::Compact,
+                    ..args.clone()
+                },
+                &mut Cursor::new(diff.as_bytes()),
+                &mut compact_pass_out,
+                &ws,
+                &typesafe_only_env(),
+                &HermeticJevProvider {
+                    compliance_score: 0.95,
+                },
+            )
+            .expect("all vetted compact must exit 0");
+            assert!(
+                compact_pass_out.is_empty(),
+                "all-vetted `compact` must emit empty stdout"
             );
 
             // Contested case exits 1 while rendering CONTESTED summary + compact TSV
@@ -678,6 +718,111 @@ mod tests {
             assert!(err.is_silent());
             let tsv = String::from_utf8(stdout_fail).expect("utf8 tsv");
             assert!(tsv.starts_with(".canons/cli/kebab.md\tcontested\t0.42\t"));
+        }
+
+        #[test]
+        fn test_mixed_vet_suppresses_vetted_rows_by_default_and_expands_under_verbose() {
+            use crate::caseload::{CanonVettingAssessment, CaseloadIntake, VettingStatus};
+
+            let ws = sample_ws();
+            let provider = HermeticJevProvider {
+                compliance_score: 0.95,
+            };
+            let vetted_canon = ".canons/cli/help-groups.md";
+            let contested_canon = ".canons/cli/kebab.md";
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/cli/app.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_vetting(CaseloadVetting::from_cases(BTreeMap::from([
+                    (
+                        vetted_canon.to_string(),
+                        CanonVettingAssessment {
+                            vetting_summary: "Help headings grouped cleanly.".to_string(),
+                            vetting_score: 0.94,
+                            vetting_status: VettingStatus::Vetted,
+                            contested_exhibits: Vec::new(),
+                        },
+                    ),
+                    (
+                        contested_canon.to_string(),
+                        CanonVettingAssessment {
+                            vetting_summary: "CamelCase flag suspected.".to_string(),
+                            vetting_score: 0.38,
+                            vetting_status: VettingStatus::Contested,
+                            contested_exhibits: Vec::new(),
+                        },
+                    ),
+                ])));
+            let serialized = serde_json::to_vec(&caseload).expect("serialize mixed vet caseload");
+
+            // 1. Default stylish prints strictly `[contested]` detail blocks
+            let base_args = VetArgs {
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
+                ..VetArgs::default()
+            };
+            let mut default_out = Vec::new();
+            let err = run_vet_with_snapshot_and_provider(
+                &base_args,
+                &mut Cursor::new(&serialized),
+                &mut default_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("mixed vet must exit 1");
+            assert_eq!(err.exit_code(), 1);
+            let default_text = String::from_utf8(default_out).expect("utf8");
+            assert!(
+                default_text
+                    .contains("Vetting: CONTESTED (1 vetted, 1 contested at threshold 0.80)")
+            );
+            assert!(default_text.contains("  - .canons/cli/kebab.md [contested] (score: 0.38)"));
+            assert!(!default_text.contains("[vetted]"));
+            assert!(!default_text.contains(vetted_canon));
+
+            // 2. `-v` (`verbose: true`) expands `[vetted]` detail blocks in stylish mode
+            let mut verbose_out = Vec::new();
+            let _ = run_vet_with_snapshot_and_provider(
+                &VetArgs {
+                    verbose: true,
+                    ..base_args.clone()
+                },
+                &mut Cursor::new(&serialized),
+                &mut verbose_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("mixed vet must exit 1");
+            let verbose_text = String::from_utf8(verbose_out).expect("utf8");
+            assert!(verbose_text.contains("  - .canons/cli/help-groups.md [vetted] (score: 0.94)"));
+            assert!(verbose_text.contains("  - .canons/cli/kebab.md [contested] (score: 0.38)"));
+
+            // 3. `compact` emits strictly `contested` rows (even when `-v` is active)
+            let mut compact_out = Vec::new();
+            let _ = run_vet_with_snapshot_and_provider(
+                &VetArgs {
+                    format: VetFormat::Compact,
+                    verbose: true,
+                    ..base_args
+                },
+                &mut Cursor::new(&serialized),
+                &mut compact_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("mixed vet must exit 1");
+            let compact_text = String::from_utf8(compact_out).expect("utf8");
+            assert_eq!(
+                compact_text,
+                ".canons/cli/kebab.md\tcontested\t0.38\tCamelCase flag suspected.\n"
+            );
         }
     }
 }

@@ -62,11 +62,11 @@ Examples:
 /// Output presentation format for `canon-clerk audit`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditFormat {
-    /// Human-readable 8-stage Pipeline Funnel Provenance receipt and Verdict summary.
+    /// Human-readable 8-stage Pipeline Funnel Provenance receipt, Verdict summary, and failing decrees.
     Stylish,
     /// Full cumulative `Caseload` JSON envelope.
     Json,
-    /// Tab-separated adjudication and diagnostic lines.
+    /// Tab-separated violation diagnostic lines for failing cases.
     Compact,
     /// GitHub Actions workflow command annotations (`::error file=...::...`) and `$GITHUB_STEP_SUMMARY` report.
     Github,
@@ -203,6 +203,10 @@ pub struct AuditArgs {
 
     #[command(flatten)]
     pub io: CaseloadIoArgs,
+
+    /// Propagated top-level `-v` / `--verbose` flag (`CANON_CLERK_VERBOSE`).
+    #[arg(skip)]
+    pub verbose: bool,
 }
 
 impl Eq for AuditArgs {}
@@ -556,7 +560,10 @@ mod tests {
     }
 
     fn parse_audit(argv: &[&str]) -> AuditArgs {
-        let cli = Cli::try_parse_from(argv).expect("parse audit args");
+        let mut cli = Cli::try_parse_from(argv).expect("parse audit args");
+        if let Some(cmd) = &mut cli.command {
+            cmd.apply_global_verbose(cli.verbose);
+        }
         match cli.command {
             Some(Commands::Audit(args)) => args,
             _ => panic!("expected Audit subcommand"),
@@ -761,6 +768,60 @@ mod tests {
     mod cascade_execution_and_github_ci_output {
         use super::*;
 
+        fn mixed_audit_caseload_bytes() -> Vec<u8> {
+            use crate::caseload::{
+                AnnotationLevel, CanonAdjudication, CaseloadIntake, CaseloadVerdict,
+                CodeAnnotation, VerdictStatus,
+            };
+
+            let completed = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/cli/audit.rs".to_string()],
+                    pr_title: Some("Update audit flags".to_string()),
+                    ..CaseloadIntake::default()
+                })
+                .with_verdict(CaseloadVerdict {
+                    status: VerdictStatus::Fail,
+                    summary: "1 passed, 2 failed across 3 active case(s)".to_string(),
+                    adjudications: vec![
+                        CanonAdjudication {
+                            canon_path: ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                            compliance_summary: "Rename `--auditThreshold` to `--audit-threshold`."
+                                .to_string(),
+                            compliance_score: 0.08,
+                            status: VerdictStatus::Fail,
+                            annotations: vec![CodeAnnotation {
+                                path: "src/cli/audit.rs".to_string(),
+                                start_line: 2,
+                                end_line: 2,
+                                start_column: Some(5),
+                                end_column: Some(34),
+                                annotation_level: AnnotationLevel::Failure,
+                                message: "Use kebab-case flag name.".to_string(),
+                                title: Some("CLI Flags Kebab Case".to_string()),
+                            }],
+                        },
+                        CanonAdjudication {
+                            canon_path: ".canons/cli/cli-help-grouping.md".to_string(),
+                            compliance_summary: "[Slice 1/2] Compliant. | [Slice 2/2] Compliant."
+                                .to_string(),
+                            compliance_score: 0.96,
+                            status: VerdictStatus::Pass,
+                            annotations: Vec::new(),
+                        },
+                        CanonAdjudication {
+                            canon_path: ".canons/git/pr-title-conventional-commits.md".to_string(),
+                            compliance_summary: "Prefix PR title with `fix(cli):` or `feat(cli):`."
+                                .to_string(),
+                            compliance_score: 0.12,
+                            status: VerdictStatus::Fail,
+                            annotations: Vec::new(),
+                        },
+                    ],
+                });
+            serde_json::to_vec(&completed).expect("serialize mixed caseload")
+        }
+
         #[test]
         fn test_passing_seven_stage_cascade_emits_telemetry_and_fast_forwards() {
             let ws = sample_workspace();
@@ -785,9 +846,7 @@ mod tests {
                     "annotations": []
                 }),
             );
-            let mut env = BTreeMap::new();
-            env.insert(ENV_GEMINI_API_KEY.to_string(), "test-key".to_string());
-
+            let env = BTreeMap::from([(ENV_GEMINI_API_KEY.to_string(), "test-key".to_string())]);
             let sink = RecordingTelemetrySink::new();
             let clock = SteppingTelemetryClock::new(1_767_225_600_000, 30);
             let session = TelemetrySession::new(&sink, &clock);
@@ -809,6 +868,7 @@ mod tests {
             let text = String::from_utf8(stdout).expect("utf8");
             assert!(text.contains("✓ audit     : 1 passed, 0 failed across 1 trial(s)"));
             assert!(text.contains("Verdict: PASS"));
+            assert!(!text.contains("[pass]"));
 
             let stages: Vec<PipelineStage> = sink
                 .events()
@@ -831,19 +891,34 @@ mod tests {
                 ]
             );
 
-            // Fast-forward completed Caseload in compact mode without API key
             let serialized = serde_json::to_vec(&caseload).expect("serialize completed caseload");
-            let ff_args = parse_audit(&[
-                "canon-clerk",
-                "audit",
-                "--caseload",
-                "-",
-                "--format",
-                "compact",
-            ]);
+            let mut verbose_out = Vec::new();
+            run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "-v", "--caseload", "-"]),
+                &mut Cursor::new(&serialized),
+                &mut verbose_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect("fast-forward completed audit with -v");
+            assert!(
+                String::from_utf8(verbose_out)
+                    .expect("utf8")
+                    .contains("  - .canons/cli/cli-flags-kebab-case.md [pass] (score: 0.97)")
+            );
+
             let mut compact_out = Vec::new();
             run_audit_with_snapshot_and_provider(
-                &ff_args,
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "-v",
+                    "--caseload",
+                    "-",
+                    "--format",
+                    "compact",
+                ]),
                 &mut Cursor::new(&serialized),
                 &mut compact_out,
                 &ws,
@@ -852,11 +927,125 @@ mod tests {
             )
             .expect("fast-forward completed audit");
             assert_eq!(provider.call_count(), 3);
+            assert!(compact_out.is_empty());
+        }
+
+        #[test]
+        fn test_mixed_audit_stylish_and_compact_suppress_passing_rows_by_default() {
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let payload = mixed_audit_caseload_bytes();
+
+            let mut default_out = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "--caseload", "-"]),
+                &mut Cursor::new(&payload),
+                &mut default_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("mixed verdict must exit 1");
+            assert_eq!(err.exit_code(), 1);
+            let default_text = String::from_utf8(default_out).expect("utf8");
             assert!(
-                String::from_utf8(compact_out)
-                    .expect("utf8")
-                    .contains(".canons/cli/cli-flags-kebab-case.md\t0:0\tpass\t0.97")
+                default_text.contains("Verdict: FAIL (1 passed, 2 failed across 3 active case(s))")
             );
+            assert!(default_text.contains("  - .canons/cli/cli-flags-kebab-case.md [fail]"));
+            assert!(default_text.contains("-> src/cli/audit.rs:2:5 [failure]"));
+            assert!(
+                default_text.contains("  - .canons/git/pr-title-conventional-commits.md [fail]")
+            );
+            assert!(!default_text.contains(".canons/cli/cli-help-grouping.md"));
+            assert!(!default_text.contains("[pass]"));
+
+            let mut env_verbose_out = Vec::new();
+            let verbose_env =
+                BTreeMap::from([("CANON_CLERK_VERBOSE".to_string(), "1".to_string())]);
+            let _ = run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "--caseload", "-"]),
+                &mut Cursor::new(&payload),
+                &mut env_verbose_out,
+                &ws,
+                &verbose_env,
+                &provider,
+            )
+            .expect_err("mixed verdict must exit 1");
+            assert!(
+                String::from_utf8(env_verbose_out)
+                    .expect("utf8")
+                    .contains("  - .canons/cli/cli-help-grouping.md [pass] (score: 0.96)")
+            );
+
+            let mut compact_out = Vec::new();
+            let _ = run_audit_with_snapshot_and_provider(
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--caseload",
+                    "-",
+                    "--format",
+                    "compact",
+                ]),
+                &mut Cursor::new(&payload),
+                &mut compact_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("mixed verdict must exit 1");
+            let compact_text = String::from_utf8(compact_out).expect("utf8");
+            assert_eq!(
+                compact_text.lines().collect::<Vec<_>>(),
+                vec![
+                    "src/cli/audit.rs\t2:5\tfailure\t.canons/cli/cli-flags-kebab-case.md\tUse kebab-case flag name.",
+                    ".canons/git/pr-title-conventional-commits.md\t0:0\tfailure\t.canons/git/pr-title-conventional-commits.md\tPrefix PR title with `fix(cli):` or `feat(cli):`.",
+                ]
+            );
+        }
+
+        #[test]
+        fn test_mixed_audit_github_step_summary_collapses_passing_cases() {
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let payload = mixed_audit_caseload_bytes();
+
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let tmp_dir = std::env::temp_dir().join(format!("canon-clerk-audit-mixed-ci-{nanos}"));
+            let step_summary = tmp_dir.join("step-summary.md");
+            let gh_env = BTreeMap::from([
+                ("GITHUB_ACTIONS".to_string(), "true".to_string()),
+                (
+                    "GITHUB_STEP_SUMMARY".to_string(),
+                    step_summary.display().to_string(),
+                ),
+            ]);
+            let mut gh_stdout = Vec::new();
+            let _ = run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "--caseload", "-"]),
+                &mut Cursor::new(&payload),
+                &mut gh_stdout,
+                &ws,
+                &gh_env,
+                &provider,
+            )
+            .expect_err("mixed verdict must exit 1");
+
+            let summary_md = fs::read_to_string(&step_summary).expect("read GITHUB_STEP_SUMMARY");
+            let details_idx = summary_md
+                .find("<details>\n<summary>Passing cases (1)</summary>")
+                .expect("collapses passing cases behind <details>");
+            let fail_idx = summary_md
+                .find("| `.canons/cli/cli-flags-kebab-case.md` | `fail` | `0.08` |")
+                .expect("renders failing decree row");
+            let pass_idx = summary_md
+                .find("| `.canons/cli/cli-help-grouping.md` | `pass` | `0.96` |")
+                .expect("renders passing decree inside <details>");
+            assert!(fail_idx < details_idx && details_idx < pass_idx);
+            let _ = fs::remove_dir_all(&tmp_dir);
         }
 
         #[test]
