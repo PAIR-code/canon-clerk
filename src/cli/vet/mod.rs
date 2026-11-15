@@ -549,10 +549,16 @@ mod tests {
     }
 
     fn typesafe_only_env() -> BTreeMap<String, String> {
-        BTreeMap::from([(
-            ENV_TYPESAFE_API_KEY.to_string(),
-            "test-typesafe-key".to_string(),
-        )])
+        BTreeMap::from([
+            (
+                ENV_TYPESAFE_API_KEY.to_string(),
+                "test-typesafe-key".to_string(),
+            ),
+            (
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            ),
+        ])
     }
 
     mod cli_ergonomics_and_guards {
@@ -620,10 +626,7 @@ mod tests {
                     diff: Some("-".to_string()),
                     ..FilingSourceArgs::default()
                 },
-                provider: ProviderConfigArgs {
-                    screener_model: Some(DEFAULT_JEV_MODEL.to_string()),
-                    ..ProviderConfigArgs::default()
-                },
+                provider: ProviderConfigArgs::default(),
                 ..VetArgs::default()
             };
 
@@ -644,7 +647,11 @@ mod tests {
                 },
                 &session,
             )
-            .expect("all vetted must exit 0 with TYPESAFE_API_KEY only");
+            .expect("all vetted must exit 0 with TYPESAFE_API_KEY only and zero model flags");
+            assert_eq!(
+                vetted_caseload.config.expect("config").screener_model,
+                DEFAULT_JEV_MODEL
+            );
             assert!(vetted_caseload.vetting.expect("vetting").is_all_vetted());
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains("✓ vet       : 1 case(s) vetted, 0 contested"));

@@ -52,8 +52,8 @@ flowchart LR
 ### Caseload Delta
 `configure` populates the `.config` namespace on the cumulative `Caseload` envelope with normalized runtime provider settings:
 
-- **Screener Model Specifier (`screener_model`):** Canonical provider-prefixed model identifier used by fast heuristic screening and prima facie vetting stages (`apprise`, `docket`, `admit`, `vet`; defaults to `"google:gemini-4-hydrogen"`).
-- **Auditor Model Specifier (`auditor_model`):** Canonical provider-prefixed generative model identifier used for substantive trial adjudication (`audit`; defaults to `"google:gemini-4-carbon"`). Discriminative-only classifiers (`typesafe:*` / `jev`) are disallowed on `auditor_model` because `audit` requires structured prose decrees, `Remediation` synthesis, and 1-based `CodeAnnotation` spans.
+- **Screener Model Specifier (`screener_model`):** Canonical provider-prefixed model identifier used by fast heuristic screening and prima facie vetting stages (`apprise`, `docket`, `admit`, `vet`). When unpinned across CLI flags, environment variables, and `config.json`, `configure` auto-selects from the credential-aware default matrix (`"typesafe:jev-latest"` when TypeSafe AI credentials are present, otherwise `"google:gemini-4-hydrogen"`).
+- **Auditor Model Specifier (`auditor_model`):** Canonical provider-prefixed generative model identifier used for substantive trial adjudication (`audit`; defaults to `"google:gemini-4-carbon"` from the top-ranked generative provider). Discriminative-only classifiers (`typesafe:*` / `jev`) are never auto-selected and are disallowed on `auditor_model` because `audit` requires structured prose decrees, `Remediation` synthesis, and 1-based `CodeAnnotation` spans.
 - **Thinking Level (`thinking_level`):** Optional discrete qualitative reasoning effort tier (`"minimal"`, `"low"`, `"medium"`, `"high"`) governing extended thinking during `audit` trials (mutually exclusive with `reasoning_budget`; when both are omitted on `.config`, both `audit` and `probe` default to bounded `"low"` thinking).
 - **Reasoning Budget (`reasoning_budget`):** Optional integer token ceiling governing extended thinking during `audit` trials (mutually exclusive with `thinking_level`).
 
@@ -68,13 +68,26 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Hierarchical Precedence Cascade:** Resolves model specifiers, thinking levels / reasoning budgets, and provider credentials along a strict descending specificity cascade:
-   - **Explicit CLI Flags:** `--screener-model`, `--auditor-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`
-   - **Environment Variables:** `CANON_CLERK_SCREENER_MODEL`, `CANON_CLERK_AUDITOR_MODEL`, `CANON_CLERK_THINKING_LEVEL`, `CANON_CLERK_REASONING_BUDGET`, `GEMINI_API_KEY`, `TYPESAFE_API_KEY`
-   - **User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`, `providers.typesafe.apiKey`) and optional tier and concurrency defaults (`screenerModel`, `auditorModel`, `thinkingLevel`, `reasoningBudget`, `appriseBatchSize`, `appriseConcurrency`, `docketBatchSize`, `docketConcurrency`, `admitConcurrency`, `vetConcurrency`, `auditConcurrency`)
-   - **Static Defaults:** `google:gemini-4-hydrogen` (screener) and `google:gemini-4-carbon` (auditor)
-2. **Model Specifier Normalization, Generative Auditor Enforcement, & Closure-Scoped Credential Gating:** Resolves shorthand aliases (`carbon` $\implies$ `google:gemini-4-carbon`, `argon` $\implies$ `google:gemini-4-argon`, `hydrogen` $\implies$ `google:gemini-4-hydrogen`, `flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `flash` $\implies$ `google:gemini-flash-latest`, `pro` $\implies$ `google:gemini-pro-latest`, `jev` / `typesafe:jev` $\implies$ `typesafe:jev-latest`) and rejects unsupported provider prefixes, malformed model identifiers, conflicting thinking controls, or discriminative-only models (`typesafe:*`) on `auditor_model` *before* inspecting credentials. `configure` then verifies credentials strictly for the provider namespaces actively required by the invoked closure—requiring only `screener_model`'s provider key on screener-only closures (`apprise`, `docket`, `admit`, `vet` unless `--auditor-model` is explicitly overridden), and verifying both `screener_model` and `auditor_model` keys on `configure`, `probe`, and `audit`. Thus an environment provisioned solely with `TYPESAFE_API_KEY` can execute up through `canon-clerk vet --screener-model jev`, while `canon-clerk audit` requires a generative auditor credential (`GEMINI_API_KEY`).
-3. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
+1. **4-Level Tier Specificity Cascade:** Resolves model specifiers, thinking levels / reasoning budgets, and provider credentials along a strict descending specificity cascade:
+   - **Level 1 — Explicit CLI Flags:** `--screener-model`, `--auditor-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`
+   - **Level 2 — Environment Variables:** `CANON_CLERK_SCREENER_MODEL`, `CANON_CLERK_AUDITOR_MODEL`, `CANON_CLERK_THINKING_LEVEL`, `CANON_CLERK_REASONING_BUDGET`, `GEMINI_API_KEY`, `TYPESAFE_API_KEY`
+   - **Level 3 — User-Level Configuration File (`~/.config/canon-clerk/config.json`):** Organized into orthogonal `providers` authentication blocks (`providers.google.apiKey`, `providers.typesafe.apiKey`) and optional tier and concurrency pins (`screenerModel`, `auditorModel`, `thinkingLevel`, `reasoningBudget`, `appriseBatchSize`, `appriseConcurrency`, `docketBatchSize`, `docketConcurrency`, `admitConcurrency`, `vetConcurrency`, `auditConcurrency`)
+   - **Level 4 — Credential-Aware Default Matrix:** When a tier is unpinned across Levels 1–3 (and not pre-populated on an incoming `--caseload`), `configure` inspects available non-empty provider credentials across CLI `--<provider>-api-key` flags, `<PROVIDER>_API_KEY` environment variables, and `providers.<provider>.apiKey` entries in `config.json`, selecting defaults deterministically:
+
+   | Available Credentials | Auto-Selected `screener_model` | Auto-Selected `auditor_model` | Operational Outcome |
+   | :--- | :--- | :--- | :--- |
+   | `TYPESAFE_API_KEY` + `GEMINI_API_KEY` | `typesafe:jev-latest` | `google:gemini-4-carbon` | Pairs discriminative Jev screening (and automatic `vet` prima facie vetting during `audit`) with Gemini 4 Carbon adjudication |
+   | `GEMINI_API_KEY` only | `google:gemini-4-hydrogen` | `google:gemini-4-carbon` | Single-vendor Google setup works with zero flags |
+   | `TYPESAFE_API_KEY` only | `typesafe:jev-latest` | `google:gemini-4-carbon` *(verified only on full-bench closures)* | Screener-only closures (`apprise`, `docket`, `admit`, `vet`) succeed with zero extra flags; full-bench closures (`configure`, `probe`, `audit`) exit `2` requesting a generative auditor credential |
+   | Multiple generative providers present | `typesafe:jev-latest` *(if present)*, else top-ranked generative screener | Top-ranked generative auditor in deterministic precedence order | Guarantees bit-for-bit deterministic `.config` resolution regardless of environment map ordering |
+
+2. **Asymmetric Provider Role Capabilities:**
+   - **Discriminative Screener Providers (`typesafe`):** Ranked first for unpinned `screener_model` selection whenever credentials are present; never auto-selected or accepted as `auditor_model` because substantive adjudication requires generative prose decrees, remediation guidance, and line-level code annotations.
+   - **Full-Stack Generative Providers (`google`):** Eligible for both default `screener_model` (fallback when discriminative screener credentials are absent) and default `auditor_model` under a deterministic provider rank order.
+3. **Explicit Override Validation & Closure-Aware Tier Sufficiency:** Explicit model specifiers and shorthand aliases (`carbon` $\implies$ `google:gemini-4-carbon`, `argon` $\implies$ `google:gemini-4-argon`, `hydrogen` $\implies$ `google:gemini-4-hydrogen`, `flash-lite` $\implies$ `google:gemini-flash-lite-latest`, `flash` $\implies$ `google:gemini-flash-latest`, `pro` $\implies$ `google:gemini-pro-latest`, `jev` / `typesafe:jev` $\implies$ `typesafe:jev-latest`) are normalized and validated—rejecting unsupported provider prefixes, malformed model identifiers, conflicting thinking controls, or discriminative-only models (`typesafe:*`) on `auditor_model`—*before* inspecting credentials, and never silently fall back to another provider if their required credential is missing. `configure` then verifies credentials strictly for the tiers required by the invoked closure:
+   - **Screener-Only Closures (`apprise`, `docket`, `admit`, `vet`):** Verify only `screener_model`'s provider credential (unless `--auditor-model` was explicitly overridden), allowing an environment provisioned solely with `TYPESAFE_API_KEY` to execute `canon-clerk apprise`, `docket`, `admit`, and `vet` with zero extra flags.
+   - **Full-Bench Closures (`configure`, `probe`, `audit`):** Verify credentials for both `screener_model` and `auditor_model` so standalone readiness checks and substantive `audit` trials never silently pass without a verified generative auditor credential. When only `TYPESAFE_API_KEY` is present on a full-bench closure, `configure` fails fast with exit code `2` and an actionable remediation hint explaining that `TYPESAFE_API_KEY` covers discriminative screening and `vet`, while full readiness and substantive adjudication require a generative auditor credential (`GEMINI_API_KEY`).
+4. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
 
 ---
 
@@ -83,11 +96,11 @@ flowchart LR
 The CLI exposes `configure` as an imperative subcommand:
 
 ```bash
-# Normalize and print active configuration:
+# Auto-select optimal tiers from ambient credentials and print normalized Caseload JSON:
 canon-clerk configure --json
 
-# Override model tiers from flags (e.g., TypeSafe Jev screener + Gemini 4 Carbon auditor):
-canon-clerk configure --screener-model jev --auditor-model carbon
+# Explicitly pin model tiers from flags (overrides credential-inferred defaults):
+canon-clerk configure --screener-model hydrogen --auditor-model carbon
 ```
 
 ### CLI Flags & Environment

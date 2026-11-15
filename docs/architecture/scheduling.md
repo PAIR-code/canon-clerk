@@ -88,9 +88,9 @@ flowchart TD
 
 ### Sequential Invariant Guarantees:
 1. **`intake` and `discover` execute first.** If zero candidate canons match the modified paths and state preconditions, Canon Clerk immediately logs `0 candidate canons matched` and exits with code `0`.
-2. **Branch B (`configure`) is never evaluated if candidates count is zero.** Fork pull requests, documentation updates, and changes to un-governed directories succeed in ~15ms without a configured `GEMINI_API_KEY`.
+2. **Branch B (`configure`) is never evaluated if candidates count is zero.** Fork pull requests, documentation updates, and changes to un-governed directories succeed in ~15ms without configured provider credentials (`GEMINI_API_KEY` / `TYPESAFE_API_KEY`).
 3. **`validate` evaluates candidate syntax before credentials are checked.** If a canon contains YAML or markdown errors, the runner fails fast with exit code `1` before loading provider credentials.
-4. **`configure` resolves JIT** only when valid candidate canons exist and heuristic screening is imminent.
+4. **`configure` resolves JIT with closure-aware credential sufficiency** only when valid candidate canons exist and heuristic screening is imminent. When model tiers are unpinned, `configure` deterministically selects `typesafe:jev-latest` + `google:gemini-4-carbon` when both `TYPESAFE_API_KEY` and `GEMINI_API_KEY` are available (automatically activating `vet` ahead of `audit`), `google:gemini-4-hydrogen` + `google:gemini-4-carbon` when only `GEMINI_API_KEY` is available, and `typesafe:jev-latest` on screener-only closures (`apprise`, `docket`, `admit`, `vet`) when only `TYPESAFE_API_KEY` is available—while full-bench closures (`configure`, `probe`, `audit`) require both screener and generative auditor credentials.
 5. **Stage-seam concurrency drains to zero and remains thread-identity isolated.** Multi-unit heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) execute bounded concurrent work uniformly within each stage and drain all in-flight worker activity before advancing to the next DAG node, guaranteeing that upstream cardinality (`1` unit vs. `N` units) never alters the transport liveness or execution behavior of downstream stages.
 
 ---
@@ -213,7 +213,7 @@ Pipeline Provenance:
   ✓ intake    : 1 target file ingested ('src/parser.rs', 45 diff lines)
   ✓ discover  : 3 candidate canons matched triggers (14 canons un-triggered)
   ✓ validate  : 3 candidate canons valid (0 errors, 0 warnings)
-  ✓ configure : screener 'typesafe:jev-latest', auditor 'google:gemini-pro-latest'
+  ✓ configure : screener 'typesafe:jev-latest', auditor 'google:gemini-4-carbon'
   ✓ docket    : 2 case(s) colorable (1 dismissed, threshold 0.50)
   ✓ admit     : 2 exhibit(s) admitted across 2 case(s) (0 excluded, threshold 0.50)
   ✓ vet       : 2 case(s) vetted, 0 contested (threshold 0.80)

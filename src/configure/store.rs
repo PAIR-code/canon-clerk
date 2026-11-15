@@ -125,23 +125,23 @@ pub struct StoredConfig {
 }
 
 impl StoredConfig {
-    /// Returns the non-empty Google API key stored under `providers.google.apiKey` (or `providers.gemini.apiKey`).
-    pub fn google_api_key(&self) -> Option<&str> {
+    /// Returns the non-empty API key configured under `providers.<slug>.apiKey`.
+    pub(crate) fn provider_api_key(&self, slug: &str) -> Option<&str> {
         self.providers
-            .get(DEFAULT_PROVIDER)
-            .or_else(|| self.providers.get("gemini"))
+            .get(slug)
             .and_then(|p| p.api_key.as_deref())
             .map(str::trim)
             .filter(|s| !s.is_empty())
     }
 
+    /// Returns the non-empty Google API key stored under `providers.google.apiKey`.
+    pub fn google_api_key(&self) -> Option<&str> {
+        self.provider_api_key(DEFAULT_PROVIDER)
+    }
+
     /// Returns the non-empty TypeSafe AI API key stored under `providers.typesafe.apiKey`.
     pub fn typesafe_api_key(&self) -> Option<&str> {
-        self.providers
-            .get(TYPESAFE_PROVIDER)
-            .and_then(|p| p.api_key.as_deref())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
+        self.provider_api_key(TYPESAFE_PROVIDER)
     }
 
     /// Returns the stored screener model specifier if present.

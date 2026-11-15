@@ -33,17 +33,17 @@ use std::io::{Read, Write};
 
 const PROBE_EXAMPLES: &str = "\
 Examples:
-  # Verify connectivity and latency to configured screener and auditor endpoints:
+  # Verify connectivity and latency to auto-selected screener and auditor endpoints:
   canon-clerk probe
 
   # Emit structured Caseload JSON with .config and .probe records:
   canon-clerk probe --json
 
-  # Probe TypeSafe Jev screener alongside Gemini Pro auditor:
-  canon-clerk probe --screener-model jev
+  # Explicitly pin TypeSafe Jev screener alongside Gemini 4 Carbon auditor:
+  canon-clerk probe --screener-model jev --auditor-model carbon
 
   # Override timeout and model tiers for diagnostic verification:
-  canon-clerk probe --timeout 3000 --screener-model flash-lite --auditor-model pro";
+  canon-clerk probe --timeout 3000 --screener-model hydrogen --auditor-model carbon";
 
 /// Output presentation format for `canon-clerk probe`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -372,6 +372,10 @@ mod tests {
             ENV_GEMINI_API_KEY.to_string(),
             "synthetic-test-api-key-value".to_string(),
         );
+        env.insert(
+            "XDG_CONFIG_HOME".to_string(),
+            "/nonexistent-canon-clerk-xdg-dir".to_string(),
+        );
         env
     }
 
@@ -489,7 +493,7 @@ mod tests {
         }
 
         #[test]
-        fn test_hybrid_typesafe_jev_probe_verifies_both_endpoints_without_key_leakage() {
+        fn test_hybrid_credentials_auto_select_jev_and_probe_both_endpoints_without_key_leakage() {
             let ts_secret = "synthetic-typesafe-probe-secret-888";
             let prober = MockProber {
                 screener: ProbeEndpointResult {
@@ -502,7 +506,6 @@ mod tests {
             };
             let args = ProbeArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("jev".to_string()),
                     typesafe_api_key: Some(ts_secret.to_string()),
                     ..ProviderConfigArgs::default()
                 },
@@ -517,10 +520,14 @@ mod tests {
                 &test_env(),
                 &prober,
             )
-            .expect("hybrid probe should succeed");
+            .expect("zero-flag hybrid probe should auto-select jev and succeed");
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains("jev-1.14.0"));
             assert!(!rendered.contains(ts_secret));
+            assert_eq!(
+                caseload.config.expect("config").screener_model,
+                "typesafe:jev-latest"
+            );
             assert!(caseload.probe.expect("probe").is_healthy());
         }
     }
@@ -584,16 +591,39 @@ mod tests {
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
 
+            let mut empty_env = BTreeMap::new();
+            empty_env.insert(
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            );
             let no_key_err = run_probe_with_env_and_prober(
                 &ProbeArgs::default(),
                 &mut stdin,
                 &mut stdout,
-                &BTreeMap::new(),
+                &empty_env,
                 &prober,
             )
             .expect_err("missing key must fail");
             assert_eq!(no_key_err.exit_code(), 2);
             assert!(no_key_err.to_string().contains("Hint:"));
+
+            // TypeSafe-only env on `probe` fails fast (exit 2) rather than silently skipping auditor check
+            let mut ts_only = empty_env;
+            ts_only.insert(
+                crate::configure::ENV_TYPESAFE_API_KEY.to_string(),
+                "ts-only-key".to_string(),
+            );
+            let ts_only_err = run_probe_with_env_and_prober(
+                &ProbeArgs::default(),
+                &mut stdin,
+                &mut stdout,
+                &ts_only,
+                &prober,
+            )
+            .expect_err("typesafe-only probe must exit 2");
+            assert_eq!(ts_only_err.exit_code(), 2);
+            assert!(ts_only_err.to_string().contains("generative auditor"));
+            assert!(ts_only_err.to_string().contains(ENV_GEMINI_API_KEY));
 
             let zero_timeout_err = run_probe_with_env_and_prober(
                 &ProbeArgs {
