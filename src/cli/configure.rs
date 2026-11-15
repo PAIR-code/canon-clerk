@@ -30,11 +30,11 @@ Examples:
   # Auto-select optimal screener and auditor tiers from available credentials:
   canon-clerk configure
 
-  # Explicitly pin screener and auditor models via aliases:
-  canon-clerk configure --screener-model hydrogen --auditor-model carbon
+  # Explicitly pin screener and auditor models via provider-omitted upstream IDs:
+  canon-clerk configure --screener-model gemini-4-hydrogen --auditor-model gemini-4-carbon
 
   # Explicitly pair TypeSafe Jev fast screener with Gemini 4 Carbon auditor:
-  canon-clerk configure --screener-model jev --auditor-model carbon
+  canon-clerk configure --screener-model jev-latest --auditor-model gemini-4-carbon
 
   # Configure custom models via fully-qualified specifiers:
   canon-clerk configure --screener-model google:gemini-4-hydrogen --auditor-model google:gemini-4-carbon
@@ -232,9 +232,9 @@ mod tests {
                 "canon-clerk",
                 "configure",
                 "--screener-model",
-                "flash-lite",
+                "gemini-2.5-flash-lite",
                 "--auditor-model",
-                "pro",
+                "gemini-2.5-pro",
                 "--reasoning-budget",
                 "4096",
                 "--json",
@@ -243,8 +243,14 @@ mod tests {
 
             match cli.command {
                 Some(Commands::Configure(args)) => {
-                    assert_eq!(args.provider.screener_model.as_deref(), Some("flash-lite"));
-                    assert_eq!(args.provider.auditor_model.as_deref(), Some("pro"));
+                    assert_eq!(
+                        args.provider.screener_model.as_deref(),
+                        Some("gemini-2.5-flash-lite")
+                    );
+                    assert_eq!(
+                        args.provider.auditor_model.as_deref(),
+                        Some("gemini-2.5-pro")
+                    );
                     assert_eq!(args.provider.reasoning_budget, Some(4096));
                     assert!(args.io.json);
                 }
@@ -261,8 +267,8 @@ mod tests {
             let secret = "synthetic-top-secret-never-echo-999";
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("hydrogen".to_string()),
-                    auditor_model: Some("carbon".to_string()),
+                    screener_model: Some("gemini-4-hydrogen".to_string()),
+                    auditor_model: Some("gemini-4-carbon".to_string()),
                     thinking_level: None,
                     reasoning_budget: Some(2048),
                     gemini_api_key: Some(secret.to_string()),
@@ -385,12 +391,12 @@ mod tests {
             );
             assert!(!compact_rendered.contains(ts_secret));
 
-            // Explicit --screener-model hydrogen overrides ambient TYPESAFE_API_KEY
+            // Explicit --screener-model gemini-4-hydrogen overrides ambient TYPESAFE_API_KEY
             let mut both_env = test_env();
             both_env.insert(ENV_TYPESAFE_API_KEY.to_string(), ts_secret.to_string());
             let override_args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("hydrogen".to_string()),
+                    screener_model: Some("gemini-4-hydrogen".to_string()),
                     ..ProviderConfigArgs::default()
                 },
                 format: ConfigureFormat::Stylish,
@@ -475,6 +481,28 @@ mod tests {
             assert_eq!(invalid_err.exit_code(), 2);
             assert!(invalid_err.to_string().contains("Invalid thinking level"));
             assert!(invalid_err.to_string().contains("Hint:"));
+
+            for retired_alias in [
+                "hydrogen",
+                "carbon",
+                "jev",
+                "google:hydrogen",
+                "typesafe:jev",
+            ] {
+                let alias_args = ConfigureArgs {
+                    provider: ProviderConfigArgs {
+                        screener_model: Some(retired_alias.to_string()),
+                        ..ProviderConfigArgs::default()
+                    },
+                    ..ConfigureArgs::default()
+                };
+                let alias_err =
+                    run_configure_with_env(&alias_args, &mut stdin, &mut stdout, &test_env())
+                        .expect_err(&format!("retired alias `{retired_alias}` must exit 2"));
+                assert_eq!(alias_err.exit_code(), 2);
+                assert!(alias_err.to_string().contains("Invalid model specifier"));
+                assert!(alias_err.to_string().contains("Hint:"));
+            }
         }
 
         #[test]

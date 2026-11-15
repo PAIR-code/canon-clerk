@@ -105,13 +105,12 @@ pub use cli::{
     run_vet_live_with_telemetry, run_vet_with_snapshot_and_provider, run_vet_with_telemetry,
 };
 pub use configure::{
-    ConfigureError, ConfigureOptions, DEFAULT_ARGON_MODEL, DEFAULT_FLASH_LITE_MODEL,
-    DEFAULT_FLASH_MODEL, DEFAULT_JEV_MODEL, DEFAULT_PRO_MODEL, ENV_AUDITOR_MODEL,
-    ENV_GEMINI_API_KEY, ENV_REASONING_BUDGET, ENV_SCREENER_MODEL, ENV_THINKING_LEVEL,
-    ENV_TYPESAFE_API_KEY, MissingCredentialsReason, PROVIDER_CAPABILITIES, ProviderCapability,
-    ProviderRole, StoredConfig, StoredProviderConfig, StoredTierModel, execute_configure,
-    load_host_config_file, normalize_model_specifier, parse_thinking_level,
-    resolve_default_config_path, resolve_gemini_api_key,
+    ConfigureError, ConfigureOptions, DEFAULT_JEV_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,
+    ENV_REASONING_BUDGET, ENV_SCREENER_MODEL, ENV_THINKING_LEVEL, ENV_TYPESAFE_API_KEY,
+    MissingCredentialsReason, PROVIDER_CAPABILITIES, ProviderCapability, ProviderRole,
+    StoredConfig, StoredProviderConfig, StoredTierModel, execute_configure, load_host_config_file,
+    normalize_model_specifier, parse_thinking_level, resolve_default_config_path,
+    resolve_gemini_api_key,
 };
 pub use discover::{
     DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,

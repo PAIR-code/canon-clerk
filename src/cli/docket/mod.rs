@@ -1420,7 +1420,7 @@ index 0000000..1111111
                 "docket",
                 "src/cli/docket.rs",
                 "--screener-model",
-                "jev",
+                "jev-latest",
                 "--json",
             ]);
             run_docket_with_snapshot_and_provider(

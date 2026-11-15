@@ -334,7 +334,7 @@ mod tests {
                         "apiKey": "synthetic-stored-typesafe-key"
                     }
                 },
-                "screenerModel": "flash-lite",
+                "screenerModel": "gemini-2.5-flash-lite",
                 "auditorModel": {
                     "provider": "google",
                     "model": "gemini-2.5-pro"
@@ -359,7 +359,10 @@ mod tests {
                 loaded.typesafe_api_key(),
                 Some("synthetic-stored-typesafe-key")
             );
-            assert_eq!(loaded.screener_specifier().as_deref(), Some("flash-lite"));
+            assert_eq!(
+                loaded.screener_specifier().as_deref(),
+                Some("gemini-2.5-flash-lite")
+            );
             assert_eq!(
                 loaded.auditor_specifier().as_deref(),
                 Some("google:gemini-2.5-pro")
