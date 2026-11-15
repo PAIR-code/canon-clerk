@@ -91,6 +91,7 @@ flowchart TD
 2. **Branch B (`configure`) is never evaluated if candidates count is zero.** Fork pull requests, documentation updates, and changes to un-governed directories succeed in ~15ms without a configured `GEMINI_API_KEY`.
 3. **`validate` evaluates candidate syntax before credentials are checked.** If a canon contains YAML or markdown errors, the runner fails fast with exit code `1` before loading provider credentials.
 4. **`configure` resolves JIT** only when valid candidate canons exist and heuristic screening is imminent.
+5. **Stage-seam concurrency drains to zero and remains thread-identity isolated.** Multi-unit heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) execute bounded concurrent work uniformly within each stage and drain all in-flight worker activity before advancing to the next DAG node, guaranteeing that upstream cardinality (`1` unit vs. `N` units) never alters the transport liveness or execution behavior of downstream stages.
 
 ---
 
