@@ -15,10 +15,13 @@
 //! Core domain execution engine for the `docket` Caseload DAG stage (`docs/architecture/nodes/docket.md`).
 
 mod decision;
+mod decode;
 mod prompt;
 
+pub(crate) use decode::resolve_canon_path;
+
 use crate::caseload::{
-    CanonDocketAssessment, Caseload, CaseloadDocket, ColorabilityStatus, TYPESAFE_PROVIDER,
+    CanonDocketAssessment, Caseload, CaseloadDocket, TYPESAFE_PROVIDER,
     normalize_colorability_score,
 };
 use crate::configure::model_provider;
@@ -26,12 +29,12 @@ use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
 };
+use decode::decode_docket_cases;
 use prompt::{
     DOCKET_SYSTEM_INSTRUCTION, build_docket_batch_user_prompt, build_docket_filing_prefix,
     build_docket_schema,
 };
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -283,6 +286,18 @@ pub fn execute_docket(
 
 type BatchCasesResult = Result<BTreeMap<String, CanonDocketAssessment>, DocketError>;
 
+pub(super) fn format_docket_batch_label(
+    batch_idx: usize,
+    total: usize,
+    canon_count: usize,
+) -> String {
+    if total == 1 {
+        format!("{canon_count} canon(s)")
+    } else {
+        format!("batch {} ({canon_count} canon(s))", batch_idx + 1)
+    }
+}
+
 fn execute_docket_batches(
     prepared_batches: &[(Vec<String>, GenerationRequest)],
     concurrency_limit: usize,
@@ -290,13 +305,16 @@ fn execute_docket_batches(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> BatchCasesResult {
-    let worker_count = concurrency_limit.min(prepared_batches.len()).max(1);
+    let total = prepared_batches.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut combined = BTreeMap::new();
-        for (batch_canons, request) in prepared_batches {
+        for (idx, (batch_canons, request)) in prepared_batches.iter().enumerate() {
             let response = provider.generate_structured(request)?;
             let batch_cases =
                 decode_docket_cases(&response.payload, batch_canons, threshold, model_specifier)?;
+            let label = format_docket_batch_label(idx, total, batch_canons.len());
+            provider.record_progress(idx + 1, total, &label);
             combined.extend(batch_cases);
         }
         return Ok(combined);
@@ -304,8 +322,8 @@ fn execute_docket_batches(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<BatchCasesResult>>> =
-        Mutex::new((0..prepared_batches.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<BatchCasesResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -315,7 +333,7 @@ fn execute_docket_batches(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared_batches.len() {
+                    if idx >= total {
                         break;
                     }
                     let (batch_canons, request) = &prepared_batches[idx];
@@ -330,171 +348,30 @@ fn execute_docket_batches(
                                 model_specifier,
                             )
                         });
-                    if res.is_err() {
+                    let succeeded = res.is_ok();
+                    if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if succeeded {
+                            guard.0 += 1;
+                            let label = format_docket_batch_label(idx, total, batch_canons.len());
+                            provider.record_progress(guard.0, total, &label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         let batch_cases = slot?;
         combined.extend(batch_cases);
     }
     Ok(combined)
-}
-
-fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> DocketError {
-    DocketError::Provider(ProviderError::SchemaDecode {
-        model_specifier: model_specifier.to_string(),
-        message: message.into(),
-    })
-}
-
-fn decode_docket_cases(
-    payload: &Value,
-    candidate_canons: &[String],
-    threshold: f64,
-    model_specifier: &str,
-) -> Result<BTreeMap<String, CanonDocketAssessment>, DocketError> {
-    let cases_arr = payload
-        .get("cases")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                "missing array field `cases` in structured docket response",
-            )
-        })?;
-
-    let expected: BTreeSet<&str> = candidate_canons.iter().map(String::as_str).collect();
-    let same_len = cases_arr.len() == candidate_canons.len();
-    let mut out = BTreeMap::new();
-
-    for (index, raw_item) in cases_arr.iter().enumerate() {
-        let pos_expected = same_len
-            .then(|| candidate_canons.get(index).map(String::as_str))
-            .flatten();
-        let (canon_path, assessment) = decode_single_case(
-            raw_item,
-            index,
-            &expected,
-            pos_expected,
-            threshold,
-            model_specifier,
-        )?;
-        if out.insert(canon_path.clone(), assessment).is_some() {
-            return Err(schema_decode_error(
-                model_specifier,
-                format!("duplicate `canon_path` `{canon_path}` in structured docket response"),
-            ));
-        }
-    }
-
-    let missing: Vec<&str> = candidate_canons
-        .iter()
-        .map(String::as_str)
-        .filter(|canon_ref| !out.contains_key(*canon_ref))
-        .collect();
-    if !missing.is_empty() {
-        return Err(schema_decode_error(
-            model_specifier,
-            format!(
-                "missing case entry for candidate canon(s): {}",
-                missing.join(", ")
-            ),
-        ));
-    }
-
-    Ok(out)
-}
-
-pub(crate) fn resolve_canon_path<'a>(
-    raw_path: &'a str,
-    expected: &BTreeSet<&'a str>,
-    pos: Option<&'a str>,
-) -> Option<&'a str> {
-    if let Some(&exact) = expected.get(raw_path) {
-        return Some(exact);
-    }
-    let pos = pos?;
-    if raw_path.rsplit('/').next() == pos.rsplit('/').next() {
-        return Some(pos);
-    }
-    let pref = raw_path
-        .bytes()
-        .zip(pos.bytes())
-        .take_while(|(a, b)| a == b)
-        .count();
-    let suff = raw_path
-        .bytes()
-        .rev()
-        .zip(pos.bytes().rev())
-        .take_while(|(a, b)| a == b)
-        .count();
-    ((pref + suff) * 5 >= raw_path.len().max(pos.len()).max(1) * 4).then_some(pos)
-}
-
-fn decode_single_case(
-    raw_item: &Value,
-    index: usize,
-    expected: &BTreeSet<&str>,
-    positional_expected: Option<&str>,
-    threshold: f64,
-    model: &str,
-) -> Result<(String, CanonDocketAssessment), DocketError> {
-    let entry = raw_item.as_object().ok_or_else(|| {
-        schema_decode_error(
-            model,
-            format!("expected object at `cases[{index}]` in structured docket response"),
-        )
-    })?;
-    let raw_canon_path = entry["canon_path"].as_str().ok_or_else(|| {
-        schema_decode_error(
-            model,
-            format!("missing string `canon_path` at `cases[{index}]`"),
-        )
-    })?;
-    let canon_path =
-        resolve_canon_path(raw_canon_path, expected, positional_expected).ok_or_else(|| {
-            schema_decode_error(
-                model,
-                format!("unknown `canon_path` `{raw_canon_path}` in structured docket response"),
-            )
-        })?;
-    let raw_summary = entry["colorability_summary"].as_str().ok_or_else(|| {
-        schema_decode_error(
-            model,
-            format!("missing string `colorability_summary` for `{canon_path}`"),
-        )
-    })?;
-    let raw_score = entry["colorability_score"].as_f64().ok_or_else(|| {
-        schema_decode_error(
-            model,
-            format!("missing numeric `colorability_score` for `{canon_path}`"),
-        )
-    })?;
-    let colorability_score = normalize_colorability_score(raw_score).map_err(|detail| {
-        schema_decode_error(
-            model,
-            format!("invalid `colorability_score` for `{canon_path}`: {detail}"),
-        )
-    })?;
-
-    Ok((
-        canon_path.to_string(),
-        CanonDocketAssessment {
-            colorability_summary: raw_summary.trim().to_string(),
-            colorability_score,
-            colorability_status: ColorabilityStatus::from_score(colorability_score, threshold),
-        },
-    ))
 }
 
 #[cfg(test)]
@@ -506,7 +383,7 @@ mod tests {
         DEFAULT_SCREENER_MODEL, FileArtifact, FileChangeStatus, LinkedIssueContext,
     };
     use crate::provider::{GenerationResponse, TokenUsage};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::sync::Mutex;
 
     struct RecordingMockProvider {
@@ -1177,8 +1054,25 @@ mod tests {
                 serde_json::to_string(&single_res).expect("json")
             );
 
-            // Verify telemetry accumulated all 3 batch calls (3 * 125 = 375 total_tokens) and 3 Thought events
+            // Verify telemetry accumulated all 3 batch calls (3 * 125 = 375 total_tokens),
+            // 3 Thought events, and monotonic 1/3..3/3 StageProgress events despite out-of-order completion.
             let events = sink.events();
+            let progress_counts: Vec<(usize, usize)> = events
+                .iter()
+                .filter_map(|e| match e {
+                    TelemetryEvent::StageProgress {
+                        stage: PipelineStage::Docket,
+                        completed,
+                        total,
+                        label,
+                    } => {
+                        assert!(!label.is_empty());
+                        Some((*completed, *total))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(progress_counts, vec![(1, 3), (2, 3), (3, 3)]);
             let thought_count = events
                 .iter()
                 .filter(|e| matches!(e, TelemetryEvent::Thought { .. }))

@@ -15,7 +15,9 @@
 //! Discriminative `Noul` batch screening for `docket` (`typesafe:jev-*`).
 
 use super::prompt::{append_canon_section, build_bounded_docket_filing_prefix};
-use super::{DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DocketError, DocketOptions};
+use super::{
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DocketError, DocketOptions, format_docket_batch_label,
+};
 use crate::caseload::{
     CanonDocketAssessment, Caseload, CaseloadDocket, ColorabilityStatus,
     normalize_colorability_score,
@@ -132,13 +134,16 @@ fn run_decision_batches(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> BatchResult {
-    let worker_count = concurrency_limit.min(prepared.len()).max(1);
+    let total = prepared.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut combined = BTreeMap::new();
-        for (batch_canons, request) in prepared {
+        for (idx, (batch_canons, request)) in prepared.iter().enumerate() {
             let response = provider.evaluate_decisions(request)?;
             let batch_cases =
                 fold_decision_cases(&response, batch_canons, threshold, model_specifier)?;
+            let label = format_docket_batch_label(idx, total, batch_canons.len());
+            provider.record_progress(idx + 1, total, &label);
             combined.extend(batch_cases);
         }
         return Ok(combined);
@@ -146,8 +151,8 @@ fn run_decision_batches(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<BatchResult>>> =
-        Mutex::new((0..prepared.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<BatchResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -157,7 +162,7 @@ fn run_decision_batches(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared.len() {
+                    if idx >= total {
                         break;
                     }
                     let (batch_canons, request) = &prepared[idx];
@@ -167,18 +172,24 @@ fn run_decision_batches(
                         .and_then(|resp| {
                             fold_decision_cases(&resp, batch_canons, threshold, model_specifier)
                         });
-                    if res.is_err() {
+                    let succeeded = res.is_ok();
+                    if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if succeeded {
+                            guard.0 += 1;
+                            let label = format_docket_batch_label(idx, total, batch_canons.len());
+                            provider.record_progress(guard.0, total, &label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         combined.extend(slot?);

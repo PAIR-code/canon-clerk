@@ -28,6 +28,42 @@ pub const ENV_LOG_FILE: &str = "CANON_CLERK_LOG_FILE";
 /// Environment variable fallback for `--verbose` (`-v`).
 pub const ENV_VERBOSE: &str = "CANON_CLERK_VERBOSE";
 
+/// Default `tracing` filter directive when `--verbose` (`-v` / `CANON_CLERK_VERBOSE`) is active
+/// without an explicit `RUST_LOG` override: enables `DEBUG` on `canon_clerk` while keeping
+/// third-party HTTP/TLS crates (`reqwest`, `hyper_util`, `h2`, `rustls`, `tokio`) at `WARN`.
+pub const DEFAULT_VERBOSE_LOG_FILTER: &str = "canon_clerk=debug,warn";
+
+/// Resolves the `tracing` filter directive string from `verbose` and `env` (`RUST_LOG`).
+pub fn resolve_log_filter_directive(verbose: bool, env: &BTreeMap<String, String>) -> String {
+    let explicit_rust_log = env
+        .get("RUST_LOG")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+
+    match (verbose, explicit_rust_log) {
+        (true, Some(rust_log)) => format!("{DEFAULT_VERBOSE_LOG_FILTER},{rust_log}"),
+        (true, None) => DEFAULT_VERBOSE_LOG_FILTER.to_string(),
+        (false, Some(rust_log)) => rust_log.to_string(),
+        (false, None) => "info".to_string(),
+    }
+}
+
+/// Constructs a [`tracing_subscriber::EnvFilter`] scoped to `canon_clerk` under `-v` while
+/// honoring explicit `RUST_LOG` directives.
+pub fn build_log_env_filter(
+    verbose: bool,
+    env: &BTreeMap<String, String>,
+) -> tracing_subscriber::EnvFilter {
+    let directive = resolve_log_filter_directive(verbose, env);
+    tracing_subscriber::EnvFilter::try_new(&directive).unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(if verbose {
+            DEFAULT_VERBOSE_LOG_FILTER
+        } else {
+            "info"
+        })
+    })
+}
+
 /// Resolves the target `--log-file` JSONL path from explicit CLI flag or `CANON_CLERK_LOG_FILE`.
 pub fn resolve_log_file_path(
     flag_path: Option<&Path>,
@@ -213,8 +249,25 @@ impl<W: Write + Send> StderrProgressSink<W> {
         let pfx = self.prefix();
         match event {
             TelemetryEvent::StageStart { stage, .. } => {
-                if self.options.verbose {
+                if self.options.verbose || stage.is_remote() {
                     Some(format!("{pfx} -> {stage} started"))
+                } else {
+                    None
+                }
+            }
+            TelemetryEvent::StageProgress {
+                stage,
+                completed,
+                total,
+                label,
+            } => {
+                if self.options.verbose || *total > 1 {
+                    let trimmed = label.trim();
+                    if trimmed.is_empty() {
+                        Some(format!("{pfx} [{stage} {completed}/{total}]"))
+                    } else {
+                        Some(format!("{pfx} [{stage} {completed}/{total}] {trimmed}"))
+                    }
                 } else {
                     None
                 }
@@ -295,6 +348,45 @@ mod tests {
     use super::*;
     use crate::provider::TokenUsage;
     use crate::telemetry::PipelineStage;
+    use std::io;
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    #[derive(Clone, Default)]
+    struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl SharedLogBuffer {
+        fn into_string(self) -> String {
+            let bytes = self.0.lock().expect("lock log buffer").clone();
+            String::from_utf8(bytes).expect("utf8 log buffer")
+        }
+    }
+
+    struct BufferGuard(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for BufferGuard {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("lock log buffer")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedLogBuffer {
+        type Writer = BufferGuard;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            BufferGuard(Arc::clone(&self.0))
+        }
+    }
 
     mod flag_and_env_resolution {
         use super::*;
@@ -347,6 +439,89 @@ mod tests {
             assert_eq!(err.exit_code(), 2);
             assert!(err.to_string().contains("Hint:"));
         }
+
+        #[test]
+        fn test_verbose_filter_scopes_debug_to_canon_clerk_and_honors_explicit_rust_log() {
+            let empty_env = BTreeMap::new();
+            assert_eq!(resolve_log_filter_directive(false, &empty_env), "info");
+            assert_eq!(
+                resolve_log_filter_directive(true, &empty_env),
+                "canon_clerk=debug,warn"
+            );
+
+            // 1. Default `-v` (no RUST_LOG): real reqwest/hyper_util HTTP transport + synthetic
+            // transport targets emit ZERO DEBUG lines, while canon_clerk DEBUG lines ARE emitted.
+            let default_verbose_buf = SharedLogBuffer::default();
+            let default_verbose_sub = tracing_subscriber::registry()
+                .with(build_log_env_filter(true, &empty_env))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(default_verbose_buf.clone())
+                        .with_ansi(false)
+                        .compact(),
+                );
+
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let server = std::thread::spawn(move || {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    );
+                }
+            });
+
+            tracing::subscriber::with_default(default_verbose_sub, || {
+                tracing::debug!(target: "canon_clerk::cli", "canon clerk verbose marker");
+                tracing::debug!(target: "reqwest::connect", "synthetic socket debug");
+                tracing::debug!(target: "hyper_util::client::legacy::pool", "synthetic pool debug");
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio rt");
+                rt.block_on(async {
+                    let client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(2))
+                        .build()
+                        .expect("reqwest client");
+                    let _ = client.get(format!("http://{addr}/")).send().await;
+                });
+            });
+            let _ = server.join();
+
+            let scoped_logs = default_verbose_buf.into_string();
+            assert!(
+                scoped_logs.contains("canon clerk verbose marker"),
+                "canon_clerk DEBUG logs must be retained under -v, got: {scoped_logs}"
+            );
+            assert!(
+                !scoped_logs.contains("reqwest::connect")
+                    && !scoped_logs.contains("hyper_util::client")
+                    && !scoped_logs.contains("synthetic socket debug")
+                    && !scoped_logs.contains("synthetic pool debug"),
+                "third-party transport DEBUG logs must be suppressed under -v without RUST_LOG, got: {scoped_logs}"
+            );
+
+            // 2. Explicit `RUST_LOG=reqwest=debug` opt-in surfaces reqwest DEBUG logs alongside -v.
+            let mut rust_log_env = BTreeMap::new();
+            rust_log_env.insert("RUST_LOG".to_string(), "reqwest=debug".to_string());
+            let opt_in_buf = SharedLogBuffer::default();
+            let opt_in_sub = tracing_subscriber::registry()
+                .with(build_log_env_filter(true, &rust_log_env))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(opt_in_buf.clone())
+                        .with_ansi(false)
+                        .compact(),
+                );
+            tracing::subscriber::with_default(opt_in_sub, || {
+                tracing::debug!(target: "reqwest::connect", "explicitly requested reqwest debug");
+                tracing::debug!(target: "hyper_util::client", "unrequested hyper_util debug");
+            });
+            let opt_in_logs = opt_in_buf.into_string();
+            assert!(opt_in_logs.contains("explicitly requested reqwest debug"));
+            assert!(!opt_in_logs.contains("unrequested hyper_util debug"));
+        }
     }
 
     mod non_interactive_and_stderr_hygiene {
@@ -391,6 +566,12 @@ mod tests {
                 stage: PipelineStage::Apprise,
                 timestamp: "2026-11-09T20:00:00.000Z".to_string(),
             });
+            sink.emit(&TelemetryEvent::StageProgress {
+                stage: PipelineStage::Apprise,
+                completed: 1,
+                total: 2,
+                label: "batch 1 (8 canon(s))".to_string(),
+            });
             sink.emit(&TelemetryEvent::Thought {
                 stage: PipelineStage::Apprise,
                 delta: "First line\nsecond line".to_string(),
@@ -413,9 +594,58 @@ mod tests {
             let rendered = String::from_utf8(sink.into_inner()).expect("utf8 stderr");
             assert!(!rendered.contains("\x1b["), "must not contain ANSI escapes");
             assert!(rendered.contains("[telemetry] -> apprise started"));
+            assert!(rendered.contains("[telemetry] [apprise 1/2] batch 1 (8 canon(s))"));
             assert!(rendered.contains("[telemetry] [apprise:thought] First line second line"));
             assert!(rendered.contains("[telemetry] ok apprise (210ms, 150 tokens)"));
             assert!(rendered.contains("[telemetry] done (220ms, 150 total tokens)"));
+        }
+
+        #[test]
+        fn test_interactive_tty_surfaces_remote_stage_entry_and_multi_unit_progress_without_verbose()
+         {
+            let opts = StderrTelemetryOptions {
+                is_tty: true,
+                verbose: false,
+                quiet: false,
+                is_ci: false,
+                no_color: true,
+            };
+            let sink = StderrProgressSink::new(Vec::<u8>::new(), opts);
+
+            // Fast local stages omit StageStart chatter when !verbose, while remote stages
+            // (such as `--caseload` handoffs into `audit`) immediately announce entry.
+            sink.emit(&TelemetryEvent::StageStart {
+                stage: PipelineStage::Intake,
+                timestamp: "2026-11-14T21:00:00.000Z".to_string(),
+            });
+            sink.emit(&TelemetryEvent::StageFinish {
+                stage: PipelineStage::Intake,
+                duration_ms: 2,
+                usage: None,
+            });
+            sink.emit(&TelemetryEvent::StageStart {
+                stage: PipelineStage::Audit,
+                timestamp: "2026-11-14T21:00:00.002Z".to_string(),
+            });
+            sink.emit(&TelemetryEvent::StageProgress {
+                stage: PipelineStage::Audit,
+                completed: 1,
+                total: 2,
+                label: ".canons/cli/rule-a.md (pass)".to_string(),
+            });
+            sink.emit(&TelemetryEvent::StageProgress {
+                stage: PipelineStage::Audit,
+                completed: 2,
+                total: 2,
+                label: ".canons/cli/rule-b.md (fail)".to_string(),
+            });
+
+            let rendered = String::from_utf8(sink.into_inner()).expect("utf8 stderr");
+            assert!(!rendered.contains("-> intake started"));
+            assert!(rendered.contains("[telemetry] ok intake (2ms)"));
+            assert!(rendered.contains("[telemetry] -> audit started"));
+            assert!(rendered.contains("[telemetry] [audit 1/2] .canons/cli/rule-a.md (pass)"));
+            assert!(rendered.contains("[telemetry] [audit 2/2] .canons/cli/rule-b.md (fail)"));
         }
     }
 }

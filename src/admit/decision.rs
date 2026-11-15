@@ -243,6 +243,14 @@ fn build_exhibit_noul_question(canon_ref: &str, canon: &Canon, exhibit_id: &str)
 
 type PairBatchResult = Result<Vec<(String, ExhibitAssessment)>, AdmitError>;
 
+fn format_admit_batch_label(batch_idx: usize, total: usize, pair_count: usize) -> String {
+    if total == 1 {
+        format!("{pair_count} exhibit pair(s)")
+    } else {
+        format!("batch {} ({pair_count} exhibit pair(s))", batch_idx + 1)
+    }
+}
+
 fn run_pair_batches(
     prepared: &[(Vec<PairSubject>, DecisionRequest)],
     concurrency_limit: usize,
@@ -250,12 +258,15 @@ fn run_pair_batches(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> PairBatchResult {
-    let worker_count = concurrency_limit.min(prepared.len()).max(1);
+    let total = prepared.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut combined = Vec::new();
-        for (batch_pairs, request) in prepared {
+        for (idx, (batch_pairs, request)) in prepared.iter().enumerate() {
             let response = provider.evaluate_decisions(request)?;
             let decoded = fold_pair_batch(&response, batch_pairs, threshold, model_specifier)?;
+            let label = format_admit_batch_label(idx, total, batch_pairs.len());
+            provider.record_progress(idx + 1, total, &label);
             combined.extend(decoded);
         }
         return Ok(combined);
@@ -263,8 +274,8 @@ fn run_pair_batches(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<PairBatchResult>>> =
-        Mutex::new((0..prepared.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<PairBatchResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -274,7 +285,7 @@ fn run_pair_batches(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared.len() {
+                    if idx >= total {
                         break;
                     }
                     let (batch_pairs, request) = &prepared[idx];
@@ -284,18 +295,24 @@ fn run_pair_batches(
                         .and_then(|resp| {
                             fold_pair_batch(&resp, batch_pairs, threshold, model_specifier)
                         });
-                    if res.is_err() {
+                    let succeeded = res.is_ok();
+                    if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if succeeded {
+                            guard.0 += 1;
+                            let label = format_admit_batch_label(idx, total, batch_pairs.len());
+                            provider.record_progress(guard.0, total, &label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = Vec::new();
     for slot in collected.into_iter().flatten() {
         combined.extend(slot?);

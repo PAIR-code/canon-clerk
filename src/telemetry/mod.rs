@@ -72,6 +72,15 @@ impl PipelineStage {
             Self::Audit => "audit",
         }
     }
+
+    /// Returns `true` when this stage invokes remote provider endpoints (`probe`, `apprise`,
+    /// `docket`, `admit`, `vet`, `audit`) rather than executing purely locally in milliseconds.
+    pub const fn is_remote(self) -> bool {
+        matches!(
+            self,
+            Self::Probe | Self::Apprise | Self::Docket | Self::Admit | Self::Vet | Self::Audit
+        )
+    }
 }
 
 impl fmt::Display for PipelineStage {
@@ -90,6 +99,18 @@ pub enum TelemetryEvent {
         stage: PipelineStage,
         /// ISO-8601 UTC wall-clock timestamp (`YYYY-MM-DDTHH:MM:SS.sssZ`).
         timestamp: String,
+    },
+    /// Reports incremental work-unit completion (`completed` of `total`) within an active stage.
+    StageProgress {
+        /// Active pipeline stage reporting incremental work-unit completion.
+        stage: PipelineStage,
+        /// Monotonic 1-based count of completed work units (`1..=total`).
+        completed: usize,
+        /// Total number of scheduled work units (batches, cases, or trial slices) in this stage.
+        total: usize,
+        /// Concise human-readable unit identifier (e.g., canon path or batch summary).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        label: String,
     },
     /// Streams an intermediate reasoning `delta` chunk associated with an active heuristic stage.
     Thought {
@@ -279,7 +300,7 @@ mod tests {
         }
 
         #[test]
-        fn test_all_four_telemetry_event_categories_serialize_deterministically() {
+        fn test_all_five_telemetry_event_categories_serialize_deterministically() {
             let events = [
                 TelemetryEvent::StageStart {
                     stage: PipelineStage::Intake,
@@ -289,6 +310,12 @@ mod tests {
                     stage: PipelineStage::Intake,
                     duration_ms: 4,
                     usage: None,
+                },
+                TelemetryEvent::StageProgress {
+                    stage: PipelineStage::Audit,
+                    completed: 1,
+                    total: 3,
+                    label: ".canons/cli/cli-flags-kebab-case.md".to_string(),
                 },
                 TelemetryEvent::Thought {
                     stage: PipelineStage::Apprise,
@@ -325,14 +352,18 @@ mod tests {
             );
             assert_eq!(
                 serialized[2],
-                r#"{"event":"Thought","stage":"apprise","delta":"Canon governs CLI flag naming."}"#
+                r#"{"event":"StageProgress","stage":"audit","completed":1,"total":3,"label":".canons/cli/cli-flags-kebab-case.md"}"#
             );
             assert_eq!(
                 serialized[3],
-                r#"{"event":"StageFinish","stage":"apprise","duration_ms":318,"usage":{"prompt_tokens":410,"completion_tokens":52,"reasoning_tokens":18,"total_tokens":480}}"#
+                r#"{"event":"Thought","stage":"apprise","delta":"Canon governs CLI flag naming."}"#
             );
             assert_eq!(
                 serialized[4],
+                r#"{"event":"StageFinish","stage":"apprise","duration_ms":318,"usage":{"prompt_tokens":410,"completion_tokens":52,"reasoning_tokens":18,"total_tokens":480}}"#
+            );
+            assert_eq!(
+                serialized[5],
                 r#"{"event":"PipelineFinish","total_duration_ms":325,"total_tokens":480}"#
             );
 

@@ -1224,6 +1224,12 @@ mod tests {
                 .iter()
                 .map(|ev| match ev {
                     TelemetryEvent::StageStart { stage, .. } => format!("start:{stage}"),
+                    TelemetryEvent::StageProgress {
+                        stage,
+                        completed,
+                        total,
+                        ..
+                    } => format!("progress:{stage}:{completed}/{total}"),
                     TelemetryEvent::Thought { stage, delta } => format!("thought:{stage}:{delta}"),
                     TelemetryEvent::StageFinish { stage, usage, .. } => {
                         format!("finish:{stage}:{}", usage.map_or(0, |u| u.total_tokens))

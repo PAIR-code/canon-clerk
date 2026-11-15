@@ -122,10 +122,11 @@ pub(super) fn execute_generative_vetting(
         })
         .collect();
 
-    let worker_count = params.concurrency_limit.min(prepared_cases.len()).max(1);
+    let total = prepared_cases.len();
+    let worker_count = params.concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut cases = BTreeMap::new();
-        for (case, req) in prepared_cases.iter().zip(&requests) {
+        for (idx, (case, req)) in prepared_cases.iter().zip(&requests).enumerate() {
             let resp = provider.generate_structured(req)?;
             let decoded = decode_vet_payload(
                 &resp.payload,
@@ -133,6 +134,8 @@ pub(super) fn execute_generative_vetting(
                 params.threshold,
                 params.screener_model,
             )?;
+            let label = format!("{} ({})", case.canon_ref, decoded.vetting_status.as_str());
+            provider.record_progress(idx + 1, total, &label);
             cases.insert(case.canon_ref.clone(), decoded);
         }
         return Ok(cases);
@@ -140,8 +143,8 @@ pub(super) fn execute_generative_vetting(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<VetCaseSlot>> =
-        Mutex::new((0..prepared_cases.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<VetCaseSlot>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -151,7 +154,7 @@ pub(super) fn execute_generative_vetting(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared_cases.len() {
+                    if idx >= total {
                         break;
                     }
                     let case = &prepared_cases[idx];
@@ -168,18 +171,25 @@ pub(super) fn execute_generative_vetting(
                             )
                             .map(|decoded| (case.canon_ref.clone(), decoded))
                         });
-                    if res.is_err() {
+                    let status_label = res.as_ref().ok().map(|(_, d)| {
+                        format!("{} ({})", case.canon_ref, d.vetting_status.as_str())
+                    });
+                    if status_label.is_none() {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if let Some(ref label) = status_label {
+                            guard.0 += 1;
+                            provider.record_progress(guard.0, total, label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut cases = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         let (canon_ref, assessment) = slot?;

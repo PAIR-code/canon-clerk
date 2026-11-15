@@ -80,7 +80,7 @@ flowchart LR
    Evaluates active cases using `caseload.config.screener_model`:
    - **Generative Per-Case Screening (`google:*`, e.g., `gemini-flash-lite-latest`):** Evaluates each active case in an **independent, isolated prompt turn** at `temperature: 0.0` (with extended thinking omitted so `gemini-flash-lite-latest` executes with zero thinking tokens), executing case calls concurrently up to `--admit-concurrency` / `--max-concurrent-calls` (default `4`).
    - **Discriminative Shared-State Batching (`typesafe:*`, e.g., `jev-latest`):** Packs `(canon, exhibit)` admissibility hypotheses (`nouls`) across active cases into context-budgeted shared-state batches so each batch encodes its union of candidate exhibits once rather than re-encoding multi-file diffs per case, executing batches concurrently up to `--admit-concurrency` with zero output tokens and zero cross-question interference.
-   - **Telemetry Aggregation & Fail-Fast:** Sums token accounting and thought events across all screening calls into `StageFinish` telemetry; if any call fails provider transport or schema validation, the stage fails fast.
+   - **Telemetry Aggregation & Fail-Fast:** Emits incremental `StageProgress` completion counts as per-case calls or shared-state batches return, and sums token accounting and thought events across all screening calls into `StageFinish` telemetry; if any call fails provider transport or schema validation, the stage fails fast.
 4. **Constrained Decoding Schema (Domain-Indirected, Reason-First):**  
    Enforces a constant-size structured JSON wire array pairing each `file_path` (file path or metadata plane identifier) with `admissibility_summary` generated before `admissibility_score`:
    ```json
