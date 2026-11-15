@@ -14,14 +14,15 @@
 
 //! Core domain execution engine for the `configure` Caseload DAG stage (`docs/architecture/nodes/configure.md`).
 
-pub mod providers;
+mod providers;
 pub mod store;
 mod thinking;
 
 pub use providers::{
     MissingCredentialsReason, PROVIDER_CAPABILITIES, ProviderCapability, ProviderRole,
-    is_discriminative_only_provider, provider_capability, resolve_default_tiers,
-    resolve_default_tiers_with_table, resolve_provider_api_key, resolve_provider_credential,
+};
+pub(crate) use providers::{
+    is_discriminative_only_provider, resolve_default_tiers, resolve_provider_api_key,
     verified_credential_env_vars,
 };
 pub use store::{

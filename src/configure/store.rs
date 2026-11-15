@@ -126,7 +126,7 @@ pub struct StoredConfig {
 
 impl StoredConfig {
     /// Returns the non-empty API key configured under `providers.<slug>.apiKey` (or optional legacy `alias`).
-    pub fn provider_api_key(&self, slug: &str, alias: Option<&str>) -> Option<&str> {
+    pub(crate) fn provider_api_key(&self, slug: &str, alias: Option<&str>) -> Option<&str> {
         self.providers
             .get(slug)
             .or_else(|| alias.and_then(|alt| self.providers.get(alt)))

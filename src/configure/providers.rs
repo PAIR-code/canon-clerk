@@ -115,17 +115,17 @@ pub enum MissingCredentialsReason {
 }
 
 /// Looks up the declarative [`ProviderCapability`] entry for a canonical provider slug.
-pub fn provider_capability(slug: &str) -> Option<&'static ProviderCapability> {
+fn provider_capability(slug: &str) -> Option<&'static ProviderCapability> {
     PROVIDER_CAPABILITIES.iter().find(|cap| cap.slug == slug)
 }
 
 /// Returns `true` when `slug` names a discriminative-only screener provider disallowed on `auditor_model`.
-pub fn is_discriminative_only_provider(slug: &str) -> bool {
+pub(crate) fn is_discriminative_only_provider(slug: &str) -> bool {
     provider_capability(slug).is_some_and(|cap| cap.role == ProviderRole::DiscriminativeScreener)
 }
 
 /// Resolves the non-empty API key for `cap` across CLI flags, environment variables, and `config.json`.
-pub fn resolve_provider_credential<'a>(
+fn resolve_provider_credential<'a>(
     cap: &ProviderCapability,
     options: &'a ConfigureOptions,
 ) -> Option<&'a str> {
@@ -142,7 +142,7 @@ pub fn resolve_provider_credential<'a>(
 }
 
 /// Resolves and validates the API key for `slug` against [`PROVIDER_CAPABILITIES`].
-pub fn resolve_provider_api_key(
+pub(crate) fn resolve_provider_api_key(
     slug: &str,
     options: &ConfigureOptions,
 ) -> Result<String, ConfigureError> {
@@ -166,7 +166,7 @@ fn missing_explicit_provider_key_error(slug: &str) -> ConfigureError {
 
 /// Deterministically resolves `(screener_model, auditor_model)` from `table` and available credentials
 /// in `options` (`docs/architecture/nodes/configure.md` §4).
-pub fn resolve_default_tiers_with_table(
+fn resolve_default_tiers_with_table(
     table: &[ProviderCapability],
     options: &ConfigureOptions,
 ) -> (String, String) {
@@ -221,13 +221,13 @@ pub fn resolve_default_tiers_with_table(
 }
 
 /// Deterministically resolves default `(screener_model, auditor_model)` from [`PROVIDER_CAPABILITIES`].
-pub fn resolve_default_tiers(options: &ConfigureOptions) -> (String, String) {
+pub(crate) fn resolve_default_tiers(options: &ConfigureOptions) -> (String, String) {
     resolve_default_tiers_with_table(PROVIDER_CAPABILITIES, options)
 }
 
 /// Returns the deduplicated, lexicographically sorted credential environment variable identifiers
 /// (`"GEMINI_API_KEY"`, `"TYPESAFE_API_KEY"`, etc.) verified for the active tiers on `config`.
-pub fn verified_credential_env_vars(config: &CaseloadConfig) -> Vec<&'static str> {
+pub(crate) fn verified_credential_env_vars(config: &CaseloadConfig) -> Vec<&'static str> {
     let mut vars = BTreeSet::new();
     for slug in [
         model_provider(&config.screener_model),
