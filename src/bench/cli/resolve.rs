@@ -26,6 +26,7 @@ use crate::bench::{
 use crate::caseload::normalize_unit_score;
 use crate::cli::CliError;
 use crate::docket::ENV_DOCKET_THRESHOLD;
+use crate::vet::ENV_VET_THRESHOLD;
 use clap::ValueEnum;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -88,13 +89,13 @@ fn resolve_stage(
         return BenchmarkStage::from_str(raw, true).map_err(|_| {
             CliError::usage(format!(
                 "Invalid stage `{raw}` in `{ENV_BENCH_STAGE}`.\n  \
-                 Hint: Pass `--stage <apprise|docket|admit|audit>` or set `{ENV_BENCH_STAGE}=apprise`."
+                 Hint: Pass `--stage <apprise|docket|admit|vet|audit>` or set `{ENV_BENCH_STAGE}=apprise`."
             ))
         });
     }
     Err(CliError::usage(format!(
-        "Missing required benchmark `--stage <apprise|docket|admit|audit>`.\n  \
-         Hint: Pass `--stage apprise`, `--stage docket`, `--stage admit`, or `--stage audit` (or set `{ENV_BENCH_STAGE}`)."
+        "Missing required benchmark `--stage <apprise|docket|admit|vet|audit>`.\n  \
+         Hint: Pass `--stage apprise`, `--stage docket`, `--stage admit`, `--stage vet`, or `--stage audit` (or set `{ENV_BENCH_STAGE}`)."
     )))
 }
 
@@ -145,6 +146,7 @@ fn resolve_threshold(
         BenchmarkStage::Apprise => Some(ENV_APPRISE_THRESHOLD),
         BenchmarkStage::Docket => Some(ENV_DOCKET_THRESHOLD),
         BenchmarkStage::Admit => Some(ENV_ADMIT_THRESHOLD),
+        BenchmarkStage::Vet => Some(ENV_VET_THRESHOLD),
         BenchmarkStage::Audit => Some(ENV_AUDIT_THRESHOLD),
     };
     for key in [Some(ENV_BENCH_THRESHOLD), stage_env].into_iter().flatten() {

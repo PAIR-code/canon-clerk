@@ -23,8 +23,9 @@ use crate::apprise::{
     DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY,
 };
 use crate::audit::{DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, ENV_AUDIT_CONCURRENCY};
-use crate::caseload::{Caseload, CaseloadIntake, IntakeScope, normalize_unit_score};
+use crate::caseload::{Caseload, IntakeScope, normalize_unit_score};
 use crate::cli::CanonSelectionArgs;
+use crate::cli::closure::merge_metadata_onto_intake;
 use crate::configure::{ConfigureOptions, StoredConfig, execute_configure};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{
@@ -33,6 +34,7 @@ use crate::docket::{
 };
 use crate::intake::{IntakeOptions, execute_intake};
 use crate::validate::{ValidateOptions, execute_validate};
+use crate::vet::{DEFAULT_VET_MAX_CONCURRENT_CALLS, ENV_VET_CONCURRENCY};
 use std::collections::BTreeMap;
 
 /// Input options for resolving one or more [`ConsistencyConfigSpec`] entries in a benchmark run.
@@ -101,6 +103,7 @@ const fn default_concurrency_for_stage(stage: BenchmarkStage) -> usize {
         BenchmarkStage::Apprise => DEFAULT_APPRISE_MAX_CONCURRENT_CALLS,
         BenchmarkStage::Admit => DEFAULT_ADMIT_MAX_CONCURRENT_CALLS,
         BenchmarkStage::Docket => DEFAULT_DOCKET_MAX_CONCURRENT_CALLS,
+        BenchmarkStage::Vet => DEFAULT_VET_MAX_CONCURRENT_CALLS,
         BenchmarkStage::Audit => DEFAULT_AUDIT_MAX_CONCURRENT_CALLS,
     }
 }
@@ -124,6 +127,7 @@ fn resolve_effective_concurrency(
         BenchmarkStage::Apprise => ENV_APPRISE_CONCURRENCY,
         BenchmarkStage::Admit => ENV_ADMIT_CONCURRENCY,
         BenchmarkStage::Docket => ENV_DOCKET_CONCURRENCY,
+        BenchmarkStage::Vet => ENV_VET_CONCURRENCY,
         BenchmarkStage::Audit => ENV_AUDIT_CONCURRENCY,
     };
     for key in [ENV_BENCH_CONCURRENCY, stage_key, ENV_MAX_CONCURRENT_CALLS] {
@@ -144,6 +148,7 @@ fn resolve_effective_concurrency(
             BenchmarkStage::Apprise => cfg.apprise_concurrency,
             BenchmarkStage::Admit => cfg.admit_concurrency,
             BenchmarkStage::Docket => cfg.docket_concurrency,
+            BenchmarkStage::Vet => cfg.vet_concurrency,
             BenchmarkStage::Audit => cfg.audit_concurrency,
         };
         if let Some(val) = stored_val {
@@ -176,9 +181,10 @@ fn resolve_batch_sweep_values(
 
     let stage_key = match stage {
         BenchmarkStage::Apprise => ENV_APPRISE_BATCH_SIZE,
-        BenchmarkStage::Docket | BenchmarkStage::Admit | BenchmarkStage::Audit => {
-            ENV_DOCKET_BATCH_SIZE
-        }
+        BenchmarkStage::Docket
+        | BenchmarkStage::Admit
+        | BenchmarkStage::Vet
+        | BenchmarkStage::Audit => ENV_DOCKET_BATCH_SIZE,
     };
     for key in [stage_key, ENV_MAX_CANONS_PER_CALL] {
         if let Some(raw) = non_empty_env(env, key) {
@@ -196,9 +202,10 @@ fn resolve_batch_sweep_values(
     if let Some(cfg) = stored {
         let stored_val = match stage {
             BenchmarkStage::Apprise => cfg.apprise_batch_size,
-            BenchmarkStage::Docket | BenchmarkStage::Admit | BenchmarkStage::Audit => {
-                cfg.docket_batch_size
-            }
+            BenchmarkStage::Docket
+            | BenchmarkStage::Admit
+            | BenchmarkStage::Vet
+            | BenchmarkStage::Audit => cfg.docket_batch_size,
         };
         if let Some(val) = stored_val {
             if val == 0 {
@@ -306,10 +313,16 @@ pub(crate) fn clear_stage_and_downstream(
         BenchmarkStage::Docket => {
             caseload.docket = None;
             caseload.evidence = None;
+            caseload.vetting = None;
             caseload.verdict = None;
         }
         BenchmarkStage::Admit => {
             caseload.evidence = None;
+            caseload.vetting = None;
+            caseload.verdict = None;
+        }
+        BenchmarkStage::Vet => {
+            caseload.vetting = None;
             caseload.verdict = None;
         }
         BenchmarkStage::Audit => {
@@ -348,7 +361,7 @@ fn resolve_upstream_intake(
     {
         let meta_changed =
             has_non_empty(&intake_opts.pr_title) || has_non_empty(&intake_opts.pr_body);
-        existing.intake = Some(merge_intake_metadata(prev_intake, intake_opts));
+        existing.intake = Some(merge_metadata_onto_intake(prev_intake, intake_opts));
         return Ok((
             existing.clone(),
             meta_changed && stage != BenchmarkStage::Apprise,
@@ -382,34 +395,6 @@ fn resolve_upstream_intake(
     Ok((updated, true))
 }
 
-fn merge_intake_metadata(mut base: CaseloadIntake, opts: &IntakeOptions) -> CaseloadIntake {
-    if let Some(intent) = opts
-        .intent
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        base.intent = Some(intent.to_string());
-    }
-    if let Some(title) = opts
-        .pr_title
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        base.pr_title = Some(title.to_string());
-    }
-    if let Some(body) = opts
-        .pr_body
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        base.pr_body = Some(body.to_string());
-    }
-    base
-}
-
 fn has_non_empty(opt: &Option<String>) -> bool {
     opt.as_deref().is_some_and(|s| !s.trim().is_empty())
 }
@@ -435,7 +420,10 @@ fn resolve_upstream_discover(
         BenchmarkStage::Apprise => {
             canons.all_canons || (!intake_has_targets && !canons.canon.is_empty())
         }
-        BenchmarkStage::Docket | BenchmarkStage::Admit | BenchmarkStage::Audit => canons.all_canons,
+        BenchmarkStage::Docket
+        | BenchmarkStage::Admit
+        | BenchmarkStage::Vet
+        | BenchmarkStage::Audit => canons.all_canons,
     };
 
     let discover_opts = DiscoverOptions {

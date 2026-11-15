@@ -22,7 +22,7 @@ The full DAG consists of:
 - **Branch B (The Environment Track):** `configure`
 - **Diagnostic Leaf:** `probe` (depends strictly on `configure`)
 - **Dual Track Convergence:**
-  - **The Contentious Track (Adjudication of In-Flight Changes):** `docket` $\longrightarrow$ `admit` $\longrightarrow$ `audit`
+  - **The Contentious Track (Adjudication of In-Flight Changes):** `docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`
   - **The Apprisal Track (Prospective Jurisprudence):** `apprise` (evaluates prospective design intent against candidate canons, bypassing `docket`)
 
 ```mermaid
@@ -32,7 +32,7 @@ flowchart TD
 
     validate --> docket
     configure --> docket
-    docket --> admit --> audit
+    docket --> admit --> vet --> audit
 
     validate --> apprise["apprise (apprisal)"]
     configure --> apprise
@@ -43,27 +43,28 @@ When an operator or CI workflow executes a subcommand $T$, the runner constructs
 
 | Terminus Node ($T$) | Transitive Dependency Closure $\text{Closure}(T)$ | Pruned Branches & Nodes |
 | :--- | :--- | :--- |
-| `intake` | $\{\text{intake}\}$ | Branch B (`configure`), `probe`, downstream nodes (`discover`, `validate`, `docket`, `admit`, `audit`, `apprise`) |
-| `discover` | $\{\text{intake}, \text{discover}\}$ | Branch B (`configure`), `probe`, downstream nodes (`validate`, `docket`, `admit`, `audit`, `apprise`) |
-| `validate` | $\{\text{intake}, \text{discover}, \text{validate}\}$ | Branch B (`configure`), `probe`, downstream nodes (`docket`, `admit`, `audit`, `apprise`) |
-| `configure` | $\{\text{configure}\}$ | Branch A (`intake`, `discover`, `validate`), `probe`, adjudication/apprisal spines (`docket`, `admit`, `audit`, `apprise`) |
-| `probe` | $\{\text{configure}, \text{probe}\}$ | Branch A (`intake`, `discover`, `validate`), adjudication/apprisal spines (`docket`, `admit`, `audit`, `apprise`) |
-| `docket` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}\}$ | `probe`, `apprise`, downstream adjudication nodes (`admit`, `audit`) |
-| `admit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}\}$ | `probe`, `apprise`, `audit` |
-| `audit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{audit}\}$ | `probe`, `apprise` |
-| `apprise` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{apprise}\}$ | `probe`, contentious adjudication spine (`docket`, `admit`, `audit`) |
+| `intake` | $\{\text{intake}\}$ | Branch B (`configure`), `probe`, downstream nodes (`discover`, `validate`, `docket`, `admit`, `vet`, `audit`, `apprise`) |
+| `discover` | $\{\text{intake}, \text{discover}\}$ | Branch B (`configure`), `probe`, downstream nodes (`validate`, `docket`, `admit`, `vet`, `audit`, `apprise`) |
+| `validate` | $\{\text{intake}, \text{discover}, \text{validate}\}$ | Branch B (`configure`), `probe`, downstream nodes (`docket`, `admit`, `vet`, `audit`, `apprise`) |
+| `configure` | $\{\text{configure}\}$ | Branch A (`intake`, `discover`, `validate`), `probe`, adjudication/apprisal spines (`docket`, `admit`, `vet`, `audit`, `apprise`) |
+| `probe` | $\{\text{configure}, \text{probe}\}$ | Branch A (`intake`, `discover`, `validate`), adjudication/apprisal spines (`docket`, `admit`, `vet`, `audit`, `apprise`) |
+| `docket` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}\}$ | `probe`, `apprise`, downstream adjudication nodes (`admit`, `vet`, `audit`) |
+| `admit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}\}$ | `probe`, `apprise`, `vet`, `audit` |
+| `vet` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{vet}\}$ | `probe`, `apprise`, `audit` |
+| `audit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{vet}, \text{audit}\}$ | `probe`, `apprise` |
+| `apprise` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{apprise}\}$ | `probe`, contentious adjudication spine (`docket`, `admit`, `vet`, `audit`) |
 
 ### Transitive Closure Pruning Rules
 1. **Branch A Independence:** `configure` and `probe` execute with zero knowledge of Git diffs, modified files, or repository canons.
 2. **Branch B Independence:** `intake`, `discover`, and `validate` execute with zero knowledge of AI providers, model configurations, or API credentials.
-3. **Diagnostic Isolation:** `probe` is never scheduled during review cascades (`docket`, `admit`, `audit`), eliminating unnecessary health-check latency prior to screening.
+3. **Diagnostic Isolation:** `probe` is never scheduled during review cascades (`docket`, `admit`, `vet`, `audit`), eliminating unnecessary health-check latency prior to screening.
 4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons`, Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidate_canons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
 
 ---
 
 ## 3. The Guarded / Lazy Scheduling Invariant
 
-When executing toward a converged target (`docket`, `admit`, `audit`), both Branch A (`validate`) and Branch B (`configure`) are required ancestors. However, running `configure` unconditionally at startup would break a critical engineering invariant: **PRs touching un-governed files must pass in CI without requiring API credentials or external secret provisioning.**
+When executing toward a converged target (`docket`, `admit`, `vet`, `audit`), both Branch A (`validate`) and Branch B (`configure`) are required ancestors. However, running `configure` unconditionally at startup would break a critical engineering invariant: **PRs touching un-governed files must pass in CI without requiring API credentials or external secret provisioning.**
 
 To uphold this guarantee, the scheduler enforces the **Guarded / Lazy Scheduling Invariant**:
 
@@ -104,8 +105,8 @@ git diff origin/main | canon-clerk audit --diff -
 ```
 The runner:
 1. Initializes a blank `Caseload`.
-2. Resolves the transitive closure for `audit`: `[intake, discover, validate, configure, docket, admit, audit]`.
-3. Executes each node in-memory sequentially according to the guarded scheduling invariant.
+2. Resolves the transitive closure for `audit`: `[intake, discover, validate, configure, docket, admit, vet, audit]`.
+3. Executes each node in-memory sequentially according to the guarded scheduling invariant (automatically skipping `vet` when `screener_model` is generative so contested cases proceed directly to `audit` without duplicate autoregressive turns).
 4. Returns the final verdict and exit code.
 
 ### Pattern B: Composable Unix Pipelining (`--caseload <path|->`)
@@ -117,24 +118,26 @@ git diff origin/main | canon-clerk intake --diff - --json > caseload-1.json
 canon-clerk discover --caseload caseload-1.json --json > caseload-2.json
 canon-clerk validate --caseload caseload-2.json --json > caseload-3.json
 
-# 2. Heuristic Adjudication in CI worker (with GEMINI_API_KEY):
+# 2. Heuristic Screening & Adjudication in CI worker:
 canon-clerk configure --caseload caseload-3.json --json > caseload-4.json
 canon-clerk docket --caseload caseload-4.json --json > caseload-5.json
 canon-clerk admit --caseload caseload-5.json --json > caseload-6.json
-canon-clerk audit --caseload caseload-6.json
+canon-clerk vet --caseload caseload-6.json --output-caseload caseload-7.json \
+  || canon-clerk audit --caseload caseload-7.json
 ```
 
 ### Pattern C: The Stage-Prefixed Flag Scoping Contract
 To prevent cross-stage parameter leakage in telescoping cascades, all stage-specific tuning parameters use **explicit stage-prefixed flags**:
 - `--docket-threshold <float>` (sets `docket`'s colorability threshold, default: `0.5`)
 - `--admit-threshold <float>` (sets `admit`'s admissibility threshold, default: `0.5`)
-- `--audit-threshold <float>` (sets `audit`'s compliance threshold, default: `0.5`)
-- `--audit-fastpass-threshold <float>` (sets `audit`'s two-tier discriminative fast-pass threshold, default: `0.80`)
+- `--vet-threshold <float>` (sets `vet`'s prima facie compliance threshold, default: `0.8`)
+- `--audit-threshold <float>` (sets `audit`'s substantive compliance threshold, default: `0.5`)
 - `--apprise-threshold <float>` (sets `apprise`'s apprisal threshold, default: `0.5`)
 
 #### Scoping & Validation Invariants:
 1. **Transitive Acceptance:** A subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure.
-   - `canon-clerk audit` accepts `--audit-threshold`, `--audit-fastpass-threshold`, `--admit-threshold`, and `--docket-threshold` because `docket` and `admit` precede `audit`.
+   - `canon-clerk audit` accepts `--audit-threshold`, `--vet-threshold`, `--admit-threshold`, and `--docket-threshold` because `docket`, `admit`, and `vet` precede `audit`.
+   - `canon-clerk vet` accepts `--vet-threshold`, `--admit-threshold`, and `--docket-threshold`.
    - `canon-clerk admit` accepts `--docket-threshold` and `--admit-threshold`.
    - `canon-clerk docket` accepts `--docket-threshold`.
    - `canon-clerk apprise` accepts `--apprise-threshold`.
@@ -157,14 +160,15 @@ The scheduler determines the node sequence using a deterministic static table. F
 | `canon-clerk probe` | `[configure, probe]` | Skips `configure` if `caseload.config` present;<br>Skips `probe` if `caseload.probe` present |
 | `canon-clerk docket` | `[intake, discover, validate, configure, docket]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`) is already present |
 | `canon-clerk admit` | `[intake, discover, validate, configure, docket, admit]` | Skips any node whose corresponding field is already populated |
-| `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, audit]` | Skips any node whose corresponding field is already populated |
+| `canon-clerk vet` | `[intake, discover, validate, configure, docket, admit, vet]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`, `.evidence`, `.vetting`) is already populated |
+| `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, vet, audit]` | Skips any node whose corresponding field is already populated (and deterministically skips `vet` when `screener_model` is generative and `.vetting` is absent) |
 | `canon-clerk apprise` | `[intake, discover, validate, configure, apprise]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.apprisal`) is already present |
 
 ### Missing Input Source Guard vs. Empty Stream Short-Circuit
 The scheduler and CLI enforce strict input handling to distinguish operator error from legitimate no-ops:
 
 1. **Missing Source Guard (Naked Invocation $\implies$ Exit 2):**  
-   When a subcommand requiring filing context or explicit scope (`intake`, `discover`, `validate`, `docket`, `admit`, `audit`, `apprise`) is invoked without file arguments, diff flags (`--diff`), intent flags (`--intent`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
+   When a subcommand requiring filing context or explicit scope (`intake`, `discover`, `validate`, `docket`, `admit`, `vet`, `audit`, `apprise`) is invoked without file arguments, diff flags (`--diff`), intent flags (`--intent`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
 
 2. **Empty Stream Short-Circuit (Legitimate No-op $\implies$ Exit 0):**  
    When an operator explicitly designates an input source (e.g. `git diff origin/main | canon-clerk audit --diff -`) and that source produces zero changes:
@@ -173,15 +177,16 @@ The scheduler and CLI enforce strict input handling to distinguish operator erro
    - The runner logs `0 modified files; 0 candidate canons matched` and short-circuits cleanly with **exit code 0**.
 
 3. **The Case or Controversy Invariant:**  
-   The heuristic adjudication spine (`docket`, `admit`, `audit`) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the prospective apprisal spine (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries and prospective file paths to determine governing statutes.
+   The heuristic adjudication spine (`docket`, `admit`, `vet`, `audit`) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the prospective apprisal spine (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries and prospective file paths to determine governing statutes.
 
 ### Short-Circuit Fast Exit Conditions
-Across the pipeline, five deterministic short-circuit conditions trigger early termination:
+Across the pipeline, six deterministic short-circuit conditions trigger early termination:
 1. **At `discover`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (`intake` and `discovery` attached to emitted Caseload; downstream nodes skipped).
 2. **At `validate`:** If `validation.has_errors == true` $\implies$ Exit `1` immediately (malformed canon syntax; zero tokens spent).
 3. **At `docket`:** If `active_docket` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at macro screening; zero trials scheduled).
 4. **At `admit`:** If all active cases retain zero admitted exhibits $\implies$ Exit `0` immediately (no admissible evidence; zero trials scheduled).
-5. **At `apprise`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at discovery; empty apprisal brief attached to emitted Caseload).
+5. **At `vet` (cascading into `audit`):** If `contested_cases` is empty $\implies$ `audit` folds `vetted_cases` into a passing `.verdict` and exits `0` immediately with zero `auditor_model` calls.
+6. **At `apprise`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at discovery; empty apprisal brief attached to emitted Caseload).
 
 ---
 
@@ -196,7 +201,8 @@ A zero-result or clean run can occur at any stage along the DAG:
 3. **At `validate`:** Candidate canons failed AST linting (aborts with Exit 1).
 4. **At `docket`:** Canons were dismissed by the screener model as uncolorable for the change.
 5. **At `admit`:** Diff hunks and files failed admissibility thresholds (insufficient relevant evidence).
-6. **At `audit`:** Admitted exhibits were fully compliant with canon statutes.
+6. **At `vet`:** Active cases passed prima facie compliance vetting on the papers (`contested_cases: []`, zero `auditor_model` trials required).
+7. **At `audit`:** Contested exhibits were adjudicated compliant with canon statutes (or satisfied declared `Exception` clauses).
 
 ### The Funnel Receipt Format
 When a multi-stage command runs in human-readable mode (default TTY stdout), the terminal output prints a compact **Pipeline Funnel Receipt** summarizing the operational watermark of every executed ancestor node in the closure:
@@ -206,27 +212,31 @@ Pipeline Provenance:
   ✓ intake    : 1 target file ingested ('src/parser.rs', 45 diff lines)
   ✓ discover  : 3 candidate canons matched triggers (14 canons un-triggered)
   ✓ validate  : 3 candidate canons valid (0 errors, 0 warnings)
-  ✓ docket    : 1 case colorable ('error-messages-must-cite-grammar', 2 dismissed)
-  ⊘ admit     : 0 exhibits admitted (relevance scores below threshold 0.5)
-  ⊘ audit     : 0 trials scheduled (fast-forward: no admissible exhibits)
+  ✓ configure : screener 'typesafe:jev-latest', auditor 'google:gemini-pro-latest'
+  ✓ docket    : 2 case(s) colorable (1 dismissed, threshold 0.50)
+  ✓ admit     : 2 exhibit(s) admitted across 2 case(s) (0 excluded, threshold 0.50)
+  ✓ vet       : 2 case(s) vetted, 0 contested (threshold 0.80)
+  ⊘ audit     : 2 vetted, 0 trials scheduled (fast-forward: all active cases vetted)
 
-Verdict: PASS (0 active violations)
+Verdict: PASS (2 passed, 0 failed)
 ```
 
 ### Fast-Exit and Short-Circuit Watermarks
-When an early exit occurs, downstream stages are explicitly marked with `(fast-forward: <reason>)` or `(skipped)`, immediately surfacing the exact filtering stage:
+When an early exit or pass-through occurs, downstream stages are explicitly marked with `(fast-forward: <reason>)` or `skipped (...)`, immediately surfacing the exact filtering stage:
 
 ```text
 Pipeline Provenance:
   ✓ intake    : 1 target file ingested ('docs/faq.md')
   ⊘ discover  : 0 candidate canons matched triggers (17 canons evaluated)
   ⊘ validate  : (fast-forward: zero candidate canons)
+  ⊘ configure : (fast-forward: zero candidate canons)
   ⊘ docket    : (fast-forward: zero candidate canons)
   ⊘ admit     : (fast-forward: zero candidate canons)
+  ⊘ vet       : (fast-forward: zero candidate canons)
   ⊘ audit     : (fast-forward: zero candidate canons)
 
 Verdict: PASS (0 candidate canons governing target files)
 ```
 
 ### Machine-Readable Provenance (`--json`)
-When invoked with `--json`, the serialized output is the cumulative `Caseload` structure. Because each executed stage preserves its own namespace (`caseload.intake`, `caseload.discovery`, `caseload.docket`, `caseload.evidence`, `caseload.verdict`), programmatic consumers and CI pipelines receive bit-for-bit full provenance across every filter step without specialized flags.
+When invoked with `--json`, the serialized output is the cumulative `Caseload` structure. Because each executed stage preserves its own namespace (`caseload.intake`, `caseload.discovery`, `caseload.docket`, `caseload.evidence`, `caseload.vetting`, `caseload.verdict`), programmatic consumers and CI pipelines receive bit-for-bit full provenance across every filter step without specialized flags.

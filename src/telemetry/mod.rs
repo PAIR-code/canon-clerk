@@ -50,6 +50,8 @@ pub enum PipelineStage {
     Docket,
     /// Cascade Spine: Micro evidentiary relevance screening (`admissibility_score`).
     Admit,
+    /// Cascade Spine: Prima facie compliance vetting (`vetting_score`).
+    Vet,
     /// Cascade Spine: Substantive per-case compliance adjudication (`compliance_score`).
     Audit,
 }
@@ -66,6 +68,7 @@ impl PipelineStage {
             Self::Apprise => "apprise",
             Self::Docket => "docket",
             Self::Admit => "admit",
+            Self::Vet => "vet",
             Self::Audit => "audit",
         }
     }
@@ -260,6 +263,7 @@ mod tests {
                 (PipelineStage::Apprise, "apprise"),
                 (PipelineStage::Docket, "docket"),
                 (PipelineStage::Admit, "admit"),
+                (PipelineStage::Vet, "vet"),
                 (PipelineStage::Audit, "audit"),
             ];
 

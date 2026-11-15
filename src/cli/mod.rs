@@ -18,7 +18,7 @@ pub mod admit;
 pub mod apprise;
 pub mod args;
 pub mod audit;
-mod closure;
+pub(crate) mod closure;
 pub mod configure;
 pub mod discover;
 pub mod docket;
@@ -29,6 +29,7 @@ mod provenance;
 pub mod runners;
 pub mod telemetry;
 pub mod validate;
+pub mod vet;
 
 pub use admit::{
     AdmitArgs, AdmitFormat, run_admit, run_admit_live_with_telemetry,
@@ -76,6 +77,10 @@ pub use telemetry::{
 pub use validate::{
     ValidateArgs, ValidateFormat, run_validate, run_validate_in_workspace,
     run_validate_with_telemetry,
+};
+pub use vet::{
+    VetArgs, VetFormat, run_vet, run_vet_live_with_telemetry, run_vet_with_snapshot_and_provider,
+    run_vet_with_telemetry,
 };
 
 use crate::probe::MultiProviderEndpointProber;
@@ -163,6 +168,8 @@ pub enum Commands {
     Docket(DocketArgs),
     /// Micro evidentiary triage: screen candidate file and metadata exhibits per active case.
     Admit(AdmitArgs),
+    /// Prima facie compliance vetting: clear uncontested compliant cases prior to judicial audit.
+    Vet(VetArgs),
     /// Judicial adjudication: evaluate admitted exhibits against canon statutes and render verdicts.
     Audit(AuditArgs),
 }
@@ -178,6 +185,7 @@ impl Commands {
             | Self::Apprise(_)
             | Self::Docket(_)
             | Self::Admit(_)
+            | Self::Vet(_)
             | Self::Audit(_) => false,
         }
     }
@@ -357,6 +365,9 @@ fn dispatch_subcommand(
         Commands::Admit(args) => {
             run_admit_live_with_telemetry(args, stdin, stdout, session)?;
         }
+        Commands::Vet(args) => {
+            run_vet_live_with_telemetry(args, stdin, stdout, session)?;
+        }
         Commands::Audit(args) => {
             run_audit_live_with_telemetry(args, stdin, stdout, session)?;
         }
@@ -443,6 +454,7 @@ mod tests {
                     | Commands::Apprise(_)
                     | Commands::Docket(_)
                     | Commands::Admit(_)
+                    | Commands::Vet(_)
                     | Commands::Audit(_),
                 )
                 | None => {

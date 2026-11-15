@@ -37,7 +37,7 @@ flowchart LR
 
 - **Direct Prerequisites:** `configure` (requires resolved provider credentials and model specifiers in `caseload.config`).
 - **Transitive Prerequisites:** None.
-- **Pruned from Cascades:** `probe` is **never executed during review cascades** (`canon-clerk audit`). This ensures that evaluation runs do not incur redundant health-check latency prior to screening.
+- **Pruned from Cascades:** `probe` is **never executed during review cascades** (`canon-clerk vet`, `canon-clerk audit`). This ensures that evaluation runs do not incur redundant health-check latency prior to screening.
 
 ---
 
@@ -50,7 +50,7 @@ flowchart LR
 - **Auditor Endpoint Health (`auditor`):** Connectivity probe result for `.config.auditor_model` with the same diagnostic fields (`status`, `latency_ms`, `model`, and optional `error`).
 
 ### Data Plane & Diagnostic Invariants
-1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`docket`, `admit`, `audit`, `apprise`), substantive review runs never populate or depend on `.probe`.
+1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`docket`, `admit`, `vet`, `audit`, `apprise`), substantive review runs never populate or depend on `.probe`.
 2. **Non-Throwing Diagnostic Capture:** Endpoint timeouts, HTTP 4xx/5xx responses, and authentication rejections are captured inside the respective endpoint health record (`status: "error"`, `error: "<reason>"`) on `.probe` before the CLI adapter maps any failure to exit code `2`.
 
 ---

@@ -23,7 +23,8 @@ use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, map_discover_error, resolve_branch_b_options, run_branch_b_configure,
+    build_live_model_provider, map_discover_error, resolve_screener_branch_b_options,
+    run_branch_b_configure,
 };
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
@@ -125,7 +126,7 @@ pub(super) fn execute_jit_configure_and_apprise(
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
-    let configure_options = resolve_branch_b_options(&args.provider, env)?;
+    let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
     let max_canons_per_call = resolve_apprise_batch_size(
         args.apprise_batch_size,
         env,

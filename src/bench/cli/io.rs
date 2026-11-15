@@ -55,14 +55,17 @@ pub(super) fn populate_stage_disk_contents(
     caseload: &Caseload,
     snapshot: &mut WorkspaceSnapshot,
 ) {
-    if !matches!(stage, BenchmarkStage::Admit | BenchmarkStage::Audit) {
+    if !matches!(
+        stage,
+        BenchmarkStage::Admit | BenchmarkStage::Vet | BenchmarkStage::Audit
+    ) {
         return;
     }
     let Some(disc) = &caseload.discovery else {
         return;
     };
     snapshot.populate_file_contents_from_disk(workspace_root, &disc.target_files);
-    if stage == BenchmarkStage::Audit {
+    if matches!(stage, BenchmarkStage::Vet | BenchmarkStage::Audit) {
         let mut ref_paths = Vec::new();
         for canon_ref in &disc.candidate_canons {
             if let Some(canon) = snapshot.canons.get(canon_ref) {

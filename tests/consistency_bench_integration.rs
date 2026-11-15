@@ -180,6 +180,34 @@ mod live_disk_zero_candidate_and_artifact_io {
         assert!(saved_caseload.intake.is_some());
         assert!(saved_caseload.discovery.is_some());
 
+        // Verify `--stage vet` defaults to threshold 0.80 and runs zero-candidate sweeps offline
+        let vet_cli = ConsistencyBenchCli::try_parse_from([
+            "consistency_bench",
+            "--stage",
+            "vet",
+            "--trials",
+            "2",
+            "--canon",
+            ".canons/nonexistent-rule.md",
+            "--json",
+            "src/lib.rs",
+        ])
+        .expect("parse vet bench cli");
+        let mut vet_stdin = Cursor::new(b"");
+        let mut vet_stdout = Vec::new();
+        let mut vet_stderr = Vec::new();
+        let vet_report = run_consistency_bench_cli(
+            &vet_cli,
+            &mut BenchIoStreams {
+                stdin: &mut vet_stdin,
+                stdout: &mut vet_stdout,
+                stderr: &mut vet_stderr,
+            },
+        )
+        .expect("live disk vet zero-candidate run");
+        assert_eq!(vet_report.stage, canon_clerk::BenchmarkStage::Vet);
+        assert_eq!(vet_report.configs[0].threshold, 0.80);
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

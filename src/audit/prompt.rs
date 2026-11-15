@@ -138,7 +138,7 @@ fn single_annotation_schema() -> Value {
 
 /// Assembles the isolated judicial trial prompt for a single active case (`canon_ref`)
 /// and returns `(user_prompt, admitted_file_paths)`.
-pub(super) fn build_audit_case_user_prompt(
+pub(crate) fn build_audit_case_user_prompt(
     canon_ref: &str,
     canon: &Canon,
     admitted_exhibits: &[&ExhibitAssessment],
@@ -182,7 +182,7 @@ pub(super) fn build_audit_case_user_prompt(
     (out, admitted_file_paths)
 }
 
-fn append_case_overview(
+pub(crate) fn append_case_overview(
     out: &mut String,
     canon_ref: &str,
     intake: &CaseloadIntake,
@@ -201,7 +201,7 @@ fn append_case_overview(
     out.push('\n');
 }
 
-fn append_governing_canon_statute(out: &mut String, canon_ref: &str, canon: &Canon) {
+pub(crate) fn append_governing_canon_statute(out: &mut String, canon_ref: &str, canon: &Canon) {
     let _ = writeln!(out, "## Governing Canon Statute: `{canon_ref}`");
     let _ = writeln!(out, "- ID: `{}`", canon.id);
     let _ = writeln!(out, "- Title: {}", canon.title);

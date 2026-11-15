@@ -7,7 +7,7 @@ Canon Clerk addresses the asymmetric cognitive tax placed on maintainers by AI c
 Key architectural concepts:
 - **Dual Pillars:** The project encompasses both the **Canon Standard** (an open specification for declarative, natural-language architectural invariants) and the **Clerk Runner** (the CI review gate and CLI engine that executes multi-stage LLM evaluation).
 - **Core Platform:** Canon Clerk is an automated review engine and specification platform, not a shell utility or script collection; helper scripts in `.agents/skills/` are auxiliary automation tools for AI coding assistants.
-- **Caseload Pipeline:** Audits execute across the Caseload DAG: Branch A filing (`intake` → `discover` → `validate`), Branch B environment (`configure`), and the adjudication spine (`docket` → `admit` → `audit`), plus diagnostic `probe`.
+- **Caseload Pipeline:** Audits execute across the Caseload DAG: Branch A filing (`intake` → `discover` → `validate`), Branch B environment (`configure`), and the adjudication spine (`docket` → `admit` → `vet` → `audit`), plus diagnostic `probe` and prospective `apprise`.
 
 ## The Canon Standard
 
@@ -25,7 +25,7 @@ Key architectural concepts:
 - [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload schema, and event stream.
 - [DAG Scheduling & Execution](docs/architecture/scheduling.md): Transitive dependency closure calculation, branch pruning, guarded lazy scheduling, and static schedule lookup table.
 - [Consistency & Flipper Benchmarking](docs/architecture/benchmarking.md): Multi-trial stage stability harness, flipper diagnostics, and polymorphic subject dispersion contracts.
-- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, audit, apprise).
+- [Stage Node Specifications](docs/architecture/nodes/): Comprehensive specifications for all imperative verb subcommands (intake, discover, validate, configure, probe, docket, admit, vet, audit, apprise).
 - [Target Audience & Problem Space](README.md#who-needs-this): Friction points, target personas, and engineering use cases for semantic linting.
 
 ## Agent & Contributor Orientation

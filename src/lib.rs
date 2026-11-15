@@ -29,6 +29,7 @@ pub mod probe;
 pub mod provider;
 pub mod telemetry;
 pub mod validate;
+pub mod vet;
 
 pub use admit::{
     AdmitError, AdmitOptions, DEFAULT_ADMIT_MAX_CONCURRENT_CALLS, DEFAULT_ADMIT_THRESHOLD,
@@ -39,9 +40,8 @@ pub use apprise::{
     ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD, execute_apprise,
 };
 pub use audit::{
-    AuditError, AuditOptions, DEFAULT_AUDIT_FASTPASS_THRESHOLD, DEFAULT_AUDIT_MAX_CONCURRENT_CALLS,
-    DEFAULT_AUDIT_THRESHOLD, DEFAULT_AUDIT_TIMEOUT_MS, ENV_AUDIT_CONCURRENCY,
-    ENV_AUDIT_FASTPASS_THRESHOLD, ENV_AUDIT_THRESHOLD, execute_audit,
+    AuditError, AuditOptions, DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD,
+    DEFAULT_AUDIT_TIMEOUT_MS, ENV_AUDIT_CONCURRENCY, ENV_AUDIT_THRESHOLD, execute_audit,
     resolve_canon_reference_paths,
 };
 pub use bench::{
@@ -70,32 +70,35 @@ pub use canon::{
 };
 pub use caseload::{
     ActiveExhibits, AdmissibilityStatus, AnnotationLevel, ApprisalStatus, CASELOAD_SCHEMA_VERSION,
-    CanonAdjudication, CanonApprisalAssessment, CanonDocketAssessment, Caseload, CaseloadApprisal,
-    CaseloadConfig, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
-    CaseloadProbe, CaseloadValidation, CaseloadVerdict, CodeAnnotation, ColorabilityStatus,
-    ContentOmissionReason, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
-    DiscoveryMode, ExhibitAssessment, FileArtifact, FileChangeStatus, IntakeScope,
-    LinkedIssueContext, PatchOmissionReason, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER,
-    ValidatedCanonMetadata, ValidationOutcome, VerdictStatus, normalize_admissibility_score,
-    normalize_colorability_score, normalize_compliance_score, normalize_unit_score,
-    sort_annotations,
+    CanonAdjudication, CanonApprisalAssessment, CanonDocketAssessment, CanonVettingAssessment,
+    Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
+    CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadValidation, CaseloadVerdict,
+    CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason,
+    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode,
+    ExhibitAssessment, FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext,
+    PatchOmissionReason, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER,
+    ValidatedCanonMetadata, ValidationOutcome, VerdictStatus, VettingStatus,
+    normalize_admissibility_score, normalize_colorability_score, normalize_compliance_score,
+    normalize_unit_score, normalize_vetting_score, sort_annotations,
 };
 pub use cli::{
     AdmitArgs, AdmitFormat, AppriseArgs, AppriseFormat, AuditArgs, AuditFormat, CanonSelectionArgs,
     CaseloadIoArgs, Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiscoverArgs,
     DiscoverFormat, DocketArgs, DocketFormat, ENV_LOG_FILE, ENV_VERBOSE, FilingSourceArgs,
     IntakeArgs, ProbeArgs, ProbeFormat, ProviderConfigArgs, StageDisposition, StderrProgressSink,
-    StderrTelemetryOptions, ValidateArgs, ValidateFormat, build_cli_telemetry_sink, init_logging,
-    open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag, run, run_admit,
-    run_admit_live_with_telemetry, run_admit_with_snapshot_and_provider, run_admit_with_telemetry,
-    run_apprise, run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
+    StderrTelemetryOptions, ValidateArgs, ValidateFormat, VetArgs, VetFormat,
+    build_cli_telemetry_sink, init_logging, open_jsonl_log_sink, resolve_log_file_path,
+    resolve_verbose_flag, run, run_admit, run_admit_live_with_telemetry,
+    run_admit_with_snapshot_and_provider, run_admit_with_telemetry, run_apprise,
+    run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
     run_apprise_with_telemetry, run_audit, run_audit_live_with_telemetry,
     run_audit_with_snapshot_and_provider, run_audit_with_telemetry, run_configure,
     run_configure_with_env, run_configure_with_telemetry, run_discover, run_discover_in_workspace,
     run_discover_with_telemetry, run_docket, run_docket_live_with_telemetry,
     run_docket_with_snapshot_and_provider, run_docket_with_telemetry, run_intake,
     run_intake_with_telemetry, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,
-    run_validate, run_validate_in_workspace, run_validate_with_telemetry,
+    run_validate, run_validate_in_workspace, run_validate_with_telemetry, run_vet,
+    run_vet_live_with_telemetry, run_vet_with_snapshot_and_provider, run_vet_with_telemetry,
 };
 pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_FLASH_MODEL, DEFAULT_JEV_MODEL, ENV_AUDITOR_MODEL,
@@ -135,6 +138,10 @@ pub use telemetry::{
 };
 pub use validate::{
     ValidateError, ValidateOptions, execute_validate, execute_validate_on_disk, lint_canon_source,
+};
+pub use vet::{
+    DEFAULT_VET_MAX_CONCURRENT_CALLS, DEFAULT_VET_THRESHOLD, ENV_VET_CONCURRENCY,
+    ENV_VET_THRESHOLD, VetError, VetOptions, execute_vet,
 };
 
 #[cfg(test)]

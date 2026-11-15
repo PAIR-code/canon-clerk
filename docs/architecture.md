@@ -20,7 +20,7 @@ flowchart TD
 
     validate --> docket
     configure --> docket
-    docket --> admit --> audit
+    docket --> admit --> vet --> audit
 
     validate --> apprise["apprise (apprisal)"]
     configure --> apprise
@@ -38,7 +38,7 @@ The complete architectural specification is partitioned across the following ded
 - **[Consistency & Flipper Benchmarking](architecture/benchmarking.md):** Multi-trial stage stability evaluation, out-of-band developer harness boundary, upstream closure reuse with downstream namespace stripping, polymorphic 1D/2D subject keys, and flipper dispersion metrics.
 
 ### Node-by-Node Stage Specifications (`docs/architecture/nodes/`)
-Comprehensive specifications for each of the nine imperative verb stages:
+Comprehensive specifications for each of the ten imperative verb stages:
 
 - **[intake](architecture/nodes/intake.md):** Universal front door parsing diffs, target paths/globs, prospective intent queries, or whole-repo target scope (`--all-targets`) into `FileArtifact` records (Branch A).
 - **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches, or compiling the full corpus via `--all-canons` (Branch A).
@@ -47,7 +47,8 @@ Comprehensive specifications for each of the nine imperative verb stages:
 - **[probe](architecture/nodes/probe.md):** Diagnostic leaf measuring live provider reachability and roundtrip endpoint latency.
 - **[docket](architecture/nodes/docket.md):** Macro triage establishing subject-matter jurisdiction (`colorability_score >= 0.5`) over in-flight changes.
 - **[admit](architecture/nodes/admit.md):** Micro triage establishing evidentiary admissibility (`admissibility_score >= 0.5`) per active case (Contentious Track).
-- **[audit](architecture/nodes/audit.md):** Single-trial substantive adjudication rendering decrees, evaluating exceptions, and generating line annotations (Contentious Track).
+- **[vet](architecture/nodes/vet.md):** Pre-trial prima facie compliance vetting (`vetting_score >= 0.8`) clearing uncontested cases and binding contested cases over for trial (Contentious Track).
+- **[audit](architecture/nodes/audit.md):** Generative substantive adjudication rendering decrees, evaluating exceptions, and generating line annotations for contested cases (Contentious Track).
 - **[apprise](architecture/nodes/apprise.md):** Prospective design-time procedural notice identifying governing canons intersecting prospective intent (Apprisal Track).
 
 ---
@@ -61,10 +62,11 @@ Comprehensive specifications for each of the nine imperative verb stages:
 | `validate` | Branch A (Filing) | AST linter | 0 tokens, ~12ms | 0 syntax errors; fails fast (exit 1) on error |
 | `configure` | Branch B (Env) | Config loader | 0 tokens, <5ms | Valid config; fails fast (exit 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Reachable; fails fast (exit 2) on unreachable |
-| `docket` | Macro Triage Spine | Flash-Lite AI | ~400ms, low $ | `colorability_score >= 0.5`; exits 0 if empty |
-| `admit` | Contentious Track | Flash-Lite AI | ~600ms, low $ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `audit` | Contentious Track | Pro Reasoning | ~2.5s, targeted | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
-| `apprise` | Apprisal Track | Flash-Lite AI | ~400ms, low $ | Determines prospective governing canons; exits 0 |
+| `docket` | Macro Triage Spine | Screener AI | ~400ms, low \$ | `colorability_score >= 0.5`; exits 0 if empty |
+| `admit` | Contentious Track | Screener AI | ~600ms, low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `vet` | Contentious Track | Screener AI (`Jev` / `Flash-Lite`) | ~200ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Contentious Track | Generative Auditor (`Pro`) | ~2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `apprise` | Apprisal Track | Screener AI | ~400ms, low \$ | Determines prospective governing canons; exits 0 |
 
 ---
 

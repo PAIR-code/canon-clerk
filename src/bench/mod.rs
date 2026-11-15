@@ -20,6 +20,7 @@ mod extract;
 mod prepare;
 mod render;
 mod stats;
+mod types;
 
 pub use cli::{
     BenchIoStreams, ConsistencyBenchCli, ConsistencyBenchFormat, HermeticBenchDeps,
@@ -37,217 +38,26 @@ pub use prepare::{
 };
 pub use render::render_consistency_markdown;
 pub use stats::{TrialRecord, analyze_config_trials};
+pub use types::{
+    ConfigConsistencyReport, ConsistencyBenchOptions, ConsistencyBenchReport,
+    ConsistencyConfigSpec, SubjectConsistency, SubjectObservation, TrialSummary,
+};
 
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::apprise::{AppriseOptions, DEFAULT_APPRISE_THRESHOLD, execute_apprise};
+use crate::apprise::{AppriseOptions, execute_apprise};
 use crate::audit::{AuditOptions, execute_audit};
 use crate::caseload::{
     Caseload, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, normalize_unit_score,
 };
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, execute_docket};
-use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider, TokenUsage};
+use crate::provider::{StructuredModelProvider, TokenUsage};
 use crate::telemetry::{
     PipelineStage, RecordingTelemetrySink, SystemTelemetryClock, TelemetryClock, TelemetryEvent,
     TelemetrySession,
 };
+use crate::vet::{VetOptions, execute_vet};
 use prepare::clear_stage_and_downstream;
-use serde::{Deserialize, Serialize};
-
-/// Execution parameters for a single benchmark configuration (e.g. unbounded vs. `batch=15,conc=4`).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ConsistencyConfigSpec {
-    /// Human-readable configuration label (`"unbounded"`, `"batch=15,conc=4"`, etc.).
-    pub label: String,
-    /// Classification score threshold in `[0.0, 1.0]`.
-    pub threshold: f64,
-    /// Optional maximum candidate canons per screener model call (`None` = single-turn unbounded).
-    pub max_canons_per_call: Option<usize>,
-    /// Optional maximum concurrent in-flight model calls when batched.
-    pub max_concurrent_calls: Option<usize>,
-    /// Per-request generation timeout ceiling in milliseconds.
-    pub timeout_ms: u64,
-}
-
-impl Default for ConsistencyConfigSpec {
-    fn default() -> Self {
-        Self {
-            label: "unbounded".to_string(),
-            threshold: DEFAULT_APPRISE_THRESHOLD,
-            max_canons_per_call: None,
-            max_concurrent_calls: None,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        }
-    }
-}
-
-/// Input options configuring [`execute_consistency_bench`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ConsistencyBenchOptions {
-    /// Target Caseload heuristic stage.
-    pub stage: BenchmarkStage,
-    /// Number of repeated trials per configuration (`>= 1`; defaults to [`DEFAULT_BENCHMARK_TRIALS`]).
-    pub trials: usize,
-    /// One or more configurations to evaluate across `trials`.
-    pub configs: Vec<ConsistencyConfigSpec>,
-}
-
-impl Default for ConsistencyBenchOptions {
-    fn default() -> Self {
-        Self {
-            stage: BenchmarkStage::Apprise,
-            trials: DEFAULT_BENCHMARK_TRIALS,
-            configs: vec![ConsistencyConfigSpec::default()],
-        }
-    }
-}
-
-/// Per-trial outcome recorded for a single canon or `(canon_path, exhibit_path)` subject.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct SubjectObservation {
-    /// 1-indexed trial number (`1..=N`).
-    pub trial: usize,
-    /// Stage status string (`"applicable"`, `"docketed"`, `"admitted"`, `"pass"`, etc.).
-    pub status: String,
-    /// Whether this trial produced an affirmative classification (`score >= threshold`).
-    pub is_positive: bool,
-    /// Continuous score in `[0.0, 1.0]`.
-    pub score: f64,
-    /// Rationale summary emitted by the model in this trial.
-    pub summary: String,
-}
-
-/// Aggregate operational and count metrics for a single trial run (`1..=N`).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TrialSummary {
-    /// 1-indexed trial number (`1..=N`).
-    pub trial: usize,
-    /// Total evaluated subjects in this trial.
-    pub subject_count: usize,
-    /// Count of subjects classified affirmatively (`applicable`, `docketed`, `admitted`, `pass`).
-    pub positive_count: usize,
-    /// Count of subjects classified negatively (`dismissed`, `excluded`, `fail`).
-    pub negative_count: usize,
-    /// Stage wall-clock latency in milliseconds.
-    pub duration_ms: u64,
-    /// Prompt tokens consumed across the trial.
-    pub prompt_tokens: u64,
-    /// Completion tokens consumed across the trial.
-    pub completion_tokens: u64,
-    /// Extended reasoning tokens consumed across the trial.
-    pub reasoning_tokens: u64,
-    /// Total tokens consumed across the trial.
-    pub total_tokens: u64,
-}
-
-/// Multi-trial consistency and flipper analysis for a single canon or `(canon_path, exhibit_path)` subject.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct SubjectConsistency {
-    /// Repository-relative canon path or identifier.
-    pub canon_path: String,
-    /// Optional repository-relative exhibit path for micro evidentiary triage (`admit`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exhibit_path: Option<String>,
-    /// `true` if classification status varied across the `N` trials.
-    pub is_flipper: bool,
-    /// Number of trials with an affirmative status (`applicable`, `docketed`, `admitted`, `pass`).
-    pub positive_count: usize,
-    /// Number of trials with a negative status (`dismissed`, `excluded`, `fail`).
-    pub negative_count: usize,
-    /// Modal status agreement fraction in `(0.0, 1.0]` (`1.0` when unanimous).
-    pub agreement_rate: f64,
-    /// Arithmetic mean of continuous scores across trials.
-    pub score_mean: f64,
-    /// Sample standard deviation (`N - 1` denominator; `0.0` when `N <= 1`) of scores across trials.
-    pub score_stdev: f64,
-    /// Minimum score observed across trials.
-    pub score_min: f64,
-    /// Maximum score observed across trials.
-    pub score_max: f64,
-    /// Chronological per-trial observations (`1..=N`).
-    pub observations: Vec<SubjectObservation>,
-}
-
-impl SubjectConsistency {
-    /// Formats `"<canon_path>"` or `"<canon_path> :: <exhibit_path>"` for human-readable tables.
-    pub fn display_id(&self) -> String {
-        match &self.exhibit_path {
-            Some(exhibit) => format!("{} :: {exhibit}", self.canon_path),
-            None => self.canon_path.clone(),
-        }
-    }
-}
-
-/// Multi-trial consistency summary for a single [`ConsistencyConfigSpec`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ConfigConsistencyReport {
-    /// Configuration label (`"unbounded"`, `"batch=15,conc=4"`, etc.).
-    pub label: String,
-    /// Evaluated Caseload stage.
-    pub stage: BenchmarkStage,
-    /// Resolved model specifier used for the stage.
-    pub model: String,
-    /// Number of completed trials (`N`).
-    pub trials: usize,
-    /// Applied classification score threshold.
-    pub threshold: f64,
-    /// Optional batch ceiling (`max_canons_per_call`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_canons_per_call: Option<usize>,
-    /// Optional concurrency ceiling (`max_concurrent_calls`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_calls: Option<usize>,
-    /// Total distinct subjects evaluated across trials.
-    pub subject_count: usize,
-    /// Count of subjects whose classification status flipped at least once.
-    pub flipper_count: usize,
-    /// Fraction of subjects with 100% unanimous status agreement across all `N` trials.
-    pub unanimous_agreement_rate: f64,
-    /// Per-trial affirmative counts (`[c_1, c_2, ..., c_N]`).
-    pub positive_counts: Vec<usize>,
-    /// Minimum affirmative count across trials.
-    pub positive_count_min: usize,
-    /// Maximum affirmative count across trials.
-    pub positive_count_max: usize,
-    /// Mean per-subject score sample standard deviation.
-    pub mean_score_stdev: f64,
-    /// Maximum per-subject score sample standard deviation.
-    pub max_score_stdev: f64,
-    /// Minimum trial wall-clock latency in milliseconds.
-    pub latency_min_ms: u64,
-    /// Median trial wall-clock latency in milliseconds.
-    pub latency_median_ms: u64,
-    /// Mean trial wall-clock latency in milliseconds.
-    pub latency_mean_ms: f64,
-    /// Maximum trial wall-clock latency in milliseconds.
-    pub latency_max_ms: u64,
-    /// Cumulative tokens expended across all `N` trials for this configuration.
-    pub total_tokens: u64,
-    /// Per-trial operational and count summaries.
-    pub trial_summaries: Vec<TrialSummary>,
-    /// Stably sorted per-subject consistency records.
-    pub subjects: Vec<SubjectConsistency>,
-}
-
-impl ConfigConsistencyReport {
-    /// Returns all subjects whose classification status flipped across trials (`is_flipper == true`).
-    pub fn flippers(&self) -> Vec<&SubjectConsistency> {
-        self.subjects.iter().filter(|s| s.is_flipper).collect()
-    }
-}
-
-/// Top-level structured report produced by [`execute_consistency_bench`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ConsistencyBenchReport {
-    /// Target Caseload heuristic stage.
-    pub stage: BenchmarkStage,
-    /// Number of trials executed per configuration.
-    pub trials: usize,
-    /// Number of candidate canons in `.discovery.candidate_canons`.
-    pub candidate_canon_count: usize,
-    /// Consistency results for each evaluated configuration.
-    pub configs: Vec<ConfigConsistencyReport>,
-}
 
 /// Executes `N` repeated trials per configuration against `caseload` using wall-clock telemetry.
 pub fn execute_consistency_bench(
@@ -285,9 +95,13 @@ pub fn execute_consistency_bench_observed(
         .map_or(0, |d| d.candidate_canons.len());
     let model = resolved_model_for_stage(options.stage, caseload);
     let mut base_caseload = clear_stage_and_downstream(options.stage, caseload.clone());
-    if matches!(options.stage, BenchmarkStage::Admit | BenchmarkStage::Audit)
-        && base_caseload.docket.is_none()
-        && !(options.stage == BenchmarkStage::Audit && base_caseload.evidence.is_some())
+    let needs_upstream_evidence =
+        matches!(options.stage, BenchmarkStage::Vet | BenchmarkStage::Audit);
+    if matches!(
+        options.stage,
+        BenchmarkStage::Admit | BenchmarkStage::Vet | BenchmarkStage::Audit
+    ) && base_caseload.docket.is_none()
+        && !(needs_upstream_evidence && base_caseload.evidence.is_some())
     {
         base_caseload = execute_docket(
             &DocketOptions::default(),
@@ -297,7 +111,7 @@ pub fn execute_consistency_bench_observed(
         )
         .map_err(ConsistencyBenchError::Docket)?;
     }
-    if options.stage == BenchmarkStage::Audit && base_caseload.evidence.is_none() {
+    if needs_upstream_evidence && base_caseload.evidence.is_none() {
         base_caseload = execute_admit(&AdmitOptions::default(), base_caseload, workspace, provider)
             .map_err(ConsistencyBenchError::Admit)?;
     }
@@ -372,12 +186,13 @@ fn validate_bench_options(options: &ConsistencyBenchOptions) -> Result<(), Consi
 
 fn resolved_model_for_stage(stage: BenchmarkStage, caseload: &Caseload) -> String {
     match stage {
-        BenchmarkStage::Apprise | BenchmarkStage::Docket | BenchmarkStage::Admit => {
-            caseload.config.as_ref().map_or_else(
-                || DEFAULT_SCREENER_MODEL.to_string(),
-                |c| c.screener_model.clone(),
-            )
-        }
+        BenchmarkStage::Apprise
+        | BenchmarkStage::Docket
+        | BenchmarkStage::Admit
+        | BenchmarkStage::Vet => caseload.config.as_ref().map_or_else(
+            || DEFAULT_SCREENER_MODEL.to_string(),
+            |c| c.screener_model.clone(),
+        ),
         BenchmarkStage::Audit => caseload.config.as_ref().map_or_else(
             || DEFAULT_AUDITOR_MODEL.to_string(),
             |c| c.auditor_model.clone(),
@@ -443,10 +258,22 @@ fn execute_single_trial(
                 })
                 .map_err(ConsistencyBenchError::Admit)?
         }
+        BenchmarkStage::Vet => {
+            let opts = VetOptions {
+                threshold: spec.threshold,
+                timeout_ms: spec.timeout_ms,
+                max_concurrent_calls: spec.max_concurrent_calls,
+            };
+            session
+                .run_stage(PipelineStage::Vet, |scope| {
+                    let instrumented = scope.instrument_provider(provider);
+                    execute_vet(&opts, base_caseload.clone(), workspace, &instrumented)
+                })
+                .map_err(ConsistencyBenchError::Vet)?
+        }
         BenchmarkStage::Audit => {
             let opts = AuditOptions {
                 threshold: spec.threshold,
-                fastpass_threshold: None,
                 timeout_ms: spec.timeout_ms,
                 max_concurrent_calls: spec.max_concurrent_calls,
             };
@@ -496,7 +323,9 @@ mod tests {
     use crate::configure::ConfigureOptions;
     use crate::docket::DEFAULT_DOCKET_THRESHOLD;
     use crate::intake::IntakeOptions;
-    use crate::provider::{GenerationRequest, GenerationResponse, ProviderError};
+    use crate::provider::{
+        DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, GenerationResponse, ProviderError,
+    };
     use crate::telemetry::SteppingTelemetryClock;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};

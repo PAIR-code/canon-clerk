@@ -240,7 +240,8 @@ pub fn run_consistency_bench_cli(
     let resolved = resolve_cli_parameters(cli, &env_map)?;
     let incoming = read_caseload_operand(cli.caseload.as_deref(), streams.stdin)?;
     let intake_opts = cli.filing.resolve_intake_options(streams.stdin)?;
-    let configure_opts = resolve_branch_b_options(&cli.provider, &env_map)?;
+    let mut configure_opts = resolve_branch_b_options(&cli.provider, &env_map)?;
+    configure_opts.screener_only_closure = resolved.stage != BenchmarkStage::Audit;
 
     let mut snapshot = materialize_disk_snapshot(&cwd, &cli.canons.canon, incoming.as_ref())?;
     let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
@@ -310,7 +311,8 @@ pub fn run_consistency_bench_hermetic(
     let resolved = resolve_cli_parameters(cli, deps.env)?;
     let incoming = read_caseload_operand(cli.caseload.as_deref(), streams.stdin)?;
     let intake_opts = cli.filing.resolve_intake_options(streams.stdin)?;
-    let configure_opts = resolve_branch_b_options(&cli.provider, deps.env)?;
+    let mut configure_opts = resolve_branch_b_options(&cli.provider, deps.env)?;
+    configure_opts.screener_only_closure = resolved.stage != BenchmarkStage::Audit;
 
     let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
         stage: resolved.stage,

@@ -15,32 +15,56 @@
 //! Case-or-Controversy guard, stage-prefixed flag scoping, and fast-forward predicates for `canon-clerk audit`.
 
 use super::AuditArgs;
+use super::stages::AuditCascadeThresholds;
 use crate::audit::{
-    DEFAULT_AUDIT_FASTPASS_THRESHOLD, DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD,
-    ENV_AUDIT_CONCURRENCY, ENV_AUDIT_FASTPASS_THRESHOLD, ENV_AUDIT_THRESHOLD,
+    DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD, ENV_AUDIT_CONCURRENCY,
+    ENV_AUDIT_THRESHOLD,
 };
 use crate::caseload::{Caseload, normalize_compliance_score};
 use crate::cli::CliError;
+use crate::cli::admit::guards::{resolve_admit_concurrency, resolve_admit_threshold};
 use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::has_provider_overrides;
-use crate::cli::docket::guards::has_concrete_cli_filing;
+use crate::cli::docket::guards::{
+    has_concrete_cli_filing, resolve_docket_batch_size, resolve_docket_concurrency,
+    resolve_docket_threshold,
+};
+use crate::cli::vet::guards::{resolve_vet_concurrency, resolve_vet_threshold};
 use crate::configure::StoredConfig;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
+pub(super) fn resolve_and_validate_audit_cli_params(
+    args: &AuditArgs,
+    env: &BTreeMap<String, String>,
+) -> Result<AuditCascadeThresholds, CliError> {
+    let thresholds = AuditCascadeThresholds {
+        docket_threshold: resolve_docket_threshold(args.docket_threshold, env)?,
+        admit_threshold: resolve_admit_threshold(args.admit_threshold, env)?,
+        vet_threshold: resolve_vet_threshold(args.vet_threshold, env)?,
+        audit_threshold: resolve_audit_threshold(args.audit_threshold, env)?,
+    };
+    let _ = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
+    let _ = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
+    let _ = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
+    let _ = resolve_vet_concurrency(args.vet_concurrency, env, None)?;
+    let _ = resolve_audit_concurrency(args.audit_concurrency, env, None)?;
+    Ok(thresholds)
+}
+
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AuditArgs) -> Result<(), CliError> {
     if args.rejected_threshold.is_some() {
         return Err(CliError::usage(
             "Ambiguous unqualified flag `--threshold` is disallowed.\n  \
-             Hint: Pass stage-prefixed `--audit-threshold <FLOAT>`, `--admit-threshold <FLOAT>`, \
-             or `--docket-threshold <FLOAT>` on `canon-clerk audit`.",
+             Hint: Pass stage-prefixed `--audit-threshold <FLOAT>`, `--vet-threshold <FLOAT>`, \
+             `--admit-threshold <FLOAT>`, or `--docket-threshold <FLOAT>` on `canon-clerk audit`.",
         ));
     }
     if args.rejected_apprise_threshold.is_some() {
         return Err(CliError::usage(
             "Out-of-closure flag `--apprise-threshold` is not valid for `canon-clerk audit` (`apprise` is pruned from the audit closure).\n  \
-             Hint: Pass `--audit-threshold <FLOAT>`, `--admit-threshold <FLOAT>`, or `--docket-threshold <FLOAT>` on `canon-clerk audit`.",
+             Hint: Pass `--audit-threshold <FLOAT>`, `--vet-threshold <FLOAT>`, `--admit-threshold <FLOAT>`, or `--docket-threshold <FLOAT>` on `canon-clerk audit`.",
         ));
     }
     if args.rejected_apprise_batch_size.is_some() {
@@ -52,7 +76,7 @@ pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AuditArgs) -> Result<
     if args.rejected_apprise_concurrency.is_some() {
         return Err(CliError::usage(
             "Out-of-closure flag `--apprise-concurrency` is not valid for `canon-clerk audit` (`apprise` is pruned from the audit closure).\n  \
-             Hint: Pass `--audit-concurrency <COUNT>`, `--admit-concurrency <COUNT>`, or `--docket-concurrency <COUNT>` on `canon-clerk audit`.",
+             Hint: Pass `--audit-concurrency <COUNT>`, `--vet-concurrency <COUNT>`, `--admit-concurrency <COUNT>`, or `--docket-concurrency <COUNT>` on `canon-clerk audit`.",
         ));
     }
     Ok(())
@@ -91,43 +115,6 @@ pub(crate) fn resolve_audit_threshold(
     }
 
     Ok(DEFAULT_AUDIT_THRESHOLD)
-}
-
-pub(crate) fn resolve_audit_fastpass_threshold(
-    flag_threshold: Option<f64>,
-    env: &BTreeMap<String, String>,
-) -> Result<Option<f64>, CliError> {
-    if let Some(val) = flag_threshold {
-        let normalized = normalize_compliance_score(val).map_err(|detail| {
-            CliError::usage(format!(
-                "Invalid `--audit-fastpass-threshold` value `{val}`: {detail}.\n  \
-                 Hint: Pass a finite float in `[0.0, 1.0]` via `--audit-fastpass-threshold <FLOAT>` (default: `{DEFAULT_AUDIT_FASTPASS_THRESHOLD}`)."
-            ))
-        })?;
-        return Ok(Some(normalized));
-    }
-
-    if let Some(raw_env) = env
-        .get(ENV_AUDIT_FASTPASS_THRESHOLD)
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        let parsed = raw_env.parse::<f64>().map_err(|_| {
-            CliError::usage(format!(
-                "Invalid threshold `{raw_env}` in `{ENV_AUDIT_FASTPASS_THRESHOLD}`: expected a float in `[0.0, 1.0]`.\n  \
-                 Hint: Pass `--audit-fastpass-threshold <FLOAT>` or set `{ENV_AUDIT_FASTPASS_THRESHOLD}={DEFAULT_AUDIT_FASTPASS_THRESHOLD}`."
-            ))
-        })?;
-        let normalized = normalize_compliance_score(parsed).map_err(|detail| {
-            CliError::usage(format!(
-                "Invalid threshold `{raw_env}` in `{ENV_AUDIT_FASTPASS_THRESHOLD}`: {detail}.\n  \
-                 Hint: Set `{ENV_AUDIT_FASTPASS_THRESHOLD}` to a finite value in `[0.0, 1.0]` (default: `{DEFAULT_AUDIT_FASTPASS_THRESHOLD}`)."
-            ))
-        })?;
-        return Ok(Some(normalized));
-    }
-
-    Ok(None)
 }
 
 pub(crate) fn resolve_audit_concurrency(
@@ -180,6 +167,10 @@ pub(super) fn has_admit_cli_overrides(args: &AuditArgs) -> bool {
     args.admit_threshold.is_some() || args.admit_concurrency.is_some()
 }
 
+pub(super) fn has_vet_cli_overrides(args: &AuditArgs) -> bool {
+    args.vet_threshold.is_some() || args.vet_concurrency.is_some()
+}
+
 pub(super) fn can_fast_forward_completed_audit(
     args: &AuditArgs,
     intake_opts: &IntakeOptions,
@@ -189,8 +180,8 @@ pub(super) fn can_fast_forward_completed_audit(
         && !intake_opts.has_designated_source()
         && args.canons.is_empty()
         && args.audit_threshold.is_none()
-        && args.audit_fastpass_threshold.is_none()
         && args.audit_concurrency.is_none()
+        && !has_vet_cli_overrides(args)
         && !has_admit_cli_overrides(args)
         && !has_docket_cli_overrides(args)
         && !has_provider_overrides(&args.provider)

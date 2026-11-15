@@ -29,9 +29,9 @@ flowchart LR
     Docket --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
     Params --> Admit
 
-    Admit --> Audit["audit (Substantive Adjudication)<br/><i>(Pipeline Cascade)</i><br/><code>.verdict</code>"]
+    Admit --> Vet["vet (Prima Facie Vetting)<br/><i>(Pipeline Cascade)</i><br/><code>.vetting</code>"]
     Admit -. "standalone CLI" .-> AdmitReport["Evidence Manifest<br/><i>(Admitted exhibits per case, Exit 0)</i>"]
-    Admit -. "empty docket or zero admitted exhibits" .-> ZeroExhibits["Fast Exit (No Evidence 0)<br/><i>Prunes audit trials</i>"]
+    Admit -. "empty docket or zero admitted exhibits" .-> ZeroExhibits["Fast Exit (No Evidence 0)<br/><i>Prunes vet & audit</i>"]
     Admit -. "missing filing" .-> UsageError["Usage Error<br/><i>(Case-or-Controversy guard, Exit 2)</i>"]
 
     style Admit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
@@ -45,7 +45,7 @@ flowchart LR
   - `configure` (Branch B: resolved provider credentials and model specifiers in `caseload.config`, evaluated JIT only when active cases with candidate exhibits exist).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`.
 - **The Case or Controversy Invariant:** Like `docket`, `admit` evaluates the admissibility of concrete filing exhibits *as applied to an active case*. It strictly requires an underlying filing (`caseload.intake` populated from target paths, `-`, `--diff`, `--all-targets`, PR metadata, or an incoming `--caseload`). Naked invocations or canon-only invocations lacking a concrete filing (e.g. `canon-clerk admit --all-canons` without targets or diff) fail fast with exit code `2`.
-- **Pruned from Execution:** `probe`, `apprise`, downstream substantive adjudication (`audit`).
+- **Pruned from Execution:** `probe`, `apprise`, downstream compliance vetting and substantive adjudication (`vet`, `audit`).
 
 ---
 
@@ -55,15 +55,15 @@ flowchart LR
 `admit` populates the `.evidence` namespace on the cumulative `Caseload` envelope with micro evidentiary relevance assessments across all docketed cases:
 
 - **Per-Case Exhibit Assessments (`exhibits`):** A deterministic map keyed by active canon identifier (`canon_path`). Each active case maps to a stably sorted list of exhibit assessments (`file_path`, `admissibility_summary`, continuous `admissibility_score` in `[0.0, 1.0]`, and deterministically derived `admissibility_status` of `"admitted"` when `admissibility_score >= threshold` or `"excluded"` when below threshold). Here `file_path` identifies either a repository-relative POSIX file path or an inspected filing metadata plane (`"pr_title"`, `"pr_body"`, `"linked_issues"`, `"commit_messages"`).
-- **Trial-Ready Active Cases (`active_cases`):** Stably sorted list of canon identifiers from `.docket.active_docket` that retain at least one `"admitted"` exhibit after threshold gating, establishing the exact cases that proceed to substantive `audit` trials.
+- **Trial-Ready Active Cases (`active_cases`):** Stably sorted list of canon identifiers from `.docket.active_docket` that retain at least one `"admitted"` exhibit after threshold gating, establishing the exact cases that proceed to prima facie vetting (`vet`) and substantive adjudication (`audit`).
 - **Diagnostic Anomalies (`anomalies`):** Optional manifest recording any non-fatal evidentiary screening anomalies encountered during micro triage (omitted when empty).
 
 ### Data Plane & Domain Short-Circuit Invariants
-1. **Auditability with Strict Admitted-Only Trial Isolation:** Preserving `"excluded"` assessments alongside `"admitted"` assessments in `.evidence.exhibits` provides complete provenance in `caseload.json`, `--format compact`, and multi-trial consistency benchmarks without lossy score truncation. Downstream `audit` trials consume exclusively the admitted-only exhibit projection (`admissibility_status == "admitted"`), structurally guaranteeing that excluded exhibits never enter deep auditor prompts.
-2. **Unified File & Metadata-Plane Screening vs. Grounding References:** `admit` screens contested filing exhibits—both candidate file exhibits (unified diff patches or materialized workspace target files within the canon's monorepo `<scope>/`) and present `inspect:` metadata planes (`pr_title`, `pr_body`, `linked_issues`, `commit_messages`). Static repository `references:` declared in canon frontmatter are authoritative statutory context injected during `audit`, not contested filing exhibits screened for exclusion.
+1. **Auditability with Strict Admitted-Only Isolation:** Preserving `"excluded"` assessments alongside `"admitted"` assessments in `.evidence.exhibits` provides complete provenance in `caseload.json`, `--format compact`, and multi-trial consistency benchmarks without lossy score truncation. Downstream `vet` and `audit` evaluations consume exclusively the admitted-only exhibit projection (`admissibility_status == "admitted"`), structurally guaranteeing that excluded exhibits never enter compliance prompts.
+2. **Unified File & Metadata-Plane Screening vs. Grounding References:** `admit` screens contested filing exhibits—both candidate file exhibits (unified diff patches or materialized workspace target files within the canon's monorepo `<scope>/`) and present `inspect:` metadata planes (`pr_title`, `pr_body`, `linked_issues`, `commit_messages`). Static repository `references:` declared in canon frontmatter are authoritative statutory context injected during `vet` and `audit`, not contested filing exhibits screened for exclusion.
 3. **Completion-Order-Independent Deterministic Folding:** Concurrent per-case screening calls fold into a lexicographically ordered `exhibits` map (with each case's exhibit list sorted lexicographically by `file_path`) and stably sorted `active_cases`, yielding byte-for-byte identical `.evidence` envelopes regardless of in-flight call completion order.
 4. **Empty-Docket Short-Circuit:** If `.docket.active_docket` is empty (either from upstream macro dismissal or a pre-populated `--caseload`), `admit` attaches an empty `.evidence` record (`exhibits: {}`, `active_cases: []`) and exits `0` immediately with zero model calls and without requiring provider credentials when `.docket` was pre-populated.
-5. **Zero-Evidence Short-Circuit:** If every case on `.docket.active_docket` retains zero admitted exhibits (`active_cases` is empty), the engine attaches the populated `.evidence` record and halts downstream cascade execution immediately with exit code `0`, scheduling zero substantive `audit` trials.
+5. **Zero-Evidence Short-Circuit:** If every case on `.docket.active_docket` retains zero admitted exhibits (`active_cases` is empty), the engine attaches the populated `.evidence` record and halts downstream cascade execution immediately with exit code `0`, scheduling zero `vet` or `audit` evaluations.
 
 ---
 
@@ -140,7 +140,7 @@ Conversely, when an explicitly designated stream yields zero changes, `discover`
 - `TARGETS` / `-` (Positional): Target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
 - `--diff <PATH|->`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags (evaluated against the underlying filing).
-- `--admit-threshold <FLOAT>` (fallback env: `CANON_CLERK_ADMIT_THRESHOLD`): Evidentiary admissibility threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure `--apprise-threshold` (along with `--apprise-batch-size` and `--apprise-concurrency`) are rejected with exit code `2` and guidance pointing to `--admit-threshold` and `--docket-threshold`.
+- `--admit-threshold <FLOAT>` (fallback env: `CANON_CLERK_ADMIT_THRESHOLD`): Evidentiary admissibility threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage flags (`--apprise-*`, `--vet-*`, `--audit-*`) are rejected with exit code `2` and guidance pointing to `--admit-threshold` and `--docket-threshold`.
 - `--admit-concurrency <COUNT>` / `--max-concurrent-calls <COUNT>` (fallback env: `CANON_CLERK_ADMIT_CONCURRENCY` / `CANON_CLERK_MAX_CONCURRENT_CALLS`; config file key: `admitConcurrency`): Optional positive integer (`>= 1`) bounding the maximum concurrent in-flight per-case screener calls (default: `4`). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).
 - `--docket-threshold <FLOAT>` (`CANON_CLERK_DOCKET_THRESHOLD`), `--docket-batch-size <COUNT>` / `--max-canons-per-call <COUNT>` (`CANON_CLERK_DOCKET_BATCH_SIZE`), `--docket-concurrency <COUNT>` (`CANON_CLERK_DOCKET_CONCURRENCY`): Upstream macro jurisdiction triage options accepted transitively for telescoping runs.
 - `--screener-model <MODEL>` (`CANON_CLERK_SCREENER_MODEL`), `--auditor-model <MODEL>` (`CANON_CLERK_AUDITOR_MODEL`), `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Shared model configuration and credential options (resolved JIT only when heuristic screening is required).

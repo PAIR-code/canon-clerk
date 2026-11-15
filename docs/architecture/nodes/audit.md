@@ -8,11 +8,11 @@
 
 ## 1. Domain Concept & Role (`core`)
 
-`audit` performs **Substantive Adjudication: Merits Evaluation & Verdict Generation** for all active cases retaining admissible evidence. In the court clerkship taxonomy, it represents the Judge taking the bench, hearing arguments strictly on the admitted exhibits, evaluating affirmative defenses (`Exception`), and rendering formal decrees with actionable remediation.
+`audit` performs **Substantive Adjudication: Merits Evaluation & Verdict Generation** for contested active cases retaining admissible evidence. In the court clerkship taxonomy, it represents the Judge taking the bench after pre-trial vetting (`vet`), hearing arguments strictly on the admitted exhibits for contested cases, evaluating affirmative defenses (`Exception`), and rendering formal decrees with actionable remediation and line annotations.
 
 - **Imperative Verb:** `audit`
-- **Court Clerkship Role:** Judicial trial and decree rendering.
-- **Metric Pair:** `compliance_score` (number [0.0, 1.0]) and `compliance_summary` (string decree).
+- **Court Clerkship Role:** Judicial trial and decree rendering for contested cases.
+- **Metric Pair:** `compliance_score` (number `[0.0, 1.0]`) and `compliance_summary` (string decree).
 - **Core Question:** *"Given the admitted exhibits, statutory grounding references, and governing invariant/exceptions, does the evidence comply with canon statute?"*
 
 ---
@@ -22,16 +22,16 @@
 ```mermaid
 flowchart LR
     subgraph Inputs["Inputs"]
-        Admit["admit (or --caseload)<br/><code>.evidence</code>"]
-        Params["Stage Flags<br/><i>(--audit-threshold, --audit-fastpass-threshold,<br/>--audit-concurrency, --admit-threshold, --docket-threshold,<br/>--auditor-model, --screener-model, --reasoning-budget)</i>"]
+        Vet["vet (or admit via --caseload)<br/><code>.vetting</code> / <code>.evidence</code>"]
+        Params["Stage Flags<br/><i>(--audit-threshold, --audit-concurrency,<br/>--vet-threshold, --vet-concurrency, --admit-threshold,<br/>--docket-threshold, --auditor-model, --screener-model, --reasoning-budget)</i>"]
     end
 
-    Admit --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
+    Vet --> Audit["audit<br/><b>(Current Node)</b><br/><code>.verdict</code>"]
     Params --> Audit
 
     Audit --> Compliant["Compliant Review Gate<br/><i>(Verdict decree, Exit 0)</i>"]
     Audit -. "statute violation" .-> Violation["Violation Decree<br/><i>(Line annotations, Exit 1)</i>"]
-    Audit -. "empty docket or zero admitted exhibits" .-> ZeroTrials["Fast Exit (0 Active Cases)<br/><i>(Passing verdict, 0 trials, Exit 0)</i>"]
+    Audit -. "0 active or 0 contested cases" .-> ZeroTrials["Fast Exit (0 Contested Trials)<br/><i>(Passing verdict, Exit 0)</i>"]
     Audit -. "missing filing" .-> UsageError["Usage Error<br/><i>(Case-or-Controversy guard, Exit 2)</i>"]
 
     style Audit fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
@@ -41,10 +41,11 @@ flowchart LR
 ```
 
 - **Direct Prerequisites:**
-  - `admit` (admitted exhibits and trial-ready active cases in `caseload.evidence`).
-  - `configure` (Branch B: resolved provider credentials, auditor model specifier, and optional reasoning budget in `caseload.config`, evaluated JIT only when heuristic screening or trial adjudication is required).
-- **Transitive Prerequisites:** `intake`, `discover`, `validate`, `docket`.
-- **The Case or Controversy Invariant:** Like `docket` and `admit`, `audit` adjudicates compliance *as applied to a concrete filing*. It strictly requires an underlying filing (`caseload.intake` populated from target paths, `-`, `--diff`, `--all-targets`, PR metadata, or an incoming `--caseload`). Naked invocations or canon-only invocations lacking a concrete filing (e.g. `canon-clerk audit --all-canons` without targets or diff) fail fast with exit code `2`.
+  - `vet` (prima facie compliance partition in `caseload.vetting`, or `admit` in `caseload.evidence` when `vet` is deterministically skipped under a generative screener).
+  - `configure` (Branch B: resolved generative `auditor_model` specifier, optional reasoning budget, and active provider credentials in `caseload.config`, evaluated JIT only when heuristic screening or contested trial adjudication is required).
+- **Transitive Prerequisites:** `intake`, `discover`, `validate`, `docket`, `admit`.
+- **Generative Auditor Requirement:** Because `audit` synthesizes natural-language `Exception` rulings, contributor `Remediation` prose, and 1-based `CodeAnnotation` spans, `auditor_model` strictly requires a generative structured model (`google:*`). Environments provisioned solely with discriminative classifier credentials (`TYPESAFE_API_KEY`) can execute through `canon-clerk vet`, whereas `canon-clerk audit` fails fast in `configure` with exit code `2` if generative auditor credentials are absent (unless `--caseload` already carries a pre-populated `.vetting` with zero `contested_cases`).
+- **The Case or Controversy Invariant:** Like `docket`, `admit`, and `vet`, `audit` adjudicates compliance *as applied to a concrete filing*. Naked invocations or canon-only invocations lacking a concrete filing (e.g. `canon-clerk audit --all-canons` without targets or diff) fail fast with exit code `2`.
 - **Pruned from Execution:** `probe`, `apprise`.
 
 ---
@@ -52,36 +53,35 @@ flowchart LR
 ## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-`audit` populates the `.verdict` namespace on the cumulative `Caseload` envelope with the final judicial decree and per-case trial outcomes:
+`audit` populates the `.verdict` namespace on the cumulative `Caseload` envelope with the final judicial decree and per-case outcomes across all active cases:
 
-- **Overall Gate Verdict (`status` & `summary`):** Top-level review gate `status` (`"pass"` when all adjudicated cases pass or zero trials were required, or `"fail"` if any case fails) accompanied by a deterministically synthesized human-readable `summary`.
-- **Per-Case Substantive Adjudications (`adjudications`):** Stably ordered list of trial decrees, one per adjudicated case (`canon_path`) from `.evidence.active_cases`. Each record captures the model's `compliance_summary` (substantive decree explaining compliance, matched exceptions, or required remediation), continuous `compliance_score` in `[0.0, 1.0]`, deterministically derived case `status` (`"pass"` when `compliance_score >= threshold`, else `"fail"`), and stably sorted line-level `annotations`.
+- **Overall Gate Verdict (`status` & `summary`):** Top-level review gate `status` (`"pass"` when all active cases pass or zero trials were required, or `"fail"` if any case fails) accompanied by a deterministically synthesized human-readable `summary`.
+- **Per-Case Substantive Adjudications (`adjudications`):** Stably ordered list of decrees, one per active case (`canon_path`) from `.evidence.active_cases`—combining prima facie `vetted_cases` carried forward from `.vetting` alongside generative trial decrees for `contested_cases` (or all `.evidence.active_cases` when `.vetting` was skipped). Each record captures `compliance_summary`, continuous `compliance_score` in `[0.0, 1.0]`, deterministically derived case `status` (`"pass"` when `compliance_score >= --audit-threshold`, else `"fail"`), and stably sorted line-level `annotations`.
 - **Violation Line Annotations (`CodeAnnotation`):** Structured source locations (`path`, `start_line`, `end_line`, optional `start_column` and `end_column`, `annotation_level` of `"failure"`, `"warning"`, or `"notice"`, `message`, and optional `title`) pinpointing non-compliant code spans on admitted file exhibits.
 
 ### Data Plane & Adjudication Invariants
-1. **Admitted-Only Zero-Leakage Trial Isolation & Statutory Reference Grounding:** `audit` schedules isolated trials strictly for `.evidence.active_cases` and consumes **exclusively** each case's `"admitted"` exhibits (unified diff patches or materialized workspace target files with 1-based line coordinates, plus admitted `inspect:` metadata planes such as `"pr_title"`, `"pr_body"`, and `"linked_issues"`). Excluded exhibits (`"excluded"`) never enter auditor prompts. Static workspace files matched by frontmatter `references:` (resolved relative to the canon's monorepo `<scope>/` when scoped) are injected alongside the canon statute as authoritative reference context.
+1. **Vetted Fold-Forward & Contested-Only Trial Isolation:** When `.vetting` is populated on the `Caseload`, `audit` carries `.vetting.vetted_cases` forward into `.verdict.adjudications` (`compliance_summary: vetting_summary`, `compliance_score: vetting_score`, `annotations: []`, and `status` derived against `--audit-threshold`) and schedules isolated generative `auditor_model` trials **exclusively** for `.vetting.contested_cases`. Each trial consumes strictly that case's `"admitted"` exhibits plus static frontmatter `references:` resolved within the canon's `<scope>/`. Excluded exhibits (`"excluded"`) never enter auditor prompts.
 2. **Three-Tier Determinism & Annotation-Anchoring Guardrails:**
-   - **Engine & Wire Determinism:** Concurrent per-case trials fold into `.verdict.adjudications` in strict lexicographical order by `canon_path`, and each case's `annotations` sort deterministically by `(path, start_line, end_line, start_column, end_column, annotation_level, message)`, guaranteeing byte-for-byte reproducible serialization regardless of async completion order.
+   - **Engine & Wire Determinism:** Vetted carry-forward entries and concurrent contested trial decrees merge into `.verdict.adjudications` in strict lexicographical order by `canon_path`, and each case's `annotations` sort deterministically by `(path, start_line, end_line, start_column, end_column, annotation_level, message)`, guaranteeing byte-for-byte reproducible serialization regardless of async completion order.
    - **Gate Verdict Stability:** The domain engine deterministically derives each case's `status` against `--audit-threshold` (default: `0.5`) and sets `.verdict.status` to `"fail"` if and only if at least one case has `status: "fail"`. Polarized score bands (`>= 0.80` vs. `<= 0.20`) anchor unanimous `pass`/`fail` stability across repeated trials.
    - **Bounded Guidance & Span Normalization:** While natural wording differences in `compliance_summary` or `message` and minor span granularity differences across live reasoning runs are expected and benign, all decoded annotations must obey strict structural invariants: `path` must match an admitted file exhibit for that case (never an un-touched or non-existent file), line coordinates are normalized to 1-based `start_line >= 1` and `end_line >= start_line`, file-level or missing-companion omission violations anchor to line `1` (`1..1`) of the primary triggering admitted file exhibit, and violations confined purely to admitted PR metadata planes (`pr_title`, `pr_body`, `linked_issues`) emit `annotations: []`.
-3. **Empty-Evidence Short-Circuit:** If `.evidence.active_cases` is empty (either because upstream `docket` dismissed all canons, `admit` excluded all candidate exhibits, or an incoming `--caseload` carried zero active cases), `audit` attaches a passing `.verdict` (`status: "pass"`, `adjudications: []`) and exits `0` immediately with zero model calls and without requiring provider credentials when upstream `.docket` or `.evidence` was pre-populated empty.
+3. **Empty-Evidence & Zero-Contested Short-Circuits:**
+   - If `.evidence.active_cases` is empty, `audit` attaches a passing `.verdict` (`status: "pass"`, `adjudications: []`) and exits `0` immediately with zero model calls.
+   - If `.vetting` is populated and `.vetting.contested_cases` is empty, `audit` folds all `.vetting.vetted_cases` directly into `.verdict` and returns immediately with zero `auditor_model` calls (and without requiring `GEMINI_API_KEY` when `.vetting` was pre-populated via `--caseload`).
 
 ---
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Prerequisite Verification & Empty-Evidence Early Exit:**  
-   Verifies that `.intake`, `.discovery`, and `.evidence` are present and that static canon validation succeeded (`.validation.has_errors` is `false`). If `.evidence.active_cases` is empty, attaches a clean passing `.verdict` (`adjudications: []`) and returns immediately with zero model calls.
+1. **Prerequisite Verification & Short-Circuit Checks:**  
+   Verifies that `.intake`, `.discovery`, and `.evidence` are present and that static canon validation succeeded (`.validation.has_errors` is `false`). If `.evidence.active_cases` is empty, attaches an empty passing `.verdict` and returns immediately. If `.vetting` is present, partitions active cases into carried-forward `vetted_cases` and trial-bound `contested_cases` (returning immediately if `contested_cases` is empty); if `.vetting` is absent (e.g., generative-screener pass-through or direct `--caseload` from `admit`), binds all `.evidence.active_cases` for trial.
 2. **Admitted Exhibit & Statutory Reference Assembly:**  
-   For each canon on `.evidence.active_cases`:
+   For each trial-bound canon:
    - Projects strictly its `"admitted"` exhibits from `.evidence.exhibits[canon_path]`.
    - Formats admitted file exhibits with explicit 1-based target-file line coordinates (annotated unified diff hunks from `.intake.diffs` when present, or numbered UTF-8 file snapshots from the workspace for path-only / `--all-targets` sweeps) alongside admitted filing metadata blocks (`pr_title`, `pr_body`, `linked_issues`).
    - Resolves static frontmatter `references:` patterns within the canon's `<scope>/` against materialized workspace files and injects them as authoritative statutory reference context.
-3. **Concurrent Isolated Per-Case Trials & Two-Tier Happy-Path Fast-Pass:**  
-   Evaluates active cases up to `--audit-concurrency` (default: `4`), aggregating prompt, completion, reasoning, and total token usage alongside intermediate reasoning `Thought` deltas into `StageFinish` telemetry:
-   - **Standard Generative Trials (`google:*`, e.g., `gemini-pro-latest`):** Evaluates each active case in an **independent, isolated prompt turn** at `temperature: 0.0`, forwarding `caseload.config.reasoning_budget` when configured so Canon A's exceptions and references never bleed into Canon B's trial.
-   - **Two-Tier Discriminative Happy-Path Fast-Pass (`typesafe:*` Screener $\to$ `google:*` Auditor):** When `caseload.config.screener_model` targets a discriminative decision model (`typesafe:*`) and `caseload.config.auditor_model` targets a generative reasoning model (`google:*`), `audit` first evaluates each active case's admitted exhibits and statute via a single-forward-pass discriminative compliance `Noul` check (zero output tokens). Cases whose compliance probability meets `max(--audit-threshold, --audit-fastpass-threshold)` (default `0.80`) pass immediately, whereas any suspected violation or low-confidence borderline case (`score < fastpass_threshold`) automatically escalates to an isolated deep generative `auditor_model` trial to evaluate exceptions, synthesize remediation guidance, and anchor 1-based line `CodeAnnotation`s.
-   - **Pure Discriminative Trials (`typesafe:*` Auditor):** When `caseload.config.auditor_model` itself targets a discriminative model, `audit` renders deterministic statute-grounded decrees directly from compliance probabilities (anchoring failing cases at line `1` of the primary admitted file exhibit when applicable).
+3. **Concurrent Isolated Generative Trials (`google:*`, e.g., `gemini-pro-latest`):**  
+   Evaluates contested cases concurrently up to `--audit-concurrency` (default: `4`) in **independent, isolated prompt turns** at `temperature: 0.0`, forwarding `caseload.config.reasoning_budget` when configured so Canon A's exceptions and references never bleed into Canon B's trial, while aggregating prompt, completion, reasoning, and total token usage alongside intermediate reasoning `Thought` deltas into `StageFinish` telemetry.
 4. **The Four-Step Judicial Decision Tree & Polarized Score Rubric:**
    - **Step 1 (Invariant Evaluation):** Evaluates admitted exhibits strictly against the normative invariant (What), treating `Rationale` (Why) as disambiguating intent context and `Remediation` (How) as post-violation repair guidance rather than extra syntactic mandates (`SPEC.md` §5). If compliant $\implies$ score in `[0.80, 1.0]`, `annotations: []`.
    - **Step 2 (Exception Screening):** If a prima facie violation is detected, evaluates declared `Exception` clauses against the admitted exhibits. If an exception's verifiable conditions are satisfied $\implies$ short-circuits to conditional `pass` (`compliance_score` in `[0.80, 0.95]`, `annotations: []`), citing the matched exception in `compliance_summary`.
@@ -96,13 +96,13 @@ flowchart LR
      "annotations": []
    }
    ```
-   Generating `compliance_summary` before `compliance_score` provides a contrastive reasoning scratchpad anchoring stable probability distributions away from the `0.5` threshold. The domain engine validates annotation paths and line bounds, derives per-case `status` (`"pass"` when `compliance_score >= --audit-threshold`, else `"fail"`), and aggregates overall `.verdict.status`.
+   Generating `compliance_summary` before `compliance_score` provides a contrastive reasoning scratchpad anchoring stable probability distributions away from the `0.5` threshold. The domain engine validates annotation paths and line bounds, merges carried-forward `vetted` records with contested trial decrees in lexicographical `canon_path` order, derives per-case `status`, and aggregates overall `.verdict.status`.
 
 ---
 
 ## 5. Driving Adapter: CLI
 
-The CLI exposes `audit` as its flagship evaluation command:
+The CLI exposes `audit` as its flagship review gate command:
 
 ```bash
 # 1. Evaluate in-flight diff in telescoping mode:
@@ -112,32 +112,32 @@ git diff origin/main | canon-clerk audit --diff -
 canon-clerk audit src/cli src/admit
 git diff origin/main --name-only | canon-clerk audit -
 
-# 3. Adjudicate an admitted Caseload from an upstream pipeline stage:
-canon-clerk audit --caseload caseload-6.json
+# 3. Adjudicate contested cases from an upstream vetted Caseload:
+canon-clerk audit --caseload caseload-7.json
 
 # 4. Run in GitHub Actions mode while archiving the full Caseload JSON artifact:
 git diff origin/main | canon-clerk audit --diff - --format github --output-caseload caseload.json
 
-# 5. Use TypeSafe Jev for ultra-fast screening and happy-path fast-pass with Gemini Pro escalation:
+# 5. Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini Pro:
 git diff origin/main | canon-clerk audit --diff - --screener-model jev
 ```
 
 ### Missing Input Source & Case-or-Controversy Guard
-`canon-clerk audit` requires an underlying filing (positional `TARGETS`, newline-delimited target paths via `-`, `--diff <PATH|->`, `--all-targets`, pull request metadata flags, or an incoming `--caseload <PATH|->` with `.intake` populated). Naked invocations or canon-only invocations lacking a concrete filing (e.g. `canon-clerk audit --all-canons` without target paths or diff, or an abstract corpus-only `--caseload` without `.intake`) fail fast with exit code `2` (Usage Error) and print actionable remediation guidance:
+`canon-clerk audit` requires an underlying filing (positional `TARGETS`, newline-delimited target paths via `-`, `--diff <PATH|->`, `--all-targets`, pull request metadata flags, or an incoming `--caseload <PATH|->` with `.intake` populated). Naked invocations or canon-only invocations lacking a concrete filing fail fast with exit code `2` (Usage Error) and print actionable remediation guidance:
 ```text
 error: No filing source provided for `audit`.
   Hint: Pipe a diff via standard input ('--diff -'), specify target paths ('src/...', '-', '--all-targets'),
         or pass an upstream caseload ('--caseload <PATH|->') with '.intake' populated.
 ```
-Conversely, if an explicitly designated stream yields zero changes, `discover` matches zero candidate canons, `docket` opens zero colorable cases, or `admit` admits zero exhibits, the pipeline cleanly short-circuits with exit code `0`.
+Conversely, if an explicitly designated stream yields zero changes, `discover` matches zero candidate canons, `docket` opens zero colorable cases, `admit` admits zero exhibits, or `vet` clears 100% of active cases, the pipeline cleanly short-circuits with exit code `0`.
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
 - `--diff <PATH|->`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags (evaluated against the underlying filing).
-- `--audit-threshold <FLOAT>` (fallback env: `CANON_CLERK_AUDIT_THRESHOLD`): Substantive compliance threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure `--apprise-*` flags (`--apprise-threshold`, `--apprise-batch-size`, `--apprise-concurrency`) are rejected with exit code `2` and guidance pointing to `--audit-threshold`, `--admit-threshold`, and `--docket-threshold`.
-- `--audit-fastpass-threshold <FLOAT>` (fallback env: `CANON_CLERK_AUDIT_FASTPASS_THRESHOLD`): High-confidence discriminative fast-pass threshold in `[0.0, 1.0]` (default: `0.80`) governing when two-tier `audit` runs (`typesafe:*` screener + `google:*` auditor) accept a compliant case without escalating to a generative `auditor_model` trial. Accepted exclusively on `audit`.
-- `--audit-concurrency <COUNT>` (fallback env: `CANON_CLERK_AUDIT_CONCURRENCY`; config file key: `auditConcurrency`): Optional positive integer (`>= 1`) bounding maximum concurrent in-flight per-case trial calls (default: `4`). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).
+- `--audit-threshold <FLOAT>` (fallback env: `CANON_CLERK_AUDIT_THRESHOLD`): Substantive compliance threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure `--apprise-*` flags are rejected with exit code `2` and guidance pointing to `--audit-threshold`, `--vet-threshold`, `--admit-threshold`, and `--docket-threshold`.
+- `--audit-concurrency <COUNT>` (fallback env: `CANON_CLERK_AUDIT_CONCURRENCY`; config file key: `auditConcurrency`): Optional positive integer (`>= 1`) bounding maximum concurrent in-flight contested trial calls (default: `4`). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).
+- `--vet-threshold <FLOAT>` (`CANON_CLERK_VET_THRESHOLD`, default: `0.80`), `--vet-concurrency <COUNT>` (`CANON_CLERK_VET_CONCURRENCY`, default: `4`): Upstream prima facie compliance vetting options accepted transitively for telescoping runs.
 - `--admit-threshold <FLOAT>` (`CANON_CLERK_ADMIT_THRESHOLD`), `--admit-concurrency <COUNT>` / `--max-concurrent-calls <COUNT>` (`CANON_CLERK_ADMIT_CONCURRENCY`): Upstream micro evidentiary admissibility options accepted transitively for telescoping runs.
 - `--docket-threshold <FLOAT>` (`CANON_CLERK_DOCKET_THRESHOLD`), `--docket-batch-size <COUNT>` / `--max-canons-per-call <COUNT>` (`CANON_CLERK_DOCKET_BATCH_SIZE`), `--docket-concurrency <COUNT>` (`CANON_CLERK_DOCKET_CONCURRENCY`): Upstream macro jurisdiction triage options accepted transitively for telescoping runs.
 - `--auditor-model <MODEL>` (`CANON_CLERK_AUDITOR_MODEL`), `--screener-model <MODEL>` (`CANON_CLERK_SCREENER_MODEL`), `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Shared model configuration and credential options (resolved JIT only when heuristic evaluation is required).
@@ -148,7 +148,7 @@ Conversely, if an explicitly designated stream yields zero changes, `discover` m
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes & GitHub Actions Integration
-- **`stylish` (Default Interactive):** Renders the complete 7-stage **Pipeline Funnel Provenance Receipt** (`intake` $\to$ `discover` $\to$ `validate` $\to$ `configure` $\to$ `docket` $\to$ `admit` $\to$ `audit`) followed by the Verdict summary (`PASS` / `FAIL`), per-case compliance decrees, and indented `CodeAnnotation` source diagnostics.
+- **`stylish` (Default Interactive):** Renders the complete 8-stage **Pipeline Funnel Provenance Receipt** (`intake` $\to$ `discover` $\to$ `validate` $\to$ `configure` $\to$ `docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`) followed by the Verdict summary (`PASS` / `FAIL`), per-case compliance decrees, and indented `CodeAnnotation` source diagnostics.
 - **`compact`:** Emits deterministic tab-separated adjudication and diagnostic lines suitable for shell scripts and editor integrations.
 - **`github` (CI Tripartite Output Model):** Auto-selected when `GITHUB_ACTIONS=true` (unless overridden by `--format` or `--json`):
   1. Emits native GitHub Actions workflow command annotations (`::error file=...,line=...,endLine=...,col=...,title=...::...`, `::warning ...`, `::notice ...`) for each `CodeAnnotation` on `stdout`.
@@ -157,6 +157,6 @@ Conversely, if an explicitly designated stream yields zero changes, `discover` m
 - **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing structured `.verdict` adjudications and annotations.
 
 ### CLI Exit Codes
-- **0:** All evaluated cases pass (`status: "pass"`, `compliance_score >= --audit-threshold`), or 0 trials required due to clean upstream short-circuits (0 changes, 0 candidate canons, empty docket, or 0 admitted exhibits).
-- **1:** Substantive canon violation detected (`.verdict.status == "fail"`), candidate canon static validation failure (`validation.has_errors` is `true`, evaluated before checking `GEMINI_API_KEY`), or local workspace I/O runtime error.
-- **2:** Usage error, missing filing source or Case-or-Controversy guard violation, invalid or out-of-range threshold/concurrency/batch flags, rejected `--threshold` or `--apprise-*` flag, conflicting `stdin` operands, missing API credentials, or model provider error.
+- **0:** All active cases pass (`status: "pass"`, `compliance_score >= --audit-threshold`), or 0 contested trials required due to clean upstream short-circuits (0 changes, 0 candidate canons, empty docket, 0 admitted exhibits, or all active cases cleared by `vet`).
+- **1:** Substantive canon violation detected (`.verdict.status == "fail"`), candidate canon static validation failure (`validation.has_errors` is `true`, evaluated before checking API credentials), or local workspace I/O runtime error.
+- **2:** Usage error, missing filing source or Case-or-Controversy guard violation, invalid or out-of-range threshold/concurrency/batch flags, rejected `--threshold` or `--apprise-*` flag, conflicting `stdin` operands, discriminative `--auditor-model` specifier, missing API credentials, or model provider error.

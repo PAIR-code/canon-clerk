@@ -64,6 +64,9 @@ pub struct ConfigureOptions {
     pub gemini_api_key: Option<String>,
     /// Explicit TypeSafe AI API key override (`--typesafe-api-key`).
     pub typesafe_api_key: Option<String>,
+    /// When `true` (screener-only closures: `apprise`, `docket`, `admit`, `vet`), verifies active
+    /// credentials strictly for `screener_model` unless `auditor_model` was explicitly overridden.
+    pub screener_only_closure: bool,
     /// Snapshot of runtime environment variables injected by the driving adapter.
     pub env: BTreeMap<String, String>,
     /// Optional parsed user-level configuration (`~/.config/canon-clerk/config.json`).
@@ -92,6 +95,8 @@ pub enum ConfigureError {
     UnsupportedProvider { provider: String, specifier: String },
     /// Model specifier is empty, contains whitespace, or does not name a valid supported model.
     InvalidModelSpecifier { specifier: String, reason: String },
+    /// Discriminative-only classifier (`typesafe:*`) was configured on `auditor_model`.
+    DiscriminativeAuditorUnsupported { specifier: String },
     /// Reasoning budget environment variable cannot be parsed as a non-negative integer.
     InvalidReasoningBudget { raw: String },
     /// User configuration file has group or world access permissions on a POSIX host.
@@ -133,6 +138,13 @@ impl fmt::Display for ConfigureError {
                 "Invalid model specifier `{specifier}`: {reason}\n  \
                  Hint: Specify a canonical model such as `{DEFAULT_SCREENER_MODEL}`, \
                  `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or shorthand aliases `flash-lite`, `flash`, `pro`, `jev`."
+            ),
+            Self::DiscriminativeAuditorUnsupported { specifier } => write!(
+                f,
+                "Discriminative model `{specifier}` cannot be configured as `auditor_model` \
+                 (`audit` requires structured generative output for exception rulings, remediation guidance, and line annotations).\n  \
+                 Hint: Pass `--screener-model jev` (e.g. `canon-clerk vet --screener-model jev`) \
+                 and keep a generative auditor such as `{DEFAULT_AUDITOR_MODEL}` (`pro`) on `--auditor-model`."
             ),
             Self::InvalidReasoningBudget { raw } => write!(
                 f,
@@ -347,11 +359,16 @@ pub fn execute_configure(
     .or_else(|| existing_config.map(|c| c.auditor_model.as_str()))
     .unwrap_or(DEFAULT_AUDITOR_MODEL);
     let auditor_model = normalize_model_specifier(raw_auditor)?;
+    if model_provider(&auditor_model) == TYPESAFE_PROVIDER {
+        return Err(ConfigureError::DiscriminativeAuditorUnsupported {
+            specifier: auditor_model,
+        });
+    }
 
+    let check_auditor_creds = !options.screener_only_closure || options.auditor_model.is_some();
     let uses_google = model_provider(&screener_model) == DEFAULT_PROVIDER
-        || model_provider(&auditor_model) == DEFAULT_PROVIDER;
-    let uses_typesafe = model_provider(&screener_model) == TYPESAFE_PROVIDER
-        || model_provider(&auditor_model) == TYPESAFE_PROVIDER;
+        || (check_auditor_creds && model_provider(&auditor_model) == DEFAULT_PROVIDER);
+    let uses_typesafe = model_provider(&screener_model) == TYPESAFE_PROVIDER;
 
     if uses_google {
         let _verified = resolve_gemini_api_key(options)?.len();
@@ -620,10 +637,8 @@ mod tests {
                 screener_model: Some("flash-lite".to_string()),
                 auditor_model: Some("pro".to_string()),
                 reasoning_budget: Some(4096),
-                gemini_api_key: None,
-                typesafe_api_key: None,
                 env,
-                stored_config: None,
+                ..ConfigureOptions::default()
             };
             let caseload = execute_configure(&opts, None).expect("configure with overrides");
             let cfg = caseload.config.expect("config populated");
@@ -730,26 +745,59 @@ mod tests {
                 })
             );
 
-            // 3. Pure TypeSafe config does NOT require GEMINI_API_KEY
+            // 3. Discriminative model on auditor_model is rejected with remediation hint
             let mut ts_only_env = BTreeMap::new();
             ts_only_env.insert(
                 ENV_TYPESAFE_API_KEY.to_string(),
                 "synthetic-typesafe-only-key".to_string(),
             );
-            let ts_only_ok = execute_configure(
+            let err_disc_auditor = execute_configure(
                 &ConfigureOptions {
                     screener_model: Some("jev".to_string()),
                     auditor_model: Some("typesafe:jev-latest".to_string()),
+                    env: ts_only_env.clone(),
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect_err("discriminative auditor_model must be rejected");
+            assert_eq!(
+                err_disc_auditor,
+                ConfigureError::DiscriminativeAuditorUnsupported {
+                    specifier: DEFAULT_JEV_MODEL.to_string(),
+                }
+            );
+            assert!(err_disc_auditor.to_string().contains("canon-clerk vet"));
+            assert!(err_disc_auditor.to_string().contains("Hint:"));
+
+            // 4. Screener-only closure with screener=jev succeeds with ONLY TYPESAFE_API_KEY
+            let screener_only_ok = execute_configure(
+                &ConfigureOptions {
+                    screener_model: Some("jev".to_string()),
+                    screener_only_closure: true,
+                    env: ts_only_env.clone(),
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect("screener-only closure with jev must succeed without GEMINI_API_KEY");
+            assert_eq!(
+                screener_only_ok.config.expect("config").screener_model,
+                DEFAULT_JEV_MODEL
+            );
+
+            // 5. Full closure (audit/configure/probe) with screener=jev still requires GEMINI_API_KEY
+            let err_full_missing_gemini = execute_configure(
+                &ConfigureOptions {
+                    screener_model: Some("jev".to_string()),
+                    screener_only_closure: false,
                     env: ts_only_env,
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect("typesafe-only config should succeed without GEMINI_API_KEY");
-            assert_eq!(
-                ts_only_ok.config.expect("config").screener_model,
-                DEFAULT_JEV_MODEL
-            );
+            .expect_err("full closure without GEMINI_API_KEY must fail");
+            assert_eq!(err_full_missing_gemini, ConfigureError::MissingApiKey);
         }
     }
 

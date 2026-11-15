@@ -183,9 +183,21 @@ pub fn resolve_branch_b_options(
         reasoning_budget: provider.reasoning_budget,
         gemini_api_key: provider.gemini_api_key.clone(),
         typesafe_api_key: provider.typesafe_api_key.clone(),
+        screener_only_closure: false,
         env: env.clone(),
         stored_config,
     })
+}
+
+/// Resolves Branch B [`ConfigureOptions`] for screener-only closures (`apprise`, `docket`, `admit`, `vet`)
+/// so active provider credential checks apply strictly to `screener_model` unless `--auditor-model` was overridden.
+pub(crate) fn resolve_screener_branch_b_options(
+    provider: &ProviderConfigArgs,
+    env: &BTreeMap<String, String>,
+) -> Result<ConfigureOptions, CliError> {
+    let mut opts = resolve_branch_b_options(provider, env)?;
+    opts.screener_only_closure = true;
+    Ok(opts)
 }
 
 /// Executes Branch B `configure` stage, fast-forwarding if `.config` is present and no overrides are specified.
@@ -218,15 +230,15 @@ pub(crate) fn resolve_typesafe_api_key(options: &ConfigureOptions) -> Result<Str
         .map_err(|err| CliError::usage(err.to_string()))
 }
 
-/// Builds a live [`MultiModelProvider`] resolving only the credentials required by `config`.
+/// Builds a live [`MultiModelProvider`] resolving only the credentials required by `config` and `options`.
 pub(crate) fn build_live_model_provider(
     options: &ConfigureOptions,
     config: &CaseloadConfig,
 ) -> Result<MultiModelProvider, CliError> {
+    let check_auditor_creds = !options.screener_only_closure || options.auditor_model.is_some();
     let needs_google = model_provider(&config.screener_model) == DEFAULT_PROVIDER
-        || model_provider(&config.auditor_model) == DEFAULT_PROVIDER;
-    let needs_typesafe = model_provider(&config.screener_model) == TYPESAFE_PROVIDER
-        || model_provider(&config.auditor_model) == TYPESAFE_PROVIDER;
+        || (check_auditor_creds && model_provider(&config.auditor_model) == DEFAULT_PROVIDER);
+    let needs_typesafe = model_provider(&config.screener_model) == TYPESAFE_PROVIDER;
 
     let gemini_key = if needs_google {
         Some(resolve_gemini_api_key(options)?)
@@ -299,15 +311,7 @@ mod tests {
                 auditor_model: "google:gemini-2.5-pro".to_string(),
                 reasoning_budget: Some(1024),
             });
-            let options = ConfigureOptions {
-                screener_model: None,
-                auditor_model: None,
-                reasoning_budget: None,
-                gemini_api_key: None,
-                typesafe_api_key: None,
-                env: BTreeMap::new(),
-                stored_config: None,
-            };
+            let options = ConfigureOptions::default();
             let result = run_branch_b_configure(&options, Some(existing.clone()), &session)
                 .expect("fast-forward skip on config");
             assert_eq!(result, existing);
