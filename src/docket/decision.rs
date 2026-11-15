@@ -16,7 +16,7 @@
 
 use super::prompt::{append_canon_section, build_bounded_docket_filing_prefix};
 use super::{
-    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DocketError, DocketOptions, format_docket_batch_label,
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DocketError, DocketOptions, format_canon_batch_label,
 };
 use crate::caseload::{
     CanonDocketAssessment, Caseload, CaseloadDocket, ColorabilityStatus,
@@ -92,14 +92,16 @@ pub(super) fn execute_docket_decisions(
         |(_, q)| q.len(),
     );
 
-    let mut prepared = Vec::with_capacity(batches.len());
-    for batch_items in batches {
+    let total_batches = batches.len();
+    let mut prepared = Vec::with_capacity(total_batches);
+    for (idx, batch_items) in batches.into_iter().enumerate() {
         let mut batch_canons = Vec::with_capacity(batch_items.len());
         let mut questions = BTreeMap::new();
         for (canon_ref, q_text) in batch_items {
             batch_canons.push(canon_ref.clone());
             questions.insert(canon_ref, q_text);
         }
+        let call_label = (total_batches > 1).then(|| format!("batch {}/{total_batches}", idx + 1));
         prepared.push((
             batch_canons,
             DecisionRequest {
@@ -107,7 +109,7 @@ pub(super) fn execute_docket_decisions(
                 state: shared_state.clone(),
                 questions,
                 timeout_ms: options.timeout_ms,
-                call_label: None,
+                call_label,
             },
         ));
     }
@@ -140,10 +142,13 @@ fn run_decision_batches(
     if worker_count == 1 {
         let mut combined = BTreeMap::new();
         for (idx, (batch_canons, request)) in prepared.iter().enumerate() {
-            let response = provider.evaluate_decisions(request)?;
-            let batch_cases =
-                fold_decision_cases(&response, batch_canons, threshold, model_specifier)?;
-            let label = format_docket_batch_label(idx, total, batch_canons.len());
+            let batch_cases = provider
+                .evaluate_decisions(request)
+                .and_then(|response| {
+                    fold_decision_cases(&response, batch_canons, threshold, model_specifier)
+                })
+                .map_err(|err| DocketError::from_batch_call(idx + 1, total, err))?;
+            let label = format_canon_batch_label(idx, total, batch_canons.len());
             provider.record_progress(idx + 1, total, &label);
             combined.extend(batch_cases);
         }
@@ -169,10 +174,10 @@ fn run_decision_batches(
                     let (batch_canons, request) = &prepared[idx];
                     let res = provider
                         .evaluate_decisions(request)
-                        .map_err(DocketError::from)
                         .and_then(|resp| {
                             fold_decision_cases(&resp, batch_canons, threshold, model_specifier)
-                        });
+                        })
+                        .map_err(|err| DocketError::from_batch_call(idx + 1, total, err));
                     let succeeded = res.is_ok();
                     if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
@@ -181,7 +186,7 @@ fn run_decision_batches(
                         guard.1[idx] = Some(res);
                         if succeeded {
                             guard.0 += 1;
-                            let label = format_docket_batch_label(idx, total, batch_canons.len());
+                            let label = format_canon_batch_label(idx, total, batch_canons.len());
                             provider.record_progress(guard.0, total, &label);
                         }
                     }
@@ -203,20 +208,23 @@ fn fold_decision_cases(
     batch_canons: &[String],
     threshold: f64,
     model_specifier: &str,
-) -> BatchResult {
+) -> Result<BTreeMap<String, CanonDocketAssessment>, ProviderError> {
     let mut cases = BTreeMap::new();
     for canon_ref in batch_canons {
-        let raw_score = response.scores.get(canon_ref).copied().ok_or_else(|| {
-            DocketError::Provider(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!("missing decision score for candidate canon `{canon_ref}`"),
-            })
-        })?;
+        let raw_score =
+            response
+                .scores
+                .get(canon_ref)
+                .copied()
+                .ok_or_else(|| ProviderError::SchemaDecode {
+                    model_specifier: model_specifier.to_string(),
+                    message: format!("missing decision score for candidate canon `{canon_ref}`"),
+                })?;
         let colorability_score = normalize_colorability_score(raw_score).map_err(|detail| {
-            DocketError::Provider(ProviderError::SchemaDecode {
+            ProviderError::SchemaDecode {
                 model_specifier: model_specifier.to_string(),
                 message: format!("invalid decision score for `{canon_ref}`: {detail}"),
-            })
+            }
         })?;
         let colorability_status = ColorabilityStatus::from_score(colorability_score, threshold);
         let colorability_summary = format!(
@@ -327,6 +335,22 @@ mod tests {
         assert_eq!(
             docket.cases[drop_ref].colorability_status,
             ColorabilityStatus::Dismissed
+        );
+    }
+
+    #[test]
+    fn test_effective_docket_batch_size_preserves_48_noul_ceiling_for_typesafe_jev() {
+        use crate::caseload::DEFAULT_SCREENER_MODEL;
+        use crate::docket::{DEFAULT_DOCKET_BATCH_SIZE, effective_docket_batch_size};
+
+        assert_eq!(
+            effective_docket_batch_size(None, DEFAULT_SCREENER_MODEL),
+            Some(DEFAULT_DOCKET_BATCH_SIZE)
+        );
+        assert_eq!(effective_docket_batch_size(None, DEFAULT_JEV_MODEL), None);
+        assert_eq!(
+            effective_docket_batch_size(Some(12), DEFAULT_JEV_MODEL),
+            Some(12)
         );
     }
 }

@@ -20,7 +20,8 @@ use super::{
 };
 use crate::admit::{DEFAULT_ADMIT_MAX_CONCURRENT_CALLS, ENV_ADMIT_CONCURRENCY};
 use crate::apprise::{
-    DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY,
+    DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, ENV_APPRISE_BATCH_SIZE,
+    ENV_APPRISE_CONCURRENCY,
 };
 use crate::audit::{DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, ENV_AUDIT_CONCURRENCY};
 use crate::caseload::{Caseload, IntakeScope, normalize_unit_score};
@@ -29,8 +30,8 @@ use crate::cli::closure::merge_metadata_onto_intake;
 use crate::configure::{ConfigureOptions, StoredConfig, execute_configure};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{
-    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY,
-    ENV_MAX_CANONS_PER_CALL, ENV_MAX_CONCURRENT_CALLS,
+    DEFAULT_DOCKET_BATCH_SIZE, DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, ENV_DOCKET_BATCH_SIZE,
+    ENV_DOCKET_CONCURRENCY, ENV_MAX_CANONS_PER_CALL, ENV_MAX_CONCURRENT_CALLS,
 };
 use crate::intake::{IntakeOptions, execute_intake};
 use crate::validate::{ValidateOptions, execute_validate};
@@ -218,7 +219,12 @@ fn resolve_batch_sweep_values(
         }
     }
 
-    Ok(vec![None])
+    let default_batch = match stage {
+        BenchmarkStage::Apprise => Some(DEFAULT_APPRISE_BATCH_SIZE),
+        BenchmarkStage::Docket => Some(DEFAULT_DOCKET_BATCH_SIZE),
+        BenchmarkStage::Admit | BenchmarkStage::Vet | BenchmarkStage::Audit => None,
+    };
+    Ok(vec![default_batch])
 }
 
 /// Parses one or more comma-delimited batch-size specifiers (`"unbounded"`, `"0"`, or positive integers).
@@ -511,6 +517,40 @@ mod tests {
             assert_eq!(specs[1].max_concurrent_calls, Some(3));
             assert_eq!(specs[2].label, "batch=25,conc=3");
             assert_eq!(specs[2].max_canons_per_call, Some(25));
+
+            let default_apprise_specs = resolve_config_specs(&ConfigSweepInputs {
+                stage: BenchmarkStage::Apprise,
+                threshold: DEFAULT_APPRISE_THRESHOLD,
+                raw_batch_specs: &[],
+                flag_concurrency: None,
+                env: &env,
+                stored_config: None,
+                timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            })
+            .expect("resolve default apprise specs");
+            assert_eq!(default_apprise_specs.len(), 1);
+            assert_eq!(default_apprise_specs[0].label, "batch=25,conc=4");
+            assert_eq!(
+                default_apprise_specs[0].max_canons_per_call,
+                Some(DEFAULT_APPRISE_BATCH_SIZE)
+            );
+
+            let default_docket_specs = resolve_config_specs(&ConfigSweepInputs {
+                stage: BenchmarkStage::Docket,
+                threshold: DEFAULT_APPRISE_THRESHOLD,
+                raw_batch_specs: &[],
+                flag_concurrency: None,
+                env: &env,
+                stored_config: None,
+                timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            })
+            .expect("resolve default docket specs");
+            assert_eq!(default_docket_specs.len(), 1);
+            assert_eq!(default_docket_specs[0].label, "batch=25,conc=4");
+            assert_eq!(
+                default_docket_specs[0].max_canons_per_call,
+                Some(DEFAULT_DOCKET_BATCH_SIZE)
+            );
         }
 
         #[test]

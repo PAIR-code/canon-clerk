@@ -16,7 +16,7 @@
 
 use super::AppriseArgs;
 use super::guards::{resolve_apprise_batch_size, resolve_apprise_concurrency};
-use crate::apprise::{AppriseOptions, execute_apprise};
+use crate::apprise::{AppriseOptions, effective_apprise_batch_size, execute_apprise};
 use crate::caseload::{Caseload, IntakeScope};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
@@ -153,7 +153,10 @@ pub(super) fn execute_jit_configure_and_apprise(
     let apprise_opts = AppriseOptions {
         threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call,
+        max_canons_per_call: effective_apprise_batch_size(
+            max_canons_per_call,
+            &cfg_snapshot.screener_model,
+        ),
         max_concurrent_calls,
     };
 

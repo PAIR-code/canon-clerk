@@ -36,8 +36,9 @@ pub use admit::{
     ENV_ADMIT_CONCURRENCY, ENV_ADMIT_THRESHOLD, execute_admit,
 };
 pub use apprise::{
-    AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
-    ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD, execute_apprise,
+    AppriseError, AppriseOptions, DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS,
+    DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY,
+    ENV_APPRISE_THRESHOLD, execute_apprise,
 };
 pub use audit::{
     AuditError, AuditOptions, DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD,
@@ -116,9 +117,10 @@ pub use discover::{
     scope_relative_path,
 };
 pub use docket::{
-    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD, DocketError, DocketOptions,
-    ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD, ENV_MAX_CANONS_PER_CALL,
-    ENV_MAX_CONCURRENT_CALLS, execute_docket, partition_candidate_canons,
+    DEFAULT_DOCKET_BATCH_SIZE, DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD,
+    DocketError, DocketOptions, ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY,
+    ENV_DOCKET_THRESHOLD, ENV_MAX_CANONS_PER_CALL, ENV_MAX_CONCURRENT_CALLS,
+    MAX_DOCKET_FILING_PREFIX_CHARS, execute_docket, partition_candidate_canons,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{

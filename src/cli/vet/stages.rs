@@ -28,7 +28,7 @@ use crate::cli::runners::{
     build_live_model_provider, resolve_screener_branch_b_options, run_branch_b_configure,
 };
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{DocketOptions, execute_docket};
+use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::vet::{VetOptions, execute_vet};
@@ -131,12 +131,9 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
 
     let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
     let stored = configure_options.stored_config.as_ref();
-    let docket_opts = DocketOptions {
-        threshold: thresholds.docket_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call: resolve_docket_batch_size(args.docket_batch_size, env, stored)?,
-        max_concurrent_calls: resolve_docket_concurrency(args.docket_concurrency, env, stored)?,
-    };
+    let explicit_docket_batch_size =
+        resolve_docket_batch_size(args.docket_batch_size, env, stored)?;
+    let docket_concurrency = resolve_docket_concurrency(args.docket_concurrency, env, stored)?;
     let admit_opts = AdmitOptions {
         threshold: thresholds.admit_threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
@@ -155,6 +152,15 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
     let cfg_snapshot = configured.config.clone().unwrap_or_default();
+    let docket_opts = DocketOptions {
+        threshold: thresholds.docket_threshold,
+        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        max_canons_per_call: effective_docket_batch_size(
+            explicit_docket_batch_size,
+            &cfg_snapshot.screener_model,
+        ),
+        max_concurrent_calls: docket_concurrency,
+    };
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {
         ClosureBackend::Hermetic { provider, .. } => *provider,

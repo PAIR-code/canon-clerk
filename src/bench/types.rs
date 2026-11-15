@@ -15,14 +15,16 @@
 //! Core configuration and report data structures for the consistency benchmark harness (`docs/architecture/benchmarking.md`).
 
 use super::{BenchmarkStage, DEFAULT_BENCHMARK_TRIALS};
-use crate::apprise::DEFAULT_APPRISE_THRESHOLD;
+use crate::apprise::{
+    DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
+};
 use crate::provider::DEFAULT_GENERATION_TIMEOUT_MS;
 use serde::{Deserialize, Serialize};
 
-/// Execution parameters for a single benchmark configuration (e.g. unbounded vs. `batch=15,conc=4`).
+/// Execution parameters for a single benchmark configuration (e.g. `"unbounded"` vs. `"batch=25,conc=4"`).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ConsistencyConfigSpec {
-    /// Human-readable configuration label (`"unbounded"`, `"batch=15,conc=4"`, etc.).
+    /// Human-readable configuration label (`"unbounded"`, `"batch=25,conc=4"`, etc.).
     pub label: String,
     /// Classification score threshold in `[0.0, 1.0]`.
     pub threshold: f64,
@@ -37,10 +39,12 @@ pub struct ConsistencyConfigSpec {
 impl Default for ConsistencyConfigSpec {
     fn default() -> Self {
         Self {
-            label: "unbounded".to_string(),
+            label: format!(
+                "batch={DEFAULT_APPRISE_BATCH_SIZE},conc={DEFAULT_APPRISE_MAX_CONCURRENT_CALLS}"
+            ),
             threshold: DEFAULT_APPRISE_THRESHOLD,
-            max_canons_per_call: None,
-            max_concurrent_calls: None,
+            max_canons_per_call: Some(DEFAULT_APPRISE_BATCH_SIZE),
+            max_concurrent_calls: Some(DEFAULT_APPRISE_MAX_CONCURRENT_CALLS),
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
         }
     }
