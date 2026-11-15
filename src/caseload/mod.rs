@@ -30,7 +30,7 @@ pub use apprisal::{
 };
 pub use config::{
     CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
-    TYPESAFE_PROVIDER,
+    DEFAULT_SCREENER_REASONING_BUDGET, TYPESAFE_PROVIDER,
 };
 pub use discovery::{ActiveExhibits, CaseloadDiscovery, DiscoveryMode};
 pub use docket::{

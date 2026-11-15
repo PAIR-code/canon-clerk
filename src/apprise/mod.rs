@@ -25,7 +25,8 @@ use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{partition_candidate_canons, resolve_canon_path};
 use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
+    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
+    ProviderError, StructuredModelProvider,
 };
 use prompt::{
     APPRISE_SYSTEM_INSTRUCTION, build_apprise_batch_user_prompt, build_apprise_intent_prefix,
@@ -244,7 +245,7 @@ pub fn execute_apprise(
             system_instruction: APPRISE_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            reasoning_budget: Some(0),
+            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: options.timeout_ms,
         };
         prepared_batches.push((batch_canons, request));
@@ -743,7 +744,7 @@ mod tests {
             );
             let req = &requests[0];
             assert_eq!(req.model_specifier, DEFAULT_SCREENER_MODEL);
-            assert_eq!(req.reasoning_budget, Some(0));
+            assert_eq!(req.reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
             assert!(req.user_prompt.contains("Refactor auth provider dispatch"));
             assert!(req.user_prompt.contains(".canons/auth/cache-expiry.md"));
             assert!(req.user_prompt.contains(".canons/auth/db-rollback.md"));

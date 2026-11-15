@@ -25,6 +25,9 @@ pub const TYPESAFE_PROVIDER: &str = "typesafe";
 /// Default canonical screener model specifier (`docs/architecture/nodes/configure.md` §3).
 pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-flash-lite-latest";
 
+/// Explicit reasoning budget in tokens for non-reasoning screener stages (`apprise`, `docket`, `admit`, `vet`).
+pub const DEFAULT_SCREENER_REASONING_BUDGET: Option<u32> = Some(0);
+
 /// Default canonical auditor model specifier (`docs/architecture/nodes/configure.md` §3).
 pub const DEFAULT_AUDITOR_MODEL: &str = "google:gemini-pro-latest";
 

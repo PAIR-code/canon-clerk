@@ -74,12 +74,12 @@ pub use caseload::{
     Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
     CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadValidation, CaseloadVerdict,
     CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason,
-    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DiscoveryMode,
-    ExhibitAssessment, FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext,
-    PatchOmissionReason, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER,
-    ValidatedCanonMetadata, ValidationOutcome, VerdictStatus, VettingStatus,
-    normalize_admissibility_score, normalize_colorability_score, normalize_compliance_score,
-    normalize_unit_score, normalize_vetting_score, sort_annotations,
+    DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
+    DEFAULT_SCREENER_REASONING_BUDGET, DiscoveryMode, ExhibitAssessment, FileArtifact,
+    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason, ProbeEndpointResult,
+    ProbeStatus, TYPESAFE_PROVIDER, ValidatedCanonMetadata, ValidationOutcome, VerdictStatus,
+    VettingStatus, normalize_admissibility_score, normalize_colorability_score,
+    normalize_compliance_score, normalize_unit_score, normalize_vetting_score, sort_annotations,
 };
 pub use cli::{
     AdmitArgs, AdmitFormat, AppriseArgs, AppriseFormat, AuditArgs, AuditFormat, CanonSelectionArgs,

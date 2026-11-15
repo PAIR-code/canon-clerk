@@ -19,6 +19,7 @@ pub mod gemini;
 mod gemini_wire;
 mod typesafe;
 
+pub use crate::caseload::DEFAULT_SCREENER_REASONING_BUDGET;
 pub use decision::{
     DecisionModelProvider, DecisionRequest, DecisionResponse, MultiModelProvider,
     TypesafeDecisionProvider,

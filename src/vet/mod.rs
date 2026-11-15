@@ -286,8 +286,8 @@ mod tests {
     use crate::caseload::{
         AdmissibilityStatus, CanonDocketAssessment, CaseloadConfig, CaseloadDiscovery,
         CaseloadDocket, CaseloadEvidence, CaseloadIntake, CaseloadValidation, ColorabilityStatus,
-        DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, DiscoveryMode, ExhibitAssessment,
-        FileArtifact, FileChangeStatus, VettingStatus,
+        DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, DEFAULT_SCREENER_REASONING_BUDGET,
+        DiscoveryMode, ExhibitAssessment, FileArtifact, FileChangeStatus, VettingStatus,
     };
     use crate::configure::DEFAULT_JEV_MODEL;
     use crate::provider::{
@@ -777,7 +777,10 @@ mod tests {
                 .expect("generative vet");
             let reqs = provider.structured_requests.lock().unwrap();
             assert_eq!(reqs.len(), 2);
-            assert!(reqs.iter().all(|r| r.reasoning_budget == Some(0)));
+            assert!(
+                reqs.iter()
+                    .all(|r| r.reasoning_budget == DEFAULT_SCREENER_REASONING_BUDGET)
+            );
 
             let vetting = out.vetting.expect("vetting");
             assert_eq!(vetting.vetted_count(), 1);

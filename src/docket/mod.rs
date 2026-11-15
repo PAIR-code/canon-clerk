@@ -27,7 +27,8 @@ use crate::caseload::{
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
+    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
+    ProviderError, StructuredModelProvider,
 };
 use decode::decode_docket_cases;
 use prompt::{
@@ -264,7 +265,7 @@ pub fn execute_docket(
             system_instruction: DOCKET_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            reasoning_budget: Some(0),
+            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: options.timeout_ms,
         };
         prepared_batches.push((batch_canons, request));
@@ -686,7 +687,7 @@ mod tests {
             assert_eq!(requests.len(), 1, "docket must execute in a single turn");
             let req = &requests[0];
             assert_eq!(req.model_specifier, DEFAULT_SCREENER_MODEL);
-            assert_eq!(req.reasoning_budget, Some(0));
+            assert_eq!(req.reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
             assert!(req.user_prompt.contains("feat(cli): add docket subcommand"));
             assert!(req.user_prompt.contains("#260: Implement docket stage"));
             assert!(req.user_prompt.contains("src/cli/docket.rs"));

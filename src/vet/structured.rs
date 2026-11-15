@@ -15,7 +15,10 @@
 //! Standalone zero-thinking structured generative vetting (`google:*`, `docs/architecture/nodes/vet.md` §4.3).
 
 use super::{PreparedVettingCase, VetError};
-use crate::caseload::{CanonVettingAssessment, VettingStatus, normalize_vetting_score};
+use crate::caseload::{
+    CanonVettingAssessment, DEFAULT_SCREENER_REASONING_BUDGET, VettingStatus,
+    normalize_vetting_score,
+};
 use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -117,7 +120,7 @@ pub(super) fn execute_generative_vetting(
             system_instruction: VET_SYSTEM_INSTRUCTION.to_string(),
             user_prompt: case.user_prompt.clone(),
             response_schema: response_schema.clone(),
-            reasoning_budget: Some(0),
+            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: params.timeout_ms,
         })
         .collect();
