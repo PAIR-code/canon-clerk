@@ -29,6 +29,7 @@ pub(super) fn decode_case_adjudication(
     canon_ref: &str,
     canon_id: &str,
     admitted_file_paths: &BTreeSet<String>,
+    primary_fallback_path: Option<&str>,
     threshold: f64,
     model_specifier: &str,
 ) -> Result<CanonAdjudication, ProviderError> {
@@ -77,8 +78,12 @@ pub(super) fn decode_case_adjudication(
     let status = VerdictStatus::from_score(compliance_score, threshold);
     let mut annotations = Vec::new();
 
+    let resolved_fallback = primary_fallback_path
+        .filter(|p| admitted_file_paths.contains(*p))
+        .or_else(|| admitted_file_paths.iter().next().map(String::as_str));
+
     if status == VerdictStatus::Fail
-        && let Some(fallback_file_path) = admitted_file_paths.iter().next()
+        && let Some(fallback_file_path) = resolved_fallback
     {
         for (idx, item) in raw_annotations.iter().enumerate() {
             let normalized = decode_and_normalize_annotation(

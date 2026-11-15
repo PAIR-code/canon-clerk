@@ -87,7 +87,7 @@ git diff origin/main | canon-clerk audit --diff -
 # Run a fast pre-flight prima facie compliance check (~1s, 0 output tokens on TypeSafe Jev):
 git diff origin/main | canon-clerk vet --diff - --screener-model jev
 
-# Accelerate screening and vet clean cases before escalating contested cases to Gemini Pro:
+# Accelerate screening and vet clean cases/slices before escalating contested exhibits to Gemini Pro:
 git diff origin/main | canon-clerk audit --diff - --screener-model jev
 
 # Audit explicit target paths or run in GitHub Actions annotation mode with Caseload archival:

@@ -15,8 +15,9 @@
 //! Context-budgeted multi-slice partitioning for discriminative `vet` (`docs/architecture/nodes/vet.md` §4.3).
 
 use crate::audit::{
-    append_admitted_exhibit_section, append_case_overview, append_governing_canon_statute,
-    append_grounding_references_section, is_metadata_plane_id, resolve_canon_reference_paths,
+    RenderedFileExhibit, build_shared_case_header, format_pinned_reference_exhibits,
+    is_metadata_plane_id, pack_rendered_exhibit_slices, partition_and_render_file_exhibits,
+    render_admitted_file_exhibits, resolve_canon_reference_paths,
 };
 use crate::canon::Canon;
 use crate::caseload::{CaseloadDiscovery, CaseloadIntake, ExhibitAssessment};
@@ -26,11 +27,18 @@ use std::fmt::Write as _;
 
 const SLICE_FRAME_RESERVE_CHARS: usize = 256;
 
+/// One context-budgeted discriminative `state` slice paired with the sliceable file exhibit paths it covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct VettingExhibitSlice {
+    pub(super) state: String,
+    pub(super) file_paths: Vec<String>,
+}
+
 /// Execution plan for evaluating one active case within a discriminative context ceiling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DiscriminativeCasePlan {
     /// One or more context-budgeted `state` slices whose conjunctive minimum score governs the case.
-    Slices(Vec<String>),
+    Slices(Vec<VettingExhibitSlice>),
     /// Single exhibit or statutory reference set exceeds the discriminative window; escalate as `contested`.
     OversizedContest,
 }
@@ -50,18 +58,21 @@ pub(super) fn build_discriminative_case_plan(
     workspace: &WorkspaceSnapshot,
     max_state_chars: usize,
 ) -> DiscriminativeCasePlan {
-    if full_prompt.len() <= max_state_chars {
-        return DiscriminativeCasePlan::Slices(vec![full_prompt.to_string()]);
-    }
-
     let admitted_file_paths: BTreeSet<String> = admitted_exhibits
         .iter()
         .map(|e| e.file_path.as_str())
         .filter(|id| !is_metadata_plane_id(id))
         .map(ToString::to_string)
         .collect();
-    let reference_paths = resolve_canon_reference_paths(canon, workspace);
 
+    if full_prompt.len() <= max_state_chars {
+        return DiscriminativeCasePlan::Slices(vec![VettingExhibitSlice {
+            state: full_prompt.to_string(),
+            file_paths: admitted_file_paths.into_iter().collect(),
+        }]);
+    }
+
+    let reference_paths = resolve_canon_reference_paths(canon, workspace);
     let (shared_header, file_exhibits) = prepare_header_and_sliceable_exhibits(
         canon_ref,
         canon,
@@ -76,7 +87,10 @@ pub(super) fn build_discriminative_case_plan(
 
     if file_exhibits.is_empty() {
         return if shared_header.len() <= max_state_chars {
-            DiscriminativeCasePlan::Slices(vec![shared_header])
+            DiscriminativeCasePlan::Slices(vec![VettingExhibitSlice {
+                state: shared_header,
+                file_paths: Vec::new(),
+            }])
         } else {
             DiscriminativeCasePlan::OversizedContest
         };
@@ -87,7 +101,7 @@ pub(super) fn build_discriminative_case_plan(
     }
     let body_budget = max_state_chars - shared_header.len() - SLICE_FRAME_RESERVE_CHARS;
 
-    let Some(groups) = pack_file_exhibit_slices(&file_exhibits, body_budget) else {
+    let Some(groups) = pack_rendered_exhibit_slices(&file_exhibits, body_budget, false) else {
         return DiscriminativeCasePlan::OversizedContest;
     };
 
@@ -106,10 +120,15 @@ pub(super) fn build_discriminative_case_plan(
                 total_slices,
                 group.len()
             );
-            for rendered in group {
-                slice_state.push_str(rendered);
+            let mut file_paths = Vec::with_capacity(group.len());
+            for item in group {
+                slice_state.push_str(&item.rendered);
+                file_paths.push(item.file_path.clone());
             }
-            slice_state
+            VettingExhibitSlice {
+                state: slice_state,
+                file_paths,
+            }
         })
         .collect();
 
@@ -130,7 +149,7 @@ fn prepare_header_and_sliceable_exhibits(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     max_state_chars: usize,
-) -> (String, Vec<String>) {
+) -> (String, Vec<RenderedFileExhibit>) {
     let mut header = build_shared_case_header(
         canon_ref,
         canon,
@@ -147,7 +166,8 @@ fn prepare_header_and_sliceable_exhibits(
         partition_and_render_file_exhibits(admitted_exhibits, &reference_set, intake, workspace);
 
     if !pinned_refs.is_empty() && !non_ref_files.is_empty() {
-        let pinned_section = format_pinned_reference_exhibits(&pinned_refs);
+        let refs_slice: Vec<&RenderedFileExhibit> = pinned_refs.iter().collect();
+        let pinned_section = format_pinned_reference_exhibits(&refs_slice);
         if header.len() + pinned_section.len() <= max_state_chars / 2 {
             header.push_str(&pinned_section);
             return (header, non_ref_files);
@@ -156,134 +176,4 @@ fn prepare_header_and_sliceable_exhibits(
 
     let all_files = render_admitted_file_exhibits(admitted_exhibits, intake, workspace);
     (header, all_files)
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Internal header builder combining overview, statute, references, metadata planes, and path manifest"
-)]
-fn build_shared_case_header(
-    canon_ref: &str,
-    canon: &Canon,
-    admitted_exhibits: &[&ExhibitAssessment],
-    admitted_file_paths: &BTreeSet<String>,
-    reference_paths: &[String],
-    intake: &CaseloadIntake,
-    discovery: &CaseloadDiscovery,
-    workspace: &WorkspaceSnapshot,
-) -> String {
-    let mut header = String::with_capacity(2048);
-
-    append_case_overview(&mut header, canon_ref, intake, discovery);
-    append_governing_canon_statute(&mut header, canon_ref, canon);
-    append_grounding_references_section(
-        &mut header,
-        reference_paths,
-        admitted_file_paths,
-        workspace,
-    );
-
-    let metadata_exhibits: Vec<&&ExhibitAssessment> = admitted_exhibits
-        .iter()
-        .filter(|e| is_metadata_plane_id(&e.file_path))
-        .collect();
-    if !metadata_exhibits.is_empty() {
-        let _ = writeln!(
-            header,
-            "## Admitted Metadata Exhibits ({})\n",
-            metadata_exhibits.len()
-        );
-        for exhibit in metadata_exhibits {
-            append_admitted_exhibit_section(&mut header, exhibit, intake, workspace);
-        }
-    }
-
-    let _ = writeln!(header, "## All Admitted File Exhibit Paths in Filing");
-    if admitted_file_paths.is_empty() {
-        let _ = writeln!(header, "(none — metadata-only case)\n");
-    } else {
-        for (idx, path) in admitted_file_paths.iter().enumerate() {
-            let _ = writeln!(header, "{}. `{path}`", idx + 1);
-        }
-        header.push('\n');
-    }
-    header
-}
-
-fn partition_and_render_file_exhibits(
-    admitted_exhibits: &[&ExhibitAssessment],
-    reference_set: &BTreeSet<&str>,
-    intake: &CaseloadIntake,
-    workspace: &WorkspaceSnapshot,
-) -> (Vec<String>, Vec<String>) {
-    let mut pinned_refs = Vec::new();
-    let mut non_ref_files = Vec::new();
-    for exhibit in admitted_exhibits {
-        if is_metadata_plane_id(&exhibit.file_path) {
-            continue;
-        }
-        let mut block = String::with_capacity(768);
-        append_admitted_exhibit_section(&mut block, exhibit, intake, workspace);
-        if reference_set.contains(exhibit.file_path.as_str()) {
-            pinned_refs.push(block);
-        } else {
-            non_ref_files.push(block);
-        }
-    }
-    (pinned_refs, non_ref_files)
-}
-
-fn format_pinned_reference_exhibits(pinned_refs: &[String]) -> String {
-    let mut out = String::with_capacity(pinned_refs.iter().map(String::len).sum::<usize>() + 128);
-    let _ = writeln!(
-        out,
-        "## Pinned Companion Reference Exhibits ({})\n",
-        pinned_refs.len()
-    );
-    for block in pinned_refs {
-        out.push_str(block);
-    }
-    out
-}
-
-fn render_admitted_file_exhibits(
-    admitted_exhibits: &[&ExhibitAssessment],
-    intake: &CaseloadIntake,
-    workspace: &WorkspaceSnapshot,
-) -> Vec<String> {
-    let mut rendered = Vec::new();
-    for exhibit in admitted_exhibits {
-        if !is_metadata_plane_id(&exhibit.file_path) {
-            let mut block = String::with_capacity(768);
-            append_admitted_exhibit_section(&mut block, exhibit, intake, workspace);
-            rendered.push(block);
-        }
-    }
-    rendered
-}
-
-fn pack_file_exhibit_slices<'a>(
-    rendered_exhibits: &'a [String],
-    body_budget: usize,
-) -> Option<Vec<Vec<&'a str>>> {
-    let mut groups: Vec<Vec<&'a str>> = Vec::new();
-    let mut current: Vec<&'a str> = Vec::new();
-    let mut current_len = 0usize;
-
-    for block in rendered_exhibits {
-        if block.len() > body_budget {
-            return None;
-        }
-        if !current.is_empty() && current_len + block.len() > body_budget {
-            groups.push(current);
-            current = Vec::new();
-            current_len = 0;
-        }
-        current_len += block.len();
-        current.push(block.as_str());
-    }
-    if !current.is_empty() {
-        groups.push(current);
-    }
-    Some(groups)
 }

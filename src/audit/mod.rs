@@ -16,14 +16,17 @@
 
 mod decode;
 mod exhibits;
+mod fold;
 mod prompt;
+mod slices;
 
+pub(crate) use exhibits::is_metadata_plane_id;
 pub use exhibits::resolve_canon_reference_paths;
-pub(crate) use exhibits::{
-    append_admitted_exhibit_section, append_grounding_references_section, is_metadata_plane_id,
-};
-pub(crate) use prompt::{
-    append_case_overview, append_governing_canon_statute, build_audit_case_user_prompt,
+pub(crate) use prompt::build_audit_case_user_prompt;
+pub(crate) use slices::{
+    RenderedFileExhibit, build_shared_case_header, format_pinned_reference_exhibits,
+    pack_rendered_exhibit_slices, partition_and_render_file_exhibits,
+    render_admitted_file_exhibits,
 };
 
 use crate::caseload::{
@@ -35,7 +38,9 @@ use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
 use decode::decode_case_adjudication;
+use fold::fold_case_slice_adjudications;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
+use slices::{MAX_AUDIT_TRIAL_CHARS, build_audit_case_slices};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Mutex;
@@ -171,7 +176,8 @@ impl From<ProviderError> for AuditError {
 pub(super) struct PreparedTrialCall {
     pub(super) canon_ref: String,
     pub(super) canon_id: String,
-    pub(super) admitted_file_paths: BTreeSet<String>,
+    pub(super) annotatable_file_paths: BTreeSet<String>,
+    pub(super) primary_fallback_path: Option<String>,
     pub(super) request: GenerationRequest,
 }
 
@@ -211,6 +217,18 @@ fn partition_vetted_and_trial_refs<'a>(
             (carried, vt.contested_cases.as_slice())
         }
         None => (Vec::new(), evidence.active_cases.as_slice()),
+    }
+}
+
+fn contested_exhibit_subset_for(
+    vetting: Option<&crate::caseload::CaseloadVetting>,
+    canon_ref: &str,
+) -> Option<BTreeSet<String>> {
+    let assessment = vetting?.cases.get(canon_ref)?;
+    if assessment.contested_exhibits.is_empty() {
+        None
+    } else {
+        Some(assessment.contested_exhibits.iter().cloned().collect())
     }
 }
 
@@ -264,7 +282,9 @@ pub fn execute_audit(
                 })?;
         let admitted = evidence.admitted_exhibits_for(canon_ref);
         if !admitted.is_empty() {
-            active_trials.push((canon_ref.clone(), canon, admitted));
+            let contested_subset =
+                contested_exhibit_subset_for(caseload.vetting.as_ref(), canon_ref);
+            active_trials.push((canon_ref.clone(), canon, admitted, contested_subset));
         }
     }
 
@@ -278,47 +298,91 @@ pub fn execute_audit(
             specifier: config.auditor_model.clone(),
         });
     }
-    let response_schema = build_audit_schema();
 
-    let mut prepared_calls = Vec::with_capacity(active_trials.len());
-    for (canon_ref, canon, admitted_exhibits) in active_trials {
-        let (user_prompt, admitted_file_paths) = build_audit_case_user_prompt(
-            &canon_ref,
-            canon,
-            &admitted_exhibits,
-            intake,
-            discovery,
-            workspace,
-        );
-        let request = GenerationRequest {
-            model_specifier: config.auditor_model.clone(),
-            system_instruction: AUDIT_SYSTEM_INSTRUCTION.to_string(),
-            user_prompt,
-            response_schema: response_schema.clone(),
-            reasoning_budget: config.reasoning_budget,
-            timeout_ms: options.timeout_ms,
-        };
-        prepared_calls.push(PreparedTrialCall {
-            canon_ref,
-            canon_id: canon.id.clone(),
-            admitted_file_paths,
-            request,
-        });
-    }
+    let (prepared_calls, case_slice_counts) = prepare_all_trial_calls(
+        active_trials,
+        config,
+        options.timeout_ms,
+        intake,
+        discovery,
+        workspace,
+    );
 
     let concurrency_limit = options
         .max_concurrent_calls
         .unwrap_or(DEFAULT_AUDIT_MAX_CONCURRENT_CALLS);
-    let trial_adjudications = execute_trial_calls(
+    let mut slice_adjudications = execute_trial_calls(
         &prepared_calls,
         concurrency_limit,
         threshold,
         &config.auditor_model,
         provider,
     )?;
-    adjudications.extend(trial_adjudications);
+
+    let mut drain_iter = slice_adjudications.drain(..);
+    for (canon_ref, count) in case_slice_counts {
+        let case_decrees: Vec<CanonAdjudication> = drain_iter.by_ref().take(count).collect();
+        adjudications.push(fold_case_slice_adjudications(
+            &canon_ref,
+            case_decrees,
+            threshold,
+        ));
+    }
 
     Ok(caseload.with_verdict(CaseloadVerdict::from_adjudications(adjudications)))
+}
+
+type ActiveTrialEntry<'a> = (
+    String,
+    &'a crate::canon::Canon,
+    Vec<&'a crate::caseload::ExhibitAssessment>,
+    Option<BTreeSet<String>>,
+);
+
+fn prepare_all_trial_calls(
+    active_trials: Vec<ActiveTrialEntry<'_>>,
+    config: &crate::caseload::CaseloadConfig,
+    timeout_ms: u64,
+    intake: &crate::caseload::CaseloadIntake,
+    discovery: &crate::caseload::CaseloadDiscovery,
+    workspace: &WorkspaceSnapshot,
+) -> (Vec<PreparedTrialCall>, Vec<(String, usize)>) {
+    let response_schema = build_audit_schema();
+    let mut prepared_calls = Vec::with_capacity(active_trials.len());
+    let mut case_slice_counts = Vec::with_capacity(active_trials.len());
+
+    for (canon_ref, canon, admitted_exhibits, contested_subset) in active_trials {
+        let slices = build_audit_case_slices(
+            &canon_ref,
+            canon,
+            &admitted_exhibits,
+            contested_subset.as_ref(),
+            intake,
+            discovery,
+            workspace,
+            MAX_AUDIT_TRIAL_CHARS,
+        );
+        let slice_count = slices.len();
+        for slice in slices {
+            let request = GenerationRequest {
+                model_specifier: config.auditor_model.clone(),
+                system_instruction: AUDIT_SYSTEM_INSTRUCTION.to_string(),
+                user_prompt: slice.user_prompt,
+                response_schema: response_schema.clone(),
+                reasoning_budget: config.reasoning_budget,
+                timeout_ms,
+            };
+            prepared_calls.push(PreparedTrialCall {
+                canon_ref: canon_ref.clone(),
+                canon_id: canon.id.clone(),
+                annotatable_file_paths: slice.annotatable_file_paths,
+                primary_fallback_path: slice.primary_fallback_path,
+                request,
+            });
+        }
+        case_slice_counts.push((canon_ref, slice_count));
+    }
+    (prepared_calls, case_slice_counts)
 }
 
 type TrialResult = Result<CanonAdjudication, AuditError>;
@@ -339,7 +403,8 @@ fn execute_trial_calls(
                 &response.payload,
                 &call.canon_ref,
                 &call.canon_id,
-                &call.admitted_file_paths,
+                &call.annotatable_file_paths,
+                call.primary_fallback_path.as_deref(),
                 threshold,
                 model_specifier,
             )?;
@@ -373,7 +438,8 @@ fn execute_trial_calls(
                                 &response.payload,
                                 &call.canon_ref,
                                 &call.canon_id,
-                                &call.admitted_file_paths,
+                                &call.annotatable_file_paths,
+                                call.primary_fallback_path.as_deref(),
                                 threshold,
                                 model_specifier,
                             )
@@ -845,6 +911,9 @@ mod tests {
     mod vetting_fold_forward_and_contested_isolation {
         use super::*;
         use crate::caseload::{CanonVettingAssessment, CaseloadVetting, VettingStatus};
+        use crate::configure::DEFAULT_JEV_MODEL;
+        use crate::provider::{DecisionRequest, DecisionResponse};
+        use crate::vet::{VetOptions, execute_vet};
 
         #[test]
         fn test_folds_vetted_cases_and_evaluates_only_contested_cases_or_short_circuits_when_all_vetted()
@@ -858,6 +927,7 @@ mod tests {
                         .to_string(),
                     vetting_score: 0.96,
                     vetting_status: VettingStatus::Vetted,
+                    contested_exhibits: Vec::new(),
                 },
             );
             vetting_cases.insert(
@@ -866,6 +936,7 @@ mod tests {
                     vetting_summary: "Contested: missing README update.".to_string(),
                     vetting_score: 0.14,
                     vetting_status: VettingStatus::Contested,
+                    contested_exhibits: Vec::new(),
                 },
             );
 
@@ -912,6 +983,7 @@ mod tests {
                         vetting_summary: "Vetted.".to_string(),
                         vetting_score: 0.95,
                         vetting_status: VettingStatus::Vetted,
+                        contested_exhibits: Vec::new(),
                     },
                 );
             }
@@ -923,6 +995,382 @@ mod tests {
                 .expect("all-vetted short-circuit");
             assert!(zero_provider.captured_requests().is_empty());
             assert_eq!(clean.verdict.expect("verdict").passed_count(), 2);
+        }
+
+        struct DualStageMockProvider {
+            vet_violation_marker: String,
+            audit_requests: Mutex<Vec<GenerationRequest>>,
+            audit_routes: Vec<(String, Value)>,
+            default_audit_payload: Value,
+        }
+
+        impl StructuredModelProvider for DualStageMockProvider {
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                let score = if request.state.contains(&self.vet_violation_marker) {
+                    0.18
+                } else {
+                    0.94
+                };
+                Ok(DecisionResponse {
+                    scores: BTreeMap::from([("compliant".to_string(), score)]),
+                    resolved_model: "jev-1.14.0".to_string(),
+                    latency_ms: 40,
+                    usage: TokenUsage {
+                        prompt_tokens: 150,
+                        completion_tokens: 0,
+                        reasoning_tokens: 0,
+                        total_tokens: 150,
+                    },
+                })
+            }
+
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                self.audit_requests
+                    .lock()
+                    .expect("lock")
+                    .push(request.clone());
+                for (needle, payload) in &self.audit_routes {
+                    if request.user_prompt.contains(needle) {
+                        return Ok(GenerationResponse {
+                            payload: payload.clone(),
+                            resolved_model: "gemini-3.1-pro".to_string(),
+                            latency_ms: 120,
+                            usage: TokenUsage {
+                                prompt_tokens: 400,
+                                completion_tokens: 60,
+                                reasoning_tokens: 120,
+                                total_tokens: 580,
+                            },
+                            thoughts: Vec::new(),
+                        });
+                    }
+                }
+                Ok(GenerationResponse {
+                    payload: self.default_audit_payload.clone(),
+                    resolved_model: "gemini-3.1-pro".to_string(),
+                    latency_ms: 100,
+                    usage: TokenUsage {
+                        prompt_tokens: 350,
+                        completion_tokens: 40,
+                        reasoning_tokens: 80,
+                        total_tokens: 470,
+                    },
+                    thoughts: Vec::new(),
+                })
+            }
+        }
+
+        fn large_multi_module_fixture(
+            canon_ref: &str,
+            module_count: usize,
+        ) -> (WorkspaceSnapshot, Caseload) {
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**\"\nreferences:\n  - \"README.md\"\n---\nEvery public CLI module MUST document flags in `README.md`.\n\nException: Internal helper modules marked `// internal` are exempt.\n",
+                    &ParseCanonOptions::with_source_ref(canon_ref),
+                )
+                .with_file_content("README.md", "# CLI Docs\n");
+
+            let mut diffs = BTreeMap::from([(
+                "README.md".to_string(),
+                FileArtifact {
+                    path: "README.md".to_string(),
+                    previous_path: None,
+                    status: FileChangeStatus::Modified,
+                    lines_added: 2,
+                    lines_deleted: 0,
+                    patch: Some("@@ -1,1 +1,3 @@\n+PINNED_README_DIFF_SENTINEL\n".to_string()),
+                    patch_omission_reason: None,
+                    content: None,
+                    content_omission_reason: None,
+                },
+            )]);
+            let mut admitted = vec![
+                ExhibitAssessment {
+                    file_path: "pr_title".to_string(),
+                    admissibility_summary: "PR title".to_string(),
+                    admissibility_score: 0.90,
+                    admissibility_status: AdmissibilityStatus::Admitted,
+                },
+                ExhibitAssessment {
+                    file_path: "README.md".to_string(),
+                    admissibility_summary: "companion README".to_string(),
+                    admissibility_score: 0.96,
+                    admissibility_status: AdmissibilityStatus::Admitted,
+                },
+            ];
+
+            let body: String = (1..=360)
+                .map(|ln| format!("+pub fn cli_handler_fn_{ln}() -> usize {{ {ln} }}\n"))
+                .collect();
+            for idx in 1..=module_count {
+                let path = format!("src/mod_{idx}.rs");
+                let sentinel = format!("// MODULE_{idx}_BODY_SENTINEL\n");
+                diffs.insert(
+                    path.clone(),
+                    FileArtifact {
+                        path: path.clone(),
+                        previous_path: None,
+                        status: FileChangeStatus::Added,
+                        lines_added: 361,
+                        lines_deleted: 0,
+                        patch: Some(format!("@@ -0,0 +1,361 @@\n+{sentinel}{body}")),
+                        patch_omission_reason: None,
+                        content: None,
+                        content_omission_reason: None,
+                    },
+                );
+                admitted.push(ExhibitAssessment {
+                    file_path: path,
+                    admissibility_summary: "module diff".to_string(),
+                    admissibility_score: 0.91,
+                    admissibility_status: AdmissibilityStatus::Admitted,
+                });
+            }
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    pr_title: Some("feat(cli): add modular CLI handlers".to_string()),
+                    diffs,
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig {
+                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    reasoning_budget: Some(2048),
+                })
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "docketed".to_string(),
+                        colorability_score: 0.95,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    admitted,
+                )])));
+            (ws, caseload)
+        }
+
+        #[test]
+        fn test_vet_to_audit_prunes_cleared_slices_while_retaining_pinned_references_metadata_and_manifest()
+         {
+            let canon_ref = ".canons/readme/broad-cli-rule.md";
+            let (ws, caseload) = large_multi_module_fixture(canon_ref, 6);
+
+            let provider = DualStageMockProvider {
+                vet_violation_marker: "MODULE_5_BODY_SENTINEL".to_string(),
+                audit_requests: Mutex::new(Vec::new()),
+                audit_routes: vec![(
+                    "MODULE_5_BODY_SENTINEL".to_string(),
+                    json!({
+                        "compliance_summary": "`src/mod_5.rs` adds undocumented CLI flags; document them in `README.md`.",
+                        "compliance_score": 0.12,
+                        "annotations": [
+                            {
+                                "path": "src/mod_5.rs",
+                                "start_line": 2,
+                                "end_line": 2,
+                                "annotation_level": "failure",
+                                "message": "Document handler flags in `README.md`."
+                            },
+                            {
+                                "path": "src/mod_1.rs",
+                                "start_line": 10,
+                                "end_line": 10,
+                                "annotation_level": "warning",
+                                "message": "Pruned-file citation must re-anchor to contested slice exhibit."
+                            }
+                        ]
+                    }),
+                )],
+                default_audit_payload: json!({
+                    "compliance_summary": "Unexpected call.",
+                    "compliance_score": 0.95,
+                    "annotations": []
+                }),
+            };
+
+            let after_vet =
+                execute_vet(&VetOptions::default(), caseload, &ws, &provider).expect("vet");
+            let contested_exhibits = after_vet.vetting.as_ref().unwrap().cases[canon_ref]
+                .contested_exhibits
+                .clone();
+            assert!(
+                contested_exhibits.contains(&"src/mod_5.rs".to_string())
+                    && !contested_exhibits.contains(&"src/mod_1.rs".to_string())
+                    && contested_exhibits.len() < 6,
+                "expected partial contested subset containing src/mod_5.rs, got {contested_exhibits:?}"
+            );
+
+            let after_audit =
+                execute_audit(&AuditOptions::default(), after_vet, &ws, &provider).expect("audit");
+            let requests = provider.audit_requests.lock().unwrap();
+            assert_eq!(
+                requests.len(),
+                1,
+                "pruning cleared slices must leave a single bounded audit request"
+            );
+            let prompt = &requests[0].user_prompt;
+            assert!(prompt.contains("MODULE_5_BODY_SENTINEL"));
+            assert!(
+                !prompt.contains("MODULE_1_BODY_SENTINEL"),
+                "vet-cleared slice diff bodies must be pruned from audit prompt"
+            );
+            assert!(
+                prompt.contains("PINNED_README_DIFF_SENTINEL"),
+                "admitted companion `references:` diffs must remain pinned even when cleared"
+            );
+            assert!(
+                prompt.contains("### Admitted Metadata Exhibit: `pr_title`"),
+                "admitted metadata planes must remain present"
+            );
+            assert!(
+                prompt.contains("## All Admitted File Exhibit Paths in Filing")
+                    && prompt.contains("`src/mod_1.rs`")
+                    && prompt.contains("`src/mod_6.rs`")
+                    && prompt.contains("`README.md`"),
+                "full filing path manifest must include all admitted files across the filing"
+            );
+
+            let verdict = after_audit.verdict.expect("verdict");
+            assert_eq!(verdict.status, VerdictStatus::Fail);
+            let adj = &verdict.adjudications[0];
+            assert!(
+                adj.annotations
+                    .iter()
+                    .all(|a| contested_exhibits.contains(&a.path) && a.path != "src/mod_1.rs"),
+                "annotations must anchor strictly to contested slice exhibits, got {:?}",
+                adj.annotations
+            );
+        }
+
+        #[test]
+        fn test_unpruned_oversized_audit_slices_concurrently_and_folds_failing_decrees() {
+            let canon_ref = ".canons/readme/broad-cli-rule.md";
+            let (ws, caseload) = large_multi_module_fixture(canon_ref, 6);
+
+            let failing_provider = DualStageMockProvider {
+                vet_violation_marker: String::new(),
+                audit_requests: Mutex::new(Vec::new()),
+                audit_routes: vec![
+                    (
+                        "MODULE_2_BODY_SENTINEL".to_string(),
+                        json!({
+                            "compliance_summary": "Undocumented flag in mod_2.",
+                            "compliance_score": 0.16,
+                            "annotations": [{
+                                "path": "src/mod_2.rs",
+                                "start_line": 4,
+                                "end_line": 4,
+                                "annotation_level": "failure",
+                                "message": "Add mod_2 flag to README.md."
+                            }]
+                        }),
+                    ),
+                    (
+                        "MODULE_6_BODY_SENTINEL".to_string(),
+                        json!({
+                            "compliance_summary": "Undocumented flag in mod_6.",
+                            "compliance_score": 0.09,
+                            "annotations": [{
+                                "path": "src/mod_6.rs",
+                                "start_line": 7,
+                                "end_line": 7,
+                                "annotation_level": "failure",
+                                "message": "Add mod_6 flag to README.md."
+                            }]
+                        }),
+                    ),
+                ],
+                default_audit_payload: json!({
+                    "compliance_summary": "Slice complies.",
+                    "compliance_score": 0.93,
+                    "annotations": []
+                }),
+            };
+
+            let fail_out = execute_audit(
+                &AuditOptions {
+                    max_concurrent_calls: Some(3),
+                    ..AuditOptions::default()
+                },
+                caseload,
+                &ws,
+                &failing_provider,
+            )
+            .expect("concurrent multi-slice failing audit");
+            let fail_reqs = failing_provider.audit_requests.lock().unwrap();
+            assert!(
+                fail_reqs.len() >= 2,
+                "oversized 6-module case without vetting must partition into multiple trial slices"
+            );
+            assert!(
+                fail_reqs
+                    .iter()
+                    .all(|r| r.user_prompt.len() <= MAX_AUDIT_TRIAL_CHARS + 1024),
+                "each trial slice prompt must stay bounded near MAX_AUDIT_TRIAL_CHARS"
+            );
+            let fail_adj = &fail_out.verdict.unwrap().adjudications[0];
+            assert_eq!(fail_adj.status, VerdictStatus::Fail);
+            assert!((fail_adj.compliance_score - 0.09).abs() < 1e-9);
+            assert_eq!(fail_adj.annotations.len(), 2);
+            assert_eq!(fail_adj.annotations[0].path, "src/mod_2.rs");
+            assert_eq!(fail_adj.annotations[1].path, "src/mod_6.rs");
+            assert!(
+                fail_adj
+                    .compliance_summary
+                    .contains("Undocumented flag in mod_2.")
+                    && fail_adj
+                        .compliance_summary
+                        .contains("Undocumented flag in mod_6.")
+            );
+        }
+
+        #[test]
+        fn test_unpruned_oversized_audit_slices_folds_passing_exception_decrees() {
+            let canon_ref = ".canons/readme/broad-cli-rule.md";
+            let (ws, caseload) = large_multi_module_fixture(canon_ref, 6);
+            let passing_provider = DualStageMockProvider {
+                vet_violation_marker: String::new(),
+                audit_requests: Mutex::new(Vec::new()),
+                audit_routes: Vec::new(),
+                default_audit_payload: json!({
+                    "compliance_summary": "Exempt under internal module Exception.",
+                    "compliance_score": 0.88,
+                    "annotations": []
+                }),
+            };
+            let pass_out = execute_audit(
+                &AuditOptions {
+                    max_concurrent_calls: Some(4),
+                    ..AuditOptions::default()
+                },
+                caseload,
+                &ws,
+                &passing_provider,
+            )
+            .expect("concurrent multi-slice passing audit");
+            let pass_adj = &pass_out.verdict.unwrap().adjudications[0];
+            assert_eq!(pass_adj.status, VerdictStatus::Pass);
+            assert!((pass_adj.compliance_score - 0.88).abs() < 1e-9);
+            assert!(pass_adj.annotations.is_empty());
+            assert!(pass_adj.compliance_summary.contains("Compliant across"));
+            assert!(pass_adj.compliance_summary.contains("Exception"));
         }
     }
 }

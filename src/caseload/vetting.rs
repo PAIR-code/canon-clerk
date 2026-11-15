@@ -75,7 +75,7 @@ where
     normalize_vetting_score(raw).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_sorted_canon_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+fn deserialize_sorted_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -83,6 +83,16 @@ where
     items.sort();
     items.dedup();
     Ok(items)
+}
+
+fn serialize_sorted_string_list<S>(items: &[String], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut sorted = items.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    sorted.serialize(serializer)
 }
 
 fn canonical_score_bits(score: f64) -> u64 {
@@ -106,6 +116,15 @@ pub struct CanonVettingAssessment {
     pub vetting_score: f64,
     /// Deterministically derived prima facie compliance status (`"vetted"` or `"contested"`).
     pub vetting_status: VettingStatus,
+    /// Stably sorted contested file exhibit paths when multi-slice vetting cleared a proper subset of
+    /// slices (`vetting_status == Contested`); omitted when `"vetted"` or when all sliceable file exhibits are contested.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_sorted_string_list",
+        deserialize_with = "deserialize_sorted_string_list"
+    )]
+    pub contested_exhibits: Vec<String>,
 }
 
 impl PartialEq for CanonVettingAssessment {
@@ -113,6 +132,7 @@ impl PartialEq for CanonVettingAssessment {
         self.vetting_summary == other.vetting_summary
             && canonical_score_bits(self.vetting_score) == canonical_score_bits(other.vetting_score)
             && self.vetting_status == other.vetting_status
+            && self.contested_exhibits == other.contested_exhibits
     }
 }
 
@@ -125,23 +145,30 @@ pub struct CaseloadVetting {
     #[serde(default)]
     pub cases: BTreeMap<String, CanonVettingAssessment>,
     /// Stably sorted lexicographical list of canon identifiers whose `vetting_status` is `"vetted"`.
-    #[serde(default, deserialize_with = "deserialize_sorted_canon_list")]
+    #[serde(default, deserialize_with = "deserialize_sorted_string_list")]
     pub vetted_cases: Vec<String>,
     /// Stably sorted lexicographical list of canon identifiers whose `vetting_status` is `"contested"`.
-    #[serde(default, deserialize_with = "deserialize_sorted_canon_list")]
+    #[serde(default, deserialize_with = "deserialize_sorted_string_list")]
     pub contested_cases: Vec<String>,
 }
 
 impl CaseloadVetting {
-    /// Constructs a [`CaseloadVetting`] from per-case `cases`, deriving `vetted_cases` and
-    /// `contested_cases` in deterministic lexicographical order.
-    pub fn from_cases(cases: BTreeMap<String, CanonVettingAssessment>) -> Self {
+    /// Constructs a [`CaseloadVetting`] from per-case `cases`, canonicalizing any slice-scoped
+    /// `contested_exhibits` and deriving `vetted_cases` and `contested_cases` in deterministic lexicographical order.
+    pub fn from_cases(mut cases: BTreeMap<String, CanonVettingAssessment>) -> Self {
         let mut vetted_cases = Vec::new();
         let mut contested_cases = Vec::new();
-        for (canon_ref, assessment) in &cases {
+        for (canon_ref, assessment) in &mut cases {
             match assessment.vetting_status {
-                VettingStatus::Vetted => vetted_cases.push(canon_ref.clone()),
-                VettingStatus::Contested => contested_cases.push(canon_ref.clone()),
+                VettingStatus::Vetted => {
+                    assessment.contested_exhibits.clear();
+                    vetted_cases.push(canon_ref.clone());
+                }
+                VettingStatus::Contested => {
+                    assessment.contested_exhibits.sort();
+                    assessment.contested_exhibits.dedup();
+                    contested_cases.push(canon_ref.clone());
+                }
             }
         }
         Self {
@@ -191,6 +218,7 @@ mod tests {
                         .to_string(),
                     vetting_score: 0.94,
                     vetting_status: VettingStatus::Vetted,
+                    contested_exhibits: Vec::new(),
                 },
             );
             cases.insert(
@@ -201,6 +229,7 @@ mod tests {
                             .to_string(),
                     vetting_score: 0.42,
                     vetting_status: VettingStatus::Contested,
+                    contested_exhibits: Vec::new(),
                 },
             );
             cases.insert(
@@ -209,6 +238,7 @@ mod tests {
                     vetting_summary: "All flags follow kebab-case.".to_string(),
                     vetting_score: 0.98,
                     vetting_status: VettingStatus::Vetted,
+                    contested_exhibits: Vec::new(),
                 },
             );
 
@@ -273,16 +303,65 @@ mod tests {
                 vetting_summary: "Contested.".to_string(),
                 vetting_score: -0.0,
                 vetting_status: VettingStatus::Contested,
+                contested_exhibits: Vec::new(),
             };
             let pos_zero = CanonVettingAssessment {
                 vetting_summary: "Contested.".to_string(),
                 vetting_score: 0.0,
                 vetting_status: VettingStatus::Contested,
+                contested_exhibits: Vec::new(),
             };
             assert_eq!(neg_zero, pos_zero);
             let json = serde_json::to_string(&neg_zero).expect("serialize -0.0");
             assert!(!json.contains("-0.0"));
             assert!(json.contains("\"vetting_score\":0.0"));
+            assert!(!json.contains("contested_exhibits"));
+        }
+
+        #[test]
+        fn test_contested_exhibits_omits_when_vetted_and_canonicalizes_partial_slice_paths() {
+            let mut cases = BTreeMap::new();
+            cases.insert(
+                ".canons/vetted.md".to_string(),
+                CanonVettingAssessment {
+                    vetting_summary: "All slices cleared.".to_string(),
+                    vetting_score: 0.91,
+                    vetting_status: VettingStatus::Vetted,
+                    contested_exhibits: vec!["src/should_be_cleared.rs".to_string()],
+                },
+            );
+            cases.insert(
+                ".canons/partial.md".to_string(),
+                CanonVettingAssessment {
+                    vetting_summary: "1 of 3 slices contested.".to_string(),
+                    vetting_score: 0.34,
+                    vetting_status: VettingStatus::Contested,
+                    contested_exhibits: vec![
+                        "src/z_mod.rs".to_string(),
+                        "src/a_mod.rs".to_string(),
+                        "src/z_mod.rs".to_string(),
+                    ],
+                },
+            );
+
+            let vetting = CaseloadVetting::from_cases(cases);
+            assert!(
+                vetting.cases[".canons/vetted.md"]
+                    .contested_exhibits
+                    .is_empty()
+            );
+            assert_eq!(
+                vetting.cases[".canons/partial.md"].contested_exhibits,
+                vec!["src/a_mod.rs".to_string(), "src/z_mod.rs".to_string()]
+            );
+
+            let encoded = serde_json::to_string(&vetting).expect("serialize partial vetting");
+            assert_eq!(encoded.matches("\"contested_exhibits\"").count(), 1);
+            assert!(encoded.contains(r#""contested_exhibits":["src/a_mod.rs","src/z_mod.rs"]"#));
+
+            let decoded: CaseloadVetting =
+                serde_json::from_str(&encoded).expect("round-trip partial vetting");
+            assert_eq!(decoded, vetting);
         }
     }
 
