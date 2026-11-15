@@ -112,6 +112,7 @@ fn oversized_contest_assessment() -> CanonVettingAssessment {
                 .to_string(),
         vetting_score: 0.0,
         vetting_status: VettingStatus::Contested,
+        contested_exhibits: Vec::new(),
     }
 }
 
@@ -129,19 +130,43 @@ fn evaluate_single_decision_case(
 
     let mut min_score = 1.0_f64;
     let mut resolved_model = params.screener_model.to_string();
+    let mut cleared_slices = 0usize;
+    let mut contested_slices = 0usize;
+    let mut failed_slice_paths = Vec::new();
 
-    for slice_state in slices {
-        match evaluate_slice(slice_state, &case.canon_ref, params, provider)? {
+    for slice in slices {
+        match evaluate_slice(&slice.state, &case.canon_ref, params, provider)? {
             SliceOutcome::Scored { score, model } => {
                 min_score = min_score.min(score);
                 resolved_model = model;
+                if VettingStatus::from_score(score, params.threshold) == VettingStatus::Vetted {
+                    cleared_slices += 1;
+                } else {
+                    contested_slices += 1;
+                    failed_slice_paths.extend(slice.file_paths.iter().cloned());
+                }
             }
             SliceOutcome::OversizedContest => return Ok(oversized_contest_assessment()),
         }
     }
 
     let status = VettingStatus::from_score(min_score, params.threshold);
-    let slice_note = if slices.len() > 1 {
+    let contested_exhibits =
+        if status == VettingStatus::Contested && cleared_slices > 0 && contested_slices > 0 {
+            failed_slice_paths.sort();
+            failed_slice_paths.dedup();
+            failed_slice_paths
+        } else {
+            Vec::new()
+        };
+
+    let slice_note = if slices.len() > 1 && !contested_exhibits.is_empty() {
+        format!(
+            " across {} slices ({contested_slices} of {} contested)",
+            slices.len(),
+            slices.len()
+        )
+    } else if slices.len() > 1 {
         format!(" across {} slices", slices.len())
     } else {
         String::new()
@@ -161,6 +186,7 @@ fn evaluate_single_decision_case(
         vetting_summary: summary,
         vetting_score: min_score,
         vetting_status: status,
+        contested_exhibits,
     })
 }
 

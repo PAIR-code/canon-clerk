@@ -679,20 +679,56 @@ mod tests {
             assert_eq!(clean_assessment.vetting_status, VettingStatus::Vetted);
             assert!((clean_assessment.vetting_score - 0.88).abs() < 1e-9);
             assert!(clean_assessment.vetting_summary.contains("across"));
+            assert!(clean_assessment.contested_exhibits.is_empty());
 
             let mut failing_provider = MockVetProvider::empty();
             failing_provider
                 .decision_scores
                 .insert("SLICE_VIOLATION_MARKER".to_string(), 0.22);
-            let contested_out =
-                execute_vet(&VetOptions::default(), caseload, &ws, &failing_provider)
-                    .expect("multi-slice contested vet");
+            let contested_out = execute_vet(
+                &VetOptions::default(),
+                caseload.clone(),
+                &ws,
+                &failing_provider,
+            )
+            .expect("multi-slice contested vet");
             let contested_assessment = &contested_out.vetting.unwrap().cases[canon_ref];
             assert_eq!(
                 contested_assessment.vetting_status,
                 VettingStatus::Contested
             );
             assert!((contested_assessment.vetting_score - 0.22).abs() < 1e-9);
+            assert!(
+                !contested_assessment.contested_exhibits.is_empty()
+                    && contested_assessment
+                        .contested_exhibits
+                        .contains(&"src/mod_5.rs".to_string())
+                    && !contested_assessment
+                        .contested_exhibits
+                        .contains(&"src/mod_1.rs".to_string())
+                    && !contested_assessment
+                        .contested_exhibits
+                        .contains(&"README.md".to_string()),
+                "partially contested multi-slice vet must record strictly the failing slice's exhibits, got {:?}",
+                contested_assessment.contested_exhibits
+            );
+
+            let mut all_failing_provider = MockVetProvider::empty();
+            all_failing_provider
+                .decision_scores
+                .insert("PINNED_README_DIFF_SENTINEL".to_string(), 0.15);
+            let all_failed_out =
+                execute_vet(&VetOptions::default(), caseload, &ws, &all_failing_provider)
+                    .expect("all slices contested vet");
+            let all_failed_assessment = &all_failed_out.vetting.unwrap().cases[canon_ref];
+            assert_eq!(
+                all_failed_assessment.vetting_status,
+                VettingStatus::Contested
+            );
+            assert!(
+                all_failed_assessment.contested_exhibits.is_empty(),
+                "when zero slices clear threshold, contested_exhibits must remain empty"
+            );
         }
 
         #[test]

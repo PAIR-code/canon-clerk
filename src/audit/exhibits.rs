@@ -77,8 +77,29 @@ pub(crate) fn append_admitted_exhibit_section(
         "pr_title" => append_pr_title_exhibit(out, exhibit, intake),
         "pr_body" => append_pr_body_exhibit(out, exhibit, intake),
         "linked_issues" => append_linked_issues_exhibit(out, exhibit, intake),
+        "commit_messages" => append_commit_messages_exhibit(out, exhibit, intake),
         file_path => append_admitted_file_exhibit(out, file_path, exhibit, intake, workspace),
     }
+}
+
+fn append_commit_messages_exhibit(
+    out: &mut String,
+    exhibit: &ExhibitAssessment,
+    intake: &CaseloadIntake,
+) {
+    let _ = writeln!(
+        out,
+        "### Admitted Metadata Exhibit: `commit_messages` (score: {:.2})",
+        exhibit.admissibility_score
+    );
+    if let Some(title) = non_blank(intake.pr_title.as_deref()) {
+        let _ = writeln!(out, "{title}");
+    }
+    if let Some(body) = non_blank(intake.pr_body.as_deref()) {
+        let bounded = truncate_chars(body, MAX_AUDIT_EXHIBIT_CHARS, "commit messages");
+        let _ = writeln!(out, "{bounded}");
+    }
+    out.push('\n');
 }
 
 fn append_pr_title_exhibit(out: &mut String, exhibit: &ExhibitAssessment, intake: &CaseloadIntake) {

@@ -91,6 +91,7 @@ fn decode_vet_payload(
         vetting_summary: summary.to_string(),
         vetting_score,
         vetting_status,
+        contested_exhibits: Vec::new(),
     })
 }
 
