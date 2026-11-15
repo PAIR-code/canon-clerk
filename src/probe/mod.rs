@@ -275,6 +275,7 @@ pub fn decode_gemini_probe_response(
 #[derive(Debug, Clone)]
 pub struct GeminiEndpointProber {
     base_url: String,
+    client: reqwest::Client,
 }
 
 impl Default for GeminiEndpointProber {
@@ -286,15 +287,22 @@ impl Default for GeminiEndpointProber {
 impl GeminiEndpointProber {
     /// Constructs a new live [`GeminiEndpointProber`] targeting the default Google Generative Language API endpoint.
     pub fn new() -> Self {
-        Self {
-            base_url: DEFAULT_GEMINI_BASE_URL.to_string(),
-        }
+        Self::with_base_url(DEFAULT_GEMINI_BASE_URL)
     }
 
     /// Constructs a [`GeminiEndpointProber`] with a custom base URL.
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
+            client: reqwest::Client::builder().build().unwrap_or_default(),
+        }
+    }
+
+    /// Constructs a [`GeminiEndpointProber`] with a custom [`reqwest::Client`] and base URL.
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into(),
+            client,
         }
     }
 }
@@ -317,6 +325,7 @@ impl EndpointProber for GeminiEndpointProber {
         };
 
         match post_gemini_json(
+            &self.client,
             &self.base_url,
             model_specifier,
             api_key,

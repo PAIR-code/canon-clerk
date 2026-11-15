@@ -777,7 +777,7 @@ mod tests {
                 .expect("generative vet");
             let reqs = provider.structured_requests.lock().unwrap();
             assert_eq!(reqs.len(), 2);
-            assert!(reqs.iter().all(|r| r.reasoning_budget.is_none()));
+            assert!(reqs.iter().all(|r| r.reasoning_budget == Some(0)));
 
             let vetting = out.vetting.expect("vetting");
             assert_eq!(vetting.vetted_count(), 1);

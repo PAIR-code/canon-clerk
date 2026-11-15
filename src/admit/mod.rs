@@ -250,7 +250,7 @@ pub fn execute_admit(
             system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            reasoning_budget: None,
+            reasoning_budget: Some(0),
             timeout_ms: options.timeout_ms,
         };
         prepared_calls.push(PreparedCaseCall {
@@ -843,6 +843,7 @@ mod tests {
 
             let reqs = provider.captured_requests();
             assert_eq!(reqs.len(), 1);
+            assert_eq!(reqs[0].reasoning_budget, Some(0));
             let overview_pos = reqs[0]
                 .user_prompt
                 .find("## Filing Overview")

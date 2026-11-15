@@ -244,7 +244,7 @@ pub fn execute_apprise(
             system_instruction: APPRISE_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            reasoning_budget: None,
+            reasoning_budget: Some(0),
             timeout_ms: options.timeout_ms,
         };
         prepared_batches.push((batch_canons, request));
@@ -743,7 +743,7 @@ mod tests {
             );
             let req = &requests[0];
             assert_eq!(req.model_specifier, DEFAULT_SCREENER_MODEL);
-            assert_eq!(req.reasoning_budget, None);
+            assert_eq!(req.reasoning_budget, Some(0));
             assert!(req.user_prompt.contains("Refactor auth provider dispatch"));
             assert!(req.user_prompt.contains(".canons/auth/cache-expiry.md"));
             assert!(req.user_prompt.contains(".canons/auth/db-rollback.md"));
