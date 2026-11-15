@@ -120,7 +120,7 @@ canon-clerk audit --caseload caseload-7.json
 git diff origin/main | canon-clerk audit --diff - --format github --output-caseload caseload.json
 
 # 5. Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini 4 Carbon:
-git diff origin/main | canon-clerk audit --diff - --screener-model jev
+git diff origin/main | canon-clerk audit --diff - --screener-model jev-latest
 ```
 
 ### Missing Input Source & Case-or-Controversy Guard

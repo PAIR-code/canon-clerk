@@ -237,9 +237,9 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
 | **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`jev` / `hydrogen`) | ~1,200 tokens | ~350ms |
-| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`jev` / `hydrogen`) | ~1,800 tokens | ~500ms |
-| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`jev`) | 0 output tokens | ~200ms |
+| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`jev-latest` / `gemini-4-hydrogen`) | ~1,200 tokens | ~350ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`jev-latest` / `gemini-4-hydrogen`) | ~1,800 tokens | ~500ms |
+| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`jev-latest`) | 0 output tokens | ~200ms |
 | **`audit` Adjudication** | 1 contested trial | 2 exhibits | `gemini-4-carbon` | ~1,500 tokens | ~1,200ms |
 | **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.5s** |
 
