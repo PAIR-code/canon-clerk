@@ -19,7 +19,10 @@ pub mod gemini;
 mod gemini_wire;
 mod typesafe;
 
-pub use crate::caseload::DEFAULT_SCREENER_REASONING_BUDGET;
+pub use crate::caseload::{
+    DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL,
+    DEFAULT_SCREENER_REASONING_BUDGET, ThinkingLevel,
+};
 pub use decision::{
     DecisionModelProvider, DecisionRequest, DecisionResponse, MultiModelProvider,
     TypesafeDecisionProvider,
@@ -32,6 +35,7 @@ pub use gemini::{
     DEFAULT_GEMINI_BASE_URL, GeminiModelProvider, build_generate_content_url,
     classify_gemini_http_error, extract_gemini_error_detail, strip_provider_prefix,
 };
+pub(crate) use gemini_wire::{GeminiThinkingConfig, build_probe_thinking_config};
 pub use typesafe::DEFAULT_TYPESAFE_BASE_URL;
 pub(crate) use typesafe::{
     TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
@@ -52,7 +56,7 @@ pub const DEFAULT_GENERATION_TIMEOUT_MS: u64 = 60_000;
 /// Provider-neutral input specification for deterministic, schema-constrained model generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationRequest {
-    /// Canonical provider-prefixed model identifier (e.g. `"google:gemini-flash-lite-latest"`).
+    /// Canonical provider-prefixed model identifier (e.g. `"google:gemini-4-carbon"`).
     pub model_specifier: String,
     /// Authoritative system-level role and evaluation instructions.
     pub system_instruction: String,
@@ -60,11 +64,17 @@ pub struct GenerationRequest {
     pub user_prompt: String,
     /// JSON Schema enforcing constrained structured output and reason-first property ordering.
     pub response_schema: serde_json::Value,
+    /// Optional qualitative reasoning effort tier (`minimal`, `low`, `medium`, `high`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<ThinkingLevel>,
     /// Optional maximum reasoning token budget for extended thinking (e.g. during `audit`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_budget: Option<u32>,
     /// Per-request timeout ceiling in milliseconds.
     pub timeout_ms: u64,
+    /// Optional concise work-unit identifier (e.g. `canon_ref` or slice label) for per-call telemetry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_label: Option<String>,
 }
 
 /// Token accounting telemetry returned by a model generation turn.
@@ -328,8 +338,10 @@ mod tests {
                 system_instruction: "Evaluate statutory jurisdiction.".to_string(),
                 user_prompt: "Intent: add auth cache".to_string(),
                 response_schema: json!({"type": "object"}),
+                thinking_level: None,
                 reasoning_budget: None,
                 timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+                call_label: None,
             };
 
             let encoded_req = serde_json::to_string(&request).expect("serialize request");

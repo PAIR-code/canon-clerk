@@ -120,8 +120,10 @@ pub(super) fn execute_generative_vetting(
             system_instruction: VET_SYSTEM_INSTRUCTION.to_string(),
             user_prompt: case.user_prompt.clone(),
             response_schema: response_schema.clone(),
+            thinking_level: None,
             reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: params.timeout_ms,
+            call_label: Some(case.canon_ref.clone()),
         })
         .collect();
 

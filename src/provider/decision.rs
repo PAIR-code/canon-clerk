@@ -91,6 +91,9 @@ pub struct DecisionRequest {
     pub questions: BTreeMap<String, String>,
     /// Per-request timeout ceiling in milliseconds.
     pub timeout_ms: u64,
+    /// Optional concise work-unit identifier (e.g. `canon_ref` or batch label) for per-call telemetry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_label: Option<String>,
 }
 
 /// Normalized calibrated probability scores and operational telemetry from a decision model pass.
@@ -421,6 +424,7 @@ mod tests {
             state: "diff".to_string(),
             questions: BTreeMap::from([("k".to_string(), "q?".to_string())]),
             timeout_ms: 5000,
+            call_label: None,
         };
         assert_eq!(
             empty_provider.evaluate_decisions(&req),

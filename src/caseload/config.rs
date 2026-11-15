@@ -15,6 +15,8 @@
 //! Data plane models for the `.config` namespace (`docs/architecture/nodes/configure.md` §3).
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// Canonical default provider namespace for MVP model specifiers (`docs/architecture/nodes/configure.md` §3).
 pub const DEFAULT_PROVIDER: &str = "google";
@@ -23,13 +25,75 @@ pub const DEFAULT_PROVIDER: &str = "google";
 pub const TYPESAFE_PROVIDER: &str = "typesafe";
 
 /// Default canonical screener model specifier (`docs/architecture/nodes/configure.md` §3).
-pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-flash-lite-latest";
+pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-4-hydrogen";
 
-/// Explicit reasoning budget in tokens for non-reasoning screener stages (`apprise`, `docket`, `admit`, `vet`).
+/// Explicit minimal/zero reasoning budget signal for heuristic screener stages (`apprise`, `docket`, `admit`, `vet`).
 pub const DEFAULT_SCREENER_REASONING_BUDGET: Option<u32> = Some(0);
 
 /// Default canonical auditor model specifier (`docs/architecture/nodes/configure.md` §3).
-pub const DEFAULT_AUDITOR_MODEL: &str = "google:gemini-pro-latest";
+pub const DEFAULT_AUDITOR_MODEL: &str = "google:gemini-4-carbon";
+
+/// Default qualitative thinking level applied to `audit` trials when neither `thinking_level` nor `reasoning_budget` is configured.
+pub const DEFAULT_AUDITOR_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Low;
+
+/// Default qualitative thinking level applied to `probe` health checks on Gemini 4 models when unspecified.
+pub const DEFAULT_PROBE_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Low;
+
+/// Provider-neutral qualitative reasoning effort tier (`docs/architecture/nodes/configure.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingLevel {
+    /// Minimal reasoning effort (maps to `"LOW"` on Gemini 4 models that lack a `"MINIMAL"` tier).
+    Minimal,
+    /// Low reasoning effort prioritizing fast turnaround and token economy (default for `audit` and `probe`).
+    Low,
+    /// Balanced reasoning depth and latency.
+    Medium,
+    /// Deep extended reasoning effort for intricate statutory analysis.
+    High,
+}
+
+impl ThinkingLevel {
+    /// Returns the canonical lowercase identifier (`"minimal"`, `"low"`, `"medium"`, `"high"`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    /// Returns the uppercase Proto3 enum wire string (`"MINIMAL"`, `"LOW"`, `"MEDIUM"`, `"HIGH"`).
+    pub const fn gemini_wire_str(self) -> &'static str {
+        match self {
+            Self::Minimal => "MINIMAL",
+            Self::Low => "LOW",
+            Self::Medium => "MEDIUM",
+            Self::High => "HIGH",
+        }
+    }
+}
+
+impl fmt::Display for ThinkingLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ThinkingLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "minimal" => Ok(Self::Minimal),
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            _ => Err(s.to_string()),
+        }
+    }
+}
 
 fn default_screener_model() -> String {
     DEFAULT_SCREENER_MODEL.to_string()
@@ -49,8 +113,11 @@ pub struct CaseloadConfig {
     /// Canonical provider-prefixed model identifier used for substantive trial adjudication (`audit`).
     #[serde(default = "default_auditor_model")]
     pub auditor_model: String,
+    /// Optional qualitative reasoning effort tier governing extended thinking during `audit` trials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<ThinkingLevel>,
     /// Optional token ceiling governing extended thinking during `audit` trials.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_budget: Option<u32>,
 }
 
@@ -59,6 +126,7 @@ impl Default for CaseloadConfig {
         Self {
             screener_model: DEFAULT_SCREENER_MODEL.to_string(),
             auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+            thinking_level: None,
             reasoning_budget: None,
         }
     }
@@ -75,9 +143,10 @@ mod tests {
         let json = serde_json::to_string(&default_cfg).expect("serialize default config");
         assert_eq!(
             json,
-            r#"{"screener_model":"google:gemini-flash-lite-latest","auditor_model":"google:gemini-pro-latest"}"#
+            r#"{"screener_model":"google:gemini-4-hydrogen","auditor_model":"google:gemini-4-carbon"}"#
         );
         assert!(!json.contains("reasoning_budget"));
+        assert!(!json.contains("thinking_level"));
 
         let with_budget = CaseloadConfig {
             reasoning_budget: Some(4096),
@@ -91,5 +160,30 @@ mod tests {
             decoded.config.as_ref().and_then(|c| c.reasoning_budget),
             Some(4096)
         );
+
+        let with_level = CaseloadConfig {
+            thinking_level: Some(ThinkingLevel::Low),
+            ..CaseloadConfig::default()
+        };
+        let level_json = serde_json::to_string(&with_level).expect("serialize thinking_level");
+        assert!(level_json.contains(r#""thinking_level":"low""#));
+        let decoded_level: CaseloadConfig =
+            serde_json::from_str(&level_json).expect("deserialize thinking_level");
+        assert_eq!(decoded_level.thinking_level, Some(ThinkingLevel::Low));
+    }
+
+    #[test]
+    fn test_thinking_level_parsing_and_wire_strings() {
+        for (raw, expected, wire) in [
+            ("minimal", ThinkingLevel::Minimal, "MINIMAL"),
+            ("  LOW ", ThinkingLevel::Low, "LOW"),
+            ("Medium", ThinkingLevel::Medium, "MEDIUM"),
+            ("HIGH", ThinkingLevel::High, "HIGH"),
+        ] {
+            let parsed: ThinkingLevel = raw.parse().expect("valid thinking level");
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.gemini_wire_str(), wire);
+        }
+        assert!("extreme".parse::<ThinkingLevel>().is_err());
     }
 }

@@ -87,7 +87,7 @@ git diff origin/main | canon-clerk audit --diff -
 # Run a fast pre-flight prima facie compliance check (~1s, 0 output tokens on TypeSafe Jev):
 git diff origin/main | canon-clerk vet --diff - --screener-model jev
 
-# Accelerate screening and vet clean cases/slices before escalating contested exhibits to Gemini Pro:
+# Accelerate screening and vet clean cases/slices before escalating contested exhibits to Gemini 4 Carbon:
 git diff origin/main | canon-clerk audit --diff - --screener-model jev
 
 # Audit explicit target paths or run in GitHub Actions annotation mode with Caseload archival:
@@ -101,7 +101,7 @@ canon-clerk validate --all-canons
 canon-clerk apprise --intent "Add a new CLI subcommand flag" src/cli
 ```
 
-Stage-specific flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--auditor-model`, `--screener-model`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`) and execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
+Stage-specific flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--auditor-model`, `--screener-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`) and execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
 
 ---
 

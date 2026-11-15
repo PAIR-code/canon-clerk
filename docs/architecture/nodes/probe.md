@@ -58,7 +58,7 @@ flowchart LR
 ## 4. Process & Domain Logic (`configuration`)
 
 1. **Endpoint Resolution:** Reads configured `screener_model` and `auditor_model` from `caseload.config` and dispatches each tier to its corresponding provider endpoint adapter (`google:*` or `typesafe:*`).
-2. **Provider-Native Ping Assembly:** Constructs minimal zero-reasoning probe requests—a single-token `:generateContent` ping for `google:*` endpoints and a minimal single-question `/v1/systemone` decision ping for `typesafe:*` endpoints—to verify authentication, model resolution, and network reachability.
+2. **Provider-Native Ping Assembly:** Constructs minimal bounded-reasoning probe requests—a lightweight `:generateContent` ping for `google:*` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring an explicit auditor `--thinking-level` / `--reasoning-budget` override) and a minimal single-question `/v1/systemone` decision ping for `typesafe:*` endpoints—to verify authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
 3. **Concurrent Multi-Provider Probe:** Concurrently sends probe requests to both configured tiers in parallel:
    - Measures roundtrip response latency in milliseconds (`latency_ms`) and captures the concrete resolved model identifier returned by each provider.
    - Verifies model availability and provider credential validity across both homogeneous and mixed-provider tier pairings.
@@ -74,7 +74,7 @@ The CLI exposes `probe` as an imperative subcommand:
 # Human-readable connectivity and latency check:
 canon-clerk probe
 
-# Probe TypeSafe Jev screener alongside Gemini Pro auditor:
+# Probe TypeSafe Jev screener alongside Gemini 4 Carbon auditor:
 canon-clerk probe --screener-model jev
 
 # Emit structured JSON probe record:
@@ -85,7 +85,8 @@ canon-clerk probe --json
 - `--timeout <ms>`: Request timeout in milliseconds (default: `5000ms`).
 - `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier or alias.
 - `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier or alias.
-- `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens.
+- `--thinking-level <minimal|low|medium|high>` (fallback env: `CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier (mutually exclusive with `--reasoning-budget`).
+- `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens (mutually exclusive with `--thinking-level`).
 - `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.
 - `--typesafe-api-key <key>` (fallback env: `TYPESAFE_API_KEY`): TypeSafe AI Jev API key override.
 - `--format <stylish|json|compact>`: Output presentation format.

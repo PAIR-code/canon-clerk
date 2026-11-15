@@ -216,6 +216,7 @@ fn finalize_admit_batch(
             state,
             questions,
             timeout_ms,
+            call_label: None,
         },
     )
 }

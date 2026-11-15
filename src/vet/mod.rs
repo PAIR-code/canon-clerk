@@ -454,6 +454,7 @@ mod tests {
             .with_config(CaseloadConfig {
                 screener_model: screener_model.to_string(),
                 auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                thinking_level: None,
                 reasoning_budget: Some(4096),
             })
             .with_docket(CaseloadDocket::from_cases(docket_cases))
@@ -632,6 +633,7 @@ mod tests {
                 .with_config(CaseloadConfig {
                     screener_model: DEFAULT_JEV_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
                     reasoning_budget: None,
                 })
                 .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(

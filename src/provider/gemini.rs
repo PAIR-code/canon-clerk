@@ -345,8 +345,10 @@ mod tests {
             system_instruction: "Adjudicate compliance with the governing canon.".to_string(),
             user_prompt: "Canon: flags must be kebab-case.\nDiff: +--foo-bar".to_string(),
             response_schema: sample_schema(),
+            thinking_level: None,
             reasoning_budget,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            call_label: None,
         }
     }
 
@@ -400,14 +402,75 @@ mod tests {
                 })
             );
 
-            let req_zero = sample_request(Some(0));
+            let mut req_zero_legacy = sample_request(Some(0));
+            req_zero_legacy.model_specifier = "google:gemini-flash-lite-latest".to_string();
             let serialized_zero =
-                serde_json::to_value(build_request_payload(&req_zero)).expect("serialize");
+                serde_json::to_value(build_request_payload(&req_zero_legacy)).expect("serialize");
             assert_eq!(
                 serialized_zero["generationConfig"]["thinkingConfig"],
                 json!({
                     "includeThoughts": false,
                     "thinkingBudget": 0
+                })
+            );
+
+            let req_zero_gemini_4 = sample_request(Some(0));
+            let serialized_zero_g4 =
+                serde_json::to_value(build_request_payload(&req_zero_gemini_4)).expect("serialize");
+            assert_eq!(
+                serialized_zero_g4["generationConfig"]["thinkingConfig"],
+                json!({
+                    "includeThoughts": false,
+                    "thinkingLevel": "LOW"
+                })
+            );
+        }
+
+        #[test]
+        fn test_serializes_thinking_levels_and_clamps_minimal_on_gemini_4() {
+            use crate::caseload::ThinkingLevel;
+
+            for (level, expected_wire) in [
+                (ThinkingLevel::Low, "LOW"),
+                (ThinkingLevel::Medium, "MEDIUM"),
+                (ThinkingLevel::High, "HIGH"),
+            ] {
+                let mut req = sample_request(None);
+                req.thinking_level = Some(level);
+                let serialized =
+                    serde_json::to_value(build_request_payload(&req)).expect("serialize level");
+                assert_eq!(
+                    serialized["generationConfig"]["thinkingConfig"],
+                    json!({
+                        "includeThoughts": true,
+                        "thinkingLevel": expected_wire
+                    })
+                );
+            }
+
+            // Minimal on Gemini 4 clamps to LOW (includeThoughts: false); on Gemini 3 emits MINIMAL.
+            let mut req_min_g4 = sample_request(None);
+            req_min_g4.thinking_level = Some(ThinkingLevel::Minimal);
+            let ser_min_g4 =
+                serde_json::to_value(build_request_payload(&req_min_g4)).expect("serialize g4 min");
+            assert_eq!(
+                ser_min_g4["generationConfig"]["thinkingConfig"],
+                json!({
+                    "includeThoughts": false,
+                    "thinkingLevel": "LOW"
+                })
+            );
+
+            let mut req_min_g3 = sample_request(None);
+            req_min_g3.model_specifier = "google:gemini-3-flash-preview".to_string();
+            req_min_g3.thinking_level = Some(ThinkingLevel::Minimal);
+            let ser_min_g3 =
+                serde_json::to_value(build_request_payload(&req_min_g3)).expect("serialize g3 min");
+            assert_eq!(
+                ser_min_g3["generationConfig"]["thinkingConfig"],
+                json!({
+                    "includeThoughts": false,
+                    "thinkingLevel": "MINIMAL"
                 })
             );
         }
@@ -758,7 +821,7 @@ mod tests {
                 let raw_req = read_complete_http_request(&mut stream);
                 let lower = raw_req.to_ascii_lowercase();
                 assert!(
-                    raw_req.starts_with("POST /v1beta/models/gemini-pro-latest:generateContent ")
+                    raw_req.starts_with("POST /v1beta/models/gemini-4-carbon:generateContent ")
                 );
                 assert!(lower.contains("x-goog-api-key: synthetic-loopback-key"));
                 assert!(raw_req.contains("\"responseMimeType\":\"application/json\""));
@@ -851,8 +914,7 @@ mod tests {
                 for call_idx in 1..=2 {
                     let raw_req = read_complete_http_request(&mut stream);
                     assert!(
-                        raw_req
-                            .starts_with("POST /v1beta/models/gemini-pro-latest:generateContent ")
+                        raw_req.starts_with("POST /v1beta/models/gemini-4-carbon:generateContent ")
                     );
 
                     let body = json!({

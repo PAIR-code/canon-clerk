@@ -236,6 +236,7 @@ fn run_apprise_core(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
+    args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let threshold = resolve_apprise_threshold(args.apprise_threshold, env)?;
     let _validated_batch_size = resolve_apprise_batch_size(args.apprise_batch_size, env, None)?;
@@ -1219,25 +1220,10 @@ mod tests {
             assert!(!json_text.contains("total_tokens"));
             assert!(!json_text.contains("timestamp"));
 
-            let events = sink.events();
-            let stages_and_kinds: Vec<String> = events
+            let stages_and_kinds: Vec<String> = sink
+                .events()
                 .iter()
-                .map(|ev| match ev {
-                    TelemetryEvent::StageStart { stage, .. } => format!("start:{stage}"),
-                    TelemetryEvent::StageProgress {
-                        stage,
-                        completed,
-                        total,
-                        ..
-                    } => format!("progress:{stage}:{completed}/{total}"),
-                    TelemetryEvent::Thought { stage, delta } => format!("thought:{stage}:{delta}"),
-                    TelemetryEvent::StageFinish { stage, usage, .. } => {
-                        format!("finish:{stage}:{}", usage.map_or(0, |u| u.total_tokens))
-                    }
-                    TelemetryEvent::PipelineFinish { total_tokens, .. } => {
-                        format!("pipeline:{total_tokens}")
-                    }
-                })
+                .map(summarize_telemetry_event)
                 .collect();
 
             assert_eq!(
@@ -1254,10 +1240,33 @@ mod tests {
                     "start:apprise",
                     "thought:apprise:Inspecting auth cache TTL canon.",
                     "thought:apprise:Jurisdiction confirmed.",
+                    "call:apprise:394",
                     "finish:apprise:394",
                     "pipeline:394",
                 ]
             );
+        }
+
+        fn summarize_telemetry_event(ev: &TelemetryEvent) -> String {
+            match ev {
+                TelemetryEvent::StageStart { stage, .. } => format!("start:{stage}"),
+                TelemetryEvent::StageProgress {
+                    stage,
+                    completed,
+                    total,
+                    ..
+                } => format!("progress:{stage}:{completed}/{total}"),
+                TelemetryEvent::Thought { stage, delta } => format!("thought:{stage}:{delta}"),
+                TelemetryEvent::ModelCall { stage, usage, .. } => {
+                    format!("call:{stage}:{}", usage.total_tokens)
+                }
+                TelemetryEvent::StageFinish { stage, usage, .. } => {
+                    format!("finish:{stage}:{}", usage.map_or(0, |u| u.total_tokens))
+                }
+                TelemetryEvent::PipelineFinish { total_tokens, .. } => {
+                    format!("pipeline:{total_tokens}")
+                }
+            }
         }
 
         #[test]
@@ -1313,7 +1322,7 @@ mod tests {
             .expect("fast-forwarded upstream stages");
 
             let ff_events = ff_sink.events();
-            assert_eq!(ff_events.len(), 3);
+            assert_eq!(ff_events.len(), 4);
             assert!(matches!(
                 ff_events[0],
                 TelemetryEvent::StageStart {
@@ -1323,6 +1332,14 @@ mod tests {
             ));
             assert!(matches!(
                 ff_events[1],
+                TelemetryEvent::ModelCall {
+                    stage: PipelineStage::Apprise,
+                    usage,
+                    ..
+                } if usage.total_tokens == 394
+            ));
+            assert!(matches!(
+                ff_events[2],
                 TelemetryEvent::StageFinish {
                     stage: PipelineStage::Apprise,
                     usage: Some(u),
@@ -1330,7 +1347,7 @@ mod tests {
                 } if u.total_tokens == 394
             ));
             assert!(matches!(
-                ff_events[2],
+                ff_events[3],
                 TelemetryEvent::PipelineFinish {
                     total_tokens: 394,
                     ..

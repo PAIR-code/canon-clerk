@@ -15,18 +15,21 @@
 //! Core domain execution engine for the `configure` Caseload DAG stage (`docs/architecture/nodes/configure.md`).
 
 pub mod store;
+mod thinking;
 
 pub use store::{
     StoredConfig, StoredProviderConfig, StoredTierModel, load_host_config_file,
     resolve_default_config_path,
 };
+pub use thinking::parse_thinking_level;
 
 use crate::caseload::{
     Caseload, CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
-    TYPESAFE_PROVIDER,
+    TYPESAFE_PROVIDER, ThinkingLevel,
 };
 use std::collections::BTreeMap;
 use std::fmt;
+use thinking::resolve_thinking_options;
 
 /// Environment variable name for the Google Gemini API key.
 pub const ENV_GEMINI_API_KEY: &str = "GEMINI_API_KEY";
@@ -40,11 +43,23 @@ pub const ENV_SCREENER_MODEL: &str = "CANON_CLERK_SCREENER_MODEL";
 /// Environment variable name for overriding the auditor model specifier.
 pub const ENV_AUDITOR_MODEL: &str = "CANON_CLERK_AUDITOR_MODEL";
 
+/// Environment variable name for overriding the qualitative thinking level (`minimal|low|medium|high`).
+pub const ENV_THINKING_LEVEL: &str = "CANON_CLERK_THINKING_LEVEL";
+
 /// Environment variable name for overriding the maximum reasoning budget in tokens.
 pub const ENV_REASONING_BUDGET: &str = "CANON_CLERK_REASONING_BUDGET";
 
+/// Canonical Google Gemini 4 Argon model specifier expanded from the `argon` shorthand alias.
+pub const DEFAULT_ARGON_MODEL: &str = "google:gemini-4-argon";
+
+/// Canonical Google Gemini Flash-Lite model specifier expanded from the `flash-lite` shorthand alias.
+pub const DEFAULT_FLASH_LITE_MODEL: &str = "google:gemini-flash-lite-latest";
+
 /// Canonical Google Gemini Flash model specifier expanded from the `flash` shorthand alias.
 pub const DEFAULT_FLASH_MODEL: &str = "google:gemini-flash-latest";
+
+/// Canonical Google Gemini Pro 3.x/2.5 model specifier expanded from the `pro` shorthand alias.
+pub const DEFAULT_PRO_MODEL: &str = "google:gemini-pro-latest";
 
 /// Canonical TypeSafe AI Jev model specifier expanded from the `jev` shorthand alias.
 pub const DEFAULT_JEV_MODEL: &str = "typesafe:jev-latest";
@@ -58,6 +73,8 @@ pub struct ConfigureOptions {
     pub screener_model: Option<String>,
     /// Explicit auditor model override (`--auditor-model`).
     pub auditor_model: Option<String>,
+    /// Explicit qualitative thinking level override (`--thinking-level`).
+    pub thinking_level: Option<ThinkingLevel>,
     /// Explicit reasoning budget override in tokens (`--reasoning-budget`).
     pub reasoning_budget: Option<u32>,
     /// Explicit Google Gemini API key override (`--gemini-api-key`).
@@ -78,6 +95,7 @@ impl ConfigureOptions {
     pub fn has_explicit_overrides(&self) -> bool {
         self.screener_model.is_some()
             || self.auditor_model.is_some()
+            || self.thinking_level.is_some()
             || self.reasoning_budget.is_some()
             || self.gemini_api_key.is_some()
             || self.typesafe_api_key.is_some()
@@ -97,8 +115,12 @@ pub enum ConfigureError {
     InvalidModelSpecifier { specifier: String, reason: String },
     /// Discriminative-only classifier (`typesafe:*`) was configured on `auditor_model`.
     DiscriminativeAuditorUnsupported { specifier: String },
+    /// Thinking level cannot be parsed as `minimal`, `low`, `medium`, or `high`.
+    InvalidThinkingLevel { raw: String },
     /// Reasoning budget environment variable cannot be parsed as a non-negative integer.
     InvalidReasoningBudget { raw: String },
+    /// Mutually exclusive `thinking_level` and `reasoning_budget` were specified at the same layer.
+    ConflictingThinkingOptions { source: String },
     /// User configuration file has group or world access permissions on a POSIX host.
     InsecureConfigPermissions { path: String, mode_octal: String },
     /// User configuration file resides inside the repository workspace directory tree.
@@ -137,20 +159,30 @@ impl fmt::Display for ConfigureError {
                 f,
                 "Invalid model specifier `{specifier}`: {reason}\n  \
                  Hint: Specify a canonical model such as `{DEFAULT_SCREENER_MODEL}`, \
-                 `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or shorthand aliases `flash-lite`, `flash`, `pro`, `jev`."
+                 `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or shorthand aliases `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro`, `jev`."
             ),
             Self::DiscriminativeAuditorUnsupported { specifier } => write!(
                 f,
                 "Discriminative model `{specifier}` cannot be configured as `auditor_model` \
                  (`audit` requires structured generative output for exception rulings, remediation guidance, and line annotations).\n  \
                  Hint: Pass `--screener-model jev` (e.g. `canon-clerk vet --screener-model jev`) \
-                 and keep a generative auditor such as `{DEFAULT_AUDITOR_MODEL}` (`pro`) on `--auditor-model`."
+                 and keep a generative auditor such as `{DEFAULT_AUDITOR_MODEL}` (`carbon`) on `--auditor-model`."
+            ),
+            Self::InvalidThinkingLevel { raw } => write!(
+                f,
+                "Invalid thinking level `{raw}`: expected one of `minimal`, `low`, `medium`, or `high`.\n  \
+                 Hint: Pass `--thinking-level <minimal|low|medium|high>` or set `{ENV_THINKING_LEVEL}=<LEVEL>`."
             ),
             Self::InvalidReasoningBudget { raw } => write!(
                 f,
                 "Invalid reasoning budget `{raw}`: expected a non-negative integer token count.\n  \
                  Hint: Pass an integer token ceiling via `--reasoning-budget <TOKENS>` \
                  or `{ENV_REASONING_BUDGET}=<TOKENS>`."
+            ),
+            Self::ConflictingThinkingOptions { source } => write!(
+                f,
+                "Conflicting extended-thinking options in {source}: `--thinking-level` and `--reasoning-budget` are mutually exclusive.\n  \
+                 Hint: Specify either `--thinking-level <minimal|low|medium|high>` (preferred for Gemini 4 models) or `--reasoning-budget <TOKENS>`, not both."
             ),
             Self::InsecureConfigPermissions { path, mode_octal } => write!(
                 f,
@@ -182,10 +214,22 @@ pub(crate) fn model_provider(specifier: &str) -> &str {
     }
 }
 
+fn expand_google_alias(alias: &str) -> Option<&'static str> {
+    match alias {
+        "carbon" => Some(DEFAULT_AUDITOR_MODEL),
+        "argon" => Some(DEFAULT_ARGON_MODEL),
+        "hydrogen" => Some(DEFAULT_SCREENER_MODEL),
+        "flash-lite" => Some(DEFAULT_FLASH_LITE_MODEL),
+        "flash" => Some(DEFAULT_FLASH_MODEL),
+        "pro" => Some(DEFAULT_PRO_MODEL),
+        _ => None,
+    }
+}
+
 /// Normalizes a raw model alias or specifier into a canonical `<provider>:<model>` identifier.
 ///
 /// Supported forms:
-/// - Shorthand aliases: `flash-lite`, `flash`, `pro` (-> `google:*`), `jev` (-> `typesafe:jev-latest`)
+/// - Shorthand aliases: `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro` (-> `google:*`), `jev` (-> `typesafe:jev-latest`)
 /// - Unqualified models: `gemini-*` -> `google:gemini-*`, `jev-*` -> `typesafe:jev-*`
 /// - Canonical specifiers: `google:gemini-*`, `typesafe:jev-*`
 pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
@@ -205,17 +249,17 @@ pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
     }
 
     let Some((provider, model_part)) = trimmed.split_once(':') else {
+        if let Some(expanded) = expand_google_alias(trimmed) {
+            return Ok(expanded.to_string());
+        }
         return match trimmed {
-            "flash-lite" => Ok(DEFAULT_SCREENER_MODEL.to_string()),
-            "flash" => Ok(DEFAULT_FLASH_MODEL.to_string()),
-            "pro" => Ok(DEFAULT_AUDITOR_MODEL.to_string()),
             JEV_MODEL_ALIAS => Ok(DEFAULT_JEV_MODEL.to_string()),
             name if is_valid_gemini_model_name(name) => Ok(format!("{DEFAULT_PROVIDER}:{name}")),
             name if is_valid_jev_model_name(name) => Ok(format!("{TYPESAFE_PROVIDER}:{name}")),
             _ => Err(ConfigureError::InvalidModelSpecifier {
                 specifier: raw.to_string(),
                 reason: format!(
-                    "unrecognized model `{trimmed}` (expected `gemini-*`, `jev-*`, or alias `flash-lite`, `flash`, `pro`, `jev`)."
+                    "unrecognized model `{trimmed}` (expected `gemini-*`, `jev-*`, or alias `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro`, `jev`)."
                 ),
             }),
         };
@@ -235,18 +279,20 @@ pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
     }
 
     match provider {
-        DEFAULT_PROVIDER => match model_part {
-            "flash-lite" => Ok(DEFAULT_SCREENER_MODEL.to_string()),
-            "flash" => Ok(DEFAULT_FLASH_MODEL.to_string()),
-            "pro" => Ok(DEFAULT_AUDITOR_MODEL.to_string()),
-            name if is_valid_gemini_model_name(name) => Ok(format!("{DEFAULT_PROVIDER}:{name}")),
-            _ => Err(ConfigureError::InvalidModelSpecifier {
-                specifier: raw.to_string(),
-                reason: format!(
-                    "unrecognized Google model `{model_part}` (expected `gemini-*` or alias `flash-lite`, `flash`, `pro`)."
-                ),
-            }),
-        },
+        DEFAULT_PROVIDER => {
+            if let Some(expanded) = expand_google_alias(model_part) {
+                Ok(expanded.to_string())
+            } else if is_valid_gemini_model_name(model_part) {
+                Ok(format!("{DEFAULT_PROVIDER}:{model_part}"))
+            } else {
+                Err(ConfigureError::InvalidModelSpecifier {
+                    specifier: raw.to_string(),
+                    reason: format!(
+                        "unrecognized Google model `{model_part}` (expected `gemini-*` or alias `carbon`, `argon`, `hydrogen`, `flash-lite`, `flash`, `pro`)."
+                    ),
+                })
+            }
+        }
         TYPESAFE_PROVIDER => match model_part {
             JEV_MODEL_ALIAS => Ok(DEFAULT_JEV_MODEL.to_string()),
             name if is_valid_jev_model_name(name) => Ok(format!("{TYPESAFE_PROVIDER}:{name}")),
@@ -365,6 +411,9 @@ pub fn execute_configure(
         });
     }
 
+    let (thinking_level, reasoning_budget) =
+        resolve_thinking_options(options, stored, existing_config)?;
+
     let check_auditor_creds = !options.screener_only_closure || options.auditor_model.is_some();
     let uses_google = model_provider(&screener_model) == DEFAULT_PROVIDER
         || (check_auditor_creds && model_provider(&auditor_model) == DEFAULT_PROVIDER);
@@ -377,11 +426,10 @@ pub fn execute_configure(
         let _verified = resolve_typesafe_api_key(options)?.len();
     }
 
-    let reasoning_budget = resolve_reasoning_budget(options, stored, existing_config)?;
-
     let config = CaseloadConfig {
         screener_model,
         auditor_model,
+        thinking_level,
         reasoning_budget,
     };
 
@@ -396,37 +444,6 @@ fn resolve_non_empty<'a>(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .or_else(|| env_val.map(str::trim).filter(|s| !s.is_empty()))
-}
-
-fn resolve_reasoning_budget(
-    options: &ConfigureOptions,
-    stored: Option<&StoredConfig>,
-    existing_config: Option<&CaseloadConfig>,
-) -> Result<Option<u32>, ConfigureError> {
-    if let Some(budget) = options.reasoning_budget {
-        return Ok(Some(budget));
-    }
-
-    if let Some(raw_env) = options
-        .env
-        .get(ENV_REASONING_BUDGET)
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        let parsed =
-            raw_env
-                .parse::<u32>()
-                .map_err(|_| ConfigureError::InvalidReasoningBudget {
-                    raw: raw_env.to_string(),
-                })?;
-        return Ok(Some(parsed));
-    }
-
-    if let Some(stored_budget) = stored.and_then(|s| s.reasoning_budget) {
-        return Ok(Some(stored_budget));
-    }
-
-    Ok(existing_config.and_then(|c| c.reasoning_budget))
 }
 
 #[cfg(test)]
@@ -449,12 +466,36 @@ mod tests {
         #[test]
         fn test_shorthand_aliases_normalize_to_canonical_google_specifiers() {
             assert_eq!(
-                normalize_model_specifier("flash-lite").expect("flash-lite alias"),
+                normalize_model_specifier("carbon").expect("carbon alias"),
+                DEFAULT_AUDITOR_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("google:carbon").expect("prefixed carbon"),
+                DEFAULT_AUDITOR_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("argon").expect("argon alias"),
+                DEFAULT_ARGON_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("google:argon").expect("prefixed argon"),
+                DEFAULT_ARGON_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("hydrogen").expect("hydrogen alias"),
                 DEFAULT_SCREENER_MODEL
             );
             assert_eq!(
-                normalize_model_specifier("google:flash-lite").expect("prefixed flash-lite"),
+                normalize_model_specifier("google:hydrogen").expect("prefixed hydrogen"),
                 DEFAULT_SCREENER_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("flash-lite").expect("flash-lite alias"),
+                DEFAULT_FLASH_LITE_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("google:flash-lite").expect("prefixed flash-lite"),
+                DEFAULT_FLASH_LITE_MODEL
             );
             assert_eq!(
                 normalize_model_specifier("flash").expect("flash alias"),
@@ -462,11 +503,11 @@ mod tests {
             );
             assert_eq!(
                 normalize_model_specifier("pro").expect("pro alias"),
-                DEFAULT_AUDITOR_MODEL
+                DEFAULT_PRO_MODEL
             );
             assert_eq!(
                 normalize_model_specifier("google:pro").expect("prefixed pro"),
-                DEFAULT_AUDITOR_MODEL
+                DEFAULT_PRO_MODEL
             );
         }
 
@@ -596,13 +637,14 @@ mod tests {
                 Some(CaseloadConfig {
                     screener_model: DEFAULT_FLASH_MODEL.to_string(),
                     auditor_model: "google:gemini-2.5-pro".to_string(),
+                    thinking_level: None,
                     reasoning_budget: Some(2048),
                 })
             );
 
             // 2. Environment variables override stored config
             let mut env = BTreeMap::new();
-            env.insert(ENV_SCREENER_MODEL.to_string(), "flash-lite".to_string());
+            env.insert(ENV_SCREENER_MODEL.to_string(), "hydrogen".to_string());
             env.insert(ENV_REASONING_BUDGET.to_string(), "4096".to_string());
             let from_env = execute_configure(
                 &ConfigureOptions {
@@ -618,6 +660,7 @@ mod tests {
                 Some(CaseloadConfig {
                     screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: "google:gemini-2.5-pro".to_string(),
+                    thinking_level: None,
                     reasoning_budget: Some(4096),
                 })
             );
@@ -634,8 +677,8 @@ mod tests {
             env.insert(ENV_REASONING_BUDGET.to_string(), "1024".to_string());
 
             let opts = ConfigureOptions {
-                screener_model: Some("flash-lite".to_string()),
-                auditor_model: Some("pro".to_string()),
+                screener_model: Some("hydrogen".to_string()),
+                auditor_model: Some("carbon".to_string()),
                 reasoning_budget: Some(4096),
                 env,
                 ..ConfigureOptions::default()
@@ -644,7 +687,78 @@ mod tests {
             let cfg = caseload.config.expect("config populated");
             assert_eq!(cfg.screener_model, DEFAULT_SCREENER_MODEL);
             assert_eq!(cfg.auditor_model, DEFAULT_AUDITOR_MODEL);
+            assert_eq!(cfg.thinking_level, None);
             assert_eq!(cfg.reasoning_budget, Some(4096));
+        }
+
+        #[test]
+        fn test_thinking_level_precedence_and_mutual_exclusivity() {
+            // 1. Conflicting CLI flags fail fast with exit-2 ConfigureError::ConflictingThinkingOptions
+            let conflict_cli = ConfigureOptions {
+                thinking_level: Some(ThinkingLevel::Low),
+                reasoning_budget: Some(2048),
+                env: env_with_key(),
+                ..ConfigureOptions::default()
+            };
+            let err_cli =
+                execute_configure(&conflict_cli, None).expect_err("conflicting CLI flags fail");
+            assert!(matches!(
+                err_cli,
+                ConfigureError::ConflictingThinkingOptions { .. }
+            ));
+            assert!(err_cli.to_string().contains("Hint:"));
+
+            // 2. Conflicting env vars fail fast
+            let mut conflict_env = env_with_key();
+            conflict_env.insert(ENV_THINKING_LEVEL.to_string(), "medium".to_string());
+            conflict_env.insert(ENV_REASONING_BUDGET.to_string(), "2048".to_string());
+            let err_env = execute_configure(
+                &ConfigureOptions {
+                    env: conflict_env,
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect_err("conflicting env vars fail");
+            assert!(matches!(
+                err_env,
+                ConfigureError::ConflictingThinkingOptions { .. }
+            ));
+
+            // 3. Higher-precedence CLI thinking_level overrides lower-precedence env reasoning_budget
+            let mut env_budget = env_with_key();
+            env_budget.insert(ENV_REASONING_BUDGET.to_string(), "2048".to_string());
+            let overridden = execute_configure(
+                &ConfigureOptions {
+                    thinking_level: Some(ThinkingLevel::Low),
+                    env: env_budget,
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect("CLI thinking_level supersedes env reasoning_budget");
+            let cfg = overridden.config.expect("config");
+            assert_eq!(cfg.thinking_level, Some(ThinkingLevel::Low));
+            assert_eq!(cfg.reasoning_budget, None);
+
+            // 4. Invalid thinking level in env fails with Hint
+            let mut bad_lvl_env = env_with_key();
+            bad_lvl_env.insert(ENV_THINKING_LEVEL.to_string(), "turbo".to_string());
+            let err_lvl = execute_configure(
+                &ConfigureOptions {
+                    env: bad_lvl_env,
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect_err("invalid thinking level fails");
+            assert_eq!(
+                err_lvl,
+                ConfigureError::InvalidThinkingLevel {
+                    raw: "turbo".to_string()
+                }
+            );
+            assert!(err_lvl.to_string().contains("Hint:"));
         }
 
         #[test]
@@ -741,6 +855,7 @@ mod tests {
                 Some(CaseloadConfig {
                     screener_model: DEFAULT_JEV_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
                     reasoning_budget: None,
                 })
             );
@@ -809,6 +924,7 @@ mod tests {
             let preconfigured = Caseload::new().with_config(CaseloadConfig {
                 screener_model: "google:gemini-2.5-flash-lite".to_string(),
                 auditor_model: "google:gemini-2.5-pro".to_string(),
+                thinking_level: None,
                 reasoning_budget: Some(2048),
             });
 

@@ -64,7 +64,7 @@ flowchart TD
         S4 -.-> S4_Probe["probe<br/>(Live provider connectivity & latency test)"]
     end
 
-    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · gemini-flash-lite-latest)"]
+    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · gemini-4-hydrogen)"]
         S_Apprise["apprise<br/>(Statutory Notice: Candidate canons → Applicable Canons)"]
     end
 
@@ -125,7 +125,7 @@ flowchart TD
 - **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (`google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) evaluate against normalized model specifiers, system instructions, prompts, and JSON Schemas.
 - **Discriminative Decision Model Port:** Encapsulates discriminative classifier endpoints (`typesafe:jev-*`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus prima facie compliance vetting in `vet`.
 - **Deterministic Reason-First Constrained Decoding:** Enforces deterministic generation (`temperature: 0.0`) paired with strict JSON Schema output enforcement (`application/json`) on generative tiers so rationale scratchpad fields precede numeric scores across generative calls.
-- **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps optional token ceilings (`reasoning_budget`) to provider-native extended thinking controls (enforcing an explicit zero thinking budget on screener stages to eliminate accidental dynamic thinking on models like `gemini-flash-latest`), separates intermediate reasoning thought summaries from decoded payloads, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for the out-of-band Telemetry Event Stream.
+- **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps discrete qualitative thinking tiers (`thinking_level`: `minimal`, `low`, `medium`, `high`) and optional token ceilings (`reasoning_budget`) to mutually exclusive provider-native extended thinking controls—enforcing bounded minimal/zero screener reasoning (`thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models and `thinkingBudget: 0` on Gemini 2.5/Flash-Lite models) while applying bounded `"LOW"` thinking (`includeThoughts: true`) by default on `audit` trials—separates intermediate reasoning thought summaries from decoded payloads, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for immediate per-call and stage-summary emission on the out-of-band Telemetry Event Stream.
 - **Credential Encapsulation & Actionable Error Classification:** Secret API keys are bound to concrete provider adapters at construction rather than carried on evaluation requests or `Caseload` envelopes, and upstream HTTP or transport failures (`401`/`403`, `404`, `429`, `5xx`, context token limits, timeouts, safety blocks, or malformed responses) are classified into actionable diagnostics with provider-specific remediation hints.
 
 ### The Driving Adapter (The CLI Boundary)
@@ -193,11 +193,11 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 | `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
 | `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
-| `apprise` | Apprisal Track | Screener AI (`Flash-Lite` / `Jev`) | ~200–400ms, low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
-| `docket` | Cascade Spine | Screener AI (`Flash-Lite` / `Jev`) | ~200–400ms, low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
-| `admit` | Cascade Spine | Screener AI (`Flash-Lite` / `Jev`) | ~300–600ms, low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `vet` | Cascade Spine | Screener AI (`Jev` / `Flash-Lite`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
-| `audit` | Cascade Spine | Generative Auditor (`Pro`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `apprise` | Apprisal Track | Screener AI (`Hydrogen` / `Jev`) | ~200–400ms, low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
+| `docket` | Cascade Spine | Screener AI (`Hydrogen` / `Jev`) | ~200–400ms, low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
+| `admit` | Cascade Spine | Screener AI (`Hydrogen` / `Jev`) | ~300–600ms, low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `vet` | Cascade Spine | Screener AI (`Jev` / `Hydrogen`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Cascade Spine | Generative Auditor (`Carbon`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -219,7 +219,7 @@ flowchart TD
     S4 --> G5{"docket Gate<br/>(Colorability ≥ 0.5)"}
     
     G5 -- "Dismissed (< 0.5)" --> SievePrune1["Pruned"]
-    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~400ms · gemini-flash-lite-latest)"]
+    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~400ms · gemini-4-hydrogen)"]
     
     C3 --> G6{"admit Gate<br/>(Admissibility ≥ 0.5)"}
     G6 -- "Inadmissible (< 0.5)" --> SievePrune2["Pruned"]
@@ -227,7 +227,7 @@ flowchart TD
     
     E5 --> G6_Vet{"vet Gate<br/>(Prima Facie ≥ 0.8 · Jev)"}
     G6_Vet -- "Vetted (≥ 0.8)" --> VettedPass["2 Vetted Cases<br/>(0 output tokens · Folded into Verdict)"]
-    G6_Vet -- "Contested (< 0.8)" --> G7["audit Adjudication<br/>(1 Contested Trial · gemini-pro-latest)"]
+    G6_Vet -- "Contested (< 0.8)" --> G7["audit Adjudication<br/>(1 Contested Trial · gemini-4-carbon)"]
     VettedPass --> FinalVerdict["Final Verdict & Decree<br/>(~1.8s · Targeted Reasoning)"]
     G7 --> FinalVerdict
 ```
@@ -236,10 +236,10 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
 | **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`jev` / `flash-lite`) | ~1,200 tokens | ~350ms |
-| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`jev` / `flash-lite`) | ~1,800 tokens | ~500ms |
+| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`jev` / `hydrogen`) | ~1,200 tokens | ~350ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`jev` / `hydrogen`) | ~1,800 tokens | ~500ms |
 | **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`jev`) | 0 output tokens | ~200ms |
-| **`audit` Adjudication** | 1 contested trial | 2 exhibits | `gemini-pro-latest` | ~1,500 tokens | ~1,200ms |
+| **`audit` Adjudication** | 1 contested trial | 2 exhibits | `gemini-4-carbon` | ~1,500 tokens | ~1,200ms |
 | **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.5s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
@@ -288,11 +288,12 @@ Downstream subcommands fast-forward across any stage whose corresponding namespa
 Canon Clerk strictly separates **substantive evaluation records** from **operational execution telemetry**:
 
 - **Substantive Record (`Caseload`):** Represents solely substantive findings, omitting wall-clock timestamps, token counters, and intermediate thought traces so serialized `caseload.json` envelopes remain free of operational telemetry churn across git diffs, cached artifacts, and hermetic snapshot tests.
-- **Event Logging (`stderr` / `--log-file`):** Operational metrics (wall-clock milliseconds, token usage, incremental work-unit completion, time-to-first-token/thought) and streaming intermediate chunks (thought deltas) are emitted out-of-band via a structured **Telemetry Event Stream** comprising five lifecycle event categories:
+- **Event Logging (`stderr` / `--log-file`):** Operational metrics (wall-clock milliseconds, per-call and stage-summary token usage, incremental work-unit completion, time-to-first-token/thought) and streaming intermediate chunks (thought deltas) are emitted out-of-band via a structured **Telemetry Event Stream** comprising six lifecycle event categories:
   - **Stage Start (`StageStart`):** Signals entry into a `PipelineStage` along with an ISO-8601 `timestamp`.
   - **Work-Unit Progress (`StageProgress`):** Reports incremental completion counts (`completed` of `total` batches, cases, or trials alongside a concise unit `label`) as concurrent or sequential model calls finish within multi-unit heuristic stages (`docket`, `admit`, `vet`, `audit`).
   - **Reasoning Delta (`Thought`):** Streams incremental model reasoning `delta` chunks associated with an active `PipelineStage`.
-  - **Stage Completion (`StageFinish`):** Records stage completion with elapsed wall-clock `duration_ms` and optional token `usage` metrics.
+  - **Per-Call Model Telemetry (`ModelCall`):** Emitted immediately as each individual generative or discriminative model call completes within an active `PipelineStage`, recording `resolved_model`, `latency_ms`, optional unit `label` (such as `canon_path` or slice identifier), and per-call `usage` (`prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `total_tokens`)—ensuring per-canon thinking-token outliers and completed call metrics are flushed in real time even if a sibling call later fails or times out.
+  - **Stage Completion (`StageFinish`):** Records stage completion with elapsed wall-clock `duration_ms` and optional aggregated token `usage` metrics.
   - **Pipeline Completion (`PipelineFinish`):** Summarizes cumulative `total_duration_ms` and aggregate `total_tokens` across the completed DAG closure.
 - **Executed-Stage Scoping:** Lifecycle events are emitted exclusively for pipeline stages that execute during the active invocation. Ancestor stages fast-forwarded from an incoming `--caseload` and downstream stages bypassed by deterministic short-circuit gates are omitted from the stream, and `PipelineFinish` aggregates `total_tokens` strictly across executed stages.
 - **Structured Log Sink, Crate-Scoped Verbose Filtering & Non-Interactive Hygiene:** Supplying `--log-file <path>` (or the `CANON_CLERK_LOG_FILE` environment variable) persists the structured event stream as newline-delimited JSON Lines (`JSONL`) on disk independently of terminal streams. Interactive TTY runs immediately announce entry into remote/heuristic stages (such as `--caseload` handoffs into `audit`) and multi-unit completion ticks on `stderr`, while `--verbose` (`-v` / `CANON_CLERK_VERBOSE`) surfaces full stage-entry, per-unit `k/N` completion, and compact thought diagnostics while scoping default debug tracing strictly to Canon Clerk's own crate targets unless overridden via `RUST_LOG` (suppressing third-party HTTP/TLS socket noise). Non-TTY pipes, `CI`, `NO_COLOR`, and `--quiet` predicate environments automatically suppress interactive decorations and ANSI escape sequences so `stdout` payloads remain uncorrupted.

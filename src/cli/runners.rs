@@ -170,6 +170,7 @@ pub fn resolve_branch_b_options(
     provider: &ProviderConfigArgs,
     env: &BTreeMap<String, String>,
 ) -> Result<ConfigureOptions, CliError> {
+    let thinking_level = provider.validate_thinking_flags()?;
     let cwd = env::current_dir().ok();
     let stored_config = match resolve_default_config_path(env) {
         Some(cfg_path) => load_host_config_file(&cfg_path, cwd.as_deref())
@@ -180,6 +181,7 @@ pub fn resolve_branch_b_options(
     Ok(ConfigureOptions {
         screener_model: provider.screener_model.clone(),
         auditor_model: provider.auditor_model.clone(),
+        thinking_level,
         reasoning_budget: provider.reasoning_budget,
         gemini_api_key: provider.gemini_api_key.clone(),
         typesafe_api_key: provider.typesafe_api_key.clone(),
@@ -309,6 +311,7 @@ mod tests {
             let existing = Caseload::new().with_config(CaseloadConfig {
                 screener_model: "google:gemini-2.5-flash-lite".to_string(),
                 auditor_model: "google:gemini-2.5-pro".to_string(),
+                thinking_level: None,
                 reasoning_budget: Some(1024),
             });
             let options = ConfigureOptions::default();

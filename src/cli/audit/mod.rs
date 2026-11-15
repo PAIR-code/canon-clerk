@@ -295,6 +295,7 @@ fn run_audit_core(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
+    args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let thresholds = resolve_and_validate_audit_cli_params(args, env)?;
 
@@ -703,6 +704,58 @@ mod tests {
                     .contains("⊘ audit     : (fast-forward: canon validation failed)")
             );
         }
+
+        #[test]
+        fn test_conflicting_or_invalid_thinking_flags_fail_fast_with_exit_code_2() {
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let mut env = BTreeMap::new();
+            env.insert(
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            );
+
+            for (argv, expected_substr) in [
+                (
+                    vec![
+                        "canon-clerk",
+                        "audit",
+                        "src/cli/audit.rs",
+                        "--thinking-level",
+                        "low",
+                        "--reasoning-budget",
+                        "2048",
+                    ],
+                    "mutually exclusive",
+                ),
+                (
+                    vec![
+                        "canon-clerk",
+                        "audit",
+                        "src/cli/audit.rs",
+                        "--thinking-level",
+                        "turbo",
+                    ],
+                    "Invalid thinking level",
+                ),
+            ] {
+                let args = parse_audit(&argv);
+                let mut stdout = Vec::new();
+                let err = run_audit_with_snapshot_and_provider(
+                    &args,
+                    &mut Cursor::new(b""),
+                    &mut stdout,
+                    &ws,
+                    &env,
+                    &provider,
+                )
+                .expect_err("conflicting or invalid thinking flags must fail fast");
+                assert_eq!(err.exit_code(), 2, "failed on argv: {argv:?}");
+                assert!(err.to_string().contains(expected_substr));
+                assert!(err.to_string().contains("Hint:"));
+                assert_eq!(provider.call_count(), 0);
+            }
+        }
     }
 
     mod cascade_execution_and_github_ci_output {
@@ -996,6 +1049,7 @@ mod tests {
                 .with_config(CaseloadConfig {
                     screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
                     reasoning_budget: Some(4096),
                 })
                 .with_docket(CaseloadDocket::from_cases(docket_cases))

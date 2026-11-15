@@ -64,7 +64,7 @@ impl<'a> TelemetrySession<'a> {
         f: impl FnOnce(&StageScope<'_>) -> Result<T, E>,
     ) -> Result<T, E> {
         if !self.sink.is_enabled() {
-            let disabled_scope = StageScope::new(stage, self.sink, false);
+            let disabled_scope = StageScope::new(stage, self.sink, None, false);
             return f(&disabled_scope);
         }
 
@@ -73,15 +73,11 @@ impl<'a> TelemetrySession<'a> {
         self.sink
             .emit(&TelemetryEvent::StageStart { stage, timestamp });
 
-        let scope = StageScope::new(stage, self.sink, true);
+        let scope = StageScope::new(stage, self.sink, Some(&self.total_tokens), true);
         let result = f(&scope)?;
 
         let duration_ms = self.clock.monotonic_ms().saturating_sub(stage_start_ms);
         let usage = scope.into_usage();
-        if let Some(u) = usage {
-            self.total_tokens
-                .fetch_add(u.total_tokens, Ordering::SeqCst);
-        }
 
         self.sink.emit(&TelemetryEvent::StageFinish {
             stage,
@@ -125,15 +121,22 @@ impl TelemetrySession<'static> {
 pub struct StageScope<'a> {
     stage: PipelineStage,
     sink: &'a dyn TelemetrySink,
+    total_tokens: Option<&'a AtomicU64>,
     enabled: bool,
     usage: Mutex<Option<TokenUsage>>,
 }
 
 impl<'a> StageScope<'a> {
-    fn new(stage: PipelineStage, sink: &'a dyn TelemetrySink, enabled: bool) -> Self {
+    fn new(
+        stage: PipelineStage,
+        sink: &'a dyn TelemetrySink,
+        total_tokens: Option<&'a AtomicU64>,
+        enabled: bool,
+    ) -> Self {
         Self {
             stage,
             sink,
+            total_tokens,
             enabled,
             usage: Mutex::new(None),
         }
@@ -171,6 +174,9 @@ impl<'a> StageScope<'a> {
         if !self.enabled {
             return;
         }
+        if let Some(counter) = self.total_tokens {
+            counter.fetch_add(turn_usage.total_tokens, Ordering::SeqCst);
+        }
         let mut guard = self.usage.lock().unwrap_or_else(PoisonError::into_inner);
         match guard.as_mut() {
             Some(existing) => existing.accumulate(turn_usage),
@@ -178,23 +184,54 @@ impl<'a> StageScope<'a> {
         }
     }
 
-    /// Records both extracted `thoughts` and `usage` from a completed [`GenerationResponse`].
-    pub fn record_generation(&self, response: &GenerationResponse) {
+    /// Emits a `TelemetryEvent::ModelCall` record and accumulates `usage` immediately upon call completion.
+    pub fn record_model_call(
+        &self,
+        label: Option<&str>,
+        resolved_model: &str,
+        latency_ms: u64,
+        usage: TokenUsage,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.sink.emit(&TelemetryEvent::ModelCall {
+            stage: self.stage,
+            label: label.unwrap_or_default().trim().to_string(),
+            resolved_model: resolved_model.to_string(),
+            latency_ms,
+            usage,
+        });
+        self.record_usage(usage);
+    }
+
+    /// Records extracted `thoughts`, per-call `ModelCall` telemetry, and stage `usage` from [`GenerationResponse`].
+    pub fn record_generation(&self, label: Option<&str>, response: &GenerationResponse) {
         if !self.enabled {
             return;
         }
         for thought in &response.thoughts {
             self.record_thought(thought);
         }
-        self.record_usage(response.usage);
+        self.record_model_call(
+            label,
+            &response.resolved_model,
+            response.latency_ms,
+            response.usage,
+        );
     }
 
-    /// Records `usage` from a completed discriminative [`DecisionResponse`].
-    pub fn record_decision(&self, response: &DecisionResponse) {
+    /// Records per-call `ModelCall` telemetry and `usage` from a completed discriminative [`DecisionResponse`].
+    pub fn record_decision(&self, label: Option<&str>, response: &DecisionResponse) {
         if !self.enabled {
             return;
         }
-        self.record_usage(response.usage);
+        self.record_model_call(
+            label,
+            &response.resolved_model,
+            response.latency_ms,
+            response.usage,
+        );
     }
 
     /// Wraps a [`StructuredModelProvider`] so all generation and decision turns automatically emit
@@ -226,7 +263,8 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
         request: &GenerationRequest,
     ) -> Result<GenerationResponse, ProviderError> {
         let response = self.inner.generate_structured(request)?;
-        self.scope.record_generation(&response);
+        self.scope
+            .record_generation(request.call_label.as_deref(), &response);
         Ok(response)
     }
 
@@ -235,7 +273,8 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
         request: &DecisionRequest,
     ) -> Result<DecisionResponse, ProviderError> {
         let response = self.inner.evaluate_decisions(request)?;
-        self.scope.record_decision(&response);
+        self.scope
+            .record_decision(request.call_label.as_deref(), &response);
         Ok(response)
     }
 
@@ -252,7 +291,7 @@ mod tests {
     use serde_json::json;
 
     struct StubProvider {
-        responses: Mutex<Vec<GenerationResponse>>,
+        responses: Mutex<Vec<Result<GenerationResponse, ProviderError>>>,
     }
 
     impl StructuredModelProvider for StubProvider {
@@ -261,28 +300,19 @@ mod tests {
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
             let mut guard = self.responses.lock().unwrap();
-            Ok(guard.remove(0))
+            guard.remove(0)
         }
     }
 
     mod lifecycle_and_aggregation {
         use super::*;
 
-        #[test]
-        fn test_session_records_ordered_events_thoughts_and_aggregates_multi_turn_tokens() {
-            let sink = RecordingTelemetrySink::new();
-            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
-            let session = TelemetrySession::new(&sink, &clock);
-
-            session
-                .run_stage(PipelineStage::Intake, |_scope| Ok::<_, ()>(()))
-                .expect("intake stage");
-
-            let provider = StubProvider {
+        fn two_turn_stub_provider() -> StubProvider {
+            StubProvider {
                 responses: Mutex::new(vec![
-                    GenerationResponse {
+                    Ok(GenerationResponse {
                         payload: json!({"ok": true}),
-                        resolved_model: "gemini-2.5-pro".to_string(),
+                        resolved_model: "gemini-4-carbon".to_string(),
                         latency_ms: 120,
                         usage: TokenUsage {
                             prompt_tokens: 100,
@@ -295,10 +325,10 @@ mod tests {
                             String::new(),
                             "Checking exception applicability.".to_string(),
                         ],
-                    },
-                    GenerationResponse {
+                    }),
+                    Ok(GenerationResponse {
                         payload: json!({"ok": true}),
-                        resolved_model: "gemini-2.5-pro".to_string(),
+                        resolved_model: "gemini-4-carbon".to_string(),
                         latency_ms: 95,
                         usage: TokenUsage {
                             prompt_tokens: 80,
@@ -307,24 +337,40 @@ mod tests {
                             total_tokens: 120,
                         },
                         thoughts: vec!["Second trial rationale.".to_string()],
-                    },
+                    }),
                 ]),
-            };
+            }
+        }
 
-            let dummy_req = GenerationRequest {
-                model_specifier: "google:gemini-pro-latest".to_string(),
+        #[test]
+        fn test_session_records_ordered_events_thoughts_and_aggregates_multi_turn_tokens() {
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            session
+                .run_stage(PipelineStage::Intake, |_scope| Ok::<_, ()>(()))
+                .expect("intake stage");
+
+            let provider = two_turn_stub_provider();
+            let req1 = GenerationRequest {
+                model_specifier: "google:gemini-4-carbon".to_string(),
                 system_instruction: "sys".to_string(),
                 user_prompt: "usr".to_string(),
                 response_schema: json!({"type": "object"}),
+                thinking_level: None,
                 reasoning_budget: Some(512),
                 timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+                call_label: Some(".canons/cli/first.md".to_string()),
             };
+            let mut req2 = req1.clone();
+            req2.call_label = Some(".canons/cli/second.md".to_string());
 
             session
                 .run_stage(PipelineStage::Audit, |scope| {
                     let instrumented = scope.instrument_provider(&provider);
-                    instrumented.generate_structured(&dummy_req)?;
-                    instrumented.generate_structured(&dummy_req)?;
+                    instrumented.generate_structured(&req1)?;
+                    instrumented.generate_structured(&req2)?;
                     Ok::<_, ProviderError>(())
                 })
                 .expect("audit stage");
@@ -356,9 +402,33 @@ mod tests {
                         stage: PipelineStage::Audit,
                         delta: "Checking exception applicability.".to_string(),
                     },
+                    TelemetryEvent::ModelCall {
+                        stage: PipelineStage::Audit,
+                        label: ".canons/cli/first.md".to_string(),
+                        resolved_model: "gemini-4-carbon".to_string(),
+                        latency_ms: 120,
+                        usage: TokenUsage {
+                            prompt_tokens: 100,
+                            completion_tokens: 20,
+                            reasoning_tokens: 30,
+                            total_tokens: 150,
+                        },
+                    },
                     TelemetryEvent::Thought {
                         stage: PipelineStage::Audit,
                         delta: "Second trial rationale.".to_string(),
+                    },
+                    TelemetryEvent::ModelCall {
+                        stage: PipelineStage::Audit,
+                        label: ".canons/cli/second.md".to_string(),
+                        resolved_model: "gemini-4-carbon".to_string(),
+                        latency_ms: 95,
+                        usage: TokenUsage {
+                            prompt_tokens: 80,
+                            completion_tokens: 15,
+                            reasoning_tokens: 25,
+                            total_tokens: 120,
+                        },
                     },
                     TelemetryEvent::StageFinish {
                         stage: PipelineStage::Audit,
@@ -376,6 +446,74 @@ mod tests {
                     },
                 ]
             );
+        }
+
+        #[test]
+        fn test_per_call_telemetry_survives_when_subsequent_call_times_out() {
+            let sink = RecordingTelemetrySink::new();
+            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
+            let session = TelemetrySession::new(&sink, &clock);
+
+            let provider = StubProvider {
+                responses: Mutex::new(vec![
+                    Ok(GenerationResponse {
+                        payload: json!({"ok": true}),
+                        resolved_model: "gemini-4-carbon".to_string(),
+                        latency_ms: 1410,
+                        usage: TokenUsage {
+                            prompt_tokens: 500,
+                            completion_tokens: 60,
+                            reasoning_tokens: 1920,
+                            total_tokens: 2480,
+                        },
+                        thoughts: vec!["Completed case reasoning.".to_string()],
+                    }),
+                    Err(ProviderError::Timeout {
+                        model_specifier: "google:gemini-4-carbon".to_string(),
+                        timeout_ms: 60_000,
+                    }),
+                ]),
+            };
+
+            let mut req1 = GenerationRequest {
+                model_specifier: "google:gemini-4-carbon".to_string(),
+                system_instruction: "sys".to_string(),
+                user_prompt: "usr".to_string(),
+                response_schema: json!({"type": "object"}),
+                thinking_level: None,
+                reasoning_budget: None,
+                timeout_ms: 60_000,
+                call_label: Some(".canons/cli/fast-case.md".to_string()),
+            };
+            let mut req2 = req1.clone();
+            req2.call_label = Some(".canons/cli/stalled-case.md".to_string());
+
+            let err = session
+                .run_stage(PipelineStage::Audit, |scope| {
+                    let instrumented = scope.instrument_provider(&provider);
+                    instrumented.generate_structured(&req1)?;
+                    req1.timeout_ms = 60_000;
+                    instrumented.generate_structured(&req2)?;
+                    Ok::<_, ProviderError>(())
+                })
+                .expect_err("second call times out");
+            assert!(matches!(err, ProviderError::Timeout { .. }));
+
+            let events = sink.events();
+            assert!(events.iter().any(|ev| matches!(
+                ev,
+                TelemetryEvent::ModelCall {
+                    stage: PipelineStage::Audit,
+                    label,
+                    latency_ms: 1410,
+                    usage: TokenUsage {
+                        reasoning_tokens: 1920,
+                        total_tokens: 2480,
+                        ..
+                    },
+                    ..
+                } if label == ".canons/cli/fast-case.md"
+            )));
         }
 
         #[test]

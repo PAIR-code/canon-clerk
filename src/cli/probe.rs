@@ -315,6 +315,7 @@ mod tests {
     use super::*;
     use crate::caseload::{
         CaseloadConfig, CaseloadIntake, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL,
+        ThinkingLevel,
     };
     use crate::cli::{Cli, Commands};
     use crate::configure::ENV_GEMINI_API_KEY;
@@ -351,8 +352,13 @@ mod tests {
             model_specifier: &str,
             _api_key: &str,
             _timeout_ms: u64,
+            _thinking_level: Option<ThinkingLevel>,
+            _reasoning_budget: Option<u32>,
         ) -> ProbeEndpointResult {
-            if model_specifier.contains("flash") || model_specifier.contains("jev") {
+            if model_specifier.contains("hydrogen")
+                || model_specifier.contains("flash")
+                || model_specifier.contains("jev")
+            {
                 self.screener.clone()
             } else {
                 self.auditor.clone()
