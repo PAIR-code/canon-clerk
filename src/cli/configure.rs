@@ -14,7 +14,9 @@
 
 //! CLI driving adapter for the `canon-clerk configure` subcommand.
 
-use crate::caseload::{Caseload, CaseloadConfig, DEFAULT_PROVIDER, TYPESAFE_PROVIDER};
+use crate::caseload::{
+    Caseload, CaseloadConfig, DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROVIDER, TYPESAFE_PROVIDER,
+};
 use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
 use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
@@ -198,7 +200,10 @@ fn render_stylish_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std
     match (config.thinking_level, config.reasoning_budget) {
         (Some(level), _) => writeln!(stdout, "  Thinking Level   : {level}")?,
         (None, Some(budget)) => writeln!(stdout, "  Reasoning Budget : {budget} tokens")?,
-        (None, None) => writeln!(stdout, "  Thinking Level   : medium (audit default)")?,
+        (None, None) => writeln!(
+            stdout,
+            "  Thinking Level   : {DEFAULT_AUDITOR_THINKING_LEVEL} (audit default)"
+        )?,
     }
     writeln!(
         stdout,
@@ -314,6 +319,7 @@ mod tests {
                 .expect("stylish configure");
             let stylish_str = String::from_utf8(stylish_out).expect("utf8");
             assert!(stylish_str.contains("Configuration Summary (READY):"));
+            assert!(stylish_str.contains("Thinking Level   : low (audit default)"));
             assert!(stylish_str.contains("GEMINI_API_KEY (verified)"));
             assert!(!stylish_str.contains(secret));
 
@@ -379,7 +385,7 @@ mod tests {
         }
 
         #[test]
-        fn test_conflicting_thinking_flags_exit_with_code_2_and_hint() {
+        fn test_conflicting_or_invalid_thinking_flags_exit_with_code_2_and_hint() {
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
                     thinking_level: Some("low".to_string()),
@@ -393,7 +399,22 @@ mod tests {
             let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &test_env())
                 .expect_err("conflicting thinking flags must fail");
             assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("mutually exclusive"));
             assert!(err.to_string().contains("Hint:"));
+
+            let invalid_args = ConfigureArgs {
+                provider: ProviderConfigArgs {
+                    thinking_level: Some("turbo".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                ..ConfigureArgs::default()
+            };
+            let invalid_err =
+                run_configure_with_env(&invalid_args, &mut stdin, &mut stdout, &test_env())
+                    .expect_err("invalid thinking level must fail");
+            assert_eq!(invalid_err.exit_code(), 2);
+            assert!(invalid_err.to_string().contains("Invalid thinking level"));
+            assert!(invalid_err.to_string().contains("Hint:"));
         }
 
         #[test]

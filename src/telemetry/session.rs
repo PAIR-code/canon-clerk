@@ -206,7 +206,7 @@ impl<'a> StageScope<'a> {
     }
 
     /// Records extracted `thoughts`, per-call `ModelCall` telemetry, and stage `usage` from [`GenerationResponse`].
-    pub fn record_generation_with_label(&self, label: Option<&str>, response: &GenerationResponse) {
+    pub fn record_generation(&self, label: Option<&str>, response: &GenerationResponse) {
         if !self.enabled {
             return;
         }
@@ -221,13 +221,8 @@ impl<'a> StageScope<'a> {
         );
     }
 
-    /// Records both extracted `thoughts` and `usage` from a completed [`GenerationResponse`].
-    pub fn record_generation(&self, response: &GenerationResponse) {
-        self.record_generation_with_label(None, response);
-    }
-
     /// Records per-call `ModelCall` telemetry and `usage` from a completed discriminative [`DecisionResponse`].
-    pub fn record_decision_with_label(&self, label: Option<&str>, response: &DecisionResponse) {
+    pub fn record_decision(&self, label: Option<&str>, response: &DecisionResponse) {
         if !self.enabled {
             return;
         }
@@ -237,11 +232,6 @@ impl<'a> StageScope<'a> {
             response.latency_ms,
             response.usage,
         );
-    }
-
-    /// Records `usage` from a completed discriminative [`DecisionResponse`].
-    pub fn record_decision(&self, response: &DecisionResponse) {
-        self.record_decision_with_label(None, response);
     }
 
     /// Wraps a [`StructuredModelProvider`] so all generation and decision turns automatically emit
@@ -274,7 +264,7 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
     ) -> Result<GenerationResponse, ProviderError> {
         let response = self.inner.generate_structured(request)?;
         self.scope
-            .record_generation_with_label(request.call_label.as_deref(), &response);
+            .record_generation(request.call_label.as_deref(), &response);
         Ok(response)
     }
 
@@ -284,7 +274,7 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
     ) -> Result<DecisionResponse, ProviderError> {
         let response = self.inner.evaluate_decisions(request)?;
         self.scope
-            .record_decision_with_label(request.call_label.as_deref(), &response);
+            .record_decision(request.call_label.as_deref(), &response);
         Ok(response)
     }
 

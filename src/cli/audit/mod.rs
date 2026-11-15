@@ -704,6 +704,58 @@ mod tests {
                     .contains("⊘ audit     : (fast-forward: canon validation failed)")
             );
         }
+
+        #[test]
+        fn test_conflicting_or_invalid_thinking_flags_fail_fast_with_exit_code_2() {
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let mut env = BTreeMap::new();
+            env.insert(
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            );
+
+            for (argv, expected_substr) in [
+                (
+                    vec![
+                        "canon-clerk",
+                        "audit",
+                        "src/cli/audit.rs",
+                        "--thinking-level",
+                        "low",
+                        "--reasoning-budget",
+                        "2048",
+                    ],
+                    "mutually exclusive",
+                ),
+                (
+                    vec![
+                        "canon-clerk",
+                        "audit",
+                        "src/cli/audit.rs",
+                        "--thinking-level",
+                        "turbo",
+                    ],
+                    "Invalid thinking level",
+                ),
+            ] {
+                let args = parse_audit(&argv);
+                let mut stdout = Vec::new();
+                let err = run_audit_with_snapshot_and_provider(
+                    &args,
+                    &mut Cursor::new(b""),
+                    &mut stdout,
+                    &ws,
+                    &env,
+                    &provider,
+                )
+                .expect_err("conflicting or invalid thinking flags must fail fast");
+                assert_eq!(err.exit_code(), 2, "failed on argv: {argv:?}");
+                assert!(err.to_string().contains(expected_substr));
+                assert!(err.to_string().contains("Hint:"));
+                assert_eq!(provider.call_count(), 0);
+            }
+        }
     }
 
     mod cascade_execution_and_github_ci_output {

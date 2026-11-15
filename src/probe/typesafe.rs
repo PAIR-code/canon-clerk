@@ -14,7 +14,7 @@
 
 //! TypeSafe AI (`/v1/systemone`) diagnostic endpoint prober implementation.
 
-use crate::caseload::{ProbeEndpointResult, ProbeStatus};
+use crate::caseload::{ProbeEndpointResult, ProbeStatus, ThinkingLevel};
 use crate::probe::EndpointProber;
 use crate::provider::{
     DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
@@ -90,6 +90,8 @@ impl EndpointProber for TypesafeEndpointProber {
         model_specifier: &str,
         api_key: &str,
         timeout_ms: u64,
+        _thinking_level: Option<ThinkingLevel>,
+        _reasoning_budget: Option<u32>,
     ) -> ProbeEndpointResult {
         let mut questions = BTreeMap::new();
         questions.insert(

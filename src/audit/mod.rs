@@ -1356,7 +1356,7 @@ mod tests {
             let (ws, fixture_caseload) = large_multi_module_fixture(canon_ref, 6);
             let caseload = fixture_caseload.with_config(CaseloadConfig::default());
 
-            // Default CaseloadConfig (no thinking_level or reasoning_budget) injects MEDIUM thinking.
+            // Default CaseloadConfig (no thinking_level or reasoning_budget) injects LOW thinking.
             let capture_provider = DualStageMockProvider {
                 vet_violation_marker: String::new(),
                 audit_requests: Mutex::new(Vec::new()),
@@ -1377,7 +1377,7 @@ mod tests {
             let reqs = capture_provider.audit_requests.lock().unwrap();
             assert!(
                 reqs.iter()
-                    .all(|r| r.thinking_level == Some(ThinkingLevel::Medium)
+                    .all(|r| r.thinking_level == Some(ThinkingLevel::Low)
                         && r.reasoning_budget.is_none()
                         && r.timeout_ms == 60_000)
             );

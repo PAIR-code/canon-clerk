@@ -109,8 +109,8 @@ impl std::error::Error for ProbeError {}
 
 /// Hexagonal port for executing a live or simulated connectivity health probe against a model endpoint.
 pub trait EndpointProber: Send + Sync {
-    /// Probes a single canonical model specifier (e.g. `"google:gemini-flash-lite-latest"`)
-    /// using the provided API key and timeout budget in milliseconds.
+    /// Probes a single canonical model specifier (e.g. `"google:gemini-4-hydrogen"`)
+    /// using the provided API key, timeout budget in milliseconds, and optional thinking overrides (`probe.md` §4).
     ///
     /// Implementations uphold the Non-Throwing Diagnostic Capture Invariant (`probe.md` §3) by
     /// returning a [`ProbeEndpointResult`] with `status: ProbeStatus::Error` and an actionable
@@ -120,19 +120,9 @@ pub trait EndpointProber: Send + Sync {
         model_specifier: &str,
         api_key: &str,
         timeout_ms: u64,
+        thinking_level: Option<ThinkingLevel>,
+        reasoning_budget: Option<u32>,
     ) -> ProbeEndpointResult;
-
-    /// Probes a model specifier with optional thinking configuration overrides (`probe.md` §4).
-    fn probe_endpoint_with_thinking(
-        &self,
-        model_specifier: &str,
-        api_key: &str,
-        timeout_ms: u64,
-        _thinking_level: Option<ThinkingLevel>,
-        _reasoning_budget: Option<u32>,
-    ) -> ProbeEndpointResult {
-        self.probe_endpoint(model_specifier, api_key, timeout_ms)
-    }
 }
 
 /// Executes the `probe` diagnostic stage concurrently across `.config.screener_model` and
@@ -167,10 +157,10 @@ pub fn execute_probe(
         let screener_ref = &screener_spec;
         let auditor_ref = &auditor_spec;
         let screener_handle = scope.spawn(move || {
-            prober.probe_endpoint_with_thinking(screener_ref, screener_key, timeout_ms, None, None)
+            prober.probe_endpoint(screener_ref, screener_key, timeout_ms, None, None)
         });
         let auditor_handle = scope.spawn(move || {
-            prober.probe_endpoint_with_thinking(
+            prober.probe_endpoint(
                 auditor_ref,
                 auditor_key,
                 timeout_ms,
@@ -339,15 +329,6 @@ impl EndpointProber for GeminiEndpointProber {
         model_specifier: &str,
         api_key: &str,
         timeout_ms: u64,
-    ) -> ProbeEndpointResult {
-        self.probe_endpoint_with_thinking(model_specifier, api_key, timeout_ms, None, None)
-    }
-
-    fn probe_endpoint_with_thinking(
-        &self,
-        model_specifier: &str,
-        api_key: &str,
-        timeout_ms: u64,
         thinking_level: Option<ThinkingLevel>,
         reasoning_budget: Option<u32>,
     ) -> ProbeEndpointResult {
@@ -411,23 +392,19 @@ impl EndpointProber for MultiProviderEndpointProber {
         model_specifier: &str,
         api_key: &str,
         timeout_ms: u64,
-    ) -> ProbeEndpointResult {
-        self.probe_endpoint_with_thinking(model_specifier, api_key, timeout_ms, None, None)
-    }
-
-    fn probe_endpoint_with_thinking(
-        &self,
-        model_specifier: &str,
-        api_key: &str,
-        timeout_ms: u64,
         thinking_level: Option<ThinkingLevel>,
         reasoning_budget: Option<u32>,
     ) -> ProbeEndpointResult {
         if model_provider(model_specifier) == TYPESAFE_PROVIDER {
-            self.typesafe
-                .probe_endpoint(model_specifier, api_key, timeout_ms)
+            self.typesafe.probe_endpoint(
+                model_specifier,
+                api_key,
+                timeout_ms,
+                thinking_level,
+                reasoning_budget,
+            )
         } else {
-            self.gemini.probe_endpoint_with_thinking(
+            self.gemini.probe_endpoint(
                 model_specifier,
                 api_key,
                 timeout_ms,
@@ -472,6 +449,8 @@ mod tests {
             model_specifier: &str,
             _api_key: &str,
             _timeout_ms: u64,
+            _thinking_level: Option<ThinkingLevel>,
+            _reasoning_budget: Option<u32>,
         ) -> ProbeEndpointResult {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             self.responses

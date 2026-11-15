@@ -34,7 +34,7 @@ pub const DEFAULT_SCREENER_REASONING_BUDGET: Option<u32> = Some(0);
 pub const DEFAULT_AUDITOR_MODEL: &str = "google:gemini-4-carbon";
 
 /// Default qualitative thinking level applied to `audit` trials when neither `thinking_level` nor `reasoning_budget` is configured.
-pub const DEFAULT_AUDITOR_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Medium;
+pub const DEFAULT_AUDITOR_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Low;
 
 /// Default qualitative thinking level applied to `probe` health checks on Gemini 4 models when unspecified.
 pub const DEFAULT_PROBE_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Low;
@@ -45,9 +45,9 @@ pub const DEFAULT_PROBE_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Low;
 pub enum ThinkingLevel {
     /// Minimal reasoning effort (maps to `"LOW"` on Gemini 4 models that lack a `"MINIMAL"` tier).
     Minimal,
-    /// Low reasoning effort prioritizing fast turnaround and token economy.
+    /// Low reasoning effort prioritizing fast turnaround and token economy (default for `audit` and `probe`).
     Low,
-    /// Balanced reasoning depth and latency (default for `audit` trials).
+    /// Balanced reasoning depth and latency.
     Medium,
     /// Deep extended reasoning effort for intricate statutory analysis.
     High,
