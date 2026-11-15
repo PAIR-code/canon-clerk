@@ -18,8 +18,8 @@ use crate::caseload::{ProbeEndpointResult, ProbeStatus, ThinkingLevel};
 use crate::probe::EndpointProber;
 use crate::provider::{
     DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
-    TypesafeSystemOneResponse, classify_typesafe_http_error, extract_typesafe_error_detail,
-    post_typesafe_json, strip_typesafe_prefix,
+    TypesafeSystemOneResponse, build_pooled_http_client, classify_typesafe_http_error,
+    extract_typesafe_error_detail, post_typesafe_json, strip_typesafe_prefix,
 };
 use std::collections::BTreeMap;
 
@@ -60,6 +60,7 @@ pub(super) fn decode_typesafe_probe_response(
 #[derive(Debug, Clone)]
 pub struct TypesafeEndpointProber {
     base_url: String,
+    client: reqwest::Client,
 }
 
 impl Default for TypesafeEndpointProber {
@@ -71,15 +72,19 @@ impl Default for TypesafeEndpointProber {
 impl TypesafeEndpointProber {
     /// Constructs a new live [`TypesafeEndpointProber`] targeting [`DEFAULT_TYPESAFE_BASE_URL`].
     pub fn new() -> Self {
-        Self {
-            base_url: DEFAULT_TYPESAFE_BASE_URL.to_string(),
-        }
+        Self::with_base_url(DEFAULT_TYPESAFE_BASE_URL)
     }
 
     /// Constructs a [`TypesafeEndpointProber`] with a custom base URL.
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
+        Self::with_client_and_base_url(build_pooled_http_client(), base_url)
+    }
+
+    /// Constructs a [`TypesafeEndpointProber`] with a custom [`reqwest::Client`] and base URL.
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
+            client,
         }
     }
 }
@@ -105,6 +110,7 @@ impl EndpointProber for TypesafeEndpointProber {
         };
 
         match post_typesafe_json(
+            &self.client,
             &self.base_url,
             model_specifier,
             api_key,

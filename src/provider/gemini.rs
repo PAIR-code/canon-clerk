@@ -14,7 +14,10 @@
 
 //! Google Gemini v1beta REST adapter implementing [`StructuredModelProvider`] (`POST /v1beta/models/{model}:generateContent`).
 
-use super::gemini_wire::{JSON_MIME_TYPE, build_request_payload, decode_generate_response};
+use super::gemini_wire::{build_request_payload, decode_generate_response};
+use super::runtime::{
+    HttpAuth, JsonPostRequest, RawHttpOutcome, build_pooled_http_client, execute_json_post,
+};
 use crate::caseload::DEFAULT_PROVIDER;
 use crate::configure::ENV_GEMINI_API_KEY;
 use crate::provider::{
@@ -22,7 +25,6 @@ use crate::provider::{
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::time::{Duration, Instant};
 
 /// Default Google Generative Language API v1beta base URL.
 pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -128,51 +130,6 @@ struct GeminiErrorBody {
     message: Option<String>,
 }
 
-pub(crate) struct RawHttpOutcome {
-    pub(crate) status_code: u16,
-    pub(crate) body: String,
-    pub(crate) latency_ms: u64,
-}
-
-thread_local! {
-    static TOKIO_RUNTIME: std::cell::RefCell<Option<tokio::runtime::Runtime>> = const { std::cell::RefCell::new(None) };
-}
-
-fn with_current_thread_runtime<F, R>(model_specifier: &str, f: F) -> Result<R, (ProviderError, u64)>
-where
-    F: FnOnce(&tokio::runtime::Runtime) -> Result<R, (ProviderError, u64)>,
-{
-    TOKIO_RUNTIME.with(|cell| {
-        let mut borrowed = cell.borrow_mut();
-        if borrowed.is_none() {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|err| {
-                    (
-                        ProviderError::Transport {
-                            model_specifier: model_specifier.to_string(),
-                            message: format!("failed to initialize async HTTP runtime ({err})"),
-                        },
-                        0,
-                    )
-                })?;
-            *borrowed = Some(rt);
-        }
-        if let Some(ref rt) = *borrowed {
-            f(rt)
-        } else {
-            Err((
-                ProviderError::Transport {
-                    model_specifier: model_specifier.to_string(),
-                    message: "runtime initialization failed".to_string(),
-                },
-                0,
-            ))
-        }
-    })
-}
-
 pub(crate) fn post_gemini_json<T: Serialize>(
     client: &reqwest::Client,
     base_url: &str,
@@ -182,43 +139,13 @@ pub(crate) fn post_gemini_json<T: Serialize>(
     payload: &T,
 ) -> Result<RawHttpOutcome, (ProviderError, u64)> {
     let url = build_generate_content_url(base_url, model_specifier);
-    let start = Instant::now();
-    with_current_thread_runtime(model_specifier, |runtime| {
-        runtime.block_on(async {
-            let send_res = client
-                .post(&url)
-                .timeout(Duration::from_millis(timeout_ms))
-                .header("x-goog-api-key", api_key)
-                .header("Content-Type", JSON_MIME_TYPE)
-                .json(payload)
-                .send()
-                .await;
-            let latency_ms = start.elapsed().as_millis() as u64;
-
-            let response = send_res.map_err(|err| {
-                let provider_err = if err.is_timeout() {
-                    ProviderError::Timeout {
-                        model_specifier: model_specifier.to_string(),
-                        timeout_ms,
-                    }
-                } else {
-                    ProviderError::Transport {
-                        model_specifier: model_specifier.to_string(),
-                        message: err.to_string(),
-                    }
-                };
-                (provider_err, latency_ms)
-            })?;
-
-            let status_code = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
-            Ok(RawHttpOutcome {
-                status_code,
-                body,
-                latency_ms,
-            })
-        })
-    })
+    let req = JsonPostRequest {
+        url: &url,
+        model_specifier,
+        auth: HttpAuth::GoogApiKey(api_key),
+        timeout_ms,
+    };
+    execute_json_post(client, &req, payload)
 }
 
 /// Google Gemini v1beta HTTPS adapter implementing [`StructuredModelProvider`].
@@ -251,8 +178,7 @@ impl GeminiModelProvider {
 
     /// Constructs a [`GeminiModelProvider`] with a custom base URL (useful for local proxies or test harnesses).
     pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
-        let client = reqwest::Client::builder().build().unwrap_or_default();
-        Self::with_client_and_base_url(api_key, client, base_url)
+        Self::with_client_and_base_url(api_key, build_pooled_http_client(), base_url)
     }
 
     /// Constructs a [`GeminiModelProvider`] with a caller-supplied reusable [`reqwest::Client`].
@@ -778,7 +704,10 @@ mod tests {
         use super::*;
         use std::io::{Read, Write};
         use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
+        use std::time::Duration;
 
         fn read_complete_http_request(stream: &mut std::net::TcpStream) -> String {
             stream
@@ -1023,6 +952,201 @@ mod tests {
                 "http://custom-proxy:8080",
             );
             assert_eq!(custom_with_base.base_url(), "http://custom-proxy:8080");
+        }
+
+        #[test]
+        fn test_parked_warmer_thread_does_not_starve_downstream_concurrent_workers() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let accepted_sockets = Arc::new(AtomicUsize::new(0));
+            let served_requests = Arc::new(AtomicUsize::new(0));
+            let accepted_ref = Arc::clone(&accepted_sockets);
+            let served_ref = Arc::clone(&served_requests);
+
+            // Serve 5 total requests across at most 4 keep-alive sockets (1 warmed + reused + 3 fresh).
+            let server = thread::spawn(move || {
+                let mut conn_threads = Vec::new();
+                for _ in 0..4 {
+                    let (mut stream, _) = listener.accept().expect("accept pooled socket");
+                    accepted_ref.fetch_add(1, Ordering::SeqCst);
+                    let served_inner = Arc::clone(&served_ref);
+                    conn_threads.push(thread::spawn(move || {
+                        loop {
+                            stream
+                                .set_read_timeout(Some(Duration::from_millis(400)))
+                                .expect("set read timeout");
+                            let mut probe = [0_u8; 1];
+                            match stream.peek(&mut probe) {
+                                Ok(0) | Err(_) => break,
+                                Ok(_) => {}
+                            }
+                            let raw_req = read_complete_http_request(&mut stream);
+                            if raw_req.is_empty() {
+                                break;
+                            }
+                            let n = served_inner.fetch_add(1, Ordering::SeqCst) + 1;
+                            let body = json!({
+                                "candidates": [{
+                                    "content": {
+                                        "parts": [{ "text": format!("{{\"req_num\":{n}}}") }]
+                                    },
+                                    "finishReason": "STOP"
+                                }],
+                                "modelVersion": "gemini-4-hydrogen"
+                            })
+                            .to_string();
+                            let resp = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            if stream.write_all(resp.as_bytes()).is_err() {
+                                break;
+                            }
+                            let _ = stream.flush();
+                        }
+                    }));
+                }
+                for h in conn_threads {
+                    let _ = h.join();
+                }
+            });
+
+            let provider = GeminiModelProvider::with_base_url(
+                "synthetic-loopback-key",
+                format!("http://{addr}/v1beta"),
+            );
+            let mut req = sample_request(None);
+            req.timeout_ms = 500;
+
+            // Stage 1 (simulating 1-canon `docket` inline on caller thread): warm 1 pooled socket.
+            let warm = provider
+                .generate_structured(&req)
+                .expect("warming request succeeds");
+            assert_eq!(warm.payload["req_num"], json!(1));
+
+            // Stage 2 (simulating 4-slice `admit` parking caller thread inside `std::thread::scope`):
+            // One worker pops the warmed keep-alive socket while caller thread is parked on join.
+            std::thread::scope(|scope| {
+                let mut handles = Vec::new();
+                for _ in 0..4 {
+                    let prov = provider.clone();
+                    let worker_req = req.clone();
+                    handles.push(scope.spawn(move || prov.generate_structured(&worker_req)));
+                }
+                for handle in handles {
+                    let res = handle
+                        .join()
+                        .expect("worker thread joined")
+                        .expect("concurrent worker call must not stall on parked warmer thread");
+                    assert!(res.payload["req_num"].as_u64().is_some());
+                }
+            });
+
+            drop(provider);
+            server.join().expect("server joined");
+            assert_eq!(served_requests.load(Ordering::SeqCst), 5);
+            assert_eq!(
+                accepted_sockets.load(Ordering::SeqCst),
+                4,
+                "5 total calls across 4 concurrent workers must reuse the warmed socket"
+            );
+        }
+
+        #[test]
+        fn test_early_worker_exit_preserves_reused_connection_for_subsequent_worker() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+
+            let server = thread::spawn(move || {
+                // Strictly accept ONE TCP connection across two distinct short-lived OS threads.
+                let (mut stream, _) = listener.accept().expect("accept single pooled socket");
+                for call_idx in 1..=2 {
+                    let raw_req = read_complete_http_request(&mut stream);
+                    assert!(raw_req.starts_with("POST /v1beta/models/"));
+                    if call_idx == 2 {
+                        thread::sleep(Duration::from_millis(40));
+                    }
+                    let body = json!({
+                        "candidates": [{
+                            "content": {
+                                "parts": [{ "text": format!("{{\"call_idx\":{call_idx}}}") }]
+                            },
+                            "finishReason": "STOP"
+                        }],
+                        "modelVersion": "gemini-4-hydrogen"
+                    })
+                    .to_string();
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream.write_all(resp.as_bytes()).expect("write response");
+                    stream.flush().expect("flush response");
+                }
+            });
+
+            let provider = GeminiModelProvider::with_base_url(
+                "synthetic-loopback-key",
+                format!("http://{addr}/v1beta"),
+            );
+
+            // Worker 1 warms the pooled connection and immediately terminates its OS thread.
+            let prov1 = provider.clone();
+            let res1 = thread::spawn(move || prov1.generate_structured(&sample_request(None)))
+                .join()
+                .expect("worker 1 joined")
+                .expect("worker 1 request succeeded");
+            assert_eq!(res1.payload["call_idx"], json!(1));
+
+            // Worker 2 reuses the exact same pooled TCP stream after Worker 1's OS thread exited.
+            let res2 = thread::spawn(move || provider.generate_structured(&sample_request(None)))
+                .join()
+                .expect("worker 2 joined")
+                .expect("worker 2 reused socket survived worker 1 exit");
+            assert_eq!(res2.payload["call_idx"], json!(2));
+
+            server.join().expect("server joined");
+        }
+
+        #[test]
+        fn test_stalled_chunked_response_body_maps_to_timeout_instead_of_malformed_envelope() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept client");
+                let _raw_req = read_complete_http_request(&mut stream);
+                // Flush 200 OK headers and an incomplete chunked body, then stall past timeout_ms.
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n{\"can\r\n",
+                    )
+                    .expect("write partial chunked response");
+                stream.flush().expect("flush partial chunk");
+                thread::sleep(Duration::from_millis(300));
+            });
+
+            let provider = GeminiModelProvider::with_base_url(
+                "synthetic-loopback-key",
+                format!("http://{addr}/v1beta"),
+            );
+            let mut req = sample_request(None);
+            req.timeout_ms = 60;
+
+            let err = provider
+                .generate_structured(&req)
+                .expect_err("mid-body stall must fail with timeout");
+            server.join().expect("server joined");
+
+            assert_eq!(
+                err,
+                ProviderError::Timeout {
+                    model_specifier: DEFAULT_AUDITOR_MODEL.to_string(),
+                    timeout_ms: 60,
+                }
+            );
         }
     }
 }

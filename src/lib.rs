@@ -21,6 +21,7 @@ pub mod bench;
 pub mod canon;
 pub mod caseload;
 pub mod cli;
+mod concurrency;
 pub mod configure;
 pub mod discover;
 pub mod docket;

@@ -17,7 +17,10 @@
 pub mod decision;
 pub mod gemini;
 mod gemini_wire;
+mod runtime;
 mod typesafe;
+
+pub(crate) use runtime::build_pooled_http_client;
 
 pub use crate::caseload::{
     DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL,

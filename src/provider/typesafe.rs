@@ -14,18 +14,15 @@
 
 //! TypeSafe AI System One (`POST /v1/systemone`) wire transport and Jev `Noul` helpers.
 
-use super::gemini::RawHttpOutcome;
+use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
 use crate::caseload::TYPESAFE_PROVIDER;
 use crate::configure::ENV_TYPESAFE_API_KEY;
 use crate::provider::ProviderError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
 
 /// Default TypeSafe AI v1 REST API base URL.
 pub const DEFAULT_TYPESAFE_BASE_URL: &str = "https://api.typesafe.ai/v1";
-
-const JSON_MIME_TYPE: &str = "application/json";
 
 /// Strips the canonical `"typesafe:"` provider prefix from a normalized model specifier.
 pub(crate) fn strip_typesafe_prefix(model_specifier: &str) -> &str {
@@ -182,6 +179,7 @@ pub(crate) fn classify_typesafe_http_error(
 }
 
 pub(crate) fn post_typesafe_json<T: Serialize>(
+    client: &reqwest::Client,
     base_url: &str,
     model_specifier: &str,
     api_key: &str,
@@ -189,67 +187,13 @@ pub(crate) fn post_typesafe_json<T: Serialize>(
     payload: &T,
 ) -> Result<RawHttpOutcome, (ProviderError, u64)> {
     let url = build_systemone_url(base_url);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| {
-            (
-                ProviderError::Transport {
-                    model_specifier: model_specifier.to_string(),
-                    message: format!("failed to initialize async HTTP runtime ({err})"),
-                },
-                0,
-            )
-        })?;
-
-    let start = Instant::now();
-    runtime.block_on(async {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .build()
-            .map_err(|err| {
-                let elapsed = start.elapsed().as_millis() as u64;
-                (
-                    ProviderError::Transport {
-                        model_specifier: model_specifier.to_string(),
-                        message: format!("failed to build HTTPS client ({err})"),
-                    },
-                    elapsed,
-                )
-            })?;
-
-        let send_res = client
-            .post(&url)
-            .bearer_auth(api_key)
-            .header("Content-Type", JSON_MIME_TYPE)
-            .json(payload)
-            .send()
-            .await;
-        let latency_ms = start.elapsed().as_millis() as u64;
-
-        let response = send_res.map_err(|err| {
-            let provider_err = if err.is_timeout() {
-                ProviderError::Timeout {
-                    model_specifier: model_specifier.to_string(),
-                    timeout_ms,
-                }
-            } else {
-                ProviderError::Transport {
-                    model_specifier: model_specifier.to_string(),
-                    message: err.to_string(),
-                }
-            };
-            (provider_err, latency_ms)
-        })?;
-
-        let status_code = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        Ok(RawHttpOutcome {
-            status_code,
-            body,
-            latency_ms,
-        })
-    })
+    let req = JsonPostRequest {
+        url: &url,
+        model_specifier,
+        auth: HttpAuth::Bearer(api_key),
+        timeout_ms,
+    };
+    execute_json_post(client, &req, payload)
 }
 
 #[cfg(test)]

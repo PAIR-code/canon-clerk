@@ -17,12 +17,11 @@
 use super::slices::DiscriminativeCasePlan;
 use super::{PreparedVettingCase, VetError};
 use crate::caseload::{CanonVettingAssessment, VettingStatus, normalize_vetting_score};
+use crate::concurrency::execute_bounded_stage_work;
 use crate::provider::{
     DecisionRequest, MAX_DECISION_BATCH_CHARS, ProviderError, StructuredModelProvider,
 };
 use std::collections::BTreeMap;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub(super) const COMPLIANCE_QUESTION_KEY: &str = "compliant";
 
@@ -49,74 +48,27 @@ pub(super) struct DiscriminativeVetParams<'a> {
     pub(super) timeout_ms: u64,
 }
 
-type VetCaseSlot = Option<Result<(String, CanonVettingAssessment), VetError>>;
-
 pub(super) fn execute_discriminative_vetting(
     prepared_cases: &[PreparedVettingCase],
     params: &DiscriminativeVetParams<'_>,
     provider: &dyn StructuredModelProvider,
 ) -> Result<BTreeMap<String, CanonVettingAssessment>, VetError> {
-    let total = prepared_cases.len();
-    let worker_count = params.concurrency_limit.min(total).max(1);
-    if worker_count == 1 {
-        let mut cases = BTreeMap::new();
-        for (idx, case) in prepared_cases.iter().enumerate() {
+    let evaluated = execute_bounded_stage_work(
+        prepared_cases,
+        params.concurrency_limit,
+        provider,
+        |_idx, case| {
             let assessment = evaluate_single_decision_case(case, params, provider)?;
             let label = format!(
                 "{} ({})",
                 case.canon_ref,
                 assessment.vetting_status.as_str()
             );
-            provider.record_progress(idx + 1, total, &label);
-            cases.insert(case.canon_ref.clone(), assessment);
-        }
-        return Ok(cases);
-    }
+            Ok::<_, VetError>(((case.canon_ref.clone(), assessment), label))
+        },
+    )?;
 
-    let next_index = AtomicUsize::new(0);
-    let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<(usize, Vec<VetCaseSlot>)> =
-        Mutex::new((0, (0..total).map(|_| None).collect()));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| {
-                loop {
-                    if aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total {
-                        break;
-                    }
-                    let case = &prepared_cases[idx];
-                    let res = evaluate_single_decision_case(case, params, provider)
-                        .map(|assessment| (case.canon_ref.clone(), assessment));
-                    let status_label = res.as_ref().ok().map(|(_, a)| {
-                        format!("{} ({})", case.canon_ref, a.vetting_status.as_str())
-                    });
-                    if status_label.is_none() {
-                        aborted.store(true, Ordering::Relaxed);
-                    }
-                    if let Ok(mut guard) = outcomes.lock() {
-                        guard.1[idx] = Some(res);
-                        if let Some(ref label) = status_label {
-                            guard.0 += 1;
-                            provider.record_progress(guard.0, total, label);
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    let (_, collected) = outcomes.into_inner().unwrap_or_default();
-    let mut cases = BTreeMap::new();
-    for slot in collected.into_iter().flatten() {
-        let (canon_ref, assessment) = slot?;
-        cases.insert(canon_ref, assessment);
-    }
-    Ok(cases)
+    Ok(evaluated.into_iter().collect())
 }
 
 fn oversized_contest_assessment() -> CanonVettingAssessment {

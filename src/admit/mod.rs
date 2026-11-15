@@ -25,6 +25,7 @@ use crate::caseload::{
     Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake, ExhibitAssessment,
     TYPESAFE_PROVIDER, normalize_admissibility_score,
 };
+use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
@@ -39,8 +40,6 @@ use slices::ExhibitSlicePlanner;
 pub use slices::{MAX_ADMIT_EXHIBITS_PER_SLICE, MAX_ADMIT_SLICE_CHARS};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Default evidentiary admissibility threshold for `admit` (`docs/architecture/nodes/admit.md` §4.5).
 pub const DEFAULT_ADMIT_THRESHOLD: f64 = 0.5;
@@ -394,60 +393,14 @@ fn execute_case_calls(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> Result<BTreeMap<String, Vec<ExhibitAssessment>>, AdmitError> {
-    let total = prepared_calls.len();
-    let worker_count = concurrency_limit.min(total).max(1);
-    if worker_count == 1 {
-        let mut combined: BTreeMap<String, Vec<ExhibitAssessment>> = BTreeMap::new();
-        for (idx, call) in prepared_calls.iter().enumerate() {
-            let (canon_ref, decoded) =
-                evaluate_single_case_call(call, threshold, model_specifier, provider)?;
-            provider.record_progress(idx + 1, total, &call.progress_label);
-            combined.entry(canon_ref).or_default().extend(decoded);
-        }
-        for items in combined.values_mut() {
-            items.sort_by(|a, b| a.file_path.cmp(&b.file_path));
-        }
-        return Ok(combined);
-    }
+    let slice_outcomes =
+        execute_bounded_stage_work(prepared_calls, concurrency_limit, provider, |_idx, call| {
+            let outcome = evaluate_single_case_call(call, threshold, model_specifier, provider)?;
+            Ok::<_, AdmitError>((outcome, call.progress_label.clone()))
+        })?;
 
-    let next_index = AtomicUsize::new(0);
-    let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<(usize, Vec<Option<CaseResult>>)> =
-        Mutex::new((0, (0..total).map(|_| None).collect()));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| {
-                loop {
-                    if aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total {
-                        break;
-                    }
-                    let call = &prepared_calls[idx];
-                    let res = evaluate_single_case_call(call, threshold, model_specifier, provider);
-                    let succeeded = res.is_ok();
-                    if !succeeded {
-                        aborted.store(true, Ordering::Relaxed);
-                    }
-                    if let Ok(mut guard) = outcomes.lock() {
-                        guard.1[idx] = Some(res);
-                        if succeeded {
-                            guard.0 += 1;
-                            provider.record_progress(guard.0, total, &call.progress_label);
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined: BTreeMap<String, Vec<ExhibitAssessment>> = BTreeMap::new();
-    for slot in collected.into_iter().flatten() {
-        let (canon_ref, items) = slot?;
+    for (canon_ref, items) in slice_outcomes {
         combined.entry(canon_ref).or_default().extend(items);
     }
     for items in combined.values_mut() {
@@ -468,6 +421,7 @@ mod tests {
     };
     use crate::provider::{GenerationResponse, TokenUsage};
     use serde_json::{Value, json};
+    use std::sync::Mutex;
 
     struct RoutingMockProvider {
         requests: Mutex<Vec<GenerationRequest>>,

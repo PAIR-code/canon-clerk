@@ -28,8 +28,8 @@ pub use crate::provider::{
     strip_provider_prefix,
 };
 use crate::provider::{
-    GeminiThinkingConfig, build_probe_thinking_config, classify_gemini_http_error,
-    extract_gemini_error_detail,
+    GeminiThinkingConfig, build_pooled_http_client, build_probe_thinking_config,
+    classify_gemini_http_error, extract_gemini_error_detail,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -308,10 +308,7 @@ impl GeminiEndpointProber {
 
     /// Constructs a [`GeminiEndpointProber`] with a custom base URL.
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-            client: reqwest::Client::builder().build().unwrap_or_default(),
-        }
+        Self::with_client_and_base_url(build_pooled_http_client(), base_url)
     }
 
     /// Constructs a [`GeminiEndpointProber`] with a custom [`reqwest::Client`] and base URL.
