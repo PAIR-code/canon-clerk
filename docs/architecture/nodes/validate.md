@@ -101,19 +101,21 @@ error: No filing source or canon scope provided for validate.
 ```
 
 ### CLI Output Modes & GitHub Actions Integration
-- **Default (Terminal / Stylish):** Emits human-readable lint reports with file paths, line/column coordinates, and error summaries.
+- **Default (`stylish`):** Emits the `Validation Summary (PASS/FAIL)` header with aggregate evaluated canon, error, and warning counts, followed by per-canon detail rows and indented line/column diagnostics **strictly for canons with validation errors or warnings** (omitting warning rows and warning-only canons when `--quiet` is active, and expanding clean `[pass]` per-canon rows only when `-v` / `--verbose` is active without `--quiet`).
+- **`compact`:** Emits deterministic tab-separated `<path>\t<line>:<col>\t<level>\t<title>\t<message>` diagnostic lines strictly for validation errors and warnings (omitting warnings under `--quiet`, and exiting `0` with empty `stdout` when zero diagnostics are emitted).
 - **GitHub Actions (CI Mode):** When executing in GitHub Actions (auto-detected via `GITHUB_ACTIONS=true` or `--format github`), emits native GitHub Actions workflow command annotations:
   ```text
   ::error file=.canons/security/rule.md,line=14,col=5,title=RFC 2119 Violation::Normative keyword 'must' must be uppercase 'MUST'.
   ```
   and appends the validation summary to `$GITHUB_STEP_SUMMARY`.
-- **`--json`:** Emits cumulative `Caseload` JSON containing structured `diagnostics` per canon.
+- **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON containing structured `results` and `diagnostics` across all evaluated candidate canons.
 
 ### CLI Flags & Environment
 - `--all-canons`: Validates all canons in `.canons/**` by directing discovery to yield the full corpus.
 - `--max-warnings <n>`: Warning threshold before triggering non-zero exit code.
 - `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
-- `--quiet`: Suppress warnings and non-essential output.
+- `-q` / `--quiet`: Suppress warnings and non-essential output.
+- `-v` / `--verbose` (`CANON_CLERK_VERBOSE`), `--log-file <PATH>` (`CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options; in `--format stylish`, `-v` additionally expands clean `[pass]` per-canon rows on `stdout` (unless `--quiet` is set).
 - `--caseload <path|->`: Ingests upstream Caseload.
 - `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout (ideal for CI workflow artifact archiving).
 - `--json`: Emits cumulative `Caseload` JSON to stdout.

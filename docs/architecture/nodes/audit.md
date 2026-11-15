@@ -142,20 +142,20 @@ Conversely, if an explicitly designated stream yields zero changes, `discover` m
 - `--admit-threshold <FLOAT>` (`CANON_CLERK_ADMIT_THRESHOLD`), `--admit-concurrency <COUNT>` / `--max-concurrent-calls <COUNT>` (`CANON_CLERK_ADMIT_CONCURRENCY`): Upstream micro evidentiary admissibility options accepted transitively for telescoping runs.
 - `--docket-threshold <FLOAT>` (`CANON_CLERK_DOCKET_THRESHOLD`), `--docket-batch-size <COUNT>` / `--max-canons-per-call <COUNT>` (`CANON_CLERK_DOCKET_BATCH_SIZE`), `--docket-concurrency <COUNT>` (`CANON_CLERK_DOCKET_CONCURRENCY`): Upstream macro jurisdiction triage options accepted transitively for telescoping runs.
 - `--auditor-model <MODEL>` (`CANON_CLERK_AUDITOR_MODEL`), `--screener-model <MODEL>` (`CANON_CLERK_SCREENER_MODEL`), `--thinking-level <minimal|low|medium|high>` (`CANON_CLERK_THINKING_LEVEL`), `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Shared model configuration and credential options (resolved JIT only when heuristic evaluation is required).
-- `-v` / `--verbose` (`CANON_CLERK_VERBOSE`), `--log-file <PATH>` (`CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options.
+- `-v` / `--verbose` (`CANON_CLERK_VERBOSE`), `--log-file <PATH>` (`CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options; in `--format stylish`, `-v` additionally expands passing (`[pass]`) per-case detail blocks on `stdout`.
 - `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`, otherwise `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload` JSON from file or `-` for standard input.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of terminal `stdout` on both passing and failing runs (ideal for CI workflow artifact archiving with `if: always()`).
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes & GitHub Actions Integration
-- **`stylish` (Default Interactive):** Renders the complete 8-stage **Pipeline Funnel Provenance Receipt** (`intake` $\to$ `discover` $\to$ `validate` $\to$ `configure` $\to$ `docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`) followed by the Verdict summary (`PASS` / `FAIL`), per-case compliance decrees, and indented `CodeAnnotation` source diagnostics.
-- **`compact`:** Emits deterministic tab-separated adjudication and diagnostic lines suitable for shell scripts and editor integrations.
+- **`stylish` (Default Interactive):** Renders the complete 8-stage **Pipeline Funnel Provenance Receipt** (`intake` $\to$ `discover` $\to$ `validate` $\to$ `configure` $\to$ `docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`) followed by the Verdict summary banner (`PASS` / `FAIL` with aggregate pass/fail counts). By default, per-case compliance decrees and indented `CodeAnnotation` source diagnostics are listed **strictly for failing cases (`status: "fail"`)**; passing (`[pass]`) per-case detail blocks are omitted unless `-v` (`--verbose` / `CANON_CLERK_VERBOSE`) is active.
+- **`compact`:** Emits deterministic tab-separated violation diagnostic lines (`<path>\t<line>:<col>\t<level>\t<canon>\t<message>`) strictly for failing cases—anchoring PR-metadata-only failures lacking file spans (`annotations: []`) at `<canon_path>\t0:0\tfailure\t<canon_path>\t<summary>` and omitting passing cases completely (exiting `0` with empty `stdout` when all active cases pass).
 - **`github` (CI Tripartite Output Model):** Auto-selected when `GITHUB_ACTIONS=true` (unless overridden by `--format` or `--json`):
   1. Emits native GitHub Actions workflow command annotations (`::error file=...,line=...,endLine=...,col=...,title=...::...`, `::warning ...`, `::notice ...`) for each `CodeAnnotation` on `stdout`.
-  2. Appends the rendered Markdown Funnel Provenance Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY` when configured.
+  2. Appends the rendered Markdown Funnel Provenance Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY` when configured—displaying failing case decrees in the primary Markdown table while collapsing passing case decrees inside a `<details>` disclosure block.
   3. Persists the full cumulative `Caseload` JSON via `--output-caseload <PATH>` independently of exit status.
-- **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing structured `.verdict` adjudications and annotations.
+- **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON envelope containing all structured `.verdict` adjudications (both passing and failing) and annotations.
 
 ### CLI Exit Codes
 - **0:** All active cases pass (`status: "pass"`, `compliance_score >= --audit-threshold`), or 0 contested trials required due to clean upstream short-circuits (0 changes, 0 candidate canons, empty docket, 0 admitted exhibits, or all active cases cleared by `vet`).
