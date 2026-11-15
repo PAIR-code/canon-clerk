@@ -14,9 +14,16 @@
 
 //! Core domain execution engine for the `configure` Caseload DAG stage (`docs/architecture/nodes/configure.md`).
 
+pub mod providers;
 pub mod store;
 mod thinking;
 
+pub use providers::{
+    MissingCredentialsReason, PROVIDER_CAPABILITIES, ProviderCapability, ProviderRole,
+    is_discriminative_only_provider, provider_capability, resolve_default_tiers,
+    resolve_default_tiers_with_table, resolve_provider_api_key, resolve_provider_credential,
+    verified_credential_env_vars,
+};
 pub use store::{
     StoredConfig, StoredProviderConfig, StoredTierModel, load_host_config_file,
     resolve_default_config_path,
@@ -100,6 +107,14 @@ impl ConfigureOptions {
             || self.gemini_api_key.is_some()
             || self.typesafe_api_key.is_some()
     }
+
+    pub(crate) fn cli_api_key_for(&self, provider_slug: &str) -> Option<&str> {
+        match provider_slug {
+            DEFAULT_PROVIDER => self.gemini_api_key.as_deref(),
+            TYPESAFE_PROVIDER => self.typesafe_api_key.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Domain errors produced during `configure` execution.
@@ -109,6 +124,8 @@ pub enum ConfigureError {
     MissingApiKey,
     /// Required `TYPESAFE_API_KEY` credential is missing from flags, environment, and user config.
     MissingTypesafeApiKey,
+    /// Unpinned or closure-scoped provider credentials are missing from flags, environment, and user config.
+    MissingCredentials(MissingCredentialsReason),
     /// Model specifier uses an unsupported provider prefix (only `google` and `typesafe` are supported).
     UnsupportedProvider { provider: String, specifier: String },
     /// Model specifier is empty, contains whitespace, or does not name a valid supported model.
@@ -146,6 +163,7 @@ impl fmt::Display for ConfigureError {
                  `providers.typesafe.apiKey` in `~/.config/canon-clerk/config.json` (mode `0600`), \
                  or pass `--typesafe-api-key <KEY>`."
             ),
+            Self::MissingCredentials(reason) => providers::format_missing_credentials(reason, f),
             Self::UnsupportedProvider {
                 provider,
                 specifier,
@@ -331,14 +349,7 @@ fn is_valid_prefixed_model_name(name: &str, prefix: &str) -> bool {
 /// Resolves the Google Gemini API key from explicit overrides, `GEMINI_API_KEY` environment variable,
 /// or the user-level configuration store (`providers.google.apiKey`).
 pub fn resolve_gemini_api_key(options: &ConfigureOptions) -> Result<String, ConfigureError> {
-    let stored = options.stored_config.as_ref();
-    resolve_non_empty(
-        options.gemini_api_key.as_deref(),
-        options.env.get(ENV_GEMINI_API_KEY).map(String::as_str),
-    )
-    .or_else(|| stored.and_then(StoredConfig::google_api_key))
-    .map(str::to_string)
-    .ok_or(ConfigureError::MissingApiKey)
+    resolve_provider_api_key(DEFAULT_PROVIDER, options)
 }
 
 /// Resolves the TypeSafe AI API key from explicit overrides, `TYPESAFE_API_KEY` environment variable,
@@ -346,23 +357,40 @@ pub fn resolve_gemini_api_key(options: &ConfigureOptions) -> Result<String, Conf
 pub(crate) fn resolve_typesafe_api_key(
     options: &ConfigureOptions,
 ) -> Result<String, ConfigureError> {
-    let stored = options.stored_config.as_ref();
-    resolve_non_empty(
-        options.typesafe_api_key.as_deref(),
-        options.env.get(ENV_TYPESAFE_API_KEY).map(String::as_str),
-    )
-    .or_else(|| stored.and_then(StoredConfig::typesafe_api_key))
-    .map(str::to_string)
-    .ok_or(ConfigureError::MissingTypesafeApiKey)
+    resolve_provider_api_key(TYPESAFE_PROVIDER, options)
+}
+
+fn resolve_pinned_tier_specifier(
+    cli_override: Option<&str>,
+    env_override: Option<&str>,
+    stored_override: Option<&str>,
+    existing_caseload_model: Option<&str>,
+) -> Result<Option<String>, ConfigureError> {
+    if let Some(raw_cli) = cli_override {
+        return normalize_model_specifier(raw_cli).map(Some);
+    }
+    if let Some(raw_env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return normalize_model_specifier(raw_env).map(Some);
+    }
+    if let Some(raw_stored) = stored_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return normalize_model_specifier(raw_stored).map(Some);
+    }
+    if let Some(raw_existing) = existing_caseload_model
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return normalize_model_specifier(raw_existing).map(Some);
+    }
+    Ok(None)
 }
 
 /// Executes the pure, deterministic `configure` stage and populates `.config` on the [`Caseload`].
 ///
-/// Precedence hierarchy:
+/// Precedence hierarchy (`docs/architecture/nodes/configure.md` §4):
 /// 1. Explicit CLI flags / programmatic overrides
 /// 2. Environment variables (`CANON_CLERK_*`, `GEMINI_API_KEY`, `TYPESAFE_API_KEY`)
 /// 3. User-level configuration file (`~/.config/canon-clerk/config.json`)
-/// 4. Existing `caseload.config` or static defaults
+/// 4. Pre-populated `caseload.config` or credential-aware default matrix
 pub fn execute_configure(
     options: &ConfigureOptions,
     caseload: Option<Caseload>,
@@ -377,35 +405,27 @@ pub fn execute_configure(
     let existing_config = caseload.config.as_ref();
     let stored_screener = stored.and_then(StoredConfig::screener_specifier);
     let stored_auditor = stored.and_then(StoredConfig::auditor_specifier);
+    let (inferred_screener, inferred_auditor) = resolve_default_tiers(options);
 
-    let raw_screener = resolve_non_empty(
+    let pinned_screener = resolve_pinned_tier_specifier(
         options.screener_model.as_deref(),
         options.env.get(ENV_SCREENER_MODEL).map(String::as_str),
-    )
-    .or_else(|| {
-        stored_screener
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-    })
-    .or_else(|| existing_config.map(|c| c.screener_model.as_str()))
-    .unwrap_or(DEFAULT_SCREENER_MODEL);
-    let screener_model = normalize_model_specifier(raw_screener)?;
+        stored_screener.as_deref(),
+        existing_config.map(|c| c.screener_model.as_str()),
+    )?;
+    let screener_was_pinned = pinned_screener.is_some();
+    let screener_model = pinned_screener.unwrap_or(inferred_screener);
 
-    let raw_auditor = resolve_non_empty(
+    let pinned_auditor = resolve_pinned_tier_specifier(
         options.auditor_model.as_deref(),
         options.env.get(ENV_AUDITOR_MODEL).map(String::as_str),
-    )
-    .or_else(|| {
-        stored_auditor
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-    })
-    .or_else(|| existing_config.map(|c| c.auditor_model.as_str()))
-    .unwrap_or(DEFAULT_AUDITOR_MODEL);
-    let auditor_model = normalize_model_specifier(raw_auditor)?;
-    if model_provider(&auditor_model) == TYPESAFE_PROVIDER {
+        stored_auditor.as_deref(),
+        existing_config.map(|c| c.auditor_model.as_str()),
+    )?;
+    let auditor_was_pinned = pinned_auditor.is_some();
+    let auditor_model = pinned_auditor.unwrap_or(inferred_auditor);
+
+    if is_discriminative_only_provider(model_provider(&auditor_model)) {
         return Err(ConfigureError::DiscriminativeAuditorUnsupported {
             specifier: auditor_model,
         });
@@ -415,16 +435,16 @@ pub fn execute_configure(
         resolve_thinking_options(options, stored, existing_config)?;
 
     let check_auditor_creds = !options.screener_only_closure || options.auditor_model.is_some();
-    let uses_google = model_provider(&screener_model) == DEFAULT_PROVIDER
-        || (check_auditor_creds && model_provider(&auditor_model) == DEFAULT_PROVIDER);
-    let uses_typesafe = model_provider(&screener_model) == TYPESAFE_PROVIDER;
-
-    if uses_google {
-        let _verified = resolve_gemini_api_key(options)?.len();
-    }
-    if uses_typesafe {
-        let _verified = resolve_typesafe_api_key(options)?.len();
-    }
+    providers::verify_closure_credentials(
+        &providers::ResolvedTierPinState {
+            screener_model: &screener_model,
+            screener_was_pinned,
+            auditor_model: &auditor_model,
+            auditor_was_pinned,
+            check_auditor_creds,
+        },
+        options,
+    )?;
 
     let config = CaseloadConfig {
         screener_model,
@@ -436,7 +456,7 @@ pub fn execute_configure(
     Ok(caseload.with_config(config))
 }
 
-fn resolve_non_empty<'a>(
+pub(crate) fn resolve_non_empty<'a>(
     override_val: Option<&'a str>,
     env_val: Option<&'a str>,
 ) -> Option<&'a str> {
@@ -784,21 +804,47 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_missing_or_blank_api_key_fails_fast_with_remediation() {
+        fn test_missing_or_blank_credentials_fail_fast_with_closure_aware_remediation() {
+            // 1. Unpinned full-bench closure with zero keys lists supported provider env vars & flags
             let empty_opts = ConfigureOptions::default();
             let err = execute_configure(&empty_opts, None).expect_err("missing key must fail");
-            assert_eq!(err, ConfigureError::MissingApiKey);
-            assert!(err.to_string().contains(ENV_GEMINI_API_KEY));
-            assert!(err.to_string().contains("Hint:"));
+            assert_eq!(
+                err,
+                ConfigureError::MissingCredentials(MissingCredentialsReason::FullBenchClosure)
+            );
+            let msg = err.to_string();
+            assert!(msg.contains(ENV_GEMINI_API_KEY));
+            assert!(msg.contains(ENV_TYPESAFE_API_KEY));
+            assert!(msg.contains("--gemini-api-key"));
+            assert!(msg.contains("Hint:"));
 
+            // 2. Unpinned screener-only closure with zero keys lists both screener providers
+            let screener_empty = ConfigureOptions {
+                screener_only_closure: true,
+                ..ConfigureOptions::default()
+            };
+            let screener_err = execute_configure(&screener_empty, None)
+                .expect_err("missing screener credentials must fail");
+            assert_eq!(
+                screener_err,
+                ConfigureError::MissingCredentials(MissingCredentialsReason::ScreenerClosure)
+            );
+            let screener_msg = screener_err.to_string();
+            assert!(screener_msg.contains(ENV_TYPESAFE_API_KEY));
+            assert!(screener_msg.contains(ENV_GEMINI_API_KEY));
+            assert!(screener_msg.contains("--typesafe-api-key"));
+            assert!(screener_msg.contains("Hint:"));
+
+            // 3. Blank env key is treated as absent; explicit Google pin fails with MissingApiKey
             let mut blank_env = BTreeMap::new();
             blank_env.insert(ENV_GEMINI_API_KEY.to_string(), "   ".to_string());
-            let blank_opts = ConfigureOptions {
+            let blank_pinned_opts = ConfigureOptions {
+                screener_model: Some("hydrogen".to_string()),
                 env: blank_env,
                 ..ConfigureOptions::default()
             };
             assert_eq!(
-                execute_configure(&blank_opts, None),
+                execute_configure(&blank_pinned_opts, None),
                 Err(ConfigureError::MissingApiKey)
             );
         }
@@ -808,7 +854,6 @@ mod tests {
             let secret = "synthetic-secret-value-do-not-persist-12345";
             let typesafe_secret = "synthetic-typesafe-secret-never-persist-67890";
             let opts = ConfigureOptions {
-                screener_model: Some("jev".to_string()),
                 gemini_api_key: Some(secret.to_string()),
                 typesafe_api_key: Some(typesafe_secret.to_string()),
                 ..ConfigureOptions::default()
@@ -819,23 +864,32 @@ mod tests {
                 !serialized.contains(secret) && !serialized.contains(typesafe_secret),
                 "Caseload JSON must never contain raw API key material"
             );
+            assert_eq!(
+                caseload.config,
+                Some(CaseloadConfig {
+                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
+                    reasoning_budget: None,
+                })
+            );
         }
 
         #[test]
-        fn test_active_provider_credential_gating_for_hybrid_and_typesafe_only_configs() {
-            // 1. Hybrid screener=jev + auditor=pro requires BOTH Gemini and TypeSafe keys
+        fn test_hybrid_auto_selection_and_explicit_pin_precedence() {
+            // 1. Explicit screener=jev without TYPESAFE_API_KEY fails fast with MissingTypesafeApiKey
             let missing_typesafe = ConfigureOptions {
                 screener_model: Some("jev".to_string()),
                 env: env_with_key(),
                 ..ConfigureOptions::default()
             };
             let err_ts = execute_configure(&missing_typesafe, None)
-                .expect_err("hybrid config without TYPESAFE_API_KEY must fail");
+                .expect_err("explicit jev without TYPESAFE_API_KEY must fail");
             assert_eq!(err_ts, ConfigureError::MissingTypesafeApiKey);
             assert!(err_ts.to_string().contains(ENV_TYPESAFE_API_KEY));
             assert!(err_ts.to_string().contains("Hint:"));
 
-            // 2. Hybrid succeeds when TYPESAFE_API_KEY is supplied via env
+            // 2. Unpinned hybrid env (TYPESAFE_API_KEY + GEMINI_API_KEY) auto-selects jev + carbon
             let mut both_env = env_with_key();
             both_env.insert(
                 ENV_TYPESAFE_API_KEY.to_string(),
@@ -843,13 +897,12 @@ mod tests {
             );
             let hybrid_ok = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("jev".to_string()),
-                    env: both_env,
+                    env: both_env.clone(),
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect("hybrid configure should succeed");
+            .expect("unpinned hybrid configure should auto-select jev + carbon");
             assert_eq!(
                 hybrid_ok.config,
                 Some(CaseloadConfig {
@@ -860,15 +913,65 @@ mod tests {
                 })
             );
 
-            // 3. Discriminative model on auditor_model is rejected with remediation hint
+            // 3. Explicit pins (CLI, env, or config.json) override credential-inferred hybrid defaults
+            let cli_pinned = execute_configure(
+                &ConfigureOptions {
+                    screener_model: Some("hydrogen".to_string()),
+                    env: both_env.clone(),
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect("CLI --screener-model hydrogen overrides ambient TYPESAFE_API_KEY");
+            assert_eq!(
+                cli_pinned.config.expect("config").screener_model,
+                DEFAULT_SCREENER_MODEL
+            );
+
+            let mut env_pinned_map = both_env.clone();
+            env_pinned_map.insert(ENV_SCREENER_MODEL.to_string(), "flash-lite".to_string());
+            let env_pinned = execute_configure(
+                &ConfigureOptions {
+                    env: env_pinned_map,
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect("CANON_CLERK_SCREENER_MODEL overrides ambient TYPESAFE_API_KEY");
+            assert_eq!(
+                env_pinned.config.expect("config").screener_model,
+                DEFAULT_FLASH_LITE_MODEL
+            );
+
+            let store_pinned = execute_configure(
+                &ConfigureOptions {
+                    env: both_env,
+                    stored_config: Some(StoredConfig {
+                        screener_model: Some(StoredTierModel::Specifier("argon".to_string())),
+                        ..StoredConfig::default()
+                    }),
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect("config.json screenerModel overrides ambient TYPESAFE_API_KEY");
+            assert_eq!(
+                store_pinned.config.expect("config").screener_model,
+                DEFAULT_ARGON_MODEL
+            );
+        }
+
+        #[test]
+        fn test_typesafe_only_screener_closure_vs_full_bench_gating() {
             let mut ts_only_env = BTreeMap::new();
             ts_only_env.insert(
                 ENV_TYPESAFE_API_KEY.to_string(),
                 "synthetic-typesafe-only-key".to_string(),
             );
+
+            // 1. Discriminative model on auditor_model is rejected with remediation hint
             let err_disc_auditor = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("jev".to_string()),
                     auditor_model: Some("typesafe:jev-latest".to_string()),
                     env: ts_only_env.clone(),
                     ..ConfigureOptions::default()
@@ -885,34 +988,57 @@ mod tests {
             assert!(err_disc_auditor.to_string().contains("canon-clerk vet"));
             assert!(err_disc_auditor.to_string().contains("Hint:"));
 
-            // 4. Screener-only closure with screener=jev succeeds with ONLY TYPESAFE_API_KEY
+            // 2. Screener-only closure with ONLY TYPESAFE_API_KEY succeeds with zero model flags
             let screener_only_ok = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("jev".to_string()),
                     screener_only_closure: true,
                     env: ts_only_env.clone(),
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect("screener-only closure with jev must succeed without GEMINI_API_KEY");
+            .expect("screener-only closure with TYPESAFE_API_KEY alone must auto-select jev");
             assert_eq!(
                 screener_only_ok.config.expect("config").screener_model,
                 DEFAULT_JEV_MODEL
             );
 
-            // 5. Full closure (audit/configure/probe) with screener=jev still requires GEMINI_API_KEY
-            let err_full_missing_gemini = execute_configure(
+            // 3. Explicit Google screener pin on screener-only closure with ONLY TYPESAFE_API_KEY fails fast
+            let err_explicit_google = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("jev".to_string()),
+                    screener_model: Some("hydrogen".to_string()),
+                    screener_only_closure: true,
+                    env: ts_only_env.clone(),
+                    ..ConfigureOptions::default()
+                },
+                None,
+            )
+            .expect_err("explicit hydrogen pin without GEMINI_API_KEY must fail");
+            assert_eq!(err_explicit_google, ConfigureError::MissingApiKey);
+
+            // 4. Full closure (audit/configure/probe) with ONLY TYPESAFE_API_KEY fails fast with generative auditor hint
+            let err_full_missing_gen = execute_configure(
+                &ConfigureOptions {
                     screener_only_closure: false,
                     env: ts_only_env,
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect_err("full closure without GEMINI_API_KEY must fail");
-            assert_eq!(err_full_missing_gemini, ConfigureError::MissingApiKey);
+            .expect_err("full closure without generative auditor credential must fail");
+            assert_eq!(
+                err_full_missing_gen,
+                ConfigureError::MissingCredentials(
+                    MissingCredentialsReason::GenerativeAuditorRequired {
+                        active_screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    }
+                )
+            );
+            let full_msg = err_full_missing_gen.to_string();
+            assert!(full_msg.contains("generative auditor"));
+            assert!(full_msg.contains(ENV_GEMINI_API_KEY));
+            assert!(full_msg.contains("canon-clerk vet"));
+            assert!(full_msg.contains("Hint:"));
         }
     }
 

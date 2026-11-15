@@ -68,3 +68,62 @@ fn test_cli_vet_guards_and_zero_candidate_short_circuit() {
         serde_json::from_slice(&vet_zero_cand.stdout).expect("parse vet Caseload JSON");
     assert!(parsed.vetting.expect("vetting").is_all_vetted());
 }
+
+#[test]
+fn test_cli_credential_aware_tier_matrix_and_full_bench_gating() {
+    let cfg_google_only = Command::new(bin_path())
+        .args(["configure", "--json"])
+        .env("GEMINI_API_KEY", "test-google-key")
+        .env_remove("TYPESAFE_API_KEY")
+        .env_remove("CANON_CLERK_SCREENER_MODEL")
+        .env_remove("CANON_CLERK_AUDITOR_MODEL")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("execute canon-clerk configure google-only");
+    assert_eq!(cfg_google_only.status.code(), Some(0));
+    let google_caseload: Caseload =
+        serde_json::from_slice(&cfg_google_only.stdout).expect("parse google-only configure JSON");
+    let google_cfg = google_caseload.config.expect("config");
+    assert_eq!(google_cfg.screener_model, "google:gemini-4-hydrogen");
+    assert_eq!(google_cfg.auditor_model, "google:gemini-4-carbon");
+
+    let cfg_hybrid = Command::new(bin_path())
+        .args(["configure", "--json"])
+        .env("GEMINI_API_KEY", "test-google-key")
+        .env("TYPESAFE_API_KEY", "test-typesafe-key")
+        .env_remove("CANON_CLERK_SCREENER_MODEL")
+        .env_remove("CANON_CLERK_AUDITOR_MODEL")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("execute canon-clerk configure hybrid");
+    assert_eq!(cfg_hybrid.status.code(), Some(0));
+    let hybrid_caseload: Caseload =
+        serde_json::from_slice(&cfg_hybrid.stdout).expect("parse hybrid configure JSON");
+    let hybrid_cfg = hybrid_caseload.config.expect("config");
+    assert_eq!(hybrid_cfg.screener_model, "typesafe:jev-latest");
+    assert_eq!(hybrid_cfg.auditor_model, "google:gemini-4-carbon");
+
+    for full_bench_args in [
+        &["configure"][..],
+        &["probe"][..],
+        &["audit", "src/lib.rs"][..],
+    ] {
+        let ts_only_full = Command::new(bin_path())
+            .args(full_bench_args)
+            .env("TYPESAFE_API_KEY", "test-typesafe-key")
+            .env_remove("GEMINI_API_KEY")
+            .env_remove("CANON_CLERK_SCREENER_MODEL")
+            .env_remove("CANON_CLERK_AUDITOR_MODEL")
+            .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+            .output()
+            .expect("execute full-bench command with TYPESAFE_API_KEY only");
+        assert_eq!(
+            ts_only_full.status.code(),
+            Some(2),
+            "full-bench command {full_bench_args:?} must exit 2 when only TYPESAFE_API_KEY is present"
+        );
+        let stderr = String::from_utf8_lossy(&ts_only_full.stderr);
+        assert!(stderr.contains("generative auditor"), "stderr: {stderr}");
+        assert!(stderr.contains("GEMINI_API_KEY"), "stderr: {stderr}");
+    }
+}

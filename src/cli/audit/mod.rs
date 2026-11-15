@@ -1336,5 +1336,135 @@ mod tests {
                 assert!(v_stderr.contains("[telemetry] [audit 2/2]"));
             }
         }
+
+        struct HybridCascadeProvider {
+            decision_calls: Mutex<usize>,
+            audit_calls: Mutex<usize>,
+            vet_score: f64,
+        }
+
+        impl StructuredModelProvider for HybridCascadeProvider {
+            fn generate_structured(
+                &self,
+                _request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                *self.audit_calls.lock().expect("lock") += 1;
+                Ok(GenerationResponse {
+                    payload: json!({
+                        "compliance_summary": "Escalated contested case passes on full review.",
+                        "compliance_score": 0.91,
+                        "annotations": []
+                    }),
+                    thoughts: Vec::new(),
+                    usage: TokenUsage {
+                        prompt_tokens: 200,
+                        completion_tokens: 40,
+                        reasoning_tokens: 20,
+                        total_tokens: 260,
+                    },
+                    latency_ms: 90,
+                    resolved_model: crate::caseload::DEFAULT_AUDITOR_MODEL.to_string(),
+                })
+            }
+
+            fn evaluate_decisions(
+                &self,
+                request: &crate::provider::DecisionRequest,
+            ) -> Result<crate::provider::DecisionResponse, ProviderError> {
+                *self.decision_calls.lock().expect("lock") += 1;
+                let mut scores = BTreeMap::new();
+                for key in request.questions.keys() {
+                    let s = if key == "compliant" {
+                        self.vet_score
+                    } else {
+                        0.95
+                    };
+                    scores.insert(key.clone(), s);
+                }
+                Ok(crate::provider::DecisionResponse {
+                    scores,
+                    resolved_model: "jev-1.14.0".to_string(),
+                    latency_ms: 35,
+                    usage: TokenUsage {
+                        prompt_tokens: 100,
+                        completion_tokens: 0,
+                        reasoning_tokens: 0,
+                        total_tokens: 100,
+                    },
+                })
+            }
+        }
+
+        #[test]
+        fn test_hybrid_credentials_auto_activate_jev_screening_and_vet_while_typesafe_only_exits_2()
+        {
+            use crate::caseload::{CaseloadConfig, DEFAULT_AUDITOR_MODEL};
+            use crate::configure::{DEFAULT_JEV_MODEL, ENV_TYPESAFE_API_KEY};
+
+            let ws = sample_workspace();
+            let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
+
+            // 1. TYPESAFE_API_KEY alone on `audit` fails fast with exit 2 and generative auditor hint
+            let ts_only_env = BTreeMap::from([
+                (ENV_TYPESAFE_API_KEY.to_string(), "ts-secret".to_string()),
+                (
+                    "XDG_CONFIG_HOME".to_string(),
+                    "/nonexistent-canon-clerk-xdg-dir".to_string(),
+                ),
+            ]);
+            let provider_unused = HybridCascadeProvider {
+                decision_calls: Mutex::new(0),
+                audit_calls: Mutex::new(0),
+                vet_score: 0.95,
+            };
+            let ts_only_err = run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "--diff", "-"]),
+                &mut Cursor::new(diff.as_bytes()),
+                &mut Vec::new(),
+                &ws,
+                &ts_only_env,
+                &provider_unused,
+            )
+            .expect_err("audit with TYPESAFE_API_KEY alone must exit 2");
+            assert_eq!(ts_only_err.exit_code(), 2);
+            assert!(ts_only_err.to_string().contains("generative auditor"));
+            assert!(ts_only_err.to_string().contains(ENV_GEMINI_API_KEY));
+            assert_eq!(*provider_unused.decision_calls.lock().expect("lock"), 0);
+
+            // 2. Hybrid TYPESAFE_API_KEY + GEMINI_API_KEY with zero model flags auto-selects jev + carbon,
+            //    runs docket + admit + vet on Jev, and escalates contested cases to Carbon
+            let mut hybrid_env = ts_only_env;
+            hybrid_env.insert(ENV_GEMINI_API_KEY.to_string(), "gemini-secret".to_string());
+            let hybrid_provider = HybridCascadeProvider {
+                decision_calls: Mutex::new(0),
+                audit_calls: Mutex::new(0),
+                vet_score: 0.30,
+            };
+            let caseload = run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "--diff", "-"]),
+                &mut Cursor::new(diff.as_bytes()),
+                &mut Vec::new(),
+                &ws,
+                &hybrid_env,
+                &hybrid_provider,
+            )
+            .expect("hybrid zero-flag audit succeeds");
+
+            assert_eq!(
+                caseload.config,
+                Some(CaseloadConfig {
+                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
+                    reasoning_budget: None,
+                })
+            );
+            assert!(
+                caseload.vetting.is_some(),
+                "vet must auto-activate on hybrid config"
+            );
+            assert_eq!(*hybrid_provider.decision_calls.lock().expect("lock"), 3);
+            assert_eq!(*hybrid_provider.audit_calls.lock().expect("lock"), 1);
+        }
     }
 }

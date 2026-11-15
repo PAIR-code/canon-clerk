@@ -14,13 +14,11 @@
 
 //! CLI driving adapter for the `canon-clerk configure` subcommand.
 
-use crate::caseload::{
-    Caseload, CaseloadConfig, DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROVIDER, TYPESAFE_PROVIDER,
-};
+use crate::caseload::{Caseload, CaseloadConfig, DEFAULT_AUDITOR_THINKING_LEVEL};
 use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
 use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
-use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
+use crate::configure::verified_credential_env_vars;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
@@ -29,17 +27,17 @@ use std::io::{Read, Write};
 
 const CONFIGURE_EXAMPLES: &str = "\
 Examples:
-  # Verify local credentials and view normalized model specifiers:
+  # Auto-select optimal screener and auditor tiers from available credentials:
   canon-clerk configure
 
-  # Configure custom screener and auditor models via aliases:
-  canon-clerk configure --screener-model flash-lite --auditor-model pro
+  # Explicitly pin screener and auditor models via aliases:
+  canon-clerk configure --screener-model hydrogen --auditor-model carbon
 
-  # Configure TypeSafe Jev as fast screener alongside Gemini Pro auditor:
-  canon-clerk configure --screener-model jev --auditor-model pro
+  # Explicitly pair TypeSafe Jev fast screener with Gemini 4 Carbon auditor:
+  canon-clerk configure --screener-model jev --auditor-model carbon
 
   # Configure custom models via fully-qualified specifiers:
-  canon-clerk configure --screener-model google:gemini-2.5-flash-lite --auditor-model google:gemini-2.5-pro
+  canon-clerk configure --screener-model google:gemini-4-hydrogen --auditor-model google:gemini-4-carbon
 
   # Configure maximum reasoning budget tokens:
   canon-clerk configure --reasoning-budget 4096
@@ -162,17 +160,7 @@ fn render_configure_output(
 }
 
 fn verified_credentials_label(config: &CaseloadConfig) -> String {
-    let mut keys = Vec::new();
-    if model_provider(&config.screener_model) == DEFAULT_PROVIDER
-        || model_provider(&config.auditor_model) == DEFAULT_PROVIDER
-    {
-        keys.push(ENV_GEMINI_API_KEY);
-    }
-    if model_provider(&config.screener_model) == TYPESAFE_PROVIDER
-        || model_provider(&config.auditor_model) == TYPESAFE_PROVIDER
-    {
-        keys.push(ENV_TYPESAFE_API_KEY);
-    }
+    let keys = verified_credential_env_vars(config);
     format!("{} (verified)", keys.join(", "))
 }
 
@@ -218,6 +206,7 @@ mod tests {
     use super::*;
     use crate::caseload::{DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL};
     use crate::cli::{Cli, Commands};
+    use crate::configure::{DEFAULT_JEV_MODEL, ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY};
     use clap::Parser;
     use std::io::Cursor;
 
@@ -226,6 +215,10 @@ mod tests {
         env.insert(
             ENV_GEMINI_API_KEY.to_string(),
             "synthetic-test-api-key-value".to_string(),
+        );
+        env.insert(
+            "XDG_CONFIG_HOME".to_string(),
+            "/nonexistent-canon-clerk-xdg-dir".to_string(),
         );
         env
     }
@@ -342,11 +335,10 @@ mod tests {
         }
 
         #[test]
-        fn test_hybrid_typesafe_jev_screener_verifies_both_keys_without_leakage() {
+        fn test_hybrid_credentials_auto_select_jev_and_verify_both_keys_without_leakage() {
             let ts_secret = "synthetic-typesafe-cli-secret-never-echo";
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("jev".to_string()),
                     typesafe_api_key: Some(ts_secret.to_string()),
                     ..ProviderConfigArgs::default()
                 },
@@ -356,14 +348,64 @@ mod tests {
             let mut stdin = Cursor::new(b"");
             let mut out = Vec::new();
             let caseload = run_configure_with_env(&args, &mut stdin, &mut out, &test_env())
-                .expect("hybrid configure should succeed");
+                .expect("hybrid configure should auto-select jev + carbon");
             let rendered = String::from_utf8(out).expect("utf8");
-            assert!(rendered.contains("typesafe:jev-latest"));
+            assert!(rendered.contains(DEFAULT_JEV_MODEL));
+            assert!(rendered.contains(DEFAULT_AUDITOR_MODEL));
             assert!(rendered.contains("GEMINI_API_KEY, TYPESAFE_API_KEY (verified)"));
             assert!(!rendered.contains(ts_secret));
             assert_eq!(
-                caseload.config.expect("config").screener_model,
-                "typesafe:jev-latest"
+                caseload.config,
+                Some(CaseloadConfig {
+                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    thinking_level: None,
+                    reasoning_budget: None,
+                })
+            );
+
+            // Compact format also reflects auto-selected hybrid tiers and verified keys
+            let compact_args = ConfigureArgs {
+                provider: ProviderConfigArgs {
+                    typesafe_api_key: Some(ts_secret.to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                format: ConfigureFormat::Compact,
+                ..ConfigureArgs::default()
+            };
+            let mut compact_out = Vec::new();
+            run_configure_with_env(&compact_args, &mut stdin, &mut compact_out, &test_env())
+                .expect("compact hybrid configure");
+            let compact_rendered = String::from_utf8(compact_out).expect("utf8");
+            assert!(compact_rendered.contains("screener_model\ttypesafe:jev-latest"));
+            assert!(compact_rendered.contains("auditor_model\tgoogle:gemini-4-carbon"));
+            assert!(
+                compact_rendered
+                    .contains("credentials\tGEMINI_API_KEY, TYPESAFE_API_KEY (verified)")
+            );
+            assert!(!compact_rendered.contains(ts_secret));
+
+            // Explicit --screener-model hydrogen overrides ambient TYPESAFE_API_KEY
+            let mut both_env = test_env();
+            both_env.insert(ENV_TYPESAFE_API_KEY.to_string(), ts_secret.to_string());
+            let override_args = ConfigureArgs {
+                provider: ProviderConfigArgs {
+                    screener_model: Some("hydrogen".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                format: ConfigureFormat::Stylish,
+                ..ConfigureArgs::default()
+            };
+            let mut override_out = Vec::new();
+            let overridden =
+                run_configure_with_env(&override_args, &mut stdin, &mut override_out, &both_env)
+                    .expect("explicit flag overrides ambient typesafe key");
+            let override_str = String::from_utf8(override_out).expect("utf8");
+            assert!(override_str.contains(DEFAULT_SCREENER_MODEL));
+            assert!(override_str.contains("Credentials      : GEMINI_API_KEY (verified)"));
+            assert_eq!(
+                overridden.config.expect("config").screener_model,
+                DEFAULT_SCREENER_MODEL
             );
         }
     }
@@ -376,12 +418,30 @@ mod tests {
             let args = ConfigureArgs::default();
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
-            let empty_env = BTreeMap::new();
+            let mut empty_env = BTreeMap::new();
+            empty_env.insert(
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            );
 
             let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &empty_env)
                 .expect_err("missing key must fail");
             assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains(ENV_GEMINI_API_KEY));
             assert!(err.to_string().contains("Hint:"));
+
+            // TypeSafe-only env on full-bench `configure` exits 2 requesting generative auditor key
+            let mut ts_only_env = empty_env;
+            ts_only_env.insert(
+                ENV_TYPESAFE_API_KEY.to_string(),
+                "ts-only-secret".to_string(),
+            );
+            let ts_err = run_configure_with_env(&args, &mut stdin, &mut stdout, &ts_only_env)
+                .expect_err("typesafe-only configure must exit 2");
+            assert_eq!(ts_err.exit_code(), 2);
+            assert!(ts_err.to_string().contains("generative auditor"));
+            assert!(ts_err.to_string().contains(ENV_GEMINI_API_KEY));
+            assert!(ts_err.to_string().contains("Hint:"));
         }
 
         #[test]
