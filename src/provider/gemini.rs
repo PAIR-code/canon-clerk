@@ -134,7 +134,47 @@ pub(crate) struct RawHttpOutcome {
     pub(crate) latency_ms: u64,
 }
 
+thread_local! {
+    static TOKIO_RUNTIME: std::cell::RefCell<Option<tokio::runtime::Runtime>> = const { std::cell::RefCell::new(None) };
+}
+
+fn with_current_thread_runtime<F, R>(model_specifier: &str, f: F) -> Result<R, (ProviderError, u64)>
+where
+    F: FnOnce(&tokio::runtime::Runtime) -> Result<R, (ProviderError, u64)>,
+{
+    TOKIO_RUNTIME.with(|cell| {
+        let mut borrowed = cell.borrow_mut();
+        if borrowed.is_none() {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|err| {
+                    (
+                        ProviderError::Transport {
+                            model_specifier: model_specifier.to_string(),
+                            message: format!("failed to initialize async HTTP runtime ({err})"),
+                        },
+                        0,
+                    )
+                })?;
+            *borrowed = Some(rt);
+        }
+        if let Some(ref rt) = *borrowed {
+            f(rt)
+        } else {
+            Err((
+                ProviderError::Transport {
+                    model_specifier: model_specifier.to_string(),
+                    message: "runtime initialization failed".to_string(),
+                },
+                0,
+            ))
+        }
+    })
+}
+
 pub(crate) fn post_gemini_json<T: Serialize>(
+    client: &reqwest::Client,
     base_url: &str,
     model_specifier: &str,
     api_key: &str,
@@ -142,65 +182,41 @@ pub(crate) fn post_gemini_json<T: Serialize>(
     payload: &T,
 ) -> Result<RawHttpOutcome, (ProviderError, u64)> {
     let url = build_generate_content_url(base_url, model_specifier);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| {
-            (
-                ProviderError::Transport {
-                    model_specifier: model_specifier.to_string(),
-                    message: format!("failed to initialize async HTTP runtime ({err})"),
-                },
-                0,
-            )
-        })?;
-
     let start = Instant::now();
-    runtime.block_on(async {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .build()
-            .map_err(|err| {
-                let elapsed = start.elapsed().as_millis() as u64;
-                (
+    with_current_thread_runtime(model_specifier, |runtime| {
+        runtime.block_on(async {
+            let send_res = client
+                .post(&url)
+                .timeout(Duration::from_millis(timeout_ms))
+                .header("x-goog-api-key", api_key)
+                .header("Content-Type", JSON_MIME_TYPE)
+                .json(payload)
+                .send()
+                .await;
+            let latency_ms = start.elapsed().as_millis() as u64;
+
+            let response = send_res.map_err(|err| {
+                let provider_err = if err.is_timeout() {
+                    ProviderError::Timeout {
+                        model_specifier: model_specifier.to_string(),
+                        timeout_ms,
+                    }
+                } else {
                     ProviderError::Transport {
                         model_specifier: model_specifier.to_string(),
-                        message: format!("failed to build HTTPS client ({err})"),
-                    },
-                    elapsed,
-                )
+                        message: err.to_string(),
+                    }
+                };
+                (provider_err, latency_ms)
             })?;
 
-        let send_res = client
-            .post(&url)
-            .header("x-goog-api-key", api_key)
-            .header("Content-Type", JSON_MIME_TYPE)
-            .json(payload)
-            .send()
-            .await;
-        let latency_ms = start.elapsed().as_millis() as u64;
-
-        let response = send_res.map_err(|err| {
-            let provider_err = if err.is_timeout() {
-                ProviderError::Timeout {
-                    model_specifier: model_specifier.to_string(),
-                    timeout_ms,
-                }
-            } else {
-                ProviderError::Transport {
-                    model_specifier: model_specifier.to_string(),
-                    message: err.to_string(),
-                }
-            };
-            (provider_err, latency_ms)
-        })?;
-
-        let status_code = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        Ok(RawHttpOutcome {
-            status_code,
-            body,
-            latency_ms,
+            let status_code = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            Ok(RawHttpOutcome {
+                status_code,
+                body,
+                latency_ms,
+            })
         })
     })
 }
@@ -210,6 +226,7 @@ pub(crate) fn post_gemini_json<T: Serialize>(
 pub struct GeminiModelProvider {
     api_key: String,
     base_url: String,
+    client: reqwest::Client,
 }
 
 impl fmt::Debug for GeminiModelProvider {
@@ -229,23 +246,41 @@ impl fmt::Debug for GeminiModelProvider {
 impl GeminiModelProvider {
     /// Constructs a [`GeminiModelProvider`] targeting [`DEFAULT_GEMINI_BASE_URL`].
     pub fn new(api_key: impl Into<String>) -> Self {
-        Self {
-            api_key: api_key.into(),
-            base_url: DEFAULT_GEMINI_BASE_URL.to_string(),
-        }
+        Self::with_base_url(api_key, DEFAULT_GEMINI_BASE_URL)
     }
 
     /// Constructs a [`GeminiModelProvider`] with a custom base URL (useful for local proxies or test harnesses).
     pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        let client = reqwest::Client::builder().build().unwrap_or_default();
+        Self::with_client_and_base_url(api_key, client, base_url)
+    }
+
+    /// Constructs a [`GeminiModelProvider`] with a caller-supplied reusable [`reqwest::Client`].
+    pub fn with_client(api_key: impl Into<String>, client: reqwest::Client) -> Self {
+        Self::with_client_and_base_url(api_key, client, DEFAULT_GEMINI_BASE_URL)
+    }
+
+    /// Constructs a [`GeminiModelProvider`] with a custom [`reqwest::Client`] and base URL.
+    pub fn with_client_and_base_url(
+        api_key: impl Into<String>,
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             api_key: api_key.into(),
             base_url: base_url.into(),
+            client,
         }
     }
 
     /// Returns the configured Google Generative Language API base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Returns a reference to the reusable, pooled [`reqwest::Client`].
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
     }
 }
 
@@ -267,6 +302,7 @@ impl StructuredModelProvider for GeminiModelProvider {
         let specifier = validate_gemini_model_specifier(&request.model_specifier)?;
         let payload = build_request_payload(request);
         let outcome = post_gemini_json(
+            &self.client,
             &self.base_url,
             specifier,
             api_key,
@@ -801,6 +837,130 @@ mod tests {
                     timeout_ms: 50,
                 }
             );
+        }
+
+        #[test]
+        fn test_connection_reuse_across_sequential_requests_on_shared_provider() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+
+            let server = thread::spawn(move || {
+                // Accept strictly a single TCP connection.
+                let (mut stream, _) = listener.accept().expect("accept single client connection");
+
+                for call_idx in 1..=2 {
+                    let raw_req = read_complete_http_request(&mut stream);
+                    assert!(
+                        raw_req
+                            .starts_with("POST /v1beta/models/gemini-pro-latest:generateContent ")
+                    );
+
+                    let body = json!({
+                        "candidates": [{
+                            "content": {
+                                "parts": [
+                                    { "text": format!("{{\"call_idx\":{call_idx}}}") }
+                                ]
+                            },
+                            "finishReason": "STOP"
+                        }],
+                        "modelVersion": "gemini-2.5-pro"
+                    })
+                    .to_string();
+
+                    let http_resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream
+                        .write_all(http_resp.as_bytes())
+                        .expect("write HTTP response");
+                    stream.flush().expect("flush stream");
+                }
+            });
+
+            let provider = GeminiModelProvider::with_base_url(
+                "synthetic-loopback-key",
+                format!("http://{addr}/v1beta"),
+            );
+
+            let res1 = provider
+                .generate_structured(&sample_request(None))
+                .expect("first call succeeds over pooled client");
+            assert_eq!(res1.payload["call_idx"], json!(1));
+
+            let res2 = provider
+                .generate_structured(&sample_request(None))
+                .expect("second call succeeds on reused TCP stream");
+            assert_eq!(res2.payload["call_idx"], json!(2));
+
+            server.join().expect("server thread cleanly joined");
+        }
+
+        #[test]
+        fn test_concurrent_worker_threads_share_gemini_provider() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+
+            let server = thread::spawn(move || {
+                for _ in 0..4 {
+                    let (mut stream, _) = listener.accept().expect("accept connection");
+                    let _raw_req = read_complete_http_request(&mut stream);
+                    let body = json!({
+                        "candidates": [{
+                            "content": {
+                                "parts": [
+                                    { "text": "{\"status\":\"ok\"}" }
+                                ]
+                            },
+                            "finishReason": "STOP"
+                        }],
+                        "modelVersion": "gemini-2.5-pro"
+                    })
+                    .to_string();
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+                }
+            });
+
+            let provider = GeminiModelProvider::with_base_url(
+                "synthetic-loopback-key",
+                format!("http://{addr}/v1beta"),
+            );
+
+            std::thread::scope(|s| {
+                let mut handles = Vec::new();
+                for _ in 0..4 {
+                    let prov = provider.clone();
+                    handles.push(s.spawn(move || prov.generate_structured(&sample_request(None))));
+                }
+                for handle in handles {
+                    let res = handle.join().expect("thread joined").expect("call ok");
+                    assert_eq!(res.payload["status"], "ok");
+                }
+            });
+
+            server.join().expect("server thread cleanly joined");
+        }
+
+        #[test]
+        fn test_client_accessor_and_custom_client_constructor() {
+            let custom_client = reqwest::Client::builder().build().expect("build client");
+            let provider = GeminiModelProvider::with_client("test-key", custom_client.clone());
+            assert_eq!(provider.base_url(), DEFAULT_GEMINI_BASE_URL);
+            assert!(provider.client().post("http://127.0.0.1").build().is_ok());
+
+            let custom_with_base = GeminiModelProvider::with_client_and_base_url(
+                "test-key",
+                custom_client,
+                "http://custom-proxy:8080",
+            );
+            assert_eq!(custom_with_base.base_url(), "http://custom-proxy:8080");
         }
     }
 }

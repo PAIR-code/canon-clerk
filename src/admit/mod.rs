@@ -26,7 +26,8 @@ use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
+    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
+    ProviderError, StructuredModelProvider,
 };
 use decode::decode_case_exhibits;
 use exhibits::resolve_case_candidate_exhibits;
@@ -250,7 +251,7 @@ pub fn execute_admit(
             system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            reasoning_budget: None,
+            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
             timeout_ms: options.timeout_ms,
         };
         prepared_calls.push(PreparedCaseCall {
@@ -843,6 +844,7 @@ mod tests {
 
             let reqs = provider.captured_requests();
             assert_eq!(reqs.len(), 1);
+            assert_eq!(reqs[0].reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
             let overview_pos = reqs[0]
                 .user_prompt
                 .find("## Filing Overview")
