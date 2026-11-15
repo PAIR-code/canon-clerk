@@ -14,17 +14,16 @@
 
 //! Structured JSON response decoding and canon path matching for `docket`.
 
-use super::DocketError;
 use crate::caseload::{CanonDocketAssessment, ColorabilityStatus, normalize_colorability_score};
 use crate::provider::ProviderError;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> DocketError {
-    DocketError::Provider(ProviderError::SchemaDecode {
+fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> ProviderError {
+    ProviderError::SchemaDecode {
         model_specifier: model_specifier.to_string(),
         message: message.into(),
-    })
+    }
 }
 
 pub(super) fn decode_docket_cases(
@@ -32,7 +31,7 @@ pub(super) fn decode_docket_cases(
     candidate_canons: &[String],
     threshold: f64,
     model_specifier: &str,
-) -> Result<BTreeMap<String, CanonDocketAssessment>, DocketError> {
+) -> Result<BTreeMap<String, CanonDocketAssessment>, ProviderError> {
     let cases_arr = payload
         .get("cases")
         .and_then(Value::as_array)
@@ -118,7 +117,7 @@ fn decode_single_case(
     positional_expected: Option<&str>,
     threshold: f64,
     model: &str,
-) -> Result<(String, CanonDocketAssessment), DocketError> {
+) -> Result<(String, CanonDocketAssessment), ProviderError> {
     let entry = raw_item.as_object().ok_or_else(|| {
         schema_decode_error(
             model,

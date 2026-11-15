@@ -628,7 +628,7 @@ mod tests {
             );
             assert!(stdout_text.contains(".canons/cli/flipper.md"));
             assert!(!stdout_text.contains("[bench]"));
-            assert!(stderr_text.contains("[bench] [unbounded] trial 1/3:"));
+            assert!(stderr_text.contains("[bench] [batch=25,conc=4] trial 1/3:"));
 
             let json_cli = ConsistencyBenchCli::try_parse_from([
                 "consistency_bench",

@@ -69,7 +69,7 @@ pub enum AppriseFormat {
 #[derive(Args, Debug, Clone, Default, PartialEq)]
 #[command(
     about = "Prospective statutory notice: determine governing canons for planned design intent and target scope",
-    long_about = "Statutory Apprisal stage of the Caseload DAG (Apprisal Track). Executes the guarded [intake, discover, validate, configure, apprise] closure to screen candidate canons against prospective architectural design intent and target scope in a single structured turn before implementation begins.",
+    long_about = "Statutory Apprisal stage of the Caseload DAG (Apprisal Track). Executes the guarded [intake, discover, validate, configure, apprise] closure to screen candidate canons against prospective architectural design intent and target scope across bounded concurrent batches before implementation begins.",
     after_help = APPRISE_EXAMPLES
 )]
 pub struct AppriseArgs {
@@ -89,13 +89,13 @@ pub struct AppriseArgs {
     )]
     pub apprise_threshold: Option<f64>,
 
-    /// Optional maximum candidate canons evaluated per screener model call (env: `CANON_CLERK_APPRISE_BATCH_SIZE`).
+    /// Optional maximum candidate canons evaluated per screener model call (default: `25`; env: `CANON_CLERK_APPRISE_BATCH_SIZE`).
     #[arg(
         long = "apprise-batch-size",
         visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Apprisal Options",
-        help = "Maximum candidate canons per screener model call (fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
+        help = "Maximum candidate canons per screener model call (default: 25; fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
     )]
     pub apprise_batch_size: Option<usize>,
 
@@ -1241,6 +1241,7 @@ mod tests {
                     "thought:apprise:Inspecting auth cache TTL canon.",
                     "thought:apprise:Jurisdiction confirmed.",
                     "call:apprise:394",
+                    "progress:apprise:1/1",
                     "finish:apprise:394",
                     "pipeline:394",
                 ]
@@ -1322,7 +1323,7 @@ mod tests {
             .expect("fast-forwarded upstream stages");
 
             let ff_events = ff_sink.events();
-            assert_eq!(ff_events.len(), 4);
+            assert_eq!(ff_events.len(), 5);
             assert!(matches!(
                 ff_events[0],
                 TelemetryEvent::StageStart {
@@ -1340,6 +1341,15 @@ mod tests {
             ));
             assert!(matches!(
                 ff_events[2],
+                TelemetryEvent::StageProgress {
+                    stage: PipelineStage::Apprise,
+                    completed: 1,
+                    total: 1,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                ff_events[3],
                 TelemetryEvent::StageFinish {
                     stage: PipelineStage::Apprise,
                     usage: Some(u),
@@ -1347,7 +1357,7 @@ mod tests {
                 } if u.total_tokens == 394
             ));
             assert!(matches!(
-                ff_events[3],
+                ff_events[4],
                 TelemetryEvent::PipelineFinish {
                     total_tokens: 394,
                     ..
@@ -1392,6 +1402,136 @@ mod tests {
             assert_eq!(
                 sc_stages,
                 vec![PipelineStage::Intake, PipelineStage::Discover]
+            );
+        }
+
+        use crate::provider::{DecisionRequest, DecisionResponse};
+
+        struct DualModeAppriseProbe {
+            gen_batch_sizes: Mutex<Vec<usize>>,
+            dec_batch_sizes: Mutex<Vec<usize>>,
+        }
+
+        impl StructuredModelProvider for DualModeAppriseProbe {
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                let mut assessments = Vec::new();
+                for line in request.user_prompt.lines() {
+                    if let Some(rest) = line.strip_prefix("### Canon: `")
+                        && let Some(canon_ref) = rest.strip_suffix('`')
+                    {
+                        assessments.push(json!({
+                            "canon_path": canon_ref,
+                            "apprisal_summary": "Applicable.",
+                            "apprisal_score": 0.80
+                        }));
+                    }
+                }
+                self.gen_batch_sizes
+                    .lock()
+                    .expect("lock")
+                    .push(assessments.len());
+                Ok(GenerationResponse {
+                    payload: json!({ "assessments": assessments }),
+                    thoughts: Vec::new(),
+                    usage: TokenUsage::default(),
+                    latency_ms: 10,
+                    resolved_model: "gemini-4-hydrogen".to_string(),
+                })
+            }
+
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                self.dec_batch_sizes
+                    .lock()
+                    .expect("lock")
+                    .push(request.questions.len());
+                let scores = request
+                    .questions
+                    .keys()
+                    .map(|k| (k.clone(), 0.80))
+                    .collect();
+                Ok(DecisionResponse {
+                    scores,
+                    resolved_model: "jev-1.14.0".to_string(),
+                    latency_ms: 10,
+                    usage: TokenUsage::default(),
+                })
+            }
+        }
+
+        #[test]
+        fn test_cli_batches_30_canons_by_default_on_generative_screener_and_keeps_single_turn_on_jev()
+         {
+            use crate::configure::ENV_TYPESAFE_API_KEY;
+
+            let mut ws = WorkspaceSnapshot::new().with_file("src/auth/login.rs");
+            for i in 0..30 {
+                let canon_ref = format!(".canons/auth/rule-{i:03}.md");
+                ws = ws.with_canon_markdown(
+                    &format!("---\ntriggers:\n  - \"src/auth/**\"\n---\n# Rule {i}\n\nRule {i} MUST hold.\n"),
+                    &ParseCanonOptions::with_source_ref(&canon_ref),
+                );
+            }
+
+            let probe = DualModeAppriseProbe {
+                gen_batch_sizes: Mutex::new(Vec::new()),
+                dec_batch_sizes: Mutex::new(Vec::new()),
+            };
+
+            let gen_args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Refactor auth login".to_string()),
+                    targets: vec!["src/auth/login.rs".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+            run_apprise_with_snapshot_and_provider(
+                &gen_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &ws,
+                &test_env_with_key(),
+                &probe,
+            )
+            .expect("default generative apprise on 30 canons");
+            assert_eq!(
+                *probe.gen_batch_sizes.lock().expect("lock"),
+                vec![15, 15],
+                "30 canons must partition into 2 balanced batches of 15 out of the box"
+            );
+
+            let mut jev_env = test_env_with_key();
+            jev_env.insert(ENV_TYPESAFE_API_KEY.to_string(), "test-jev-key".to_string());
+            let jev_args = AppriseArgs {
+                provider: ProviderConfigArgs {
+                    screener_model: Some("jev".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                ..gen_args
+            };
+            run_apprise_with_snapshot_and_provider(
+                &jev_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &ws,
+                &jev_env,
+                &probe,
+            )
+            .expect("default discriminative apprise on 30 canons");
+            assert_eq!(
+                *probe.dec_batch_sizes.lock().expect("lock"),
+                vec![30],
+                "discriminative Jev must retain its 48-noul single-pass ceiling across 30 canons"
             );
         }
     }

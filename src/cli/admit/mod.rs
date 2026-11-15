@@ -115,13 +115,13 @@ pub struct AdmitArgs {
     )]
     pub docket_threshold: Option<f64>,
 
-    /// Upstream maximum candidate canons per `docket` screener call (env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
+    /// Upstream maximum candidate canons per `docket` screener call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
     #[arg(
         long = "docket-batch-size",
         visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Docket Options",
-        help = "Maximum candidate canons per upstream docket screener call (fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
+        help = "Maximum candidate canons per upstream docket screener call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
     )]
     pub docket_batch_size: Option<usize>,
 

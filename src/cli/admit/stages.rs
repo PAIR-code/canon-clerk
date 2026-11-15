@@ -28,7 +28,7 @@ use crate::cli::runners::{
     run_branch_b_configure,
 };
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
-use crate::docket::{DocketOptions, execute_docket};
+use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
 use crate::telemetry::{PipelineStage, TelemetrySession};
@@ -220,7 +220,10 @@ pub(super) fn execute_jit_configure_docket_and_admit(
         let docket_opts = DocketOptions {
             threshold: thresholds.docket_threshold,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_canons_per_call: docket_batch_size,
+            max_canons_per_call: effective_docket_batch_size(
+                docket_batch_size,
+                &cfg_snapshot.screener_model,
+            ),
             max_concurrent_calls: docket_concurrency,
         };
         let docketed =

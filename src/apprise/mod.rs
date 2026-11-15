@@ -15,31 +15,34 @@
 //! Core domain execution engine for the `apprise` Caseload DAG stage (`docs/architecture/nodes/apprise.md`).
 
 mod decision;
+mod decode;
 mod prompt;
 
 use crate::caseload::{
-    ApprisalStatus, CanonApprisalAssessment, Caseload, CaseloadApprisal, TYPESAFE_PROVIDER,
-    normalize_unit_score,
+    CanonApprisalAssessment, Caseload, CaseloadApprisal, TYPESAFE_PROVIDER, normalize_unit_score,
 };
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{partition_candidate_canons, resolve_canon_path};
+use crate::docket::{format_canon_batch_label, partition_candidate_canons};
 use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
     ProviderError, StructuredModelProvider,
 };
+use decode::decode_apprise_assessments;
 use prompt::{
     APPRISE_SYSTEM_INSTRUCTION, build_apprise_batch_user_prompt, build_apprise_intent_prefix,
     build_apprise_schema,
 };
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Default prospective applicability score threshold for `apprise` (`docs/architecture/nodes/apprise.md` §4.4).
 pub const DEFAULT_APPRISE_THRESHOLD: f64 = 0.5;
+
+/// Default maximum candidate canons evaluated per generative `apprise` screener call (`docs/architecture/nodes/apprise.md` §4.2).
+pub const DEFAULT_APPRISE_BATCH_SIZE: usize = 25;
 
 /// Default maximum concurrent in-flight screener model calls when `apprise` executes multiple batches.
 pub const DEFAULT_APPRISE_MAX_CONCURRENT_CALLS: usize = 4;
@@ -60,7 +63,7 @@ pub struct AppriseOptions {
     pub threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
-    /// Optional maximum candidate canons evaluated per screener model call (`>= 1`; `None` evaluates all in a single turn).
+    /// Optional maximum candidate canons evaluated per screener model call (`>= 1`; defaults to `Some(DEFAULT_APPRISE_BATCH_SIZE)`, while `None` evaluates all in a single unbounded turn).
     pub max_canons_per_call: Option<usize>,
     /// Optional maximum concurrent in-flight screener model calls when batched (`>= 1`; defaults to [`DEFAULT_APPRISE_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
@@ -71,9 +74,25 @@ impl Default for AppriseOptions {
         Self {
             threshold: DEFAULT_APPRISE_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_canons_per_call: None,
+            max_canons_per_call: Some(DEFAULT_APPRISE_BATCH_SIZE),
             max_concurrent_calls: None,
         }
+    }
+}
+
+/// Resolves the effective `max_canons_per_call` for `apprise` given an optional explicit override
+/// and the configured `screener_model` (`None` on `typesafe:*` to preserve its `48`-noul batch ceiling,
+/// `Some(DEFAULT_APPRISE_BATCH_SIZE)` on generative models).
+pub(crate) fn effective_apprise_batch_size(
+    explicit: Option<usize>,
+    screener_model: &str,
+) -> Option<usize> {
+    if explicit.is_some() {
+        explicit
+    } else if model_provider(screener_model) == TYPESAFE_PROVIDER {
+        None
+    } else {
+        Some(DEFAULT_APPRISE_BATCH_SIZE)
     }
 }
 
@@ -96,8 +115,35 @@ pub enum AppriseError {
     MissingConfig,
     /// A candidate canon listed in `.discovery.candidate_canons` is absent from the workspace snapshot.
     MissingCandidateCanon { canon_ref: String },
-    /// Structured model provider returned a transport, HTTP, block, or schema decoding error.
+    /// Multi-batch model call or response decoding failed with 1-based batch coordinates.
+    BatchProvider {
+        /// 1-based batch index (`1..=batch_count`).
+        batch_index: usize,
+        /// Total batches prepared for this stage (`>= 2`).
+        batch_count: usize,
+        /// Underlying provider timeout, transport, HTTP, block, or schema decoding error.
+        source: ProviderError,
+    },
+    /// Single-batch or unscoped structured model provider error.
     Provider(ProviderError),
+}
+
+impl AppriseError {
+    pub(super) fn from_batch_call(
+        batch_index: usize,
+        batch_count: usize,
+        source: ProviderError,
+    ) -> Self {
+        if batch_count > 1 {
+            Self::BatchProvider {
+                batch_index,
+                batch_count,
+                source,
+            }
+        } else {
+            Self::Provider(source)
+        }
+    }
 }
 
 impl fmt::Display for AppriseError {
@@ -113,7 +159,7 @@ impl fmt::Display for AppriseError {
                 f,
                 "Invalid apprise batch size: {detail}.\n  \
                  Hint: Pass a positive integer (`>= 1`) via `--apprise-batch-size <COUNT>` \
-                 or `{ENV_APPRISE_BATCH_SIZE}`."
+                 or `{ENV_APPRISE_BATCH_SIZE}` (default: `{DEFAULT_APPRISE_BATCH_SIZE}`)."
             ),
             Self::InvalidConcurrency { detail } => write!(
                 f,
@@ -147,6 +193,14 @@ impl fmt::Display for AppriseError {
                 f,
                 "Candidate canon `{canon_ref}` referenced in `.discovery` was not found in the workspace snapshot.\n  \
                  Hint: Re-run `canon-clerk discover` against the current workspace."
+            ),
+            Self::BatchProvider {
+                batch_index,
+                batch_count,
+                source,
+            } => write!(
+                f,
+                "Apprise screening failed (batch {batch_index}/{batch_count}): {source}"
             ),
             Self::Provider(err) => write!(f, "{err}"),
         }
@@ -278,17 +332,24 @@ fn execute_apprise_batches(
     model_specifier: &str,
     provider: &dyn StructuredModelProvider,
 ) -> BatchAssessmentsResult {
-    let worker_count = concurrency_limit.min(prepared_batches.len()).max(1);
+    let total = prepared_batches.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut combined = BTreeMap::new();
-        for (batch_canons, request) in prepared_batches {
-            let response = provider.generate_structured(request)?;
-            let batch_assessments = decode_apprise_assessments(
-                &response.payload,
-                batch_canons,
-                threshold,
-                model_specifier,
-            )?;
+        for (idx, (batch_canons, request)) in prepared_batches.iter().enumerate() {
+            let batch_assessments = provider
+                .generate_structured(request)
+                .and_then(|response| {
+                    decode_apprise_assessments(
+                        &response.payload,
+                        batch_canons,
+                        threshold,
+                        model_specifier,
+                    )
+                })
+                .map_err(|err| AppriseError::from_batch_call(idx + 1, total, err))?;
+            let label = format_canon_batch_label(idx, total, batch_canons.len());
+            provider.record_progress(idx + 1, total, &label);
             combined.extend(batch_assessments);
         }
         return Ok(combined);
@@ -296,8 +357,8 @@ fn execute_apprise_batches(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<BatchAssessmentsResult>>> =
-        Mutex::new((0..prepared_batches.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<BatchAssessmentsResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -307,13 +368,12 @@ fn execute_apprise_batches(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared_batches.len() {
+                    if idx >= total {
                         break;
                     }
                     let (batch_canons, request) = &prepared_batches[idx];
                     let res = provider
                         .generate_structured(request)
-                        .map_err(Into::into)
                         .and_then(|response| {
                             decode_apprise_assessments(
                                 &response.payload,
@@ -321,19 +381,26 @@ fn execute_apprise_batches(
                                 threshold,
                                 model_specifier,
                             )
-                        });
-                    if res.is_err() {
+                        })
+                        .map_err(|err| AppriseError::from_batch_call(idx + 1, total, err));
+                    let succeeded = res.is_ok();
+                    if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if succeeded {
+                            guard.0 += 1;
+                            let label = format_canon_batch_label(idx, total, batch_canons.len());
+                            provider.record_progress(guard.0, total, &label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         let batch_assessments = slot?;
@@ -342,151 +409,16 @@ fn execute_apprise_batches(
     Ok(combined)
 }
 
-fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> AppriseError {
-    AppriseError::Provider(ProviderError::SchemaDecode {
-        model_specifier: model_specifier.to_string(),
-        message: message.into(),
-    })
-}
-
-fn decode_apprise_assessments(
-    payload: &Value,
-    candidate_canons: &[String],
-    threshold: f64,
-    model_specifier: &str,
-) -> Result<BTreeMap<String, CanonApprisalAssessment>, AppriseError> {
-    let assessments_arr = payload
-        .get("assessments")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                "missing array field `assessments` in structured apprise response",
-            )
-        })?;
-
-    let expected: BTreeSet<&str> = candidate_canons.iter().map(String::as_str).collect();
-    let same_len = assessments_arr.len() == candidate_canons.len();
-    let mut out = BTreeMap::new();
-
-    for (index, raw_item) in assessments_arr.iter().enumerate() {
-        let pos_expected = same_len
-            .then(|| candidate_canons.get(index).map(String::as_str))
-            .flatten();
-        let (canon_path, assessment) = decode_single_assessment(
-            raw_item,
-            index,
-            &expected,
-            pos_expected,
-            threshold,
-            model_specifier,
-        )?;
-        if out.insert(canon_path.clone(), assessment).is_some() {
-            return Err(schema_decode_error(
-                model_specifier,
-                format!("duplicate `canon_path` `{canon_path}` in structured apprise response"),
-            ));
-        }
-    }
-
-    let missing: Vec<&str> = candidate_canons
-        .iter()
-        .map(String::as_str)
-        .filter(|canon_ref| !out.contains_key(*canon_ref))
-        .collect();
-    if !missing.is_empty() {
-        return Err(schema_decode_error(
-            model_specifier,
-            format!(
-                "missing assessment entry for candidate canon(s): {}",
-                missing.join(", ")
-            ),
-        ));
-    }
-
-    Ok(out)
-}
-
-fn decode_single_assessment(
-    raw_item: &Value,
-    index: usize,
-    expected: &BTreeSet<&str>,
-    positional_expected: Option<&str>,
-    threshold: f64,
-    model_specifier: &str,
-) -> Result<(String, CanonApprisalAssessment), AppriseError> {
-    let entry = raw_item.as_object().ok_or_else(|| {
-        schema_decode_error(
-            model_specifier,
-            format!("expected object at `assessments[{index}]` in structured apprise response"),
-        )
-    })?;
-
-    let raw_canon_path = entry
-        .get("canon_path")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                format!("missing string `canon_path` at `assessments[{index}]`"),
-            )
-        })?;
-
-    let canon_path =
-        resolve_canon_path(raw_canon_path, expected, positional_expected).ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                format!("unknown `canon_path` `{raw_canon_path}` in structured apprise response"),
-            )
-        })?;
-
-    let raw_summary = entry
-        .get("apprisal_summary")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                format!("missing string `apprisal_summary` for `{canon_path}`"),
-            )
-        })?;
-
-    let raw_score = entry
-        .get("apprisal_score")
-        .and_then(Value::as_f64)
-        .ok_or_else(|| {
-            schema_decode_error(
-                model_specifier,
-                format!("missing numeric `apprisal_score` for `{canon_path}`"),
-            )
-        })?;
-
-    let apprisal_score = normalize_unit_score(raw_score).map_err(|detail| {
-        schema_decode_error(
-            model_specifier,
-            format!("invalid `apprisal_score` for `{canon_path}`: {detail}"),
-        )
-    })?;
-
-    Ok((
-        canon_path.to_string(),
-        CanonApprisalAssessment {
-            apprisal_summary: raw_summary.trim().to_string(),
-            apprisal_score,
-            apprisal_status: ApprisalStatus::from_score(apprisal_score, threshold),
-        },
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
-        CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
+        ApprisalStatus, CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
         DEFAULT_SCREENER_MODEL,
     };
     use crate::provider::{GenerationResponse, TokenUsage};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::sync::Mutex;
 
     struct RecordingMockProvider {
@@ -776,11 +708,53 @@ mod tests {
             );
         }
 
+        struct PerBatchAppriseProvider {
+            requests: Mutex<Vec<GenerationRequest>>,
+            scores: BTreeMap<String, f64>,
+        }
+
+        impl StructuredModelProvider for PerBatchAppriseProvider {
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                self.requests
+                    .lock()
+                    .expect("lock requests")
+                    .push(request.clone());
+                let mut assessments = Vec::new();
+                for line in request.user_prompt.lines() {
+                    if let Some(rest) = line.strip_prefix("### Canon: `")
+                        && let Some(canon_ref) = rest.strip_suffix('`')
+                    {
+                        let score = self.scores.get(canon_ref).copied().unwrap_or(0.10);
+                        assessments.push(json!({
+                            "canon_path": canon_ref,
+                            "apprisal_summary": format!("Scale rationale for {canon_ref}."),
+                            "apprisal_score": score
+                        }));
+                    }
+                }
+                Ok(GenerationResponse {
+                    payload: json!({ "assessments": assessments }),
+                    resolved_model: "gemini-4-hydrogen".to_string(),
+                    latency_ms: 95,
+                    usage: TokenUsage {
+                        prompt_tokens: 410,
+                        completion_tokens: 90,
+                        reasoning_tokens: 0,
+                        total_tokens: 500,
+                    },
+                    thoughts: Vec::new(),
+                })
+            }
+        }
+
         #[test]
-        fn test_constant_size_schema_scales_across_60_candidate_canons() {
+        fn test_constant_size_schema_and_default_batching_scale_across_60_candidate_canons() {
             let mut snapshot = WorkspaceSnapshot::new().with_file("src/auth/provider.rs");
             let mut candidates = Vec::new();
-            let mut wire_items = Vec::new();
+            let mut scores = BTreeMap::new();
 
             for idx in 0..60 {
                 let canon_ref = format!(".canons/scale/canon-{idx:03}.md");
@@ -790,14 +764,9 @@ mod tests {
                 snapshot = snapshot
                     .with_canon_markdown(&md, &ParseCanonOptions::with_source_ref(&canon_ref));
                 let score = if idx % 10 == 0 { 0.85 } else { 0.10 };
-                wire_items.push(json!({
-                    "canon_path": canon_ref,
-                    "apprisal_summary": format!("Scale rationale {idx}."),
-                    "apprisal_score": score
-                }));
+                scores.insert(canon_ref.clone(), score);
                 candidates.push(canon_ref);
             }
-            wire_items.reverse();
 
             let one_canon_provider = RecordingMockProvider::with_payload(json!({
                 "assessments": [
@@ -816,26 +785,72 @@ mod tests {
             )
             .expect("1-canon execution");
 
-            let sixty_canon_provider =
-                RecordingMockProvider::with_payload(json!({ "assessments": wire_items }));
+            let sixty_canon_provider = PerBatchAppriseProvider {
+                requests: Mutex::new(Vec::new()),
+                scores: scores.clone(),
+            };
             let result = execute_apprise(
                 &AppriseOptions::default(),
                 fixture_caseload(candidates.clone()),
                 &snapshot,
                 &sixty_canon_provider,
             )
-            .expect("60-canon execution");
+            .expect("60-canon execution across default bounded batches");
 
+            let mut requests = sixty_canon_provider
+                .requests
+                .lock()
+                .expect("lock requests")
+                .clone();
+            requests.sort_by(|a, b| a.call_label.cmp(&b.call_label));
             assert_eq!(
-                one_canon_provider.recorded_requests()[0].response_schema,
-                sixty_canon_provider.recorded_requests()[0].response_schema,
-                "response_schema must remain O(1) constant-size independent of candidate canon count"
+                requests.len(),
+                3,
+                "60 canons must partition into 3 balanced batches of 20 under DEFAULT_APPRISE_BATCH_SIZE=25"
             );
+            let labels: Vec<Option<&str>> =
+                requests.iter().map(|r| r.call_label.as_deref()).collect();
+            assert_eq!(
+                labels,
+                vec![Some("batch 1/3"), Some("batch 2/3"), Some("batch 3/3")]
+            );
+            for req in &requests {
+                assert_eq!(
+                    one_canon_provider.recorded_requests()[0].response_schema,
+                    req.response_schema,
+                    "response_schema must remain O(1) constant-size independent of candidate canon count"
+                );
+            }
 
-            let apprisal = result.apprisal.expect("apprisal populated");
+            let apprisal = result.apprisal.as_ref().expect("apprisal populated");
             assert_eq!(apprisal.assessments.len(), 60);
             assert_eq!(apprisal.applicable_count(), 6);
             assert_eq!(apprisal.dismissed_count(), 54);
+
+            // Explicit `None` preserves single-turn unbounded execution
+            let unbounded_provider = PerBatchAppriseProvider {
+                requests: Mutex::new(Vec::new()),
+                scores,
+            };
+            let unbounded = execute_apprise(
+                &AppriseOptions {
+                    max_canons_per_call: None,
+                    ..AppriseOptions::default()
+                },
+                fixture_caseload(candidates),
+                &snapshot,
+                &unbounded_provider,
+            )
+            .expect("explicit unbounded 60-canon apprise");
+            assert_eq!(
+                unbounded_provider
+                    .requests
+                    .lock()
+                    .expect("lock requests")
+                    .len(),
+                1
+            );
+            assert_eq!(unbounded, result);
         }
 
         #[test]
@@ -1378,7 +1393,7 @@ Interactive UI controls MUST provide accessible labels.
         }
 
         #[test]
-        fn test_concurrent_batch_error_propagates_cleanly() {
+        fn test_concurrent_batch_error_annotates_batch_coordinates_on_timeout_and_decode_failure() {
             let mut snapshot = WorkspaceSnapshot::new().with_file("src/auth/provider.rs");
             let mut candidates = Vec::new();
             for i in 0..4 {
@@ -1401,15 +1416,47 @@ Interactive UI controls MUST provide accessible labels.
                     max_concurrent_calls: Some(2),
                     ..AppriseOptions::default()
                 },
-                caseload,
+                caseload.clone(),
                 &snapshot,
                 &failing_provider,
             )
             .expect_err("failing second batch must fail execute_apprise");
             assert!(matches!(
                 err,
-                AppriseError::Provider(ProviderError::Timeout { .. })
+                AppriseError::BatchProvider {
+                    batch_index: 2,
+                    batch_count: 2,
+                    source: ProviderError::Timeout { .. },
+                }
             ));
+            assert!(
+                err.to_string()
+                    .contains("Apprise screening failed (batch 2/2):"),
+                "expected contextual batch 2/2 prefix, got: {err}"
+            );
+
+            let malformed_provider =
+                RecordingMockProvider::with_payload(json!({ "assessments": [] }));
+            let decode_err = execute_apprise(
+                &AppriseOptions {
+                    max_canons_per_call: Some(2),
+                    max_concurrent_calls: Some(1),
+                    ..AppriseOptions::default()
+                },
+                caseload,
+                &snapshot,
+                &malformed_provider,
+            )
+            .expect_err("malformed multi-batch payload must fail");
+            assert!(matches!(
+                decode_err,
+                AppriseError::BatchProvider {
+                    batch_index: 1,
+                    batch_count: 2,
+                    source: ProviderError::SchemaDecode { .. },
+                }
+            ));
+            assert!(decode_err.to_string().contains("(batch 1/2):"));
         }
     }
 }

@@ -20,6 +20,7 @@ use crate::caseload::{
     ApprisalStatus, CanonApprisalAssessment, Caseload, CaseloadApprisal, normalize_unit_score,
 };
 use crate::discover::WorkspaceSnapshot;
+use crate::docket::format_canon_batch_label;
 use crate::provider::{
     DecisionRequest, DecisionResponse, MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL,
     ProviderError, StructuredModelProvider, partition_decision_items,
@@ -90,14 +91,16 @@ pub(super) fn execute_apprise_decisions(
         |(_, q)| q.len(),
     );
 
-    let mut prepared = Vec::with_capacity(batches.len());
-    for batch_items in batches {
+    let total_batches = batches.len();
+    let mut prepared = Vec::with_capacity(total_batches);
+    for (idx, batch_items) in batches.into_iter().enumerate() {
         let mut batch_canons = Vec::with_capacity(batch_items.len());
         let mut questions = BTreeMap::new();
         for (canon_ref, q_text) in batch_items {
             batch_canons.push(canon_ref.clone());
             questions.insert(canon_ref, q_text);
         }
+        let call_label = (total_batches > 1).then(|| format!("batch {}/{total_batches}", idx + 1));
         prepared.push((
             batch_canons,
             DecisionRequest {
@@ -105,7 +108,7 @@ pub(super) fn execute_apprise_decisions(
                 state: shared_state.clone(),
                 questions,
                 timeout_ms: options.timeout_ms,
-                call_label: None,
+                call_label,
             },
         ));
     }
@@ -135,18 +138,25 @@ fn run_apprise_decision_batches(
     workspace: &WorkspaceSnapshot,
     provider: &dyn StructuredModelProvider,
 ) -> BatchResult {
-    let worker_count = concurrency_limit.min(prepared.len()).max(1);
+    let total = prepared.len();
+    let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
         let mut combined = BTreeMap::new();
-        for (batch_canons, request) in prepared {
-            let response = provider.evaluate_decisions(request)?;
-            let batch_map = fold_apprise_decisions(
-                &response,
-                batch_canons,
-                threshold,
-                model_specifier,
-                workspace,
-            )?;
+        for (idx, (batch_canons, request)) in prepared.iter().enumerate() {
+            let batch_map = provider
+                .evaluate_decisions(request)
+                .and_then(|response| {
+                    fold_apprise_decisions(
+                        &response,
+                        batch_canons,
+                        threshold,
+                        model_specifier,
+                        workspace,
+                    )
+                })
+                .map_err(|err| AppriseError::from_batch_call(idx + 1, total, err))?;
+            let label = format_canon_batch_label(idx, total, batch_canons.len());
+            provider.record_progress(idx + 1, total, &label);
             combined.extend(batch_map);
         }
         return Ok(combined);
@@ -154,8 +164,8 @@ fn run_apprise_decision_batches(
 
     let next_index = AtomicUsize::new(0);
     let aborted = AtomicBool::new(false);
-    let outcomes: Mutex<Vec<Option<BatchResult>>> =
-        Mutex::new((0..prepared.len()).map(|_| None).collect());
+    let outcomes: Mutex<(usize, Vec<Option<BatchResult>>)> =
+        Mutex::new((0, (0..total).map(|_| None).collect()));
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -165,13 +175,12 @@ fn run_apprise_decision_batches(
                         break;
                     }
                     let idx = next_index.fetch_add(1, Ordering::SeqCst);
-                    if idx >= prepared.len() {
+                    if idx >= total {
                         break;
                     }
                     let (batch_canons, request) = &prepared[idx];
                     let res = provider
                         .evaluate_decisions(request)
-                        .map_err(AppriseError::from)
                         .and_then(|resp| {
                             fold_apprise_decisions(
                                 &resp,
@@ -180,19 +189,26 @@ fn run_apprise_decision_batches(
                                 model_specifier,
                                 workspace,
                             )
-                        });
-                    if res.is_err() {
+                        })
+                        .map_err(|err| AppriseError::from_batch_call(idx + 1, total, err));
+                    let succeeded = res.is_ok();
+                    if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
                     }
                     if let Ok(mut guard) = outcomes.lock() {
-                        guard[idx] = Some(res);
+                        guard.1[idx] = Some(res);
+                        if succeeded {
+                            guard.0 += 1;
+                            let label = format_canon_batch_label(idx, total, batch_canons.len());
+                            provider.record_progress(guard.0, total, &label);
+                        }
                     }
                 }
             });
         }
     });
 
-    let collected = outcomes.into_inner().unwrap_or_default();
+    let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut combined = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         combined.extend(slot?);
@@ -206,21 +222,23 @@ fn fold_apprise_decisions(
     threshold: f64,
     model_specifier: &str,
     workspace: &WorkspaceSnapshot,
-) -> BatchResult {
+) -> Result<BTreeMap<String, CanonApprisalAssessment>, ProviderError> {
     let mut assessments = BTreeMap::new();
     for canon_ref in batch_canons {
-        let raw_score = response.scores.get(canon_ref).copied().ok_or_else(|| {
-            AppriseError::Provider(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!("missing decision score for candidate canon `{canon_ref}`"),
-            })
-        })?;
-        let apprisal_score = normalize_unit_score(raw_score).map_err(|detail| {
-            AppriseError::Provider(ProviderError::SchemaDecode {
+        let raw_score =
+            response
+                .scores
+                .get(canon_ref)
+                .copied()
+                .ok_or_else(|| ProviderError::SchemaDecode {
+                    model_specifier: model_specifier.to_string(),
+                    message: format!("missing decision score for candidate canon `{canon_ref}`"),
+                })?;
+        let apprisal_score =
+            normalize_unit_score(raw_score).map_err(|detail| ProviderError::SchemaDecode {
                 model_specifier: model_specifier.to_string(),
                 message: format!("invalid decision score for `{canon_ref}`: {detail}"),
-            })
-        })?;
+            })?;
         let apprisal_status = ApprisalStatus::from_score(apprisal_score, threshold);
         let apprisal_summary = match apprisal_status {
             ApprisalStatus::Applicable => {

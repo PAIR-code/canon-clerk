@@ -101,7 +101,7 @@ canon-clerk validate --all-canons
 canon-clerk apprise --intent "Add a new CLI subcommand flag" src/cli
 ```
 
-Stage-specific flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--auditor-model`, `--screener-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`) and execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
+Stage-specific flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--docket-batch-size`, `--docket-concurrency`, `--apprise-threshold`, `--apprise-batch-size`, `--apprise-concurrency`, `--auditor-model`, `--screener-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`) and bounded batch/slice execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [`docket` Stage Specification](docs/architecture/nodes/docket.md), [`apprise` Stage Specification](docs/architecture/nodes/apprise.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
 
 ---
 

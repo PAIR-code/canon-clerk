@@ -70,7 +70,7 @@ pub enum DocketFormat {
 #[derive(Args, Debug, Clone, Default, PartialEq)]
 #[command(
     about = "Macro jurisdiction triage: screen candidate canons to open active cases on the docket",
-    long_about = "Macro Jurisdiction Triage stage of the Caseload DAG (Cascade Spine). Executes the guarded [intake, discover, validate, configure, docket] closure to screen candidate canons against an in-flight filing in a single structured turn before micro evidentiary triage.",
+    long_about = "Macro Jurisdiction Triage stage of the Caseload DAG (Cascade Spine). Executes the guarded [intake, discover, validate, configure, docket] closure to screen candidate canons against an in-flight filing across bounded concurrent batches before micro evidentiary triage.",
     after_help = DOCKET_EXAMPLES
 )]
 pub struct DocketArgs {
@@ -90,13 +90,13 @@ pub struct DocketArgs {
     )]
     pub docket_threshold: Option<f64>,
 
-    /// Optional maximum candidate canons evaluated per screener model call (env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
+    /// Optional maximum candidate canons evaluated per screener model call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
     #[arg(
         long = "docket-batch-size",
         visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Docket Options",
-        help = "Maximum candidate canons per screener model call (fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
+        help = "Maximum candidate canons per screener model call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
     )]
     pub docket_batch_size: Option<usize>,
 
@@ -1319,6 +1319,124 @@ index 0000000..1111111
                     ..
                 }
             )));
+        }
+
+        struct DualModeBatchProbe {
+            gen_batch_sizes: Mutex<Vec<usize>>,
+            dec_batch_sizes: Mutex<Vec<usize>>,
+        }
+
+        impl StructuredModelProvider for DualModeBatchProbe {
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                let mut cases = Vec::new();
+                for line in request.user_prompt.lines() {
+                    if let Some(rest) = line.strip_prefix("### Canon: `")
+                        && let Some(canon_ref) = rest.strip_suffix('`')
+                    {
+                        cases.push(json!({
+                            "canon_path": canon_ref,
+                            "colorability_summary": "Docketed.",
+                            "colorability_score": 0.80
+                        }));
+                    }
+                }
+                self.gen_batch_sizes.lock().expect("lock").push(cases.len());
+                Ok(GenerationResponse {
+                    payload: json!({ "cases": cases }),
+                    thoughts: Vec::new(),
+                    usage: TokenUsage::default(),
+                    latency_ms: 10,
+                    resolved_model: "gemini-4-hydrogen".to_string(),
+                })
+            }
+
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                self.dec_batch_sizes
+                    .lock()
+                    .expect("lock")
+                    .push(request.questions.len());
+                let scores = request
+                    .questions
+                    .keys()
+                    .map(|k| (k.clone(), 0.80))
+                    .collect();
+                Ok(DecisionResponse {
+                    scores,
+                    resolved_model: "jev-1.14.0".to_string(),
+                    latency_ms: 10,
+                    usage: TokenUsage::default(),
+                })
+            }
+        }
+
+        use crate::provider::{DecisionRequest, DecisionResponse};
+
+        #[test]
+        fn test_cli_batches_30_canons_by_default_on_generative_screener_and_keeps_single_turn_on_jev()
+         {
+            use crate::configure::ENV_TYPESAFE_API_KEY;
+
+            let mut ws = WorkspaceSnapshot::new().with_file("src/cli/docket.rs");
+            for i in 0..30 {
+                let canon_ref = format!(".canons/cli/rule-{i:03}.md");
+                ws = ws.with_canon_markdown(
+                    &format!("---\ntriggers:\n  - \"src/cli/**\"\n---\n# Rule {i}\n\nRule {i} MUST hold.\n"),
+                    &ParseCanonOptions::with_source_ref(&canon_ref),
+                );
+            }
+
+            let probe = DualModeBatchProbe {
+                gen_batch_sizes: Mutex::new(Vec::new()),
+                dec_batch_sizes: Mutex::new(Vec::new()),
+            };
+
+            let gen_args =
+                parse_docket_args(&["canon-clerk", "docket", "src/cli/docket.rs", "--json"]);
+            run_docket_with_snapshot_and_provider(
+                &gen_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &ws,
+                &env_with_key(),
+                &probe,
+            )
+            .expect("default generative docket on 30 canons");
+            assert_eq!(
+                *probe.gen_batch_sizes.lock().expect("lock"),
+                vec![15, 15],
+                "30 canons must partition into 2 balanced batches of 15 out of the box"
+            );
+
+            let mut jev_env = env_with_key();
+            jev_env.insert(ENV_TYPESAFE_API_KEY.to_string(), "test-jev-key".to_string());
+            let jev_args = parse_docket_args(&[
+                "canon-clerk",
+                "docket",
+                "src/cli/docket.rs",
+                "--screener-model",
+                "jev",
+                "--json",
+            ]);
+            run_docket_with_snapshot_and_provider(
+                &jev_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &ws,
+                &jev_env,
+                &probe,
+            )
+            .expect("default discriminative docket on 30 canons");
+            assert_eq!(
+                *probe.dec_batch_sizes.lock().expect("lock"),
+                vec![30],
+                "discriminative Jev must retain its 48-noul single-pass ceiling across 30 canons"
+            );
         }
     }
 

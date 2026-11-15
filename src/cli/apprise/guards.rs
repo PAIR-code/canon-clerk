@@ -16,8 +16,8 @@
 
 use super::AppriseArgs;
 use crate::apprise::{
-    DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_BATCH_SIZE,
-    ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD,
+    DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
+    ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD,
 };
 use crate::caseload::{Caseload, IntakeScope, normalize_unit_score};
 use crate::cli::CliError;
@@ -107,7 +107,7 @@ pub(super) fn resolve_apprise_batch_size(
         if val == 0 {
             return Err(CliError::usage(format!(
                 "Invalid `--apprise-batch-size` value `0`: batch size must be at least 1.\n  \
-                 Hint: Pass a positive integer (`>= 1`) via `--apprise-batch-size <COUNT>` or `{ENV_APPRISE_BATCH_SIZE}`."
+                 Hint: Pass a positive integer (`>= 1`) via `--apprise-batch-size <COUNT>` or `{ENV_APPRISE_BATCH_SIZE}` (default: `{DEFAULT_APPRISE_BATCH_SIZE}`)."
             )));
         }
         return Ok(Some(val));
@@ -118,7 +118,7 @@ pub(super) fn resolve_apprise_batch_size(
             let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
                 CliError::usage(format!(
                     "Invalid batch size `{raw_env}` in `{env_key}`: expected a positive integer (`>= 1`).\n  \
-                     Hint: Pass `--apprise-batch-size <COUNT>` or set `{ENV_APPRISE_BATCH_SIZE}=15`."
+                     Hint: Pass `--apprise-batch-size <COUNT>` or set `{ENV_APPRISE_BATCH_SIZE}={DEFAULT_APPRISE_BATCH_SIZE}`."
                 ))
             })?;
             return Ok(Some(parsed));
@@ -129,7 +129,7 @@ pub(super) fn resolve_apprise_batch_size(
         if stored_val == 0 {
             return Err(CliError::usage(format!(
                 "Invalid `appriseBatchSize` value `0` in user configuration: batch size must be at least 1.\n  \
-                 Hint: Configure a positive integer (`>= 1`) for `appriseBatchSize` or override with `--apprise-batch-size <COUNT>` / `{ENV_APPRISE_BATCH_SIZE}`."
+                 Hint: Configure a positive integer (`>= 1`) for `appriseBatchSize` or override with `--apprise-batch-size <COUNT>` / `{ENV_APPRISE_BATCH_SIZE}` (default: `{DEFAULT_APPRISE_BATCH_SIZE}`)."
             )));
         }
         return Ok(Some(stored_val));

@@ -22,6 +22,9 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 const MAX_MACRO_PATCH_CHARS: usize = 4_096;
+const MIN_MACRO_PATCH_CHARS: usize = 160;
+const FILE_EXHIBIT_FRAME_OVERHEAD_CHARS: usize = 160;
+const MIN_FILE_EXHIBITS_BUDGET_CHARS: usize = 2_048;
 
 pub(super) const DOCKET_SYSTEM_INSTRUCTION: &str = "\
 You are the Clerk of the Court for Canon Clerk performing Macro Subject-Matter Jurisdiction Triage (`docket`).
@@ -78,41 +81,34 @@ fn single_canon_case_schema() -> Value {
     })
 }
 
-/// Assembles the shared filing metadata and modified file exhibit prefix shared identically across all batch prompts.
-pub(super) fn build_docket_filing_prefix(
-    intake: &CaseloadIntake,
-    discovery: &CaseloadDiscovery,
-) -> String {
-    let mut out = String::new();
-    append_filing_metadata_section(&mut out, intake, discovery);
-    append_file_exhibits_section(&mut out, intake, discovery, MAX_MACRO_PATCH_CHARS, None);
-    out
-}
-
-/// Assembles a context-bounded filing prefix for discriminative screening models (`typesafe:jev-*`),
-/// dividing `max_state_chars` fairly across modified file patches so every modified file header and
-/// diff preview remains visible within bounded context windows.
+/// Assembles a context-bounded shared filing prefix (`max_prefix_chars`), dividing patch preview
+/// budget fairly across active modified file exhibits so every modified file header and diff preview
+/// remains visible within bounded context windows while preserving cross-batch prefix caching.
 pub(super) fn build_bounded_docket_filing_prefix(
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
-    max_state_chars: usize,
+    max_prefix_chars: usize,
 ) -> String {
     let mut out = String::new();
     append_filing_metadata_section(&mut out, intake, discovery);
-    if out.len() > max_state_chars / 2 {
-        out = truncate_chars(&out, max_state_chars / 2);
+    if out.len() > max_prefix_chars / 2 {
+        out = truncate_chars(&out, max_prefix_chars / 2);
         out.push('\n');
     }
-    let remaining = max_state_chars.saturating_sub(out.len()).max(2_048);
-    let file_count = intake.diffs.len().max(1);
-    let per_file_cap = (remaining / file_count).clamp(160, MAX_MACRO_PATCH_CHARS);
-    append_file_exhibits_section(
-        &mut out,
-        intake,
-        discovery,
-        per_file_cap,
-        Some(max_state_chars),
-    );
+    if intake.diffs.is_empty() {
+        return out;
+    }
+
+    let selected = select_active_diff_exhibits(intake, discovery);
+    let remaining = max_prefix_chars
+        .saturating_sub(out.len())
+        .max(MIN_FILE_EXHIBITS_BUDGET_CHARS);
+    let file_count = selected.len().max(1);
+    let patch_pool =
+        remaining.saturating_sub(file_count.saturating_mul(FILE_EXHIBIT_FRAME_OVERHEAD_CHARS));
+    let per_file_cap =
+        (patch_pool / file_count).clamp(MIN_MACRO_PATCH_CHARS, MAX_MACRO_PATCH_CHARS);
+    append_selected_file_exhibits(&mut out, &selected, per_file_cap, max_prefix_chars);
     out
 }
 
@@ -200,17 +196,10 @@ fn append_linked_issues(out: &mut String, issues: &[LinkedIssueContext]) {
     }
 }
 
-fn append_file_exhibits_section(
-    out: &mut String,
-    intake: &CaseloadIntake,
+fn select_active_diff_exhibits<'a>(
+    intake: &'a CaseloadIntake,
     discovery: &CaseloadDiscovery,
-    per_file_patch_cap: usize,
-    total_char_ceiling: Option<usize>,
-) {
-    if intake.diffs.is_empty() {
-        return;
-    }
-
+) -> Vec<&'a FileArtifact> {
     let active_set: BTreeSet<&str> = discovery
         .active_exhibits
         .files
@@ -222,15 +211,26 @@ fn append_file_exhibits_section(
         .keys()
         .any(|path| active_set.contains(path.as_str()));
 
-    let selected: Vec<&FileArtifact> = intake
+    intake
         .diffs
         .values()
         .filter(|art| !has_active_diff_overlap || active_set.contains(art.path.as_str()))
-        .collect();
+        .collect()
+}
+
+fn append_selected_file_exhibits(
+    out: &mut String,
+    selected: &[&FileArtifact],
+    per_file_patch_cap: usize,
+    total_char_ceiling: usize,
+) {
+    if selected.is_empty() {
+        return;
+    }
 
     let _ = writeln!(out, "## Modified File Exhibits ({})\n", selected.len());
     for artifact in selected {
-        let include_patch = total_char_ceiling.is_none_or(|cap| out.len() < cap);
+        let include_patch = out.len() < total_char_ceiling;
         append_single_file_exhibit(out, artifact, per_file_patch_cap, include_patch);
     }
 }
