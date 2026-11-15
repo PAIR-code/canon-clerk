@@ -104,6 +104,17 @@ pub(super) fn resolve_case_candidate_exhibits(
     unique.into_iter().collect()
 }
 
+/// Renders a single candidate exhibit (`file_path` or metadata plane) into a standalone Markdown block.
+pub(super) fn render_candidate_exhibit(
+    exhibit_id: &str,
+    intake: &CaseloadIntake,
+    workspace: &WorkspaceSnapshot,
+) -> String {
+    let mut out = String::with_capacity(512);
+    append_candidate_exhibit_section(&mut out, exhibit_id, intake, workspace);
+    out
+}
+
 /// Appends the formatted representation of a single candidate exhibit (`file_path` or metadata plane).
 pub(super) fn append_candidate_exhibit_section(
     out: &mut String,
@@ -240,7 +251,7 @@ pub(super) fn non_blank(text: Option<&str>) -> Option<&str> {
     text.map(str::trim).filter(|s| !s.is_empty())
 }
 
-fn truncate_chars(text: &str, max_chars: usize, label: &str) -> String {
+pub(super) fn truncate_chars(text: &str, max_chars: usize, label: &str) -> String {
     let mut char_indices = text.char_indices();
     match char_indices.nth(max_chars) {
         Some((byte_idx, _)) => format!(

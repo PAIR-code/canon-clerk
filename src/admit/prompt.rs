@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Per-case prompt assembly and reason-first JSON Schema builder for `admit` (`docs/architecture/nodes/admit.md` §4).
+//! Per-case and per-slice prompt assembly and reason-first JSON Schema builder for `admit` (`docs/architecture/nodes/admit.md` §4).
 
-use super::exhibits::{append_candidate_exhibit_section, non_blank};
+use super::exhibits::{append_candidate_exhibit_section, non_blank, truncate_chars};
 use crate::canon::Canon;
 use crate::caseload::{CaseloadDiscovery, CaseloadIntake};
 use crate::discover::WorkspaceSnapshot;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
+
+const MAX_OVERVIEW_PR_BODY_CHARS: usize = 1_024;
+const MAX_OVERVIEW_ISSUE_BODY_CHARS: usize = 512;
+const MAX_OVERVIEW_LINKED_ISSUES: usize = 5;
+const MAX_OVERVIEW_MANIFEST_PATHS: usize = 200;
 
 pub(super) const ADMIT_SYSTEM_INSTRUCTION: &str = "\
 You are the Clerk of the Court for Canon Clerk performing Micro Evidentiary Admissibility Triage (`admit`).
@@ -112,7 +118,32 @@ pub(super) fn build_admit_case_user_prompt(
     }
 
     append_governing_canon_section(&mut out, canon_ref, canon);
+    append_evaluation_directive_and_identifiers(&mut out, canon_ref, candidate_exhibits);
 
+    out
+}
+
+/// Assembles an isolated micro-triage user prompt for one slice of a multi-slice active case,
+/// starting from the canon-invariant `shared_slice_prefix` (`## Filing Overview` + `## Candidate Exhibits`)
+/// so sibling canons sharing identical exhibit sets retain byte-identical prefixes per slice.
+pub(super) fn build_admit_slice_user_prompt(
+    shared_slice_prefix: &str,
+    canon_ref: &str,
+    canon: &Canon,
+    slice_exhibits: &[String],
+) -> String {
+    let mut out = String::with_capacity(shared_slice_prefix.len() + 1280);
+    out.push_str(shared_slice_prefix);
+    append_governing_canon_section(&mut out, canon_ref, canon);
+    append_evaluation_directive_and_identifiers(&mut out, canon_ref, slice_exhibits);
+    out
+}
+
+fn append_evaluation_directive_and_identifiers(
+    out: &mut String,
+    canon_ref: &str,
+    required_exhibits: &[String],
+) {
     let _ = writeln!(
         out,
         "## Evaluation Directive for `{canon_ref}`\n\n\
@@ -129,13 +160,11 @@ pub(super) fn build_admit_case_user_prompt(
     let _ = writeln!(
         out,
         "## Required `file_path` Identifiers ({})",
-        candidate_exhibits.len()
+        required_exhibits.len()
     );
-    for (idx, exhibit_id) in candidate_exhibits.iter().enumerate() {
+    for (idx, exhibit_id) in required_exhibits.iter().enumerate() {
         let _ = writeln!(out, "{}. `{exhibit_id}`", idx + 1);
     }
-
-    out
 }
 
 pub(super) fn append_filing_overview(
@@ -166,6 +195,82 @@ pub(super) fn append_filing_overview(
         let _ = writeln!(out, "- Design Intent: {intent}");
     }
     out.push('\n');
+}
+
+/// Builds the global `## Filing Overview` shared across every slice of a multi-slice case,
+/// preserving `PR Title`, bounded `PR Body` and `Linked Issues` metadata context, and the
+/// numbered manifest of all filing file paths in scope so contingent commit-type preconditions
+/// and companion-artifact omission checks behave identically across disjoint slices.
+pub(super) fn build_sliced_filing_overview(
+    intake: &CaseloadIntake,
+    discovery: &CaseloadDiscovery,
+    max_overview_chars: usize,
+) -> String {
+    let mut out = String::with_capacity(1536);
+    append_filing_overview(&mut out, intake, discovery);
+
+    if let Some(body) = non_blank(intake.pr_body.as_deref()) {
+        let bounded = truncate_chars(body, MAX_OVERVIEW_PR_BODY_CHARS, "PR body overview");
+        let _ = writeln!(out, "### Pull Request Description Context\n{bounded}\n");
+    }
+
+    if let Some(issues) = intake.linked_issues.as_deref().filter(|v| !v.is_empty()) {
+        let _ = writeln!(out, "### Linked Issues Context");
+        for issue in issues.iter().take(MAX_OVERVIEW_LINKED_ISSUES) {
+            let title = non_blank(issue.title.as_deref()).unwrap_or("(untitled)");
+            let _ = writeln!(out, "- Issue #{}: {title}", issue.number);
+            if let Some(body) = non_blank(issue.body.as_deref()) {
+                let bounded = truncate_chars(body, MAX_OVERVIEW_ISSUE_BODY_CHARS, "issue overview");
+                let _ = writeln!(out, "  {bounded}");
+            }
+        }
+        if issues.len() > MAX_OVERVIEW_LINKED_ISSUES {
+            let _ = writeln!(
+                out,
+                "- ... (+{} additional linked issue(s))",
+                issues.len() - MAX_OVERVIEW_LINKED_ISSUES
+            );
+        }
+        out.push('\n');
+    }
+
+    let filing_paths: BTreeSet<&str> = if !intake.diffs.is_empty() {
+        intake.diffs.keys().map(String::as_str).collect()
+    } else {
+        discovery.target_files.iter().map(String::as_str).collect()
+    };
+    if !filing_paths.is_empty() {
+        let _ = writeln!(
+            out,
+            "### All Filing File Paths in Scope ({})",
+            filing_paths.len()
+        );
+        for (idx, path) in filing_paths
+            .iter()
+            .take(MAX_OVERVIEW_MANIFEST_PATHS)
+            .enumerate()
+        {
+            let _ = writeln!(out, "{}. `{path}`", idx + 1);
+        }
+        if filing_paths.len() > MAX_OVERVIEW_MANIFEST_PATHS {
+            let _ = writeln!(
+                out,
+                "... (+{} additional filing file path(s))",
+                filing_paths.len() - MAX_OVERVIEW_MANIFEST_PATHS
+            );
+        }
+        out.push('\n');
+    }
+
+    let cap = max_overview_chars.max(256);
+    if out.len() > cap
+        && let Some((byte_idx, _)) = out.char_indices().nth(cap)
+    {
+        out.truncate(byte_idx);
+        out.push_str("\n... [filing overview truncated]\n\n");
+    }
+
+    out
 }
 
 pub(super) fn append_governing_canon_section(out: &mut String, canon_ref: &str, canon: &Canon) {

@@ -18,9 +18,12 @@ mod decision;
 mod decode;
 mod exhibits;
 mod prompt;
+mod slices;
 
+use crate::canon::Canon;
 use crate::caseload::{
-    Caseload, CaseloadEvidence, ExhibitAssessment, TYPESAFE_PROVIDER, normalize_admissibility_score,
+    Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake, ExhibitAssessment,
+    TYPESAFE_PROVIDER, normalize_admissibility_score,
 };
 use crate::configure::model_provider;
 use crate::discover::WorkspaceSnapshot;
@@ -31,7 +34,9 @@ use crate::provider::{
 };
 use decode::decode_case_exhibits;
 use exhibits::resolve_case_candidate_exhibits;
-use prompt::{ADMIT_SYSTEM_INSTRUCTION, build_admit_case_user_prompt, build_admit_schema};
+use prompt::{ADMIT_SYSTEM_INSTRUCTION, build_admit_schema};
+use slices::ExhibitSlicePlanner;
+pub use slices::{MAX_ADMIT_EXHIBITS_PER_SLICE, MAX_ADMIT_SLICE_CHARS};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
@@ -89,8 +94,35 @@ pub enum AdmitError {
     MissingConfig,
     /// An active canon listed in `.docket.active_docket` is absent from the workspace snapshot.
     MissingActiveCanon { canon_ref: String },
+    /// Per-case or per-slice screening call failed with contextual `canon_ref` and 1-based slice coordinates.
+    CaseProvider {
+        /// Governing canon identifier whose micro-triage call failed.
+        canon_ref: String,
+        /// 1-based slice index (`1..=slice_count`).
+        slice_index: usize,
+        /// Total slices prepared for this case (`>= 1`).
+        slice_count: usize,
+        /// Underlying provider timeout, transport, HTTP, block, or schema decoding error.
+        source: ProviderError,
+    },
     /// Structured model provider returned a transport, HTTP, block, or schema decoding error.
     Provider(ProviderError),
+}
+
+impl AdmitError {
+    pub(super) fn from_case_call(
+        canon_ref: &str,
+        slice_index: usize,
+        slice_count: usize,
+        source: ProviderError,
+    ) -> Self {
+        Self::CaseProvider {
+            canon_ref: canon_ref.to_string(),
+            slice_index,
+            slice_count,
+            source,
+        }
+    }
 }
 
 impl fmt::Display for AdmitError {
@@ -139,6 +171,24 @@ impl fmt::Display for AdmitError {
                 "Active docket canon `{canon_ref}` referenced in `.docket.active_docket` was not found in the workspace snapshot.\n  \
                  Hint: Re-run `canon-clerk docket` or `canon-clerk admit` against the current workspace."
             ),
+            Self::CaseProvider {
+                canon_ref,
+                slice_index,
+                slice_count,
+                source,
+            } => {
+                if *slice_count > 1 {
+                    write!(
+                        f,
+                        "Admit screening failed for canon `{canon_ref}` (slice {slice_index}/{slice_count}): {source}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Admit screening failed for canon `{canon_ref}`: {source}"
+                    )
+                }
+            }
             Self::Provider(err) => write!(f, "{err}"),
         }
     }
@@ -154,6 +204,9 @@ impl From<ProviderError> for AdmitError {
 
 struct PreparedCaseCall {
     canon_ref: String,
+    slice_index: usize,
+    slice_count: usize,
+    progress_label: String,
     candidate_exhibits: Vec<String>,
     request: GenerationRequest,
 }
@@ -234,34 +287,14 @@ pub fn execute_admit(
             provider,
         );
     }
-    let response_schema = build_admit_schema();
-
-    let mut prepared_calls = Vec::with_capacity(non_empty_cases.len());
-    for (canon_ref, canon, candidate_exhibits) in non_empty_cases {
-        let user_prompt = build_admit_case_user_prompt(
-            &canon_ref,
-            canon,
-            &candidate_exhibits,
-            intake,
-            discovery,
-            workspace,
-        );
-        let request = GenerationRequest {
-            model_specifier: config.screener_model.clone(),
-            system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
-            user_prompt,
-            response_schema: response_schema.clone(),
-            thinking_level: None,
-            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
-            timeout_ms: options.timeout_ms,
-            call_label: Some(canon_ref.clone()),
-        };
-        prepared_calls.push(PreparedCaseCall {
-            canon_ref,
-            candidate_exhibits,
-            request,
-        });
-    }
+    let prepared_calls = prepare_generative_case_calls(
+        non_empty_cases,
+        &config.screener_model,
+        options.timeout_ms,
+        intake,
+        discovery,
+        workspace,
+    );
 
     let concurrency_limit = options
         .max_concurrent_calls
@@ -278,7 +311,81 @@ pub fn execute_admit(
     Ok(caseload.with_evidence(CaseloadEvidence::from_exhibits(all_exhibits)))
 }
 
+fn prepare_generative_case_calls(
+    non_empty_cases: Vec<(String, &Canon, Vec<String>)>,
+    screener_model: &str,
+    timeout_ms: u64,
+    intake: &CaseloadIntake,
+    discovery: &CaseloadDiscovery,
+    workspace: &WorkspaceSnapshot,
+) -> Vec<PreparedCaseCall> {
+    let response_schema = build_admit_schema();
+    let mut planner = ExhibitSlicePlanner::new(
+        intake,
+        discovery,
+        workspace,
+        MAX_ADMIT_SLICE_CHARS,
+        MAX_ADMIT_EXHIBITS_PER_SLICE,
+    );
+    let mut prepared_calls = Vec::with_capacity(non_empty_cases.len());
+
+    for (canon_ref, canon, candidate_exhibits) in non_empty_cases {
+        let slices = planner.build_case_slices(&canon_ref, canon, candidate_exhibits);
+        let slice_count = slices.len();
+        for (idx, slice) in slices.into_iter().enumerate() {
+            let slice_index = idx + 1;
+            let call_label = if slice_count > 1 {
+                format!("{canon_ref} [slice {slice_index}/{slice_count}]")
+            } else {
+                canon_ref.clone()
+            };
+            let request = GenerationRequest {
+                model_specifier: screener_model.to_string(),
+                system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
+                user_prompt: slice.user_prompt,
+                response_schema: response_schema.clone(),
+                thinking_level: None,
+                reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
+                timeout_ms,
+                call_label: Some(call_label.clone()),
+            };
+            prepared_calls.push(PreparedCaseCall {
+                canon_ref: canon_ref.clone(),
+                slice_index,
+                slice_count,
+                progress_label: call_label,
+                candidate_exhibits: slice.candidate_exhibits,
+                request,
+            });
+        }
+    }
+
+    prepared_calls
+}
+
 type CaseResult = Result<(String, Vec<ExhibitAssessment>), AdmitError>;
+
+fn evaluate_single_case_call(
+    call: &PreparedCaseCall,
+    threshold: f64,
+    model_specifier: &str,
+    provider: &dyn StructuredModelProvider,
+) -> CaseResult {
+    let response = provider.generate_structured(&call.request).map_err(|err| {
+        AdmitError::from_case_call(&call.canon_ref, call.slice_index, call.slice_count, err)
+    })?;
+    let decoded = decode_case_exhibits(
+        &response.payload,
+        &call.canon_ref,
+        &call.candidate_exhibits,
+        threshold,
+        model_specifier,
+    )
+    .map_err(|err| {
+        AdmitError::from_case_call(&call.canon_ref, call.slice_index, call.slice_count, err)
+    })?;
+    Ok((call.canon_ref.clone(), decoded))
+}
 
 fn execute_case_calls(
     prepared_calls: &[PreparedCaseCall],
@@ -290,18 +397,15 @@ fn execute_case_calls(
     let total = prepared_calls.len();
     let worker_count = concurrency_limit.min(total).max(1);
     if worker_count == 1 {
-        let mut combined = BTreeMap::new();
+        let mut combined: BTreeMap<String, Vec<ExhibitAssessment>> = BTreeMap::new();
         for (idx, call) in prepared_calls.iter().enumerate() {
-            let response = provider.generate_structured(&call.request)?;
-            let decoded = decode_case_exhibits(
-                &response.payload,
-                &call.canon_ref,
-                &call.candidate_exhibits,
-                threshold,
-                model_specifier,
-            )?;
-            provider.record_progress(idx + 1, total, &call.canon_ref);
-            combined.insert(call.canon_ref.clone(), decoded);
+            let (canon_ref, decoded) =
+                evaluate_single_case_call(call, threshold, model_specifier, provider)?;
+            provider.record_progress(idx + 1, total, &call.progress_label);
+            combined.entry(canon_ref).or_default().extend(decoded);
+        }
+        for items in combined.values_mut() {
+            items.sort_by(|a, b| a.file_path.cmp(&b.file_path));
         }
         return Ok(combined);
     }
@@ -323,19 +427,7 @@ fn execute_case_calls(
                         break;
                     }
                     let call = &prepared_calls[idx];
-                    let res = provider
-                        .generate_structured(&call.request)
-                        .map_err(Into::into)
-                        .and_then(|response| {
-                            let decoded = decode_case_exhibits(
-                                &response.payload,
-                                &call.canon_ref,
-                                &call.candidate_exhibits,
-                                threshold,
-                                model_specifier,
-                            )?;
-                            Ok((call.canon_ref.clone(), decoded))
-                        });
+                    let res = evaluate_single_case_call(call, threshold, model_specifier, provider);
                     let succeeded = res.is_ok();
                     if !succeeded {
                         aborted.store(true, Ordering::Relaxed);
@@ -344,7 +436,7 @@ fn execute_case_calls(
                         guard.1[idx] = Some(res);
                         if succeeded {
                             guard.0 += 1;
-                            provider.record_progress(guard.0, total, &call.canon_ref);
+                            provider.record_progress(guard.0, total, &call.progress_label);
                         }
                     }
                 }
@@ -353,16 +445,20 @@ fn execute_case_calls(
     });
 
     let (_, collected) = outcomes.into_inner().unwrap_or_default();
-    let mut combined = BTreeMap::new();
+    let mut combined: BTreeMap<String, Vec<ExhibitAssessment>> = BTreeMap::new();
     for slot in collected.into_iter().flatten() {
         let (canon_ref, items) = slot?;
-        combined.insert(canon_ref, items);
+        combined.entry(canon_ref).or_default().extend(items);
+    }
+    for items in combined.values_mut() {
+        items.sort_by(|a, b| a.file_path.cmp(&b.file_path));
     }
     Ok(combined)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::prompt::build_admit_case_user_prompt;
     use super::*;
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
@@ -790,8 +886,16 @@ mod tests {
                 .expect_err("incomplete exhibit response must fail");
             assert!(matches!(
                 err,
-                AdmitError::Provider(ProviderError::SchemaDecode { .. })
+                AdmitError::CaseProvider {
+                    ref canon_ref,
+                    slice_index: 1,
+                    slice_count: 1,
+                    source: ProviderError::SchemaDecode { .. },
+                } if canon_ref == ".canons/cli/cli-flags-kebab-case.md"
             ));
+            let rendered_err = err.to_string();
+            assert!(rendered_err.contains(".canons/cli/cli-flags-kebab-case.md"));
+            assert!(!rendered_err.contains("(slice "));
         }
 
         #[test]
@@ -977,8 +1081,326 @@ mod tests {
             .expect_err("unknown segment inside comma-grouped file_path must fail");
             assert!(matches!(
                 err,
-                AdmitError::Provider(ProviderError::SchemaDecode { .. })
+                AdmitError::CaseProvider {
+                    source: ProviderError::SchemaDecode { .. },
+                    ..
+                }
             ));
+        }
+    }
+
+    mod exhibit_slicing_and_map_reduce_folding {
+        use super::*;
+        use crate::caseload::AdmissibilityStatus;
+        use std::time::Duration;
+
+        fn multi_file_docketed_fixture(file_count: usize) -> (WorkspaceSnapshot, Caseload) {
+            let cli_ref = ".canons/cli/cli-flags-kebab-case.md";
+            let readme_ref = ".canons/readme/feat-updates-readme.md";
+            let ws = sample_workspace();
+
+            let mut diffs = BTreeMap::new();
+            let mut target_files = Vec::new();
+            let mut joined = vec![
+                "linked_issues".to_string(),
+                "pr_body".to_string(),
+                "pr_title".to_string(),
+            ];
+            for idx in 0..file_count {
+                let path = format!("src/cli/subcmd_{idx:02}.rs");
+                diffs.insert(
+                    path.clone(),
+                    FileArtifact {
+                        path: path.clone(),
+                        status: FileChangeStatus::Added,
+                        previous_path: None,
+                        lines_added: 18,
+                        lines_deleted: 0,
+                        patch: Some(format!(
+                            "@@ -0,0 +1,18 @@\n+#[arg(long = \"flag-{idx:02}\")]\n+pub struct Args{idx:02} {{}}\n"
+                        )),
+                        patch_omission_reason: None,
+                        content: None,
+                        content_omission_reason: None,
+                    },
+                );
+                target_files.push(path.clone());
+                joined.push(path);
+            }
+            joined.sort();
+
+            let mut triggers_join = BTreeMap::new();
+            triggers_join.insert(cli_ref.to_string(), joined.clone());
+            triggers_join.insert(readme_ref.to_string(), joined);
+
+            let mut cases = BTreeMap::new();
+            for canon_ref in [cli_ref, readme_ref] {
+                cases.insert(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "Active in docket.".to_string(),
+                        colorability_score: 0.92,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                );
+            }
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    pr_title: Some("feat(cli): add 20 subcommand modules".to_string()),
+                    pr_body: Some("Closes #313".to_string()),
+                    diffs,
+                    linked_issues: Some(vec![LinkedIssueContext {
+                        number: 313,
+                        title: Some("Slice admit exhibits".to_string()),
+                        body: Some("Prevent 60s screener timeouts.".to_string()),
+                        url: None,
+                    }]),
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    target_files: target_files.clone(),
+                    candidate_canons: vec![cli_ref.to_string(), readme_ref.to_string()],
+                    active_exhibits: ActiveExhibits {
+                        files: target_files,
+                        pr_title: Some(true),
+                        pr_body: Some(true),
+                        commit_messages: None,
+                        linked_issues: Some(true),
+                    },
+                    triggers_join,
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default())
+                .with_docket(CaseloadDocket::from_cases(cases));
+
+            (ws, caseload)
+        }
+
+        fn parse_required_identifiers(prompt: &str) -> Vec<String> {
+            let marker = "## Required `file_path` Identifiers (";
+            let start = prompt.find(marker).expect("required identifiers marker");
+            prompt[start..]
+                .lines()
+                .skip(1)
+                .filter_map(|line| {
+                    let tick_start = line.find('`')? + 1;
+                    let tick_end = line[tick_start..].find('`')? + tick_start;
+                    Some(line[tick_start..tick_end].to_string())
+                })
+                .collect()
+        }
+
+        struct OutOfOrderSliceProvider {
+            requests: Mutex<Vec<GenerationRequest>>,
+            progress: Mutex<Vec<String>>,
+            fail_slice_needle: Option<String>,
+        }
+
+        impl OutOfOrderSliceProvider {
+            fn new(fail_slice_needle: Option<&str>) -> Self {
+                Self {
+                    requests: Mutex::new(Vec::new()),
+                    progress: Mutex::new(Vec::new()),
+                    fail_slice_needle: fail_slice_needle.map(ToString::to_string),
+                }
+            }
+        }
+
+        impl StructuredModelProvider for OutOfOrderSliceProvider {
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                self.requests
+                    .lock()
+                    .expect("lock requests")
+                    .push(request.clone());
+
+                if let Some(ref needle) = self.fail_slice_needle
+                    && request
+                        .call_label
+                        .as_deref()
+                        .unwrap_or_default()
+                        .contains(needle)
+                {
+                    return Err(ProviderError::Timeout {
+                        model_specifier: request.model_specifier.clone(),
+                        timeout_ms: request.timeout_ms,
+                    });
+                }
+
+                // Delay slice 1 so slice 2 finishes first under concurrent execution.
+                if request
+                    .call_label
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("[slice 1/")
+                {
+                    std::thread::sleep(Duration::from_millis(15));
+                }
+
+                let required_ids = parse_required_identifiers(&request.user_prompt);
+                let items: Vec<Value> = required_ids
+                    .into_iter()
+                    .map(|id| {
+                        let score = if id.ends_with("_00.rs") || id.ends_with("_18.rs") {
+                            0.93
+                        } else {
+                            0.11
+                        };
+                        json!({
+                            "file_path": id,
+                            "admissibility_summary": format!("Evaluated `{id}` in isolated slice."),
+                            "admissibility_score": score
+                        })
+                    })
+                    .collect();
+
+                Ok(GenerationResponse {
+                    payload: json!({ "exhibits": items }),
+                    thoughts: Vec::new(),
+                    usage: TokenUsage {
+                        prompt_tokens: 400,
+                        completion_tokens: 120,
+                        reasoning_tokens: 20,
+                        total_tokens: 540,
+                    },
+                    latency_ms: 35,
+                    resolved_model: "gemini-4-hydrogen".to_string(),
+                })
+            }
+
+            fn record_progress(&self, completed: usize, total: usize, label: &str) {
+                self.progress
+                    .lock()
+                    .expect("lock progress")
+                    .push(format!("{completed}/{total}:{label}"));
+            }
+        }
+
+        fn assert_folded_case_evidence(evidence: &CaseloadEvidence, canon_ref: &str) {
+            let items = &evidence.exhibits[canon_ref];
+            assert_eq!(items.len(), 23);
+            let sorted_paths: Vec<&str> = items.iter().map(|e| e.file_path.as_str()).collect();
+            let mut check = sorted_paths.clone();
+            check.sort_unstable();
+            assert_eq!(sorted_paths, check);
+
+            let admitted: Vec<&str> = evidence
+                .admitted_exhibits_for(canon_ref)
+                .into_iter()
+                .map(|e| e.file_path.as_str())
+                .collect();
+            assert_eq!(
+                admitted,
+                vec!["src/cli/subcmd_00.rs", "src/cli/subcmd_18.rs"]
+            );
+            assert!(items.iter().any(|e| {
+                e.file_path == "pr_title" && e.admissibility_status == AdmissibilityStatus::Excluded
+            }));
+        }
+
+        #[test]
+        fn test_concurrent_out_of_order_slices_fold_into_byte_identical_evidence_and_record_slice_labels()
+         {
+            let (ws, caseload) = multi_file_docketed_fixture(20);
+
+            let sequential_provider = OutOfOrderSliceProvider::new(None);
+            let seq_out = execute_admit(
+                &AdmitOptions {
+                    max_concurrent_calls: Some(1),
+                    ..AdmitOptions::default()
+                },
+                caseload.clone(),
+                &ws,
+                &sequential_provider,
+            )
+            .expect("sequential sliced admit");
+
+            let concurrent_provider = OutOfOrderSliceProvider::new(None);
+            let conc_out = execute_admit(
+                &AdmitOptions {
+                    max_concurrent_calls: Some(4),
+                    ..AdmitOptions::default()
+                },
+                caseload,
+                &ws,
+                &concurrent_provider,
+            )
+            .expect("concurrent out-of-order sliced admit");
+
+            let seq_json =
+                serde_json::to_string(&seq_out.evidence).expect("serialize sequential evidence");
+            let conc_json =
+                serde_json::to_string(&conc_out.evidence).expect("serialize concurrent evidence");
+            assert_eq!(
+                seq_json, conc_json,
+                "out-of-order slice completions must fold into byte-for-byte identical .evidence"
+            );
+
+            let evidence = conc_out.evidence.expect("evidence populated");
+            assert_eq!(evidence.exhibits.len(), 2);
+            assert_folded_case_evidence(&evidence, ".canons/cli/cli-flags-kebab-case.md");
+            assert_folded_case_evidence(&evidence, ".canons/readme/feat-updates-readme.md");
+
+            let captured = sequential_provider.requests.lock().expect("requests");
+            assert_eq!(captured.len(), 4);
+            let labels: Vec<&str> = captured
+                .iter()
+                .filter_map(|r| r.call_label.as_deref())
+                .collect();
+            assert_eq!(
+                labels,
+                vec![
+                    ".canons/cli/cli-flags-kebab-case.md [slice 1/2]",
+                    ".canons/cli/cli-flags-kebab-case.md [slice 2/2]",
+                    ".canons/readme/feat-updates-readme.md [slice 1/2]",
+                    ".canons/readme/feat-updates-readme.md [slice 2/2]",
+                ]
+            );
+        }
+
+        #[test]
+        fn test_multi_slice_timeout_error_annotates_canon_ref_and_slice_coordinates() {
+            let (ws, caseload) = multi_file_docketed_fixture(20);
+            let failing_provider = OutOfOrderSliceProvider::new(Some(
+                ".canons/cli/cli-flags-kebab-case.md [slice 2/2]",
+            ));
+
+            let err = execute_admit(
+                &AdmitOptions {
+                    max_concurrent_calls: Some(2),
+                    timeout_ms: 60_000,
+                    ..AdmitOptions::default()
+                },
+                caseload,
+                &ws,
+                &failing_provider,
+            )
+            .expect_err("slice 2 timeout must fail fast");
+
+            assert!(matches!(
+                err,
+                AdmitError::CaseProvider {
+                    ref canon_ref,
+                    slice_index: 2,
+                    slice_count: 2,
+                    source: ProviderError::Timeout { timeout_ms: 60_000, .. },
+                } if canon_ref == ".canons/cli/cli-flags-kebab-case.md"
+            ));
+            let rendered = err.to_string();
+            assert!(
+                rendered.contains(".canons/cli/cli-flags-kebab-case.md"),
+                "got: {rendered}"
+            );
+            assert!(rendered.contains("(slice 2/2)"), "got: {rendered}");
+            assert!(
+                rendered.contains("timed out after 60000ms"),
+                "got: {rendered}"
+            );
+            assert!(rendered.contains("Hint:"), "got: {rendered}");
         }
     }
 }
