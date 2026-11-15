@@ -55,8 +55,6 @@ pub struct ProviderCapability {
     pub env_var: &'static str,
     /// Canonical `~/.config/canon-clerk/config.json` key path (`"providers.<slug>.apiKey"`).
     pub config_key_path: &'static str,
-    /// Optional legacy alias key under `config.json` `providers.<alias>` (e.g. `"gemini"` for `"google"`).
-    pub config_provider_alias: Option<&'static str>,
     /// Default canonical `screener_model` specifier when this provider is selected for screening.
     pub default_screener_model: Option<&'static str>,
     /// Default canonical generative `auditor_model` specifier when this provider is selected for auditing.
@@ -77,7 +75,6 @@ pub const PROVIDER_CAPABILITIES: &[ProviderCapability] = &[
         cli_flag: "--typesafe-api-key",
         env_var: ENV_TYPESAFE_API_KEY,
         config_key_path: "providers.typesafe.apiKey",
-        config_provider_alias: None,
         default_screener_model: Some(DEFAULT_JEV_MODEL),
         default_auditor_model: None,
     },
@@ -89,7 +86,6 @@ pub const PROVIDER_CAPABILITIES: &[ProviderCapability] = &[
         cli_flag: "--gemini-api-key",
         env_var: ENV_GEMINI_API_KEY,
         config_key_path: "providers.google.apiKey",
-        config_provider_alias: Some("gemini"),
         default_screener_model: Some(DEFAULT_SCREENER_MODEL),
         default_auditor_model: Some(DEFAULT_AUDITOR_MODEL),
     },
@@ -137,7 +133,7 @@ fn resolve_provider_credential<'a>(
         options
             .stored_config
             .as_ref()
-            .and_then(|s| s.provider_api_key(cap.slug, cap.config_provider_alias))
+            .and_then(|s| s.provider_api_key(cap.slug))
     })
 }
 
@@ -452,7 +448,7 @@ mod tests {
             // 2. TypeSafe in config.json + Gemini via CLI flag
             let mut providers = BTreeMap::new();
             providers.insert(
-                "typesafe".to_string(),
+                TYPESAFE_PROVIDER.to_string(),
                 StoredProviderConfig {
                     api_key: Some("stored-ts-key".to_string()),
                 },
@@ -504,7 +500,6 @@ mod tests {
                 cli_flag: "--acme-api-key",
                 env_var: "ACME_API_KEY",
                 config_key_path: "providers.acme.apiKey",
-                config_provider_alias: None,
                 default_screener_model: Some("acme:swift-1"),
                 default_auditor_model: Some("acme:reasoner-1"),
             },
