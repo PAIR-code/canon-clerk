@@ -14,17 +14,16 @@
 
 //! Structured JSON response decoder and completeness/uniqueness validators for `admit`.
 
-use super::AdmitError;
 use crate::caseload::{AdmissibilityStatus, ExhibitAssessment, normalize_admissibility_score};
 use crate::provider::ProviderError;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> AdmitError {
-    AdmitError::Provider(ProviderError::SchemaDecode {
+fn schema_decode_error(model_specifier: &str, message: impl Into<String>) -> ProviderError {
+    ProviderError::SchemaDecode {
         model_specifier: model_specifier.to_string(),
         message: message.into(),
-    })
+    }
 }
 
 pub(super) fn decode_case_exhibits(
@@ -33,7 +32,7 @@ pub(super) fn decode_case_exhibits(
     candidate_exhibits: &[String],
     threshold: f64,
     model_specifier: &str,
-) -> Result<Vec<ExhibitAssessment>, AdmitError> {
+) -> Result<Vec<ExhibitAssessment>, ProviderError> {
     let exhibits_arr = payload
         .get("exhibits")
         .and_then(Value::as_array)
@@ -156,7 +155,7 @@ fn decode_exhibit_entry(
     positional_expected: Option<&str>,
     threshold: f64,
     model: &str,
-) -> Result<Vec<ExhibitAssessment>, AdmitError> {
+) -> Result<Vec<ExhibitAssessment>, ProviderError> {
     let entry = raw_item.as_object().ok_or_else(|| {
         schema_decode_error(
             model,
