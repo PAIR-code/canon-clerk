@@ -139,8 +139,7 @@ pub use provider::{
     GeminiModelProvider, GenerationRequest, GenerationResponse, MultiModelProvider, ProviderError,
     RetryNotification, RetryObserver, RetryPolicy, SharedHttpRequester, StructuredModelProvider,
     TokenUsage, TypesafeDecisionProvider, build_decisions_url, build_generate_content_url,
-    classify_gemini_decisions_http_error, classify_gemini_http_error,
-    extract_advised_retry_delay_ms, extract_gemini_error_detail, is_hard_quota_exhausted,
+    classify_gemini_decisions_http_error, classify_gemini_http_error, extract_gemini_error_detail,
     strip_provider_prefix,
 };
 pub use telemetry::{

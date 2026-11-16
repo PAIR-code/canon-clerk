@@ -510,6 +510,22 @@ mod tests {
             assert!(err.use_stderr());
             assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
         }
+
+        #[test]
+        fn test_non_heuristic_subcommands_reject_retry_flags_as_unknown_arguments() {
+            for sub in ["probe", "configure", "intake", "discover", "validate"] {
+                for flag in ["--max-retries", "--max-backoff-ms"] {
+                    let err = Cli::try_parse_from(["canon-clerk", sub, flag, "1"])
+                        .expect_err("non-heuristic subcommand must reject retry flags");
+                    assert!(err.use_stderr());
+                    assert_eq!(
+                        err.kind(),
+                        clap::error::ErrorKind::UnknownArgument,
+                        "`canon-clerk {sub} {flag} 1` must be rejected with usage error"
+                    );
+                }
+            }
+        }
     }
 
     mod help_and_metadata {
@@ -542,6 +558,33 @@ mod tests {
                 help.contains("intake"),
                 "help screen must document intake subcommand"
             );
+        }
+
+        #[test]
+        fn test_heuristic_subcommand_help_documents_provider_transport_and_retry_flags() {
+            let mut root = Cli::command();
+            for subcommand in ["apprise", "docket", "admit", "vet", "audit"] {
+                let sub = root
+                    .find_subcommand_mut(subcommand)
+                    .expect("heuristic subcommand registered");
+                let help_text = sub.render_long_help().to_string();
+                assert!(
+                    help_text.contains("Provider Transport & Retry:"),
+                    "`{subcommand} --help` must group retry flags under Provider Transport & Retry"
+                );
+                assert!(
+                    help_text.contains("--max-retries <COUNT>")
+                        && help_text.contains("CANON_CLERK_MAX_RETRIES")
+                        && help_text.contains("0 disables retries"),
+                    "`{subcommand} --help` must clearly document --max-retries semantics"
+                );
+                assert!(
+                    help_text.contains("--max-backoff-ms <MS>")
+                        && help_text.contains("CANON_CLERK_MAX_BACKOFF_MS")
+                        && help_text.contains("90000"),
+                    "`{subcommand} --help` must clearly document --max-backoff-ms semantics"
+                );
+            }
         }
 
         #[test]

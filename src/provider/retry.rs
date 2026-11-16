@@ -14,7 +14,7 @@
 
 //! Retry policy, quota guardrails, and failure classification (`docs/architecture/transport.md` §4).
 
-pub use super::retry_delay::extract_advised_retry_delay_ms;
+use super::retry_delay::extract_advised_retry_delay_ms;
 use crate::provider::ProviderError;
 
 /// Default maximum retry attempts per heuristic provider call (`2` retries = up to `3` total attempts).
@@ -157,7 +157,7 @@ pub(crate) fn compute_exponential_backoff_ms(
 }
 
 /// Returns `true` when an upstream `429` payload signals non-recoverable hard/daily/billing quota exhaustion.
-pub fn is_hard_quota_exhausted(body: &str) -> bool {
+fn is_hard_quota_exhausted(body: &str) -> bool {
     let compact: String = body
         .chars()
         .filter(|c| !c.is_ascii_whitespace())

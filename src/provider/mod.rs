@@ -18,8 +18,8 @@ pub mod decision;
 pub mod gemini;
 pub mod gemini_decisions;
 mod gemini_wire;
-pub mod requester;
-pub mod retry;
+mod requester;
+mod retry;
 mod retry_delay;
 mod runtime;
 mod typesafe;
@@ -51,7 +51,6 @@ pub use requester::{RetryObserver, SharedHttpRequester};
 pub use retry::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
     ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryNotification, RetryPolicy,
-    extract_advised_retry_delay_ms, is_hard_quota_exhausted,
 };
 pub use typesafe::DEFAULT_TYPESAFE_BASE_URL;
 pub(crate) use typesafe::{

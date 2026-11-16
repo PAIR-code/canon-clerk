@@ -20,7 +20,7 @@ use serde_json::Value;
 /// 1. HTTP `Retry-After` response header (delta-seconds or RFC 9110 HTTP-date).
 /// 2. Structured JSON metadata (`google.rpc.RetryInfo.retryDelay`, `retry_after`, `retry_after_ms`).
 /// 3. Embedded diagnostic message hints (`"Please retry in <N>s"`, `"retry after <N>ms"`, etc.).
-pub fn extract_advised_retry_delay_ms(
+pub(super) fn extract_advised_retry_delay_ms(
     retry_after_header: Option<&str>,
     body: &str,
     now_unix_ms: u64,
