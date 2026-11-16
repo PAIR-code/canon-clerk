@@ -62,11 +62,11 @@ Comprehensive specifications for each of the ten imperative verb stages:
 | `validate` | Branch A (Filing) | AST linter | 0 tokens, ~12ms | 0 syntax errors; fails fast (exit 1) on error |
 | `configure` | Branch B (Env) | Config loader | 0 tokens, <5ms | Valid config; fails fast (exit 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Reachable; fails fast (exit 2) on unreachable |
-| `docket` | Macro Triage Spine | Screener AI | ~400ms, low \$ | `colorability_score >= 0.5`; exits 0 if empty |
-| `admit` | Contentious Track | Screener AI | ~600ms, low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `vet` | Contentious Track | Screener AI (`Jev` / `Flash-Lite`) | ~200ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
-| `audit` | Contentious Track | Generative Auditor (`Pro`) | ~2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
-| `apprise` | Apprisal Track | Screener AI | ~400ms, low \$ | Determines prospective governing canons; exits 0 |
+| `docket` | Macro Triage Spine | Screener AI (`gemini-decision-1` / `jev-latest`) | ~200–400ms, 0–low \$ | `colorability_score >= 0.5`; exits 0 if empty |
+| `admit` | Contentious Track | Screener AI (`gemini-decision-1` / `jev-latest`) | ~250–600ms, 0–low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `vet` | Contentious Track | Screener AI (`gemini-decision-1` / `jev-latest`) | ~200ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Contentious Track | Generative Auditor (`gemini-4-carbon`) | ~2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `apprise` | Apprisal Track | Screener AI (`gemini-decision-1` / `jev-latest`) | ~200–400ms, 0–low \$ | Determines prospective governing canons; exits 0 |
 
 ---
 

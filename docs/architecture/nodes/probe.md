@@ -57,8 +57,8 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Endpoint Resolution:** Reads configured `screener_model` and `auditor_model` from `caseload.config` and dispatches each tier to its corresponding provider endpoint adapter (`google:*` or `typesafe:*`).
-2. **Provider-Native Ping Assembly:** Constructs minimal bounded-reasoning probe requests—a lightweight `:generateContent` ping for `google:*` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring an explicit auditor `--thinking-level` / `--reasoning-budget` override) and a minimal single-question `/v1/systemone` decision ping for `typesafe:*` endpoints—to verify authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
+1. **Endpoint & Credential Resolution:** Reads configured `screener_model` and `auditor_model` from `caseload.config`, resolves credentials by provider namespace (`google:*` $\to$ `GEMINI_API_KEY`, `typesafe:*` $\to$ `TYPESAFE_API_KEY`), and dispatches each tier's network probe by model capability.
+2. **Capability-Specific Ping Assembly:** Constructs minimal probe requests matched to each endpoint's wire protocol—a single-question `/v1beta/decisions` `noul` decision ping for `google:gemini-decision-*`, a single-question `/v1/systemone` `noul` decision ping for `typesafe:jev-*`, and a lightweight `:generateContent` ping for generative `google:*` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring an explicit auditor `--thinking-level` / `--reasoning-budget` override)—to verify authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
 3. **Concurrent Multi-Provider Probe:** Concurrently sends probe requests to both configured tiers in parallel:
    - Measures roundtrip response latency in milliseconds (`latency_ms`) and captures the concrete resolved model identifier returned by each provider.
    - Verifies model availability and provider credential validity across both homogeneous and mixed-provider tier pairings.
@@ -83,8 +83,8 @@ canon-clerk probe --json
 
 ### CLI Flags & Options
 - `--timeout <ms>`: Request timeout in milliseconds (default: `5000ms`).
-- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier (`gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`).
-- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom auditor model specifier (`gemini-*`, `google:gemini-*`).
+- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier (`gemini-decision-1`, `gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`).
+- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom generative auditor model specifier (generative `gemini-*`, `google:gemini-*`).
 - `--thinking-level <minimal|low|medium|high>` (fallback env: `CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier (mutually exclusive with `--reasoning-budget`).
 - `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens (mutually exclusive with `--thinking-level`).
 - `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.

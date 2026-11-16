@@ -64,7 +64,7 @@ flowchart TD
         S4 -.-> S4_Probe["probe<br/>(Live provider connectivity & latency test)"]
     end
 
-    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · gemini-4-hydrogen)"]
+    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · Screener AI)"]
         S_Apprise["apprise<br/>(Statutory Notice: Candidate canons → Applicable Canons)"]
     end
 
@@ -122,8 +122,8 @@ flowchart TD
 - **Configuration & Probe:** Resolves runtime environment and API credentials, normalizes model specifiers, and implements the diagnostic `probe` provider health check.
 
 ### The Driven Adapter (The Model Provider Boundary)
-- **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (`google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) evaluate against normalized model specifiers, system instructions, prompts, and JSON Schemas.
-- **Discriminative Decision Model Port:** Encapsulates discriminative classifier endpoints (`typesafe:jev-*`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus prima facie compliance vetting in `vet`.
+- **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (generative `google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) evaluate against normalized model specifiers, system instructions, prompts, and JSON Schemas.
+- **Discriminative Decision Model Port:** Encapsulates discriminative classifier endpoints (`google:gemini-decision-*` via `/v1beta/decisions` and `typesafe:jev-*` via `/v1/systemone`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus prima facie compliance vetting in `vet`, under per-model context and question-batching budget profiles.
 - **Deterministic Reason-First Constrained Decoding:** Enforces deterministic generation (`temperature: 0.0`) paired with strict JSON Schema output enforcement (`application/json`) on generative tiers so rationale scratchpad fields precede numeric scores across generative calls.
 - **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps discrete qualitative thinking tiers (`thinking_level`: `minimal`, `low`, `medium`, `high`) and optional token ceilings (`reasoning_budget`) to mutually exclusive provider-native extended thinking controls—enforcing bounded minimal/zero screener reasoning (`thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models and `thinkingBudget: 0` on Gemini 2.5/Flash-Lite models) while applying bounded `"LOW"` thinking (`includeThoughts: true`) by default on `audit` trials—separates intermediate reasoning thought summaries from decoded payloads, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for immediate per-call and stage-summary emission on the out-of-band Telemetry Event Stream.
 - **Credential Encapsulation & Actionable Error Classification:** Secret API keys are bound to concrete provider adapters at construction rather than carried on evaluation requests or `Caseload` envelopes, and upstream HTTP or transport failures (`401`/`403`, `404`, `429`, `5xx`, context token limits, timeouts, safety blocks, or malformed responses) are classified into actionable diagnostics with provider-specific remediation hints.
@@ -194,11 +194,11 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 | `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
 | `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
-| `apprise` | Apprisal Track | Screener AI (`Hydrogen` / `Jev`) | ~200–400ms, low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
-| `docket` | Cascade Spine | Screener AI (`Hydrogen` / `Jev`) | ~200–400ms, low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
-| `admit` | Cascade Spine | Screener AI (`Hydrogen` / `Jev`) | ~300–600ms, low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `vet` | Cascade Spine | Screener AI (`Jev` / `Hydrogen`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
-| `audit` | Cascade Spine | Generative Auditor (`Carbon`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `apprise` | Apprisal Track | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
+| `docket` | Cascade Spine | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
+| `admit` | Cascade Spine | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~200–600ms, 0–low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `vet` | Cascade Spine | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Cascade Spine | Generative Auditor (`gemini-4-carbon`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -220,13 +220,13 @@ flowchart TD
     S4 --> G5{"docket Gate<br/>(Colorability ≥ 0.5)"}
     
     G5 -- "Dismissed (< 0.5)" --> SievePrune1["Pruned"]
-    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~400ms · gemini-4-hydrogen)"]
+    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~200ms · gemini-decision-1)"]
     
     C3 --> G6{"admit Gate<br/>(Admissibility ≥ 0.5)"}
     G6 -- "Inadmissible (< 0.5)" --> SievePrune2["Pruned"]
-    G6 -- "Admitted (≥ 0.5)" --> E5["3 Active Cases · 5 Admitted Exhibits<br/>(~600ms · Screener AI)"]
+    G6 -- "Admitted (≥ 0.5)" --> E5["3 Active Cases · 5 Admitted Exhibits<br/>(~250ms · Screener AI)"]
     
-    E5 --> G6_Vet{"vet Gate<br/>(Prima Facie ≥ 0.8 · Jev)"}
+    E5 --> G6_Vet{"vet Gate<br/>(Prima Facie ≥ 0.8 · Discriminative Screener)"}
     G6_Vet -- "Vetted (≥ 0.8)" --> VettedPass["2 Vetted Cases<br/>(0 output tokens · Folded into Verdict)"]
     G6_Vet -- "Contested (< 0.8)" --> G7["audit Adjudication<br/>(1 Contested Trial · gemini-4-carbon)"]
     VettedPass --> FinalVerdict["Final Verdict & Decree<br/>(~1.8s · Targeted Reasoning)"]
@@ -237,11 +237,11 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
 | **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`jev-latest` / `gemini-4-hydrogen`) | ~1,200 tokens | ~350ms |
-| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`jev-latest` / `gemini-4-hydrogen`) | ~1,800 tokens | ~500ms |
-| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`jev-latest`) | 0 output tokens | ~200ms |
+| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | 0 output tokens (~1,200 input) | ~200ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | 0 output tokens (~1,800 input) | ~250ms |
+| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`gemini-decision-1` / `jev-latest`) | 0 output tokens | ~200ms |
 | **`audit` Adjudication** | 1 contested trial | 2 exhibits | `gemini-4-carbon` | ~1,500 tokens | ~1,200ms |
-| **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.5s** |
+| **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.0s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
 
