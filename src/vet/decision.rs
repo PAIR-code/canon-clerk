@@ -35,8 +35,8 @@ against the Governing Canon Statute's Normative Invariant (`What`) and Declared 
   (when `state` presents an exhibit slice, `## All Admitted File Exhibit Paths in Filing` lists all files admitted across the filing).\n\
 - If a prima facie violation satisfies the verifiable conditions of a declared `Exception`, treat the case as compliant.\n\n\
 Question: Do the Admitted Exhibits in `state` comply with the Governing Canon Statute with zero unexcused violations?\n\
-- Answer YES only if the Admitted Exhibits comply (or satisfy a declared `Exception`) and require zero violation annotations.\n\
-- Answer NO if any unexcused statute violation or missing required companion update is present.";
+- Answer YES if the Admitted Exhibits comply, satisfy a declared `Exception`, OR if the canon's governed construct is absent/untouched in these exhibits (zero violation annotations required).\n\
+- Answer NO ONLY if an unexcused statute violation or missing required companion update is actually present in the exhibits.";
 
 pub(super) fn max_discriminative_state_chars(screener_model: &str) -> usize {
     DecisionBudgetProfile::for_model(screener_model)

@@ -229,14 +229,13 @@ fn build_exhibit_noul_question(canon_ref: &str, canon: &Canon, exhibit_id: &str)
          Target Candidate Exhibit: `{exhibit_id}`\n\n\
          Question: Is Candidate Exhibit `{exhibit_id}` admissible as direct, relevant evidence for \
          adjudicating `{canon_ref}`?\n\
-         - Answer YES if `{exhibit_id}` itself belongs to the governed stratum and defines, \
-           implements, modifies, or directly evidences an instance of this canon's governed \
-           construct (including compliant code, or exhibits evidencing a triggering change when \
-           a required companion file is omitted).\n\
-         - Answer NO if `{exhibit_id}` is prose Markdown documentation (`*.md`) on a source-code \
-           canon, belongs to an orthogonal architectural layer, is an irrelevant PR metadata plane \
-           on a self-contained source-code rule, or when a commit-type precondition (such as `fix:` \
-           vs `feat:`) is unmet.",
+         - Answer YES if `{exhibit_id}`'s diff hunks or contents directly introduce, modify, or \
+           evidence an instance of this canon's specific governed construct (including compliant code, \
+           or exhibits evidencing a triggering feature change when a required companion update is omitted).\n\
+         - Answer NO if `{exhibit_id}`'s diff hunks do not touch the specific construct governed \
+           by this canon (even if the file belongs to the same subsystem or directory), or if \
+           `{exhibit_id}` is prose Markdown documentation (`*.md`) on a source-code canon, belongs \
+           to an unrelated architectural layer, or when a commit-type precondition is unmet.",
         canon.title,
         canon.invariant.trim()
     )
