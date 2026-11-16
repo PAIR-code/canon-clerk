@@ -18,6 +18,9 @@ pub mod decision;
 pub mod gemini;
 pub mod gemini_decisions;
 mod gemini_wire;
+mod requester;
+mod retry;
+mod retry_delay;
 mod runtime;
 mod typesafe;
 
@@ -44,6 +47,11 @@ pub(crate) use gemini_decisions::{
     is_decision_context_limit_error, post_gemini_decisions_json,
 };
 pub(crate) use gemini_wire::{GeminiThinkingConfig, build_probe_thinking_config};
+pub use requester::{RetryObserver, SharedHttpRequester};
+pub use retry::{
+    DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
+    ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryNotification, RetryPolicy,
+};
 pub use typesafe::DEFAULT_TYPESAFE_BASE_URL;
 pub(crate) use typesafe::{
     TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
@@ -282,8 +290,17 @@ pub trait StructuredModelProvider: Send + Sync {
         request: &GenerationRequest,
     ) -> Result<GenerationResponse, ProviderError>;
 
+    /// Executes a single structured generation turn while streaming real-time retry/cooldown notifications.
+    fn generate_structured_observed(
+        &self,
+        request: &GenerationRequest,
+        _on_retry: Option<RetryObserver<'_>>,
+    ) -> Result<GenerationResponse, ProviderError> {
+        self.generate_structured(request)
+    }
+
     /// Evaluates batched binary `Noul` questions against a shared `state` when backed by a
-    /// discriminative decision model (such as `typesafe:jev-*`).
+    /// discriminative decision model (such as `google:gemini-decision-*` or `typesafe:jev-*`).
     fn evaluate_decisions(
         &self,
         request: &DecisionRequest,
@@ -295,9 +312,24 @@ pub trait StructuredModelProvider: Send + Sync {
         })
     }
 
+    /// Evaluates batched binary `Noul` questions while streaming real-time retry/cooldown notifications.
+    fn evaluate_decisions_observed(
+        &self,
+        request: &DecisionRequest,
+        _on_retry: Option<RetryObserver<'_>>,
+    ) -> Result<DecisionResponse, ProviderError> {
+        self.evaluate_decisions(request)
+    }
+
     /// Reports completion of an incremental stage work unit (`completed` of `total`) when
     /// observed by an active telemetry decorator.
     fn record_progress(&self, _completed: usize, _total: usize, _label: &str) {}
+
+    /// Resets cooperative stage-abort state prior to or following a bounded concurrent stage run.
+    fn clear_abort(&self) {}
+
+    /// Signals cooperative stage abort so cooldown- or backoff-parked tasks wake immediately.
+    fn notify_abort(&self) {}
 }
 
 #[cfg(test)]

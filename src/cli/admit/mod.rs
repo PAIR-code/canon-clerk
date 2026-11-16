@@ -20,7 +20,9 @@ mod stages;
 
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+};
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::docket::guards::{
     resolve_docket_batch_size, resolve_docket_concurrency, resolve_docket_threshold,
@@ -153,6 +155,9 @@ pub struct AdmitArgs {
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
+    #[command(flatten)]
+    pub transport: ProviderTransportArgs,
+
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
         long = "format",
@@ -263,6 +268,7 @@ fn run_admit_core(
     let docket_threshold = resolve_docket_threshold(args.docket_threshold, env)?;
     let admit_threshold = resolve_admit_threshold(args.admit_threshold, env)?;
     let _validated_docket_batch = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
+    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
     let _validated_docket_conc = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
     let _validated_admit_conc = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
 

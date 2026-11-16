@@ -18,7 +18,7 @@ use super::clock::{NoopTelemetryClock, TelemetryClock};
 use super::{NoopTelemetrySink, PipelineStage, TelemetryEvent, TelemetrySink};
 use crate::provider::{
     DecisionRequest, DecisionResponse, GenerationRequest, GenerationResponse, ProviderError,
-    StructuredModelProvider, TokenUsage,
+    RetryNotification, RetryObserver, StructuredModelProvider, TokenUsage,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -234,8 +234,29 @@ impl<'a> StageScope<'a> {
         );
     }
 
+    /// Emits a `TelemetryEvent::ProviderRetry` event immediately prior to a cooldown or backoff sleep.
+    pub fn record_retry(&self, notice: &RetryNotification) {
+        if !self.enabled {
+            return;
+        }
+        self.sink.emit(&TelemetryEvent::ProviderRetry {
+            stage: self.stage,
+            label: notice
+                .label
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            host: notice.host.clone(),
+            attempt: notice.attempt,
+            max_retries: notice.max_retries,
+            wait_ms: notice.wait_ms,
+            reason: notice.reason.clone(),
+        });
+    }
+
     /// Wraps a [`StructuredModelProvider`] so all generation and decision turns automatically emit
-    /// `Thought` events and accumulate `TokenUsage` on this stage scope.
+    /// `Thought`, `ProviderRetry`, and `ModelCall` events and accumulate `TokenUsage` on this stage scope.
     pub fn instrument_provider<'p>(
         &'p self,
         inner: &'p dyn StructuredModelProvider,
@@ -262,7 +283,26 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
         &self,
         request: &GenerationRequest,
     ) -> Result<GenerationResponse, ProviderError> {
-        let response = self.inner.generate_structured(request)?;
+        self.generate_structured_observed(request, None)
+    }
+
+    fn generate_structured_observed(
+        &self,
+        request: &GenerationRequest,
+        on_retry: Option<RetryObserver<'_>>,
+    ) -> Result<GenerationResponse, ProviderError> {
+        let cb = |notice: &RetryNotification| {
+            self.scope.record_retry(notice);
+            if let Some(outer) = on_retry {
+                outer(notice);
+            }
+        };
+        let observer: Option<RetryObserver<'_>> = if self.scope.enabled || on_retry.is_some() {
+            Some(&cb)
+        } else {
+            None
+        };
+        let response = self.inner.generate_structured_observed(request, observer)?;
         self.scope
             .record_generation(request.call_label.as_deref(), &response);
         Ok(response)
@@ -272,7 +312,26 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
         &self,
         request: &DecisionRequest,
     ) -> Result<DecisionResponse, ProviderError> {
-        let response = self.inner.evaluate_decisions(request)?;
+        self.evaluate_decisions_observed(request, None)
+    }
+
+    fn evaluate_decisions_observed(
+        &self,
+        request: &DecisionRequest,
+        on_retry: Option<RetryObserver<'_>>,
+    ) -> Result<DecisionResponse, ProviderError> {
+        let cb = |notice: &RetryNotification| {
+            self.scope.record_retry(notice);
+            if let Some(outer) = on_retry {
+                outer(notice);
+            }
+        };
+        let observer: Option<RetryObserver<'_>> = if self.scope.enabled || on_retry.is_some() {
+            Some(&cb)
+        } else {
+            None
+        };
+        let response = self.inner.evaluate_decisions_observed(request, observer)?;
         self.scope
             .record_decision(request.call_label.as_deref(), &response);
         Ok(response)
@@ -280,6 +339,14 @@ impl StructuredModelProvider for InstrumentedModelProvider<'_> {
 
     fn record_progress(&self, completed: usize, total: usize, label: &str) {
         self.scope.record_progress(completed, total, label);
+    }
+
+    fn clear_abort(&self) {
+        self.inner.clear_abort();
+    }
+
+    fn notify_abort(&self) {
+        self.inner.notify_abort();
     }
 }
 

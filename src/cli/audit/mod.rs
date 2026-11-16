@@ -20,7 +20,9 @@ mod stages;
 
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVerdict, VerdictStatus};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+};
 use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
     resolve_closure_validate,
@@ -191,6 +193,9 @@ pub struct AuditArgs {
 
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
+
+    #[command(flatten)]
+    pub transport: ProviderTransportArgs,
 
     /// Output format (`stylish`, `json`, `compact`, or `github`; defaults to `github` when `GITHUB_ACTIONS=true`).
     #[arg(

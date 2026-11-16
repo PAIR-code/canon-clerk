@@ -122,6 +122,14 @@ pub struct StoredConfig {
     /// Optional default maximum concurrent in-flight `audit` trial calls (`auditConcurrency` or `audit_concurrency`).
     #[serde(alias = "auditConcurrency", alias = "audit_concurrency")]
     pub audit_concurrency: Option<usize>,
+
+    /// Optional default maximum retry attempts per heuristic provider call (`maxRetries` or `max_retries`).
+    #[serde(alias = "maxRetries", alias = "max_retries")]
+    pub max_retries: Option<u32>,
+
+    /// Optional default maximum per-wait rate-limit cooldown or retry backoff in milliseconds (`maxBackoffMs` or `max_backoff_ms`).
+    #[serde(alias = "maxBackoffMs", alias = "max_backoff_ms")]
+    pub max_backoff_ms: Option<u64>,
 }
 
 impl StoredConfig {

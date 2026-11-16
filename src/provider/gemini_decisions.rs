@@ -16,9 +16,9 @@
 
 use super::decision::{DecisionModelProvider, DecisionRequest, DecisionResponse};
 use super::gemini::{DEFAULT_GEMINI_BASE_URL, extract_gemini_error_detail, strip_provider_prefix};
-use super::runtime::{
-    HttpAuth, JsonPostRequest, RawHttpOutcome, build_pooled_http_client, execute_json_post,
-};
+use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester};
+use super::retry::RetryPolicy;
+use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
 use crate::caseload::DEFAULT_PROVIDER;
 use crate::configure::{ENV_GEMINI_API_KEY, is_gemini_decision_model_name};
 use crate::provider::{ProviderError, TokenUsage};
@@ -164,12 +164,27 @@ pub(crate) fn post_gemini_decisions_json<T: Serialize>(
     execute_json_post(client, &req, payload)
 }
 
+fn build_gemini_decisions_http_status_error(
+    status_code: u16,
+    model_specifier: &str,
+    body: &str,
+) -> ProviderError {
+    let detail = extract_gemini_error_detail(body);
+    let diagnostic = classify_gemini_decisions_http_error(status_code, model_specifier, &detail);
+    ProviderError::HttpStatus {
+        status_code,
+        model_specifier: model_specifier.to_string(),
+        detail,
+        diagnostic,
+    }
+}
+
 /// Live Google Gemini Decisions HTTPS adapter implementing [`DecisionModelProvider`] (`POST /v1beta/decisions`).
 #[derive(Clone)]
 pub struct GeminiDecisionProvider {
     api_key: String,
     base_url: String,
-    client: reqwest::Client,
+    requester: SharedHttpRequester,
 }
 
 impl fmt::Debug for GeminiDecisionProvider {
@@ -194,7 +209,7 @@ impl GeminiDecisionProvider {
 
     /// Constructs a [`GeminiDecisionProvider`] with a custom base URL (for loopback tests or proxies).
     pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
-        Self::with_client_and_base_url(api_key, build_pooled_http_client(), base_url)
+        Self::with_requester_and_base_url(api_key, SharedHttpRequester::default(), base_url)
     }
 
     /// Constructs a [`GeminiDecisionProvider`] with a caller-supplied reusable [`reqwest::Client`].
@@ -208,10 +223,28 @@ impl GeminiDecisionProvider {
         client: reqwest::Client,
         base_url: impl Into<String>,
     ) -> Self {
+        Self::with_requester_and_base_url(
+            api_key,
+            SharedHttpRequester::with_client(client, RetryPolicy::default()),
+            base_url,
+        )
+    }
+
+    /// Constructs a [`GeminiDecisionProvider`] sharing an explicit [`SharedHttpRequester`].
+    pub fn with_requester(api_key: impl Into<String>, requester: SharedHttpRequester) -> Self {
+        Self::with_requester_and_base_url(api_key, requester, DEFAULT_GEMINI_BASE_URL)
+    }
+
+    /// Constructs a [`GeminiDecisionProvider`] sharing an explicit [`SharedHttpRequester`] and custom base URL.
+    pub fn with_requester_and_base_url(
+        api_key: impl Into<String>,
+        requester: SharedHttpRequester,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             api_key: api_key.into(),
             base_url: base_url.into(),
-            client,
+            requester,
         }
     }
 
@@ -222,7 +255,12 @@ impl GeminiDecisionProvider {
 
     /// Returns a reference to the reusable, pooled [`reqwest::Client`].
     pub fn client(&self) -> &reqwest::Client {
-        &self.client
+        self.requester.client()
+    }
+
+    /// Returns a reference to the shared [`SharedHttpRequester`].
+    pub fn requester(&self) -> &SharedHttpRequester {
+        &self.requester
     }
 }
 
@@ -230,6 +268,14 @@ impl DecisionModelProvider for GeminiDecisionProvider {
     fn evaluate_decisions(
         &self,
         request: &DecisionRequest,
+    ) -> Result<DecisionResponse, ProviderError> {
+        self.evaluate_decisions_observed(request, None)
+    }
+
+    fn evaluate_decisions_observed(
+        &self,
+        request: &DecisionRequest,
+        on_retry: Option<RetryObserver<'_>>,
     ) -> Result<DecisionResponse, ProviderError> {
         if request.timeout_ms == 0 {
             return Err(ProviderError::InvalidTimeout { timeout_ms: 0 });
@@ -263,31 +309,19 @@ impl DecisionModelProvider for GeminiDecisionProvider {
             input: request.state.clone(),
             questions: wire_questions,
         };
-
-        let outcome = post_gemini_decisions_json(
-            &self.client,
-            &self.base_url,
-            &request.model_specifier,
-            api_key,
-            request.timeout_ms,
+        let url = build_decisions_url(&self.base_url);
+        let outcome = self.requester.execute_json_post(
+            &RetryablePostRequest {
+                url: &url,
+                model_specifier: &request.model_specifier,
+                auth: HttpAuth::GoogApiKey(api_key),
+                timeout_ms: request.timeout_ms,
+                call_label: request.call_label.as_deref(),
+                format_http_error: build_gemini_decisions_http_status_error,
+            },
             &payload,
-        )
-        .map_err(|(err, _latency)| err)?;
-
-        if !(200..300).contains(&outcome.status_code) {
-            let detail = extract_gemini_error_detail(&outcome.body);
-            let diagnostic = classify_gemini_decisions_http_error(
-                outcome.status_code,
-                &request.model_specifier,
-                &detail,
-            );
-            return Err(ProviderError::HttpStatus {
-                status_code: outcome.status_code,
-                model_specifier: request.model_specifier.clone(),
-                detail,
-                diagnostic,
-            });
-        }
+            on_retry,
+        )?;
 
         decode_gemini_decisions_response(
             &outcome.body,
@@ -408,6 +442,7 @@ fn decode_gemini_decisions_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::build_pooled_http_client;
 
     mod wire_decoding_and_error_classification {
         use super::*;

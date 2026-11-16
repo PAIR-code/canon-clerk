@@ -15,9 +15,9 @@
 //! Google Gemini v1beta REST adapter implementing [`StructuredModelProvider`] (`POST /v1beta/models/{model}:generateContent`).
 
 use super::gemini_wire::{build_request_payload, decode_generate_response};
-use super::runtime::{
-    HttpAuth, JsonPostRequest, RawHttpOutcome, build_pooled_http_client, execute_json_post,
-};
+use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester};
+use super::retry::RetryPolicy;
+use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
 use crate::caseload::DEFAULT_PROVIDER;
 use crate::configure::{ENV_GEMINI_API_KEY, is_gemini_decision_model_name};
 use crate::provider::{
@@ -155,12 +155,27 @@ pub(crate) fn post_gemini_json<T: Serialize>(
     execute_json_post(client, &req, payload)
 }
 
+fn build_gemini_http_status_error(
+    status_code: u16,
+    model_specifier: &str,
+    body: &str,
+) -> ProviderError {
+    let detail = extract_gemini_error_detail(body);
+    let diagnostic = classify_gemini_http_error(status_code, model_specifier, &detail);
+    ProviderError::HttpStatus {
+        status_code,
+        model_specifier: model_specifier.to_string(),
+        detail,
+        diagnostic,
+    }
+}
+
 /// Google Gemini v1beta HTTPS adapter implementing [`StructuredModelProvider`].
 #[derive(Clone)]
 pub struct GeminiModelProvider {
     api_key: String,
     base_url: String,
-    client: reqwest::Client,
+    requester: SharedHttpRequester,
 }
 
 impl fmt::Debug for GeminiModelProvider {
@@ -185,7 +200,7 @@ impl GeminiModelProvider {
 
     /// Constructs a [`GeminiModelProvider`] with a custom base URL (useful for local proxies or test harnesses).
     pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
-        Self::with_client_and_base_url(api_key, build_pooled_http_client(), base_url)
+        Self::with_requester_and_base_url(api_key, SharedHttpRequester::default(), base_url)
     }
 
     /// Constructs a [`GeminiModelProvider`] with a caller-supplied reusable [`reqwest::Client`].
@@ -199,10 +214,28 @@ impl GeminiModelProvider {
         client: reqwest::Client,
         base_url: impl Into<String>,
     ) -> Self {
+        Self::with_requester_and_base_url(
+            api_key,
+            SharedHttpRequester::with_client(client, RetryPolicy::default()),
+            base_url,
+        )
+    }
+
+    /// Constructs a [`GeminiModelProvider`] sharing an explicit [`SharedHttpRequester`].
+    pub fn with_requester(api_key: impl Into<String>, requester: SharedHttpRequester) -> Self {
+        Self::with_requester_and_base_url(api_key, requester, DEFAULT_GEMINI_BASE_URL)
+    }
+
+    /// Constructs a [`GeminiModelProvider`] sharing an explicit [`SharedHttpRequester`] and custom base URL.
+    pub fn with_requester_and_base_url(
+        api_key: impl Into<String>,
+        requester: SharedHttpRequester,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             api_key: api_key.into(),
             base_url: base_url.into(),
-            client,
+            requester,
         }
     }
 
@@ -213,7 +246,12 @@ impl GeminiModelProvider {
 
     /// Returns a reference to the reusable, pooled [`reqwest::Client`].
     pub fn client(&self) -> &reqwest::Client {
-        &self.client
+        self.requester.client()
+    }
+
+    /// Returns a reference to the shared [`SharedHttpRequester`].
+    pub fn requester(&self) -> &SharedHttpRequester {
+        &self.requester
     }
 }
 
@@ -221,6 +259,14 @@ impl StructuredModelProvider for GeminiModelProvider {
     fn generate_structured(
         &self,
         request: &GenerationRequest,
+    ) -> Result<GenerationResponse, ProviderError> {
+        self.generate_structured_observed(request, None)
+    }
+
+    fn generate_structured_observed(
+        &self,
+        request: &GenerationRequest,
+        on_retry: Option<RetryObserver<'_>>,
     ) -> Result<GenerationResponse, ProviderError> {
         let api_key = self.api_key.trim();
         if api_key.is_empty() {
@@ -234,15 +280,19 @@ impl StructuredModelProvider for GeminiModelProvider {
 
         let specifier = validate_gemini_model_specifier(&request.model_specifier)?;
         let payload = build_request_payload(request);
-        let outcome = post_gemini_json(
-            &self.client,
-            &self.base_url,
-            specifier,
-            api_key,
-            request.timeout_ms,
+        let url = build_generate_content_url(&self.base_url, specifier);
+        let outcome = self.requester.execute_json_post(
+            &RetryablePostRequest {
+                url: &url,
+                model_specifier: specifier,
+                auth: HttpAuth::GoogApiKey(api_key),
+                timeout_ms: request.timeout_ms,
+                call_label: request.call_label.as_deref(),
+                format_http_error: build_gemini_http_status_error,
+            },
             &payload,
-        )
-        .map_err(|(err, _latency)| err)?;
+            on_retry,
+        )?;
 
         decode_generate_response(
             outcome.status_code,
@@ -250,6 +300,14 @@ impl StructuredModelProvider for GeminiModelProvider {
             specifier,
             outcome.latency_ms,
         )
+    }
+
+    fn clear_abort(&self) {
+        self.requester.clear_abort();
+    }
+
+    fn notify_abort(&self) {
+        self.requester.notify_abort();
     }
 }
 
@@ -813,12 +871,19 @@ mod tests {
             let addr = listener.local_addr().expect("local addr");
 
             let server = thread::spawn(move || {
-                let (_stream, _) = listener.accept().expect("accept client");
-                thread::sleep(Duration::from_millis(350));
+                let mut held = Vec::new();
+                for _ in 0..3 {
+                    let (stream, _) = listener.accept().expect("accept client");
+                    held.push(stream);
+                }
+                thread::sleep(Duration::from_millis(120));
             });
 
-            let provider = GeminiModelProvider::with_base_url(
+            let requester =
+                SharedHttpRequester::new(RetryPolicy::new(2, 500).with_base_and_slot_ms(10, 5));
+            let provider = GeminiModelProvider::with_requester_and_base_url(
                 "synthetic-loopback-key",
+                requester,
                 format!("http://{addr}/v1beta"),
             );
             let mut req = sample_request(None);
@@ -1123,20 +1188,27 @@ mod tests {
             let addr = listener.local_addr().expect("local addr");
 
             let server = thread::spawn(move || {
-                let (mut stream, _) = listener.accept().expect("accept client");
-                let _raw_req = read_complete_http_request(&mut stream);
-                // Flush 200 OK headers and an incomplete chunked body, then stall past timeout_ms.
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n{\"can\r\n",
-                    )
-                    .expect("write partial chunked response");
-                stream.flush().expect("flush partial chunk");
-                thread::sleep(Duration::from_millis(300));
+                let mut held = Vec::new();
+                for _ in 0..3 {
+                    let (mut stream, _) = listener.accept().expect("accept client");
+                    let _raw_req = read_complete_http_request(&mut stream);
+                    // Flush 200 OK headers and an incomplete chunked body, then stall past timeout_ms.
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n{\"can\r\n",
+                        )
+                        .expect("write partial chunked response");
+                    stream.flush().expect("flush partial chunk");
+                    held.push(stream);
+                }
+                thread::sleep(Duration::from_millis(120));
             });
 
-            let provider = GeminiModelProvider::with_base_url(
+            let requester =
+                SharedHttpRequester::new(RetryPolicy::new(2, 500).with_base_and_slot_ms(10, 5));
+            let provider = GeminiModelProvider::with_requester_and_base_url(
                 "synthetic-loopback-key",
+                requester,
                 format!("http://{addr}/v1beta"),
             );
             let mut req = sample_request(None);

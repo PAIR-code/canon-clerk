@@ -21,7 +21,9 @@ pub(crate) mod stages;
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVetting};
 use crate::cli::CliError;
 use crate::cli::admit::guards::{resolve_admit_concurrency, resolve_admit_threshold};
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+};
 use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
     resolve_closure_validate,
@@ -183,6 +185,9 @@ pub struct VetArgs {
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
+    #[command(flatten)]
+    pub transport: ProviderTransportArgs,
+
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
         long = "format",
@@ -304,6 +309,7 @@ fn run_vet_core(
     let _validated_docket_conc = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
     let _validated_admit_conc = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
     let _validated_vet_conc = resolve_vet_concurrency(args.vet_concurrency, env, None)?;
+    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;

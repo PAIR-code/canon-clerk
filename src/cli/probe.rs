@@ -796,4 +796,77 @@ mod tests {
             ));
         }
     }
+
+    mod single_shot_isolation {
+        use super::*;
+        use crate::cli::Cli;
+        use crate::probe::MultiProviderEndpointProber;
+        use clap::Parser;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        #[test]
+        fn test_probe_executes_single_shot_without_sleeping_on_429_retry_after() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let hits = Arc::new(AtomicUsize::new(0));
+            let hits_ref = Arc::clone(&hits);
+
+            let server = thread::spawn(move || {
+                // `probe` checks screener + auditor concurrently (2 single-shot calls total).
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().expect("accept probe connection");
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                    let mut buf = [0_u8; 2048];
+                    let _ = stream.read(&mut buf);
+                    hits_ref.fetch_add(1, Ordering::SeqCst);
+                    let body = r#"{"error":{"message":"Please retry in 5s"}}"#;
+                    let resp = format!(
+                        "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nRetry-After: 5\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+                    let _ = stream.flush();
+                }
+            });
+
+            let prober = MultiProviderEndpointProber::with_base_urls(
+                format!("http://{addr}/v1beta"),
+                format!("http://{addr}/v1"),
+            );
+            let args = ProbeArgs::default();
+            let mut stdin = Cursor::new(Vec::<u8>::new());
+            let mut stdout = Vec::<u8>::new();
+
+            let start = Instant::now();
+            let err =
+                run_probe_with_env_and_prober(&args, &mut stdin, &mut stdout, &test_env(), &prober)
+                    .expect_err("429 probe must return unhealthy exit 2");
+            assert_eq!(err.exit_code(), 2);
+            assert!(
+                start.elapsed() < Duration::from_millis(800),
+                "probe must never sleep for 5s Retry-After cooldown"
+            );
+            assert_eq!(
+                hits.load(Ordering::SeqCst),
+                2,
+                "probe must issue exactly 1 single-shot request per configured tier (0 retries)"
+            );
+            server.join().expect("server joined");
+        }
+
+        #[test]
+        fn test_probe_rejects_transport_retry_flags_as_unknown_arguments() {
+            for flag in ["--max-retries", "--max-backoff-ms"] {
+                let err = Cli::try_parse_from(["canon-clerk", "probe", flag, "1"])
+                    .expect_err("probe must reject retry flags");
+                assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+            }
+        }
+    }
 }

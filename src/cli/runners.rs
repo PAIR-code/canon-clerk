@@ -23,7 +23,7 @@ use crate::configure::{
 };
 use crate::discover::{DiscoverError, DiscoverOptions, execute_discover_on_disk};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
-use crate::provider::MultiModelProvider;
+use crate::provider::{MultiModelProvider, RetryPolicy};
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::validate::{ValidateError, ValidateOptions, execute_validate_on_disk};
 use std::collections::BTreeMap;
@@ -232,10 +232,12 @@ pub(crate) fn resolve_typesafe_api_key(options: &ConfigureOptions) -> Result<Str
         .map_err(|err| CliError::usage(err.to_string()))
 }
 
-/// Builds a live [`MultiModelProvider`] resolving only the credentials required by `config` and `options`.
+/// Builds a live [`MultiModelProvider`] resolving only the credentials required by `config` and `options`
+/// and sharing a single pooled requester governed by `retry_policy`.
 pub(crate) fn build_live_model_provider(
     options: &ConfigureOptions,
     config: &CaseloadConfig,
+    retry_policy: RetryPolicy,
 ) -> Result<MultiModelProvider, CliError> {
     let check_auditor_creds = !options.screener_only_closure || options.auditor_model.is_some();
     let needs_google = model_provider(&config.screener_model) == DEFAULT_PROVIDER
@@ -253,7 +255,11 @@ pub(crate) fn build_live_model_provider(
         resolve_typesafe_api_key(options).ok()
     };
 
-    Ok(MultiModelProvider::new(gemini_key, typesafe_key))
+    Ok(MultiModelProvider::with_retry_policy(
+        gemini_key,
+        typesafe_key,
+        retry_policy,
+    ))
 }
 
 #[cfg(test)]

@@ -15,12 +15,9 @@
 //! Hexagonal outbound port, per-model decision budget profiles, and composite decision routing.
 
 use super::gemini_decisions::GeminiDecisionProvider;
-use super::runtime::build_pooled_http_client;
-use super::typesafe::{
-    DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
-    TypesafeSystemOneResponse, classify_typesafe_http_error, extract_typesafe_error_detail,
-    post_typesafe_json, strip_typesafe_prefix,
-};
+use super::requester::{RetryObserver, SharedHttpRequester};
+use super::retry::RetryPolicy;
+pub use super::typesafe::TypesafeDecisionProvider;
 use crate::caseload::{DEFAULT_PROVIDER, TYPESAFE_PROVIDER};
 use crate::configure::{is_discriminative_model, model_provider};
 use crate::provider::{
@@ -29,7 +26,6 @@ use crate::provider::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt;
 
 /// Per-model context character and `Noul` question-batching budget profile (`docs/architecture/nodes/docket.md` §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,223 +141,15 @@ pub trait DecisionModelProvider: Send + Sync {
         &self,
         request: &DecisionRequest,
     ) -> Result<DecisionResponse, ProviderError>;
-}
 
-/// Live TypeSafe AI HTTPS adapter implementing [`DecisionModelProvider`] (`POST /v1/systemone`).
-#[derive(Clone)]
-pub struct TypesafeDecisionProvider {
-    api_key: String,
-    base_url: String,
-    client: reqwest::Client,
-}
-
-impl fmt::Debug for TypesafeDecisionProvider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let key_repr = if self.api_key.trim().is_empty() {
-            "<empty>"
-        } else {
-            "<redacted>"
-        };
-        f.debug_struct("TypesafeDecisionProvider")
-            .field("api_key", &key_repr)
-            .field("base_url", &self.base_url)
-            .finish()
-    }
-}
-
-impl TypesafeDecisionProvider {
-    /// Constructs a [`TypesafeDecisionProvider`] targeting [`DEFAULT_TYPESAFE_BASE_URL`].
-    pub fn new(api_key: impl Into<String>) -> Self {
-        Self::with_base_url(api_key, DEFAULT_TYPESAFE_BASE_URL)
-    }
-
-    /// Constructs a [`TypesafeDecisionProvider`] with a custom base URL (for loopback tests or proxies).
-    pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
-        Self::with_client_and_base_url(api_key, build_pooled_http_client(), base_url)
-    }
-
-    /// Constructs a [`TypesafeDecisionProvider`] with a caller-supplied reusable [`reqwest::Client`].
-    pub fn with_client(api_key: impl Into<String>, client: reqwest::Client) -> Self {
-        Self::with_client_and_base_url(api_key, client, DEFAULT_TYPESAFE_BASE_URL)
-    }
-
-    /// Constructs a [`TypesafeDecisionProvider`] with a custom [`reqwest::Client`] and base URL.
-    pub fn with_client_and_base_url(
-        api_key: impl Into<String>,
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            api_key: api_key.into(),
-            base_url: base_url.into(),
-            client,
-        }
-    }
-
-    /// Returns the configured TypeSafe AI v1 base URL.
-    pub fn base_url(&self) -> &str {
-        &self.base_url
-    }
-
-    /// Returns a reference to the reusable, pooled [`reqwest::Client`].
-    pub fn client(&self) -> &reqwest::Client {
-        &self.client
-    }
-}
-
-impl DecisionModelProvider for TypesafeDecisionProvider {
-    fn evaluate_decisions(
+    /// Evaluates `request.questions` while streaming real-time retry/cooldown notifications to `on_retry`.
+    fn evaluate_decisions_observed(
         &self,
         request: &DecisionRequest,
+        _on_retry: Option<RetryObserver<'_>>,
     ) -> Result<DecisionResponse, ProviderError> {
-        if request.timeout_ms == 0 {
-            return Err(ProviderError::InvalidTimeout { timeout_ms: 0 });
-        }
-
-        let api_key = self.api_key.trim();
-        if api_key.is_empty() {
-            return Err(ProviderError::MissingTypesafeApiKey);
-        }
-
-        validate_typesafe_specifier(&request.model_specifier)?;
-        if request.questions.is_empty() {
-            return Ok(DecisionResponse {
-                scores: BTreeMap::new(),
-                resolved_model: request.model_specifier.clone(),
-                latency_ms: 0,
-                usage: TokenUsage::default(),
-            });
-        }
-
-        let mut wire_questions = BTreeMap::new();
-        let mut wire_to_domain = Vec::with_capacity(request.questions.len());
-        for (idx, (domain_key, instructions)) in request.questions.iter().enumerate() {
-            let wire_key = format!("q_{idx}");
-            wire_questions.insert(wire_key.clone(), TypesafeNoulQuestion::new(instructions));
-            wire_to_domain.push((wire_key, domain_key.clone()));
-        }
-
-        let payload = TypesafeSystemOneRequest {
-            model: strip_typesafe_prefix(request.model_specifier.trim()).to_string(),
-            state: request.state.clone(),
-            questions: wire_questions,
-        };
-
-        let outcome = post_typesafe_json(
-            &self.client,
-            &self.base_url,
-            &request.model_specifier,
-            api_key,
-            request.timeout_ms,
-            &payload,
-        )
-        .map_err(|(err, _latency)| err)?;
-
-        if !(200..300).contains(&outcome.status_code) {
-            let detail = extract_typesafe_error_detail(&outcome.body);
-            let diagnostic = classify_typesafe_http_error(
-                outcome.status_code,
-                &request.model_specifier,
-                &detail,
-            );
-            return Err(ProviderError::HttpStatus {
-                status_code: outcome.status_code,
-                model_specifier: request.model_specifier.clone(),
-                detail,
-                diagnostic,
-            });
-        }
-
-        decode_systemone_response(
-            &outcome.body,
-            outcome.latency_ms,
-            &request.model_specifier,
-            &wire_to_domain,
-        )
+        self.evaluate_decisions(request)
     }
-}
-
-fn validate_typesafe_specifier(raw: &str) -> Result<(), ProviderError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
-        return Err(ProviderError::InvalidModelSpecifier {
-            model_specifier: raw.to_string(),
-            reason: "model specifier must be non-empty and contain no whitespace".to_string(),
-        });
-    }
-    if let Some((prov, model_id)) = trimmed.split_once(':') {
-        if prov.is_empty() || model_id.is_empty() || model_id.contains(':') {
-            return Err(ProviderError::InvalidModelSpecifier {
-                model_specifier: raw.to_string(),
-                reason: "expected `typesafe:<model>` with non-empty segments".to_string(),
-            });
-        }
-        if prov != TYPESAFE_PROVIDER {
-            return Err(ProviderError::UnsupportedProvider {
-                provider: prov.to_string(),
-                model_specifier: trimmed.to_string(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn decode_systemone_response(
-    body: &str,
-    latency_ms: u64,
-    model_specifier: &str,
-    wire_to_domain: &[(String, String)],
-) -> Result<DecisionResponse, ProviderError> {
-    let parsed: TypesafeSystemOneResponse =
-        serde_json::from_str(body).map_err(|err| ProviderError::MalformedResponse {
-            model_specifier: model_specifier.to_string(),
-            reason: format!("invalid TypeSafe `/v1/systemone` JSON envelope ({err})"),
-        })?;
-
-    let mut scores = BTreeMap::new();
-    for (wire_key, domain_key) in wire_to_domain {
-        let answer = parsed.answers.get(wire_key).ok_or_else(|| {
-            ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!(
-                    "missing `noul` answer `{wire_key}` for subject `{domain_key}` in `/v1/systemone` response"
-                ),
-            }
-        })?;
-        if !answer.noul.is_finite() || !(-1e-6..=1.0 + 1e-6).contains(&answer.noul) {
-            return Err(ProviderError::SchemaDecode {
-                model_specifier: model_specifier.to_string(),
-                message: format!(
-                    "out-of-range `noul` probability `{}` for subject `{domain_key}`",
-                    answer.noul
-                ),
-            });
-        }
-        scores.insert(domain_key.clone(), answer.noul.clamp(0.0, 1.0));
-    }
-
-    let resolved_model = parsed
-        .model
-        .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| model_specifier.to_string());
-
-    let usage = match parsed.usage {
-        Some(u) => TokenUsage {
-            prompt_tokens: u.input_tokens,
-            completion_tokens: u.output_tokens,
-            reasoning_tokens: 0,
-            total_tokens: u.input_tokens.saturating_add(u.output_tokens),
-        },
-        None => TokenUsage::default(),
-    };
-
-    Ok(DecisionResponse {
-        scores,
-        resolved_model,
-        latency_ms,
-        usage,
-    })
 }
 
 /// Composite provider routing generative `google:*` turns to [`GeminiModelProvider`],
@@ -376,20 +164,39 @@ pub struct MultiModelProvider {
 
 impl MultiModelProvider {
     /// Constructs a [`MultiModelProvider`] from optional Gemini and TypeSafe credentials,
-    /// sharing a single pooled HTTP client between [`GeminiModelProvider`] and [`GeminiDecisionProvider`].
+    /// sharing a single [`SharedHttpRequester`] across all active provider adapters.
     pub fn new(gemini_api_key: Option<String>, typesafe_api_key: Option<String>) -> Self {
+        Self::with_retry_policy(gemini_api_key, typesafe_api_key, RetryPolicy::default())
+    }
+
+    /// Constructs a [`MultiModelProvider`] sharing a centralized [`SharedHttpRequester`] configured with `retry_policy`.
+    pub fn with_retry_policy(
+        gemini_api_key: Option<String>,
+        typesafe_api_key: Option<String>,
+        retry_policy: RetryPolicy,
+    ) -> Self {
+        let requester = SharedHttpRequester::new(retry_policy);
+        Self::with_requester(gemini_api_key, typesafe_api_key, requester)
+    }
+
+    /// Constructs a [`MultiModelProvider`] sharing a caller-supplied [`SharedHttpRequester`].
+    pub fn with_requester(
+        gemini_api_key: Option<String>,
+        typesafe_api_key: Option<String>,
+        requester: SharedHttpRequester,
+    ) -> Self {
         let (gemini, gemini_decisions) = match gemini_api_key.filter(|k| !k.trim().is_empty()) {
             Some(key) => {
-                let structured = GeminiModelProvider::new(key.clone());
-                let decisions =
-                    GeminiDecisionProvider::with_client(key, structured.client().clone());
+                let structured =
+                    GeminiModelProvider::with_requester(key.clone(), requester.clone());
+                let decisions = GeminiDecisionProvider::with_requester(key, requester.clone());
                 (Some(structured), Some(decisions))
             }
             None => (None, None),
         };
         let typesafe = typesafe_api_key
             .filter(|k| !k.trim().is_empty())
-            .map(TypesafeDecisionProvider::new);
+            .map(|key| TypesafeDecisionProvider::with_requester(key, requester));
         Self {
             gemini,
             gemini_decisions,
@@ -416,6 +223,14 @@ impl DecisionModelProvider for MultiModelProvider {
         &self,
         request: &DecisionRequest,
     ) -> Result<DecisionResponse, ProviderError> {
+        <Self as DecisionModelProvider>::evaluate_decisions_observed(self, request, None)
+    }
+
+    fn evaluate_decisions_observed(
+        &self,
+        request: &DecisionRequest,
+        on_retry: Option<RetryObserver<'_>>,
+    ) -> Result<DecisionResponse, ProviderError> {
         let prov = model_provider(&request.model_specifier);
         match prov {
             DEFAULT_PROVIDER if is_discriminative_model(&request.model_specifier) => {
@@ -423,7 +238,7 @@ impl DecisionModelProvider for MultiModelProvider {
                     .gemini_decisions
                     .as_ref()
                     .ok_or(ProviderError::MissingApiKey)?;
-                adapter.evaluate_decisions(request)
+                adapter.evaluate_decisions_observed(request, on_retry)
             }
             DEFAULT_PROVIDER => Err(ProviderError::InvalidModelSpecifier {
                 model_specifier: request.model_specifier.clone(),
@@ -435,7 +250,7 @@ impl DecisionModelProvider for MultiModelProvider {
                     .typesafe
                     .as_ref()
                     .ok_or(ProviderError::MissingTypesafeApiKey)?;
-                adapter.evaluate_decisions(request)
+                adapter.evaluate_decisions_observed(request, on_retry)
             }
             _ => Err(ProviderError::UnsupportedProvider {
                 provider: prov.to_string(),
@@ -449,6 +264,14 @@ impl StructuredModelProvider for MultiModelProvider {
     fn generate_structured(
         &self,
         request: &GenerationRequest,
+    ) -> Result<GenerationResponse, ProviderError> {
+        self.generate_structured_observed(request, None)
+    }
+
+    fn generate_structured_observed(
+        &self,
+        request: &GenerationRequest,
+        on_retry: Option<RetryObserver<'_>>,
     ) -> Result<GenerationResponse, ProviderError> {
         let prov = model_provider(&request.model_specifier);
         if prov != DEFAULT_PROVIDER {
@@ -464,7 +287,7 @@ impl StructuredModelProvider for MultiModelProvider {
             });
         }
         let adapter = self.gemini.as_ref().ok_or(ProviderError::MissingApiKey)?;
-        adapter.generate_structured(request)
+        adapter.generate_structured_observed(request, on_retry)
     }
 
     fn evaluate_decisions(
@@ -473,57 +296,43 @@ impl StructuredModelProvider for MultiModelProvider {
     ) -> Result<DecisionResponse, ProviderError> {
         DecisionModelProvider::evaluate_decisions(self, request)
     }
+
+    fn evaluate_decisions_observed(
+        &self,
+        request: &DecisionRequest,
+        on_retry: Option<RetryObserver<'_>>,
+    ) -> Result<DecisionResponse, ProviderError> {
+        DecisionModelProvider::evaluate_decisions_observed(self, request, on_retry)
+    }
+
+    fn clear_abort(&self) {
+        if let Some(g) = &self.gemini {
+            g.requester().clear_abort();
+        }
+        if let Some(d) = &self.gemini_decisions {
+            d.requester().clear_abort();
+        }
+        if let Some(t) = &self.typesafe {
+            t.requester().clear_abort();
+        }
+    }
+
+    fn notify_abort(&self) {
+        if let Some(g) = &self.gemini {
+            g.requester().notify_abort();
+        }
+        if let Some(d) = &self.gemini_decisions {
+            d.requester().notify_abort();
+        }
+        if let Some(t) = &self.typesafe {
+            t.requester().notify_abort();
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_decode_systemone_response_maps_wire_keys_to_domain_subjects() {
-        let raw = r#"{
-            "model": "jev-1.14.0",
-            "answers": {
-                "q_0": { "type": "noul", "noul": 0.94 },
-                "q_1": { "type": "noul", "noul": 0.08 }
-            },
-            "usage": { "input_tokens": 410, "output_tokens": 0 }
-        }"#;
-        let mapping = vec![
-            ("q_0".to_string(), ".canons/cli/rule-a.md".to_string()),
-            ("q_1".to_string(), ".canons/cli/rule-b.md".to_string()),
-        ];
-        let decoded = decode_systemone_response(raw, 105, "typesafe:jev-latest", &mapping)
-            .expect("decode valid systemone response");
-        assert_eq!(decoded.resolved_model, "jev-1.14.0");
-        assert_eq!(decoded.latency_ms, 105);
-        assert_eq!(decoded.scores[".canons/cli/rule-a.md"], 0.94);
-        assert_eq!(decoded.scores[".canons/cli/rule-b.md"], 0.08);
-        assert_eq!(decoded.usage.prompt_tokens, 410);
-        assert_eq!(decoded.usage.total_tokens, 410);
-    }
-
-    #[test]
-    fn test_typesafe_provider_debug_redacts_secret_and_validates_inputs() {
-        let secret = "super-secret-typesafe-token";
-        let provider = TypesafeDecisionProvider::new(secret);
-        let dbg = format!("{provider:?}");
-        assert!(!dbg.contains(secret));
-        assert!(dbg.contains("<redacted>"));
-
-        let empty_provider = TypesafeDecisionProvider::new("  ");
-        let req = DecisionRequest {
-            model_specifier: "typesafe:jev-latest".to_string(),
-            state: "diff".to_string(),
-            questions: BTreeMap::from([("k".to_string(), "q?".to_string())]),
-            timeout_ms: 5000,
-            call_label: None,
-        };
-        assert_eq!(
-            empty_provider.evaluate_decisions(&req),
-            Err(ProviderError::MissingTypesafeApiKey)
-        );
-    }
 
     #[test]
     fn test_partition_decision_items_respects_count_and_character_budgets() {
@@ -541,92 +350,5 @@ mod tests {
         assert_eq!(by_count[0].len(), 2);
         assert_eq!(by_count[1].len(), 2);
         assert_eq!(by_count[2].len(), 1);
-    }
-
-    #[test]
-    fn test_typesafe_provider_reuses_pooled_connection_across_distinct_threads() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::thread;
-        use std::time::Duration;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-        let addr = listener.local_addr().expect("local addr");
-
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept single pooled socket");
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .expect("set read timeout");
-            for idx in 1..=2 {
-                let mut raw = Vec::new();
-                let mut buf = [0_u8; 4096];
-                loop {
-                    let n = stream.read(&mut buf).expect("read request");
-                    if n == 0 {
-                        break;
-                    }
-                    raw.extend_from_slice(&buf[..n]);
-                    let text = String::from_utf8_lossy(&raw);
-                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
-                        let expected_len = head
-                            .lines()
-                            .find_map(|l| {
-                                let (k, v) = l.split_once(':')?;
-                                k.eq_ignore_ascii_case("content-length")
-                                    .then(|| v.trim().parse::<usize>().ok())
-                                    .flatten()
-                            })
-                            .unwrap_or(0);
-                        if body.len() >= expected_len {
-                            break;
-                        }
-                    }
-                }
-                let score = if idx == 1 { 0.92 } else { 0.14 };
-                let body = format!(
-                    r#"{{"model":"jev-1.14.0","answers":{{"q_0":{{"type":"noul","noul":{score}}}}},"usage":{{"input_tokens":20,"output_tokens":0}}}}"#
-                );
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                stream.write_all(resp.as_bytes()).expect("write response");
-                stream.flush().expect("flush response");
-            }
-        });
-
-        let custom_client = build_pooled_http_client();
-        let provider = TypesafeDecisionProvider::with_client_and_base_url(
-            "synthetic-typesafe-key",
-            custom_client,
-            format!("http://{addr}/v1"),
-        );
-        assert!(provider.client().post("http://127.0.0.1").build().is_ok());
-
-        let req = DecisionRequest {
-            model_specifier: "typesafe:jev-latest".to_string(),
-            state: "diff".to_string(),
-            questions: BTreeMap::from([("rule".to_string(), "Is it colorable?".to_string())]),
-            timeout_ms: 500,
-            call_label: None,
-        };
-
-        let prov1 = provider.clone();
-        let req1 = req.clone();
-        let res1 = thread::spawn(move || prov1.evaluate_decisions(&req1))
-            .join()
-            .expect("worker 1 joined")
-            .expect("call 1 succeeded");
-        assert_eq!(res1.scores["rule"], 0.92);
-
-        let res2 = thread::spawn(move || provider.evaluate_decisions(&req))
-            .join()
-            .expect("worker 2 joined")
-            .expect("call 2 reused pooled socket after worker 1 exited");
-        assert_eq!(res2.scores["rule"], 0.14);
-
-        server.join().expect("server joined");
     }
 }

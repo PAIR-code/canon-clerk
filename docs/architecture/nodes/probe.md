@@ -52,6 +52,7 @@ flowchart LR
 ### Data Plane & Diagnostic Invariants
 1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`docket`, `admit`, `vet`, `audit`, `apprise`), substantive review runs never populate or depend on `.probe`.
 2. **Non-Throwing Diagnostic Capture:** Endpoint timeouts, HTTP 4xx/5xx responses, and authentication rejections are captured inside the respective endpoint health record (`status: "error"`, `error: "<reason>"`) on `.probe` before the CLI adapter maps any failure to exit code `2`.
+3. **Single-Shot Diagnostic Isolation:** Unlike heuristic evaluation stages, `probe` executes strictly single-shot (`0` retries), bypasses per-origin rate-limit cooldown gates, and rejects heuristic retry flags (`--max-retries`, `--max-backoff-ms`) with exit code `2` so health checks immediately measure raw single-roundtrip reachability and latency within `--timeout` ([`../transport.md` §5](../transport.md#5-single-shot-diagnostic-probe-isolation)).
 
 ---
 
