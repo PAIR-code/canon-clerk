@@ -34,13 +34,12 @@ use std::fmt::Write as _;
 const DOCKET_NOUL_QUERY_SUFFIX: &str = "\
 Question: Does this candidate canon have a colorable claim of subject-matter jurisdiction over \
 the in-flight filing in `state`?\n\
-- Answer YES when the filing touches, introduces, or modifies the domain construct, architectural \
-layer, or workflow governed by this canon.\n\
-- NEVER answer NO because the code is compliant: compliant implementations of a governed construct \
-still fall under the canon's jurisdiction, and `feat` PRs fall under feature companion/documentation \
-rules even when the companion file is omitted.\n\
-- Answer NO ONLY when the canon's specific governed construct is absent from the filing (such as \
-`fix`-only commit rules on a `feat` PR, or workflow/signal/parser rules when those constructs are untouched).";
+- Answer YES if the filing introduces, modifies, or deletes the specific domain construct, \
+architectural boundary, or workflow governed by this canon, OR if this canon enforces an omission \
+rule on a `feat` PR.\n\
+- NEVER answer NO because the code appears compliant: compliant implementations remain under jurisdiction.\n\
+- Answer NO when the canon's specific governed construct is absent from the diff (for example, general \
+CLI edits that do not modify CLI flags, stdin, or operands do NOT fall under flag, stdin, or operand canons).";
 
 pub(super) fn execute_docket_decisions(
     options: &DocketOptions,
