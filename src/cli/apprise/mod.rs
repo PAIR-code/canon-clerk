@@ -20,7 +20,9 @@ mod stages;
 
 use crate::caseload::{Caseload, CaseloadApprisal};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+};
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::provenance::StageDisposition;
@@ -132,6 +134,9 @@ pub struct AppriseArgs {
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
+    #[command(flatten)]
+    pub transport: ProviderTransportArgs,
+
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
         long = "format",
@@ -241,6 +246,7 @@ fn run_apprise_core(
     let threshold = resolve_apprise_threshold(args.apprise_threshold, env)?;
     let _validated_batch_size = resolve_apprise_batch_size(args.apprise_batch_size, env, None)?;
     let _validated_concurrency = resolve_apprise_concurrency(args.apprise_concurrency, env, None)?;
+    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -1268,6 +1274,12 @@ mod tests {
                 TelemetryEvent::ModelCall { stage, usage, .. } => {
                     format!("call:{stage}:{}", usage.total_tokens)
                 }
+                TelemetryEvent::ProviderRetry {
+                    stage,
+                    attempt,
+                    wait_ms,
+                    ..
+                } => format!("retry:{stage}:{attempt}:{wait_ms}"),
                 TelemetryEvent::StageFinish { stage, usage, .. } => {
                     format!("finish:{stage}:{}", usage.map_or(0, |u| u.total_tokens))
                 }

@@ -290,29 +290,24 @@ impl<W: Write + Send> StderrProgressSink<W> {
                 resolved_model,
                 latency_ms,
                 usage,
-            } => {
-                if self.options.verbose {
-                    let trimmed = label.trim();
-                    let subject = if trimmed.is_empty() {
-                        format!("[{stage}:call]")
-                    } else {
-                        format!("[{stage}:call] {trimmed}")
-                    };
-                    if usage.reasoning_tokens > 0 {
-                        Some(format!(
-                            "{pfx} {subject} ({resolved_model}, {latency_ms}ms, {} tokens, {} reasoning)",
-                            usage.total_tokens, usage.reasoning_tokens
-                        ))
-                    } else {
-                        Some(format!(
-                            "{pfx} {subject} ({resolved_model}, {latency_ms}ms, {} tokens)",
-                            usage.total_tokens
-                        ))
-                    }
-                } else {
-                    None
-                }
-            }
+            } => self.format_model_call_line(*stage, label, resolved_model, *latency_ms, usage),
+            TelemetryEvent::ProviderRetry {
+                stage,
+                label,
+                host,
+                attempt,
+                max_retries,
+                wait_ms,
+                reason,
+            } => self.format_retry_line(
+                *stage,
+                label,
+                host,
+                *attempt,
+                *max_retries,
+                *wait_ms,
+                reason,
+            ),
             TelemetryEvent::StageFinish {
                 stage,
                 duration_ms,
@@ -336,6 +331,79 @@ impl<W: Write + Send> StderrProgressSink<W> {
                     Some(format!("{pfx} done ({total_duration_ms}ms)"))
                 }
             }
+        }
+    }
+
+    fn format_model_call_line(
+        &self,
+        stage: crate::telemetry::PipelineStage,
+        label: &str,
+        resolved_model: &str,
+        latency_ms: u64,
+        usage: &crate::provider::TokenUsage,
+    ) -> Option<String> {
+        if !self.options.verbose {
+            return None;
+        }
+        let pfx = self.prefix();
+        let trimmed = label.trim();
+        let subject = if trimmed.is_empty() {
+            format!("[{stage}:call]")
+        } else {
+            format!("[{stage}:call] {trimmed}")
+        };
+        if usage.reasoning_tokens > 0 {
+            Some(format!(
+                "{pfx} {subject} ({resolved_model}, {latency_ms}ms, {} tokens, {} reasoning)",
+                usage.total_tokens, usage.reasoning_tokens
+            ))
+        } else {
+            Some(format!(
+                "{pfx} {subject} ({resolved_model}, {latency_ms}ms, {} tokens)",
+                usage.total_tokens
+            ))
+        }
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Private formatting helper unpacking TelemetryEvent::ProviderRetry fields"
+    )]
+    fn format_retry_line(
+        &self,
+        stage: crate::telemetry::PipelineStage,
+        label: &str,
+        host: &str,
+        attempt: u32,
+        max_retries: u32,
+        wait_ms: u64,
+        reason: &str,
+    ) -> Option<String> {
+        if !self.options.verbose && wait_ms < 1_000 {
+            return None;
+        }
+        let pfx = self.prefix();
+        let trimmed = label.trim();
+        let subject = if trimmed.is_empty() {
+            format!("[{stage}:retry]")
+        } else {
+            format!("[{stage}:retry] {trimmed}:")
+        };
+        let wait_repr = if wait_ms >= 1_000 {
+            format!("{:.1}s", wait_ms as f64 / 1_000.0)
+        } else {
+            format!("{wait_ms}ms")
+        };
+        let next_attempt = attempt.saturating_add(1);
+        let total_attempts = max_retries.saturating_add(1);
+        if attempt == 0 {
+            Some(format!(
+                "{pfx} {subject} {reason} on {host}; waiting {wait_repr} before attempt {next_attempt}/{total_attempts}"
+            ))
+        } else {
+            Some(format!(
+                "{pfx} {subject} {reason} on {host}; waiting {wait_repr} before retry {next_attempt}/{total_attempts}"
+            ))
         }
     }
 }
@@ -690,6 +758,65 @@ mod tests {
             assert!(rendered.contains("[telemetry] -> audit started"));
             assert!(rendered.contains("[telemetry] [audit 1/2] .canons/cli/rule-a.md (pass)"));
             assert!(rendered.contains("[telemetry] [audit 2/2] .canons/cli/rule-b.md (fail)"));
+        }
+
+        #[test]
+        fn test_provider_retry_renders_on_tty_for_multisecond_waits_without_verbose_and_all_waits_with_verbose()
+         {
+            let tty_default = StderrTelemetryOptions {
+                is_tty: true,
+                verbose: false,
+                quiet: false,
+                is_ci: false,
+                no_color: true,
+            };
+            let sink = StderrProgressSink::new(Vec::<u8>::new(), tty_default);
+            sink.emit(&TelemetryEvent::ProviderRetry {
+                stage: PipelineStage::Audit,
+                label: "rule-a.md".to_string(),
+                host: "generativelanguage.googleapis.com".to_string(),
+                attempt: 1,
+                max_retries: 2,
+                wait_ms: 250,
+                reason: "HTTP 503 upstream server error".to_string(),
+            });
+            sink.emit(&TelemetryEvent::ProviderRetry {
+                stage: PipelineStage::Vet,
+                label: String::new(),
+                host: "generativelanguage.googleapis.com".to_string(),
+                attempt: 1,
+                max_retries: 2,
+                wait_ms: 56_000,
+                reason: "HTTP 429 rate limit".to_string(),
+            });
+
+            let rendered = String::from_utf8(sink.into_inner()).expect("utf8 stderr");
+            assert!(
+                !rendered.contains("250ms"),
+                "sub-second retry waits stay quiet when !verbose"
+            );
+            assert!(rendered.contains(
+                "[telemetry] [vet:retry] HTTP 429 rate limit on generativelanguage.googleapis.com; waiting 56.0s before retry 2/3"
+            ));
+
+            let verbose_opts = StderrTelemetryOptions {
+                verbose: true,
+                ..tty_default
+            };
+            let verbose_sink = StderrProgressSink::new(Vec::<u8>::new(), verbose_opts);
+            verbose_sink.emit(&TelemetryEvent::ProviderRetry {
+                stage: PipelineStage::Audit,
+                label: "rule-a.md".to_string(),
+                host: "generativelanguage.googleapis.com".to_string(),
+                attempt: 0,
+                max_retries: 2,
+                wait_ms: 250,
+                reason: "origin rate-limit cooldown active".to_string(),
+            });
+            let v_rendered = String::from_utf8(verbose_sink.into_inner()).expect("utf8 stderr");
+            assert!(v_rendered.contains(
+                "[telemetry] [audit:retry] rule-a.md: origin rate-limit cooldown active on generativelanguage.googleapis.com; waiting 250ms before attempt 1/3"
+            ));
         }
     }
 }

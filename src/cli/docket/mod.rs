@@ -20,7 +20,9 @@ mod stages;
 
 use crate::caseload::{Caseload, CaseloadDocket};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+};
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::provenance::StageDisposition;
@@ -137,6 +139,9 @@ pub struct DocketArgs {
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
+    #[command(flatten)]
+    pub transport: ProviderTransportArgs,
+
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
         long = "format",
@@ -246,6 +251,7 @@ fn run_docket_core(
     let threshold = resolve_docket_threshold(args.docket_threshold, env)?;
     let _validated_batch_size = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
     let _validated_concurrency = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
+    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;

@@ -137,6 +137,9 @@ pub(super) fn execute_jit_configure_and_apprise(
         env,
         configure_options.stored_config.as_ref(),
     )?;
+    let retry_policy = args
+        .transport
+        .resolve_retry_policy(env, configure_options.stored_config.as_ref())?;
     let config_was_present =
         caseload.config.is_some() && !configure_options.has_explicit_overrides();
     caseload.apprisal = None;
@@ -148,6 +151,7 @@ pub(super) fn execute_jit_configure_and_apprise(
         ClosureBackend::LiveDisk { .. } => Some(build_live_model_provider(
             &configure_options,
             &cfg_snapshot,
+            retry_policy,
         )?),
     };
     let apprise_opts = AppriseOptions {

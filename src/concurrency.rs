@@ -54,6 +54,7 @@ where
     let outcomes: Mutex<(usize, Vec<WorkSlot<O, E>>)> =
         Mutex::new((0, (0..total).map(|_| None).collect()));
 
+    provider.clear_abort();
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
             scope.spawn(|| {
@@ -75,6 +76,7 @@ where
                         }
                         Err(err) => {
                             aborted.store(true, Ordering::Release);
+                            provider.notify_abort();
                             if let Ok(mut guard) = outcomes.lock() {
                                 guard.1[idx] = Some(Err(err));
                             }
@@ -84,6 +86,7 @@ where
             });
         }
     });
+    provider.clear_abort();
 
     let (_, collected) = outcomes.into_inner().unwrap_or_default();
     let mut ordered = Vec::with_capacity(total);

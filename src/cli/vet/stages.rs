@@ -145,6 +145,8 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
         max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
     };
 
+    let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
+
     let config_was_present =
         caseload.config.is_some() && !configure_options.has_explicit_overrides();
     caseload.vetting = None;
@@ -165,7 +167,8 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
     let active_provider: &dyn StructuredModelProvider = match backend {
         ClosureBackend::Hermetic { provider, .. } => *provider,
         ClosureBackend::LiveDisk { .. } => {
-            live_instance = build_live_model_provider(&configure_options, &cfg_snapshot)?;
+            live_instance =
+                build_live_model_provider(&configure_options, &cfg_snapshot, retry_policy)?;
             &live_instance
         }
     };

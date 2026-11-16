@@ -52,6 +52,7 @@ pub(super) fn resolve_and_validate_audit_cli_params(
     let _ = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
     let _ = resolve_vet_concurrency(args.vet_concurrency, env, None)?;
     let _ = resolve_audit_concurrency(args.audit_concurrency, env, None)?;
+    let _ = args.transport.resolve_retry_policy(env, None)?;
     Ok(thresholds)
 }
 

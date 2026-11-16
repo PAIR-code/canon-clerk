@@ -27,9 +27,9 @@ use super::{
 use crate::audit::DEFAULT_AUDIT_TIMEOUT_MS;
 use crate::caseload::Caseload;
 use crate::cli::{
-    CanonSelectionArgs, CliError, FilingSourceArgs, ProviderConfigArgs, build_live_model_provider,
-    ensure_single_stdin_source, read_caseload_operand, resolve_branch_b_options,
-    write_caseload_file,
+    CanonSelectionArgs, CliError, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+    build_live_model_provider, ensure_single_stdin_source, read_caseload_operand,
+    resolve_branch_b_options, write_caseload_file,
 };
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, MultiModelProvider, StructuredModelProvider};
@@ -283,7 +283,9 @@ pub fn run_consistency_bench_cli(
         .is_some_and(|d| !d.candidate_canons.is_empty());
     let live_provider = if has_candidates {
         let cfg = caseload.config.clone().unwrap_or_default();
-        build_live_model_provider(&configure_opts, &cfg)?
+        let retry_policy = ProviderTransportArgs::default()
+            .resolve_retry_policy(&env_map, configure_opts.stored_config.as_ref())?;
+        build_live_model_provider(&configure_opts, &cfg, retry_policy)?
     } else {
         MultiModelProvider::new(None, None)
     };

@@ -134,6 +134,24 @@ pub enum TelemetryEvent {
         /// Token accounting metrics expended by this individual call.
         usage: TokenUsage,
     },
+    /// Announces a per-origin rate-limit cooldown or transient retry wait immediately prior to sleeping.
+    ProviderRetry {
+        /// Active pipeline stage executing the model call.
+        stage: PipelineStage,
+        /// Concise work-unit identifier (e.g., `canon_path` or slice label), omitted when empty.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        label: String,
+        /// Normalized target origin host (`generativelanguage.googleapis.com` or `127.0.0.1:<port>`).
+        host: String,
+        /// Retry attempt index (`0` for pre-dispatch origin cooldown waits before Attempt 1; `1..=max_retries` for retries).
+        attempt: u32,
+        /// Configured maximum retry count per call.
+        max_retries: u32,
+        /// Planned sleep duration in milliseconds.
+        wait_ms: u64,
+        /// Concise human-readable reason for waiting (`HTTP 429 rate limit`, `wire timeout`, etc.).
+        reason: String,
+    },
     /// Records stage completion with elapsed wall-clock `duration_ms` and optional token `usage`.
     StageFinish {
         /// Completed pipeline stage.
