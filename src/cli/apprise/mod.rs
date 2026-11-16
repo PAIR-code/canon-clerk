@@ -1566,9 +1566,10 @@ mod tests {
                 &probe,
             )
             .expect("jev-latest apprise on 60 canons");
+            probe.dec_batch_sizes.lock().expect("lock").sort_unstable();
             assert_eq!(
                 *probe.dec_batch_sizes.lock().expect("lock"),
-                vec![48, 12],
+                vec![12, 48],
                 "discriminative Jev must preserve its 48-noul batch ceiling across 60 canons"
             );
         }

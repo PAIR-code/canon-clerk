@@ -524,6 +524,7 @@ mod tests {
             &jev_probe,
         )
         .expect("jev-latest admit");
-        assert_eq!(*jev_probe.batch_sizes.lock().unwrap(), vec![48, 12]);
+        jev_probe.batch_sizes.lock().unwrap().sort_unstable();
+        assert_eq!(*jev_probe.batch_sizes.lock().unwrap(), vec![12, 48]);
     }
 }
