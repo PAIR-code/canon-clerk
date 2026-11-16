@@ -77,13 +77,13 @@ pub use caseload::{
     Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
     CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadValidation, CaseloadVerdict,
     CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason,
-    DEFAULT_AUDITOR_MODEL, DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL,
-    DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL, DEFAULT_SCREENER_REASONING_BUDGET, DiscoveryMode,
-    ExhibitAssessment, FileArtifact, FileChangeStatus, IntakeScope, LinkedIssueContext,
-    PatchOmissionReason, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel,
-    ValidatedCanonMetadata, ValidationOutcome, VerdictStatus, VettingStatus,
-    normalize_admissibility_score, normalize_colorability_score, normalize_compliance_score,
-    normalize_unit_score, normalize_vetting_score, sort_annotations,
+    DEFAULT_AUDITOR_MODEL, DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_GENERATIVE_SCREENER_MODEL,
+    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_SCREENER_MODEL,
+    DEFAULT_SCREENER_REASONING_BUDGET, DiscoveryMode, ExhibitAssessment, FileArtifact,
+    FileChangeStatus, IntakeScope, LinkedIssueContext, PatchOmissionReason, ProbeEndpointResult,
+    ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel, ValidatedCanonMetadata, ValidationOutcome,
+    VerdictStatus, VettingStatus, normalize_admissibility_score, normalize_colorability_score,
+    normalize_compliance_score, normalize_unit_score, normalize_vetting_score, sort_annotations,
 };
 pub use cli::{
     AdmitArgs, AdmitFormat, AppriseArgs, AppriseFormat, AuditArgs, AuditFormat, CanonSelectionArgs,
@@ -108,9 +108,9 @@ pub use configure::{
     ConfigureError, ConfigureOptions, DEFAULT_JEV_MODEL, ENV_AUDITOR_MODEL, ENV_GEMINI_API_KEY,
     ENV_REASONING_BUDGET, ENV_SCREENER_MODEL, ENV_THINKING_LEVEL, ENV_TYPESAFE_API_KEY,
     MissingCredentialsReason, PROVIDER_CAPABILITIES, ProviderCapability, ProviderRole,
-    StoredConfig, StoredProviderConfig, StoredTierModel, execute_configure, load_host_config_file,
-    normalize_model_specifier, parse_thinking_level, resolve_default_config_path,
-    resolve_gemini_api_key,
+    StoredConfig, StoredProviderConfig, StoredTierModel, execute_configure,
+    is_discriminative_model, load_host_config_file, normalize_model_specifier,
+    parse_thinking_level, resolve_default_config_path, resolve_gemini_api_key,
 };
 pub use discover::{
     DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,
@@ -126,16 +126,19 @@ pub use docket::{
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{
-    DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiEndpointProber,
-    MultiProviderEndpointProber, ProbeError, ProbeOptions, TypesafeEndpointProber,
-    decode_gemini_probe_response, execute_probe,
+    DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiDecisionsEndpointProber,
+    GeminiEndpointProber, MultiProviderEndpointProber, ProbeError, ProbeOptions,
+    TypesafeEndpointProber, decode_gemini_decisions_probe_response, decode_gemini_probe_response,
+    execute_probe,
 };
 pub use provider::{
     DEFAULT_GEMINI_BASE_URL, DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_TYPESAFE_BASE_URL,
-    DecisionModelProvider, DecisionRequest, DecisionResponse, GeminiModelProvider,
-    GenerationRequest, GenerationResponse, MultiModelProvider, ProviderError,
-    StructuredModelProvider, TokenUsage, TypesafeDecisionProvider, build_generate_content_url,
-    classify_gemini_http_error, extract_gemini_error_detail, strip_provider_prefix,
+    DecisionBudgetProfile, DecisionModelProvider, DecisionRequest, DecisionResponse,
+    GeminiDecisionProvider, GeminiModelProvider, GenerationRequest, GenerationResponse,
+    MultiModelProvider, ProviderError, StructuredModelProvider, TokenUsage,
+    TypesafeDecisionProvider, build_decisions_url, build_generate_content_url,
+    classify_gemini_decisions_http_error, classify_gemini_http_error, extract_gemini_error_detail,
+    strip_provider_prefix,
 };
 pub use telemetry::{
     CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,

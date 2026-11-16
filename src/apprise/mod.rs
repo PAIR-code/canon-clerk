@@ -18,11 +18,9 @@ mod decision;
 mod decode;
 mod prompt;
 
-use crate::caseload::{
-    CanonApprisalAssessment, Caseload, CaseloadApprisal, TYPESAFE_PROVIDER, normalize_unit_score,
-};
+use crate::caseload::{CanonApprisalAssessment, Caseload, CaseloadApprisal, normalize_unit_score};
 use crate::concurrency::execute_bounded_stage_work;
-use crate::configure::model_provider;
+use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{format_canon_batch_label, partition_candidate_canons};
 use crate::provider::{
@@ -80,15 +78,15 @@ impl Default for AppriseOptions {
 }
 
 /// Resolves the effective `max_canons_per_call` for `apprise` given an optional explicit override
-/// and the configured `screener_model` (`None` on `typesafe:*` to preserve its `48`-noul batch ceiling,
-/// `Some(DEFAULT_APPRISE_BATCH_SIZE)` on generative models).
+/// and the configured `screener_model` (`None` on discriminative models so their `DecisionBudgetProfile`
+/// governs batching, `Some(DEFAULT_APPRISE_BATCH_SIZE)` on generative models).
 pub(crate) fn effective_apprise_batch_size(
     explicit: Option<usize>,
     screener_model: &str,
 ) -> Option<usize> {
     if explicit.is_some() {
         explicit
-    } else if model_provider(screener_model) == TYPESAFE_PROVIDER {
+    } else if is_discriminative_model(screener_model) {
         None
     } else {
         Some(DEFAULT_APPRISE_BATCH_SIZE)
@@ -277,7 +275,7 @@ pub fn execute_apprise(
         .config
         .as_ref()
         .ok_or(AppriseError::MissingConfig)?;
-    if model_provider(&config.screener_model) == TYPESAFE_PROVIDER {
+    if is_discriminative_model(&config.screener_model) {
         return decision::execute_apprise_decisions(
             options, caseload, threshold, workspace, provider,
         );
@@ -366,7 +364,7 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         ApprisalStatus, CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
-        DEFAULT_SCREENER_MODEL,
+        DEFAULT_GENERATIVE_SCREENER_MODEL,
     };
     use crate::provider::{GenerationResponse, TokenUsage};
     use serde_json::{Value, json};
@@ -454,7 +452,10 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig::default())
+            .with_config(CaseloadConfig {
+                screener_model: DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                ..CaseloadConfig::default()
+            })
     }
 
     mod zero_candidate_and_prerequisite_guards {
@@ -630,7 +631,7 @@ mod tests {
                 "must screen all candidates in a single turn"
             );
             let req = &requests[0];
-            assert_eq!(req.model_specifier, DEFAULT_SCREENER_MODEL);
+            assert_eq!(req.model_specifier, DEFAULT_GENERATIVE_SCREENER_MODEL);
             assert_eq!(req.reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
             assert!(req.user_prompt.contains("Refactor auth provider dispatch"));
             assert!(req.user_prompt.contains(".canons/auth/cache-expiry.md"));
@@ -973,7 +974,10 @@ Interactive UI controls MUST provide accessible labels.
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default());
+                .with_config(CaseloadConfig {
+                    screener_model: DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                    ..CaseloadConfig::default()
+                });
 
             let provider = RecordingMockProvider::with_payload(json!({
                 "assessments": [
@@ -1012,7 +1016,7 @@ Interactive UI controls MUST provide accessible labels.
 
             let auth_fail_provider = RecordingMockProvider::with_error(ProviderError::HttpStatus {
                 status_code: 401,
-                model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                model_specifier: DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
                 detail: "API key not valid".to_string(),
                 diagnostic: "HTTP 401: Invalid API key.\n  Hint: Check GEMINI_API_KEY.".to_string(),
             });

@@ -25,7 +25,10 @@ pub const DEFAULT_PROVIDER: &str = "google";
 pub const TYPESAFE_PROVIDER: &str = "typesafe";
 
 /// Default canonical screener model specifier (`docs/architecture/nodes/configure.md` §3).
-pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-4-hydrogen";
+pub const DEFAULT_SCREENER_MODEL: &str = "google:gemini-decision-1";
+
+/// Default canonical generative Gemini screener model specifier when explicitly overriding discriminative screening.
+pub const DEFAULT_GENERATIVE_SCREENER_MODEL: &str = "google:gemini-4-hydrogen";
 
 /// Explicit minimal/zero reasoning budget signal for heuristic screener stages (`apprise`, `docket`, `admit`, `vet`).
 pub const DEFAULT_SCREENER_REASONING_BUDGET: Option<u32> = Some(0);
@@ -143,7 +146,7 @@ mod tests {
         let json = serde_json::to_string(&default_cfg).expect("serialize default config");
         assert_eq!(
             json,
-            r#"{"screener_model":"google:gemini-4-hydrogen","auditor_model":"google:gemini-4-carbon"}"#
+            r#"{"screener_model":"google:gemini-decision-1","auditor_model":"google:gemini-4-carbon"}"#
         );
         assert!(!json.contains("reasoning_budget"));
         assert!(!json.contains("thinking_level"));

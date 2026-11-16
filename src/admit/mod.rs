@@ -23,10 +23,10 @@ mod slices;
 use crate::canon::Canon;
 use crate::caseload::{
     Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake, ExhibitAssessment,
-    TYPESAFE_PROVIDER, normalize_admissibility_score,
+    normalize_admissibility_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
-use crate::configure::model_provider;
+use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{
@@ -275,7 +275,7 @@ pub fn execute_admit(
     }
 
     let config = caseload.config.as_ref().ok_or(AdmitError::MissingConfig)?;
-    if model_provider(&config.screener_model) == TYPESAFE_PROVIDER {
+    if is_discriminative_model(&config.screener_model) {
         return decision::execute_admit_decisions(
             options,
             caseload,
@@ -578,7 +578,10 @@ mod tests {
                 triggers_join,
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig::default())
+            .with_config(CaseloadConfig {
+                screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                ..CaseloadConfig::default()
+            })
             .with_docket(CaseloadDocket::from_cases(cases))
     }
 
@@ -892,7 +895,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default())
+                .with_config(CaseloadConfig {
+                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                    ..CaseloadConfig::default()
+                })
                 .with_docket(CaseloadDocket::from_cases(cases));
 
             let enriched = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
@@ -1126,7 +1132,10 @@ mod tests {
                     triggers_join,
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default())
+                .with_config(CaseloadConfig {
+                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                    ..CaseloadConfig::default()
+                })
                 .with_docket(CaseloadDocket::from_cases(cases));
 
             (ws, caseload)

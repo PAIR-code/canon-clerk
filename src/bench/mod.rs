@@ -394,6 +394,7 @@ mod tests {
             ..IntakeOptions::default()
         };
         let cfg_opts = ConfigureOptions {
+            screener_model: Some(crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string()),
             gemini_api_key: Some("test-key".to_string()),
             ..ConfigureOptions::default()
         };

@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Hexagonal outbound port and TypeSafe AI Jev adapter for discriminative `Noul` evaluations.
+//! Hexagonal outbound port, per-model decision budget profiles, and composite decision routing.
 
+use super::gemini_decisions::GeminiDecisionProvider;
 use super::runtime::build_pooled_http_client;
 use super::typesafe::{
     DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
@@ -21,7 +22,7 @@ use super::typesafe::{
     post_typesafe_json, strip_typesafe_prefix,
 };
 use crate::caseload::{DEFAULT_PROVIDER, TYPESAFE_PROVIDER};
-use crate::configure::model_provider;
+use crate::configure::{is_discriminative_model, model_provider};
 use crate::provider::{
     GeminiModelProvider, GenerationRequest, GenerationResponse, ProviderError,
     StructuredModelProvider, TokenUsage,
@@ -30,15 +31,41 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// Maximum `Noul` questions packed into a single `/v1/systemone` forward pass by default.
-pub(crate) const MAX_DECISION_NOULS_PER_CALL: usize = 48;
+/// Per-model context character and `Noul` question-batching budget profile (`docs/architecture/nodes/docket.md` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecisionBudgetProfile {
+    /// Maximum shared `state` / `input` character budget for macro discriminative screening.
+    pub max_state_chars: usize,
+    /// Maximum combined `state` + `questions` character budget per forward pass.
+    pub max_batch_chars: usize,
+    /// Maximum `Noul` questions packed into a single forward pass by default.
+    pub max_nouls_per_call: usize,
+}
 
-/// Maximum `state` character budget for macro discriminative screening (`~13.5k` code tokens).
-pub(crate) const MAX_DECISION_STATE_CHARS: usize = 36_000;
+impl DecisionBudgetProfile {
+    /// Expanded profile for Google Gemini Decisions (`google:gemini-decision-*`: `262,144` input tokens, `1,000` questions/call).
+    pub const GEMINI_DECISION: Self = Self {
+        max_state_chars: 240_000,
+        max_batch_chars: 480_000,
+        max_nouls_per_call: 256,
+    };
 
-/// Maximum combined `state` + `questions` character budget per `/v1/systemone` call (`~24k` code
-/// tokens, staying safely below the upstream `32,768` input token ceiling on punctuation-dense diffs).
-pub(crate) const MAX_DECISION_BATCH_CHARS: usize = 64_000;
+    /// Calibrated profile for TypeSafe AI Jev (`typesafe:jev-*`: `32,768` input tokens).
+    pub const TYPESAFE_JEV: Self = Self {
+        max_state_chars: 36_000,
+        max_batch_chars: 64_000,
+        max_nouls_per_call: 48,
+    };
+
+    /// Resolves the deterministic [`DecisionBudgetProfile`] for a discriminative model specifier.
+    pub fn for_model(specifier: &str) -> Self {
+        if model_provider(specifier) == TYPESAFE_PROVIDER || specifier.trim().starts_with("jev-") {
+            Self::TYPESAFE_JEV
+        } else {
+            Self::GEMINI_DECISION
+        }
+    }
+}
 
 const MIN_QUESTION_BUDGET_CHARS: usize = 4_096;
 const WIRE_KEY_OVERHEAD_CHARS: usize = 32;
@@ -337,24 +364,50 @@ fn decode_systemone_response(
     })
 }
 
-/// Composite provider routing `google:*` structured generation turns to [`GeminiModelProvider`]
+/// Composite provider routing generative `google:*` turns to [`GeminiModelProvider`],
+/// `google:gemini-decision-*` discriminative `Noul` passes to [`GeminiDecisionProvider`],
 /// and `typesafe:*` discriminative `Noul` passes to [`TypesafeDecisionProvider`].
 #[derive(Debug, Clone)]
 pub struct MultiModelProvider {
     gemini: Option<GeminiModelProvider>,
+    gemini_decisions: Option<GeminiDecisionProvider>,
     typesafe: Option<TypesafeDecisionProvider>,
 }
 
 impl MultiModelProvider {
-    /// Constructs a [`MultiModelProvider`] from optional Gemini and TypeSafe credentials.
+    /// Constructs a [`MultiModelProvider`] from optional Gemini and TypeSafe credentials,
+    /// sharing a single pooled HTTP client between [`GeminiModelProvider`] and [`GeminiDecisionProvider`].
     pub fn new(gemini_api_key: Option<String>, typesafe_api_key: Option<String>) -> Self {
-        let gemini = gemini_api_key
-            .filter(|k| !k.trim().is_empty())
-            .map(GeminiModelProvider::new);
+        let (gemini, gemini_decisions) = match gemini_api_key.filter(|k| !k.trim().is_empty()) {
+            Some(key) => {
+                let structured = GeminiModelProvider::new(key.clone());
+                let decisions =
+                    GeminiDecisionProvider::with_client(key, structured.client().clone());
+                (Some(structured), Some(decisions))
+            }
+            None => (None, None),
+        };
         let typesafe = typesafe_api_key
             .filter(|k| !k.trim().is_empty())
             .map(TypesafeDecisionProvider::new);
-        Self { gemini, typesafe }
+        Self {
+            gemini,
+            gemini_decisions,
+            typesafe,
+        }
+    }
+
+    /// Constructs a [`MultiModelProvider`] from pre-configured provider adapters (for loopback tests or custom base URLs).
+    pub fn with_providers(
+        gemini: Option<GeminiModelProvider>,
+        gemini_decisions: Option<GeminiDecisionProvider>,
+        typesafe: Option<TypesafeDecisionProvider>,
+    ) -> Self {
+        Self {
+            gemini,
+            gemini_decisions,
+            typesafe,
+        }
     }
 }
 
@@ -364,17 +417,31 @@ impl DecisionModelProvider for MultiModelProvider {
         request: &DecisionRequest,
     ) -> Result<DecisionResponse, ProviderError> {
         let prov = model_provider(&request.model_specifier);
-        if prov != TYPESAFE_PROVIDER {
-            return Err(ProviderError::UnsupportedProvider {
+        match prov {
+            DEFAULT_PROVIDER if is_discriminative_model(&request.model_specifier) => {
+                let adapter = self
+                    .gemini_decisions
+                    .as_ref()
+                    .ok_or(ProviderError::MissingApiKey)?;
+                adapter.evaluate_decisions(request)
+            }
+            DEFAULT_PROVIDER => Err(ProviderError::InvalidModelSpecifier {
+                model_specifier: request.model_specifier.clone(),
+                reason: "generative Gemini models do not support discriminative `Noul` evaluation"
+                    .to_string(),
+            }),
+            TYPESAFE_PROVIDER => {
+                let adapter = self
+                    .typesafe
+                    .as_ref()
+                    .ok_or(ProviderError::MissingTypesafeApiKey)?;
+                adapter.evaluate_decisions(request)
+            }
+            _ => Err(ProviderError::UnsupportedProvider {
                 provider: prov.to_string(),
                 model_specifier: request.model_specifier.clone(),
-            });
+            }),
         }
-        let adapter = self
-            .typesafe
-            .as_ref()
-            .ok_or(ProviderError::MissingTypesafeApiKey)?;
-        adapter.evaluate_decisions(request)
     }
 }
 
@@ -388,6 +455,12 @@ impl StructuredModelProvider for MultiModelProvider {
             return Err(ProviderError::UnsupportedProvider {
                 provider: prov.to_string(),
                 model_specifier: request.model_specifier.clone(),
+            });
+        }
+        if is_discriminative_model(&request.model_specifier) {
+            return Err(ProviderError::InvalidModelSpecifier {
+                model_specifier: request.model_specifier.clone(),
+                reason: "discriminative Gemini Decisions models use `/v1beta/decisions` (`evaluate_decisions`) rather than `:generateContent`".to_string(),
             });
         }
         let adapter = self.gemini.as_ref().ok_or(ProviderError::MissingApiKey)?;

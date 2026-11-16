@@ -14,14 +14,18 @@
 
 //! Core domain execution engine and hexagonal endpoint prober for the `probe` diagnostic stage (`docs/architecture/nodes/probe.md`).
 
+mod gemini_decisions;
 mod typesafe;
 
+pub use gemini_decisions::{GeminiDecisionsEndpointProber, decode_gemini_decisions_probe_response};
 pub use typesafe::TypesafeEndpointProber;
 
 use crate::caseload::{
     Caseload, CaseloadProbe, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel,
 };
-use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
+use crate::configure::{
+    ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, is_discriminative_model, model_provider,
+};
 use crate::provider::gemini::post_gemini_json;
 pub use crate::provider::{
     DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, build_generate_content_url,
@@ -368,18 +372,57 @@ impl EndpointProber for GeminiEndpointProber {
     }
 }
 
-/// Composite live [`EndpointProber`] routing `google:*` specifiers to [`GeminiEndpointProber`]
+/// Composite live [`EndpointProber`] routing generative `google:*` specifiers to [`GeminiEndpointProber`],
+/// `google:gemini-decision-*` specifiers to [`GeminiDecisionsEndpointProber`],
 /// and `typesafe:*` specifiers to [`TypesafeEndpointProber`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MultiProviderEndpointProber {
     gemini: GeminiEndpointProber,
+    gemini_decisions: GeminiDecisionsEndpointProber,
     typesafe: TypesafeEndpointProber,
+}
+
+impl Default for MultiProviderEndpointProber {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MultiProviderEndpointProber {
     /// Constructs a new [`MultiProviderEndpointProber`] targeting default Gemini and TypeSafe endpoints.
     pub fn new() -> Self {
-        Self::default()
+        let client = build_pooled_http_client();
+        Self {
+            gemini: GeminiEndpointProber::with_client_and_base_url(
+                client.clone(),
+                DEFAULT_GEMINI_BASE_URL,
+            ),
+            gemini_decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
+                client,
+                DEFAULT_GEMINI_BASE_URL,
+            ),
+            typesafe: TypesafeEndpointProber::new(),
+        }
+    }
+
+    /// Constructs a [`MultiProviderEndpointProber`] targeting custom base URLs (for hermetic loopback tests).
+    pub fn with_base_urls(
+        gemini_base_url: impl Into<String>,
+        typesafe_base_url: impl Into<String>,
+    ) -> Self {
+        let gemini_base = gemini_base_url.into();
+        let client = build_pooled_http_client();
+        Self {
+            gemini: GeminiEndpointProber::with_client_and_base_url(
+                client.clone(),
+                gemini_base.clone(),
+            ),
+            gemini_decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
+                client,
+                gemini_base,
+            ),
+            typesafe: TypesafeEndpointProber::with_base_url(typesafe_base_url),
+        }
     }
 }
 
@@ -394,6 +437,14 @@ impl EndpointProber for MultiProviderEndpointProber {
     ) -> ProbeEndpointResult {
         if model_provider(model_specifier) == TYPESAFE_PROVIDER {
             self.typesafe.probe_endpoint(
+                model_specifier,
+                api_key,
+                timeout_ms,
+                thinking_level,
+                reasoning_budget,
+            )
+        } else if is_discriminative_model(model_specifier) {
+            self.gemini_decisions.probe_endpoint(
                 model_specifier,
                 api_key,
                 timeout_ms,
@@ -793,6 +844,98 @@ mod tests {
             )
             .expect("hybrid probe with both keys");
             assert!(ok_hybrid.probe.expect("probe").is_healthy());
+        }
+
+        #[test]
+        fn test_multi_provider_prober_routes_gemini_decision_to_decisions_and_carbon_to_generate_content()
+         {
+            use std::io::{Read, Write};
+            use std::net::TcpListener;
+            use std::sync::{Arc, Mutex};
+            use std::thread;
+            use std::time::Duration;
+
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let seen_paths = Arc::new(Mutex::new(Vec::new()));
+            let seen_for_server = Arc::clone(&seen_paths);
+
+            let server = thread::spawn(move || {
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().expect("accept probe connection");
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .expect("read timeout");
+                    let mut raw = Vec::new();
+                    let mut buf = [0_u8; 4096];
+                    let head = loop {
+                        let n = stream.read(&mut buf).expect("read");
+                        assert!(n > 0);
+                        raw.extend_from_slice(&buf[..n]);
+                        let text = String::from_utf8_lossy(&raw);
+                        if let Some((h, body)) = text.split_once("\r\n\r\n") {
+                            let expected_len = h
+                                .lines()
+                                .find_map(|l| {
+                                    let (k, v) = l.split_once(':')?;
+                                    k.eq_ignore_ascii_case("content-length")
+                                        .then(|| v.trim().parse::<usize>().ok())
+                                        .flatten()
+                                })
+                                .unwrap_or(0);
+                            if body.len() >= expected_len {
+                                break h.to_string();
+                            }
+                        }
+                    };
+                    let req_line = head.lines().next().unwrap_or("").to_string();
+                    seen_for_server.lock().unwrap().push(req_line.clone());
+
+                    let resp_body = if req_line.contains("/v1beta/decisions") {
+                        r#"{"model":"gemini-decision-1","answers":{"ping":{"type":"noul","noul":0.99}}}"#
+                    } else {
+                        r#"{"modelVersion":"gemini-4-carbon"}"#
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                        resp_body.len(),
+                        resp_body
+                    );
+                    stream.write_all(resp.as_bytes()).expect("write");
+                    stream.flush().expect("flush");
+                }
+            });
+
+            let prober = MultiProviderEndpointProber::with_base_urls(
+                format!("http://{addr}/v1beta"),
+                format!("http://{addr}/v1"),
+            );
+            let out = execute_probe(
+                &ProbeOptions {
+                    api_key: "synthetic-gemini-key".to_string(),
+                    typesafe_api_key: None,
+                    timeout_ms: 2000,
+                },
+                &prober,
+                Caseload::new().with_config(CaseloadConfig::default()),
+            )
+            .expect("live loopback probe succeeds");
+
+            server.join().expect("server joined");
+            let probe = out.probe.expect("probe populated");
+            assert!(probe.is_healthy());
+            assert_eq!(probe.screener.model, "gemini-decision-1");
+            assert_eq!(probe.auditor.model, "gemini-4-carbon");
+
+            let mut paths = seen_paths.lock().unwrap().clone();
+            paths.sort();
+            assert_eq!(
+                paths,
+                vec![
+                    "POST /v1beta/decisions HTTP/1.1".to_string(),
+                    "POST /v1beta/models/gemini-4-carbon:generateContent HTTP/1.1".to_string(),
+                ]
+            );
         }
     }
 }

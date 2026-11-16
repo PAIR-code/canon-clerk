@@ -119,7 +119,7 @@ impl fmt::Display for AuditError {
                 f,
                 "Discriminative model `{specifier}` cannot adjudicate `audit` trials \
                  (`audit` requires a generative model for exception rulings, remediation guidance, and line annotations).\n  \
-                 Hint: Use `canon-clerk vet --screener-model jev-latest` for discriminative vetting, or configure \
+                 Hint: Use `canon-clerk vet --screener-model {specifier}` for discriminative vetting, or configure \
                  `{DEFAULT_AUDITOR_MODEL}` (`gemini-4-carbon`) as `--auditor-model`."
             ),
             Self::MissingActiveCanon { canon_ref } => write!(

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Shared-state discriminative `Noul` exhibit screening for `admit` (`typesafe:jev-*`).
+//! Shared-state discriminative `Noul` exhibit screening for `admit` (`google:gemini-decision-*`, `typesafe:jev-*`).
 
 use super::exhibits::append_candidate_exhibit_section;
 use super::prompt::append_filing_overview;
@@ -25,8 +25,8 @@ use crate::caseload::{
 use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
-    DecisionRequest, DecisionResponse, MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL,
-    ProviderError, StructuredModelProvider,
+    DecisionBudgetProfile, DecisionRequest, DecisionResponse, ProviderError,
+    StructuredModelProvider,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -117,12 +117,13 @@ fn pack_exhibit_grouped_batches(
         return Vec::new();
     }
 
+    let budget = DecisionBudgetProfile::for_model(screener_model);
     let mut filing_overview = String::with_capacity(1024);
     append_filing_overview(&mut filing_overview, intake, discovery);
-    if filing_overview.len() > MAX_DECISION_BATCH_CHARS / 4
+    if filing_overview.len() > budget.max_batch_chars / 4
         && let Some((idx, _)) = filing_overview
             .char_indices()
-            .nth(MAX_DECISION_BATCH_CHARS / 4)
+            .nth(budget.max_batch_chars / 4)
     {
         filing_overview.truncate(idx);
         filing_overview.push_str("\n... [overview truncated]\n\n");
@@ -151,8 +152,8 @@ fn pack_exhibit_grouped_batches(
         };
         let q_cost = item.question_text.len() + 32;
         if !cur_pairs.is_empty()
-            && (cur_pairs.len() >= MAX_DECISION_NOULS_PER_CALL
-                || cur_chars + ex_cost + q_cost > MAX_DECISION_BATCH_CHARS)
+            && (cur_pairs.len() >= budget.max_nouls_per_call
+                || cur_chars + ex_cost + q_cost > budget.max_batch_chars)
         {
             prepared.push(finalize_admit_batch(
                 cur_pairs,
@@ -423,5 +424,106 @@ mod tests {
         assert_eq!(items[0].admissibility_status, AdmissibilityStatus::Excluded);
         assert_eq!(items[1].file_path, "src/cli/app.rs");
         assert_eq!(items[1].admissibility_status, AdmissibilityStatus::Admitted);
+    }
+
+    #[test]
+    fn test_gemini_decision_expanded_budget_packs_over_48_pairs_in_single_batch_vs_jev() {
+        use crate::caseload::DEFAULT_SCREENER_MODEL;
+        use std::sync::Mutex;
+
+        struct BatchCountingDecisionScreener {
+            batch_sizes: Mutex<Vec<usize>>,
+        }
+        impl StructuredModelProvider for BatchCountingDecisionScreener {
+            fn generate_structured(
+                &self,
+                _request: &crate::provider::GenerationRequest,
+            ) -> Result<crate::provider::GenerationResponse, ProviderError> {
+                panic!("must execute discriminative Noul path")
+            }
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                self.batch_sizes
+                    .lock()
+                    .unwrap()
+                    .push(request.questions.len());
+                let scores = request
+                    .questions
+                    .keys()
+                    .map(|k| (k.clone(), 0.90))
+                    .collect();
+                Ok(DecisionResponse {
+                    scores,
+                    resolved_model: request.model_specifier.clone(),
+                    latency_ms: 50,
+                    usage: TokenUsage::default(),
+                })
+            }
+        }
+
+        let canon_ref = ".canons/cli/rule.md";
+        let mut ws = WorkspaceSnapshot::new().with_canon_markdown(
+            "---\ntriggers:\n  - \"**\"\n---\nCLI code MUST validate flags.\n",
+            &ParseCanonOptions::with_source_ref(canon_ref),
+        );
+        let mut files = Vec::new();
+        for i in 0..60 {
+            let p = format!("src/cli/f_{i:02}.rs");
+            ws = ws.with_file_content(&p, "fn f() {}\n");
+            files.push(p);
+        }
+
+        let make_caseload = |model: &str| {
+            Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: files.clone(),
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    triggers_join: BTreeMap::from([(canon_ref.to_string(), files.clone())]),
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig {
+                    screener_model: model.to_string(),
+                    ..CaseloadConfig::default()
+                })
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "ok".to_string(),
+                        colorability_score: 0.9,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+        };
+
+        let gemini_probe = BatchCountingDecisionScreener {
+            batch_sizes: Mutex::new(Vec::new()),
+        };
+        execute_admit(
+            &AdmitOptions::default(),
+            make_caseload(DEFAULT_SCREENER_MODEL),
+            &ws,
+            &gemini_probe,
+        )
+        .expect("gemini-decision-1 admit");
+        assert_eq!(*gemini_probe.batch_sizes.lock().unwrap(), vec![60]);
+
+        let jev_probe = BatchCountingDecisionScreener {
+            batch_sizes: Mutex::new(Vec::new()),
+        };
+        execute_admit(
+            &AdmitOptions::default(),
+            make_caseload(DEFAULT_JEV_MODEL),
+            &ws,
+            &jev_probe,
+        )
+        .expect("jev-latest admit");
+        assert_eq!(*jev_probe.batch_sizes.lock().unwrap(), vec![48, 12]);
     }
 }
