@@ -19,8 +19,8 @@ mod slices;
 mod structured;
 
 use crate::audit::build_audit_case_user_prompt;
-use crate::caseload::{Caseload, CaseloadVetting, TYPESAFE_PROVIDER, normalize_vetting_score};
-use crate::configure::model_provider;
+use crate::caseload::{Caseload, CaseloadVetting, normalize_vetting_score};
+use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
@@ -217,8 +217,8 @@ pub fn execute_vet(
     }
 
     let config = caseload.config.as_ref().ok_or(VetError::MissingConfig)?;
-    let is_discriminative = model_provider(&config.screener_model) == TYPESAFE_PROVIDER;
-    let max_state_chars = decision::max_discriminative_state_chars();
+    let is_discriminative = is_discriminative_model(&config.screener_model);
+    let max_state_chars = decision::max_discriminative_state_chars(&config.screener_model);
 
     let prepared_cases: Vec<PreparedVettingCase> = active_entries
         .into_iter()
@@ -758,7 +758,7 @@ mod tests {
 
         #[test]
         fn test_standalone_generative_vetting_omits_reasoning_budget_and_decodes_scores() {
-            let (ws, caseload) = sample_fixture(DEFAULT_SCREENER_MODEL);
+            let (ws, caseload) = sample_fixture(crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL);
             let mut provider = MockVetProvider::empty();
             provider.structured_routes.insert(
                 ".canons/cli/clean-rule.md".to_string(),
@@ -787,6 +787,36 @@ mod tests {
             let vetting = out.vetting.expect("vetting");
             assert_eq!(vetting.vetted_count(), 1);
             assert_eq!(vetting.contested_count(), 1);
+        }
+
+        #[test]
+        fn test_default_gemini_decision_screener_executes_discriminative_noul_vetting() {
+            let (ws, caseload) = sample_fixture(DEFAULT_SCREENER_MODEL);
+            let mut provider = MockVetProvider::empty();
+            provider
+                .decision_scores
+                .insert(".canons/cli/clean-rule.md".to_string(), 0.96);
+            provider
+                .decision_scores
+                .insert(".canons/cli/contested-rule.md".to_string(), 0.08);
+
+            let out = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
+                .expect("gemini-decision-1 discriminative vet");
+            assert!(
+                provider.structured_requests.lock().unwrap().is_empty(),
+                "default gemini-decision-1 must not call generate_structured"
+            );
+            assert_eq!(provider.decision_requests.lock().unwrap().len(), 2);
+
+            let vetting = out.vetting.expect("vetting");
+            assert_eq!(
+                vetting.vetted_cases,
+                vec![".canons/cli/clean-rule.md".to_string()]
+            );
+            assert_eq!(
+                vetting.contested_cases,
+                vec![".canons/cli/contested-rule.md".to_string()]
+            );
         }
     }
 }

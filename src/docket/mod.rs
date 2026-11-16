@@ -21,11 +21,10 @@ mod prompt;
 pub(crate) use decode::resolve_canon_path;
 
 use crate::caseload::{
-    CanonDocketAssessment, Caseload, CaseloadDocket, TYPESAFE_PROVIDER,
-    normalize_colorability_score,
+    CanonDocketAssessment, Caseload, CaseloadDocket, normalize_colorability_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
-use crate::configure::model_provider;
+use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
@@ -91,15 +90,15 @@ impl Default for DocketOptions {
 }
 
 /// Resolves the effective `max_canons_per_call` for `docket` given an optional explicit override
-/// and the configured `screener_model` (`None` on `typesafe:*` to preserve its `48`-noul batch ceiling,
-/// `Some(DEFAULT_DOCKET_BATCH_SIZE)` on generative models).
+/// and the configured `screener_model` (`None` on discriminative models so their `DecisionBudgetProfile`
+/// governs batching, `Some(DEFAULT_DOCKET_BATCH_SIZE)` on generative models).
 pub(crate) fn effective_docket_batch_size(
     explicit: Option<usize>,
     screener_model: &str,
 ) -> Option<usize> {
     if explicit.is_some() {
         explicit
-    } else if model_provider(screener_model) == TYPESAFE_PROVIDER {
+    } else if is_discriminative_model(screener_model) {
         None
     } else {
         Some(DEFAULT_DOCKET_BATCH_SIZE)
@@ -300,7 +299,7 @@ pub fn execute_docket(
     }
 
     let config = caseload.config.as_ref().ok_or(DocketError::MissingConfig)?;
-    if model_provider(&config.screener_model) == TYPESAFE_PROVIDER {
+    if is_discriminative_model(&config.screener_model) {
         return decision::execute_docket_decisions(
             options, caseload, threshold, workspace, provider,
         );
@@ -520,7 +519,10 @@ mod tests {
                 has_errors: false,
                 results: BTreeMap::new(),
             })
-            .with_config(CaseloadConfig::default())
+            .with_config(CaseloadConfig {
+                screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                ..CaseloadConfig::default()
+            })
     }
 
     mod zero_candidate_and_prerequisite_guards {
@@ -702,7 +704,10 @@ mod tests {
             let requests = provider.captured_requests();
             assert_eq!(requests.len(), 1, "docket must execute in a single turn");
             let req = &requests[0];
-            assert_eq!(req.model_specifier, DEFAULT_SCREENER_MODEL);
+            assert_eq!(
+                req.model_specifier,
+                crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL
+            );
             assert_eq!(req.reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
             assert!(req.user_prompt.contains("feat(cli): add docket subcommand"));
             assert!(req.user_prompt.contains("#260: Implement docket stage"));
@@ -897,7 +902,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default());
+                .with_config(CaseloadConfig {
+                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                    ..CaseloadConfig::default()
+                });
             (ws, caseload, target_files)
         }
 

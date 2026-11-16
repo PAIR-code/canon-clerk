@@ -22,8 +22,7 @@ pub use providers::{
     MissingCredentialsReason, PROVIDER_CAPABILITIES, ProviderCapability, ProviderRole,
 };
 pub(crate) use providers::{
-    is_discriminative_only_provider, resolve_default_tiers, resolve_provider_api_key,
-    verified_credential_env_vars,
+    resolve_default_tiers, resolve_provider_api_key, verified_credential_env_vars,
 };
 pub use store::{
     StoredConfig, StoredProviderConfig, StoredTierModel, load_host_config_file,
@@ -117,7 +116,7 @@ pub enum ConfigureError {
     UnsupportedProvider { provider: String, specifier: String },
     /// Model specifier is empty, contains whitespace, or does not name a valid supported model.
     InvalidModelSpecifier { specifier: String, reason: String },
-    /// Discriminative-only classifier (`typesafe:*`) was configured on `auditor_model`.
+    /// Discriminative decision model (`google:gemini-decision-*` or `typesafe:*`) was configured on `auditor_model`.
     DiscriminativeAuditorUnsupported { specifier: String },
     /// Thinking level cannot be parsed as `minimal`, `low`, `medium`, or `high`.
     InvalidThinkingLevel { raw: String },
@@ -164,13 +163,13 @@ impl fmt::Display for ConfigureError {
                 f,
                 "Invalid model specifier `{specifier}`: {reason}\n  \
                  Hint: Specify an exact upstream model identifier such as `{DEFAULT_SCREENER_MODEL}`, \
-                 `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or unprefixed `gemini-4-hydrogen`, `gemini-4-carbon`, `jev-latest`."
+                 `{DEFAULT_AUDITOR_MODEL}`, `{DEFAULT_JEV_MODEL}`, or unprefixed `gemini-decision-1`, `gemini-4-hydrogen`, `gemini-4-carbon`, `jev-latest`."
             ),
             Self::DiscriminativeAuditorUnsupported { specifier } => write!(
                 f,
                 "Discriminative model `{specifier}` cannot be configured as `auditor_model` \
                  (`audit` requires structured generative output for exception rulings, remediation guidance, and line annotations).\n  \
-                 Hint: Pass `--screener-model jev-latest` (e.g. `canon-clerk vet --screener-model jev-latest`) \
+                 Hint: Pass `--screener-model {specifier}` (e.g. `canon-clerk vet --screener-model {specifier}`) \
                  and keep a generative auditor such as `{DEFAULT_AUDITOR_MODEL}` (`gemini-4-carbon`) on `--auditor-model`."
             ),
             Self::InvalidThinkingLevel { raw } => write!(
@@ -274,7 +273,7 @@ pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
                 Err(ConfigureError::InvalidModelSpecifier {
                     specifier: raw.to_string(),
                     reason: format!(
-                        "unrecognized Google model `{model_part}` (expected `gemini-*`, e.g. `gemini-4-hydrogen` or `gemini-4-carbon`)."
+                        "unrecognized Google model `{model_part}` (expected `gemini-decision-1`, `gemini-4-hydrogen`, `gemini-4-carbon`, or another exact `gemini-*` upstream ID)."
                     ),
                 })
             }
@@ -295,7 +294,26 @@ pub fn normalize_model_specifier(raw: &str) -> Result<String, ConfigureError> {
     }
 }
 
+pub(crate) fn is_gemini_decision_model_name(name: &str) -> bool {
+    is_valid_prefixed_model_name(name, "gemini-decision-")
+}
+
+/// Returns `true` when `specifier` names a discriminative `Noul` decision model
+/// (`google:gemini-decision-*`, `gemini-decision-*`, `typesafe:*`, or `jev-*`).
+pub fn is_discriminative_model(specifier: &str) -> bool {
+    let trimmed = specifier.trim();
+    match trimmed.split_once(':') {
+        Some((DEFAULT_PROVIDER, model_part)) => is_gemini_decision_model_name(model_part),
+        Some((TYPESAFE_PROVIDER, model_part)) => !model_part.is_empty(),
+        Some(_) => false,
+        None => is_gemini_decision_model_name(trimmed) || is_valid_jev_model_name(trimmed),
+    }
+}
+
 fn is_valid_gemini_model_name(name: &str) -> bool {
+    if name.starts_with("gemini-decision") {
+        return is_gemini_decision_model_name(name);
+    }
     is_valid_prefixed_model_name(name, "gemini-")
 }
 
@@ -392,7 +410,7 @@ pub fn execute_configure(
     let auditor_was_pinned = pinned_auditor.is_some();
     let auditor_model = pinned_auditor.unwrap_or(inferred_auditor);
 
-    if is_discriminative_only_provider(model_provider(&auditor_model)) {
+    if is_discriminative_model(&auditor_model) {
         return Err(ConfigureError::DiscriminativeAuditorUnsupported {
             specifier: auditor_model,
         });
@@ -462,9 +480,19 @@ mod tests {
                 DEFAULT_AUDITOR_MODEL
             );
             assert_eq!(
+                normalize_model_specifier("gemini-decision-1")
+                    .expect("unqualified gemini-decision-1"),
+                DEFAULT_SCREENER_MODEL
+            );
+            assert_eq!(
+                normalize_model_specifier("google:gemini-decision-1")
+                    .expect("canonical gemini-decision-1"),
+                DEFAULT_SCREENER_MODEL
+            );
+            assert_eq!(
                 normalize_model_specifier("gemini-4-hydrogen")
                     .expect("unqualified gemini-4-hydrogen"),
-                DEFAULT_SCREENER_MODEL
+                "google:gemini-4-hydrogen"
             );
             assert_eq!(
                 normalize_model_specifier("gemini-2.5-pro").expect("unqualified gemini"),
@@ -554,6 +582,10 @@ mod tests {
                 "typesafe:jev-",
                 "unknown-model",
                 "gemini-",
+                "gemini-decision",
+                "google:gemini-decision",
+                "gemini-decision-",
+                "google:gemini-decision-",
                 "jev-",
             ] {
                 let err = normalize_model_specifier(invalid)
@@ -637,7 +669,7 @@ mod tests {
             assert_eq!(
                 from_env.config,
                 Some(CaseloadConfig {
-                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
+                    screener_model: "google:gemini-4-hydrogen".to_string(),
                     auditor_model: "google:gemini-2.5-pro".to_string(),
                     thinking_level: None,
                     reasoning_budget: Some(4096),
@@ -664,7 +696,7 @@ mod tests {
             };
             let caseload = execute_configure(&opts, None).expect("configure with overrides");
             let cfg = caseload.config.expect("config populated");
-            assert_eq!(cfg.screener_model, DEFAULT_SCREENER_MODEL);
+            assert_eq!(cfg.screener_model, "google:gemini-4-hydrogen");
             assert_eq!(cfg.auditor_model, DEFAULT_AUDITOR_MODEL);
             assert_eq!(cfg.thinking_level, None);
             assert_eq!(cfg.reasoning_budget, Some(4096));
@@ -826,7 +858,7 @@ mod tests {
             assert_eq!(
                 caseload.config,
                 Some(CaseloadConfig {
-                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
                     thinking_level: None,
                     reasoning_budget: None,
@@ -848,7 +880,7 @@ mod tests {
             assert!(err_ts.to_string().contains(ENV_TYPESAFE_API_KEY));
             assert!(err_ts.to_string().contains("Hint:"));
 
-            // 2. Unpinned hybrid env (TYPESAFE_API_KEY + GEMINI_API_KEY) auto-selects jev-latest + gemini-4-carbon
+            // 2. Unpinned hybrid env (GEMINI_API_KEY + TYPESAFE_API_KEY) auto-selects gemini-decision-1 + gemini-4-carbon
             let mut both_env = env_with_key();
             both_env.insert(
                 ENV_TYPESAFE_API_KEY.to_string(),
@@ -861,11 +893,13 @@ mod tests {
                 },
                 None,
             )
-            .expect("unpinned hybrid configure should auto-select jev-latest + gemini-4-carbon");
+            .expect(
+                "unpinned hybrid configure should auto-select gemini-decision-1 + gemini-4-carbon",
+            );
             assert_eq!(
                 hybrid_ok.config,
                 Some(CaseloadConfig {
-                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
                     thinking_level: None,
                     reasoning_budget: None,
@@ -875,16 +909,16 @@ mod tests {
             // 3. Explicit pins (CLI, env, or config.json) override credential-inferred hybrid defaults
             let cli_pinned = execute_configure(
                 &ConfigureOptions {
-                    screener_model: Some("gemini-4-hydrogen".to_string()),
+                    screener_model: Some("jev-latest".to_string()),
                     env: both_env.clone(),
                     ..ConfigureOptions::default()
                 },
                 None,
             )
-            .expect("CLI --screener-model gemini-4-hydrogen overrides ambient TYPESAFE_API_KEY");
+            .expect("CLI --screener-model jev-latest overrides default gemini-decision-1");
             assert_eq!(
                 cli_pinned.config.expect("config").screener_model,
-                DEFAULT_SCREENER_MODEL
+                DEFAULT_JEV_MODEL
             );
 
             let mut env_pinned_map = both_env.clone();
@@ -933,24 +967,28 @@ mod tests {
                 "synthetic-typesafe-only-key".to_string(),
             );
 
-            // 1. Discriminative model on auditor_model is rejected with remediation hint
-            let err_disc_auditor = execute_configure(
-                &ConfigureOptions {
-                    auditor_model: Some("typesafe:jev-latest".to_string()),
-                    env: ts_only_env.clone(),
-                    ..ConfigureOptions::default()
-                },
-                None,
-            )
-            .expect_err("discriminative auditor_model must be rejected");
-            assert_eq!(
-                err_disc_auditor,
-                ConfigureError::DiscriminativeAuditorUnsupported {
-                    specifier: DEFAULT_JEV_MODEL.to_string(),
-                }
-            );
-            assert!(err_disc_auditor.to_string().contains("canon-clerk vet"));
-            assert!(err_disc_auditor.to_string().contains("Hint:"));
+            // 1. Discriminative models (typesafe:jev-* and google:gemini-decision-*) on auditor_model are rejected
+            for bad_auditor in [
+                "typesafe:jev-latest",
+                "gemini-decision-1",
+                "google:gemini-decision-1",
+            ] {
+                let err_disc_auditor = execute_configure(
+                    &ConfigureOptions {
+                        auditor_model: Some(bad_auditor.to_string()),
+                        env: env_with_key(),
+                        ..ConfigureOptions::default()
+                    },
+                    None,
+                )
+                .expect_err("discriminative auditor_model must be rejected");
+                assert!(matches!(
+                    err_disc_auditor,
+                    ConfigureError::DiscriminativeAuditorUnsupported { .. }
+                ));
+                assert!(err_disc_auditor.to_string().contains("canon-clerk vet"));
+                assert!(err_disc_auditor.to_string().contains("Hint:"));
+            }
 
             // 2. Screener-only closure with ONLY TYPESAFE_API_KEY succeeds with zero model flags
             let screener_only_ok = execute_configure(

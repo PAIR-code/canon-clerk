@@ -32,11 +32,11 @@ pub(crate) use slices::{
 };
 
 use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_THINKING_LEVEL,
-    TYPESAFE_PROVIDER, VerdictStatus, normalize_compliance_score,
+    CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_THINKING_LEVEL, VerdictStatus,
+    normalize_compliance_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
-use crate::configure::model_provider;
+use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{GenerationRequest, StructuredModelProvider};
@@ -204,7 +204,7 @@ pub fn execute_audit(
     }
 
     let config = caseload.config.as_ref().ok_or(AuditError::MissingConfig)?;
-    if model_provider(&config.auditor_model) == TYPESAFE_PROVIDER {
+    if is_discriminative_model(&config.auditor_model) {
         return Err(AuditError::DiscriminativeAuditorUnsupported {
             specifier: config.auditor_model.clone(),
         });

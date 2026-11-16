@@ -21,7 +21,7 @@ use crate::caseload::{
 };
 use crate::configure::{
     ConfigureError, ConfigureOptions, DEFAULT_JEV_MODEL, ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY,
-    model_provider, resolve_non_empty,
+    is_discriminative_model, model_provider, resolve_non_empty,
 };
 use std::collections::BTreeSet;
 use std::fmt;
@@ -68,26 +68,26 @@ pub struct ProviderCapability {
 /// directly from this table.
 pub const PROVIDER_CAPABILITIES: &[ProviderCapability] = &[
     ProviderCapability {
-        slug: TYPESAFE_PROVIDER,
-        display_name: "TypeSafe AI",
-        role: ProviderRole::DiscriminativeScreener,
-        rank: 1,
-        cli_flag: "--typesafe-api-key",
-        env_var: ENV_TYPESAFE_API_KEY,
-        config_key_path: "providers.typesafe.apiKey",
-        default_screener_model: Some(DEFAULT_JEV_MODEL),
-        default_auditor_model: None,
-    },
-    ProviderCapability {
         slug: DEFAULT_PROVIDER,
         display_name: "Google Gemini",
         role: ProviderRole::GenerativeFullStack,
-        rank: 2,
+        rank: 1,
         cli_flag: "--gemini-api-key",
         env_var: ENV_GEMINI_API_KEY,
         config_key_path: "providers.google.apiKey",
         default_screener_model: Some(DEFAULT_SCREENER_MODEL),
         default_auditor_model: Some(DEFAULT_AUDITOR_MODEL),
+    },
+    ProviderCapability {
+        slug: TYPESAFE_PROVIDER,
+        display_name: "TypeSafe AI",
+        role: ProviderRole::DiscriminativeScreener,
+        rank: 2,
+        cli_flag: "--typesafe-api-key",
+        env_var: ENV_TYPESAFE_API_KEY,
+        config_key_path: "providers.typesafe.apiKey",
+        default_screener_model: Some(DEFAULT_JEV_MODEL),
+        default_auditor_model: None,
     },
 ];
 
@@ -113,11 +113,6 @@ pub enum MissingCredentialsReason {
 /// Looks up the declarative [`ProviderCapability`] entry for a canonical provider slug.
 fn provider_capability(slug: &str) -> Option<&'static ProviderCapability> {
     PROVIDER_CAPABILITIES.iter().find(|cap| cap.slug == slug)
-}
-
-/// Returns `true` when `slug` names a discriminative-only screener provider disallowed on `auditor_model`.
-pub(crate) fn is_discriminative_only_provider(slug: &str) -> bool {
-    provider_capability(slug).is_some_and(|cap| cap.role == ProviderRole::DiscriminativeScreener)
 }
 
 /// Resolves the non-empty API key for `cap` across CLI flags, environment variables, and `config.json`.
@@ -174,7 +169,8 @@ fn resolve_default_tiers_with_table(
         })
         .min_by_key(|cap| {
             (
-                cap.role != ProviderRole::DiscriminativeScreener,
+                !cap.default_screener_model
+                    .is_some_and(is_discriminative_model),
                 cap.rank,
                 cap.slug,
             )
@@ -412,7 +408,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_google_only_credentials_select_hydrogen_and_carbon() {
+        fn test_google_only_credentials_select_gemini_decision_and_carbon() {
             let mut env = BTreeMap::new();
             env.insert(ENV_GEMINI_API_KEY.to_string(), "gemini-key".to_string());
             let opts = ConfigureOptions {
@@ -429,8 +425,9 @@ mod tests {
         }
 
         #[test]
-        fn test_hybrid_typesafe_and_google_credentials_select_jev_and_carbon_across_sources() {
-            // 1. Both via env
+        fn test_hybrid_google_and_typesafe_credentials_select_gemini_decision_and_carbon_across_sources()
+         {
+            // 1. Both via env -> google:gemini-decision-1 wins rank 1 ahead of typesafe:jev-latest
             let mut env = BTreeMap::new();
             env.insert(ENV_GEMINI_API_KEY.to_string(), "gemini-key".to_string());
             env.insert(ENV_TYPESAFE_API_KEY.to_string(), "typesafe-key".to_string());
@@ -440,12 +437,12 @@ mod tests {
                     ..ConfigureOptions::default()
                 }),
                 (
-                    DEFAULT_JEV_MODEL.to_string(),
+                    DEFAULT_SCREENER_MODEL.to_string(),
                     DEFAULT_AUDITOR_MODEL.to_string()
                 )
             );
 
-            // 2. TypeSafe in config.json + Gemini via CLI flag
+            // 2. TypeSafe in config.json + Gemini via CLI flag -> google:gemini-decision-1 wins rank 1
             let mut providers = BTreeMap::new();
             providers.insert(
                 TYPESAFE_PROVIDER.to_string(),
@@ -464,7 +461,7 @@ mod tests {
             assert_eq!(
                 resolve_default_tiers(&opts),
                 (
-                    DEFAULT_JEV_MODEL.to_string(),
+                    DEFAULT_SCREENER_MODEL.to_string(),
                     DEFAULT_AUDITOR_MODEL.to_string()
                 )
             );
@@ -503,8 +500,8 @@ mod tests {
                 default_screener_model: Some("acme:swift-1"),
                 default_auditor_model: Some("acme:reasoner-1"),
             },
-            PROVIDER_CAPABILITIES[1], // google (rank 2)
-            PROVIDER_CAPABILITIES[0], // typesafe (rank 1)
+            PROVIDER_CAPABILITIES[0], // google (rank 1)
+            PROVIDER_CAPABILITIES[1], // typesafe (rank 2)
         ];
 
         #[test]

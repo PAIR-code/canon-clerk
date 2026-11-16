@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Discriminative `Noul` prima facie compliance vetting for `vet` (`typesafe:jev-*`, `docs/architecture/nodes/vet.md` §4.3).
+//! Discriminative `Noul` prima facie compliance vetting for `vet` (`google:gemini-decision-*`, `typesafe:jev-*`, `docs/architecture/nodes/vet.md` §4.3).
 
 use super::slices::DiscriminativeCasePlan;
 use super::{PreparedVettingCase, VetError};
 use crate::caseload::{CanonVettingAssessment, VettingStatus, normalize_vetting_score};
 use crate::concurrency::execute_bounded_stage_work;
 use crate::provider::{
-    DecisionRequest, MAX_DECISION_BATCH_CHARS, ProviderError, StructuredModelProvider,
+    DecisionBudgetProfile, DecisionRequest, ProviderError, StructuredModelProvider,
+    is_decision_context_limit_error,
 };
 use std::collections::BTreeMap;
 
@@ -37,8 +38,10 @@ Question: Do the Admitted Exhibits in `state` comply with the Governing Canon St
 - Answer YES only if the Admitted Exhibits comply (or satisfy a declared `Exception`) and require zero violation annotations.\n\
 - Answer NO if any unexcused statute violation or missing required companion update is present.";
 
-pub(super) const fn max_discriminative_state_chars() -> usize {
-    MAX_DECISION_BATCH_CHARS - VET_NOUL_INSTRUCTION.len() - 128
+pub(super) fn max_discriminative_state_chars(screener_model: &str) -> usize {
+    DecisionBudgetProfile::for_model(screener_model)
+        .max_batch_chars
+        .saturating_sub(VET_NOUL_INSTRUCTION.len() + 128)
 }
 
 pub(super) struct DiscriminativeVetParams<'a> {
@@ -186,7 +189,7 @@ fn evaluate_slice(
             status_code: 400,
             ref detail,
             ..
-        }) if detail.contains("max_tokens_exceeded") => {
+        }) if is_decision_context_limit_error(detail) => {
             return Ok(SliceOutcome::OversizedContest);
         }
         Err(err) => return Err(VetError::Provider(err)),

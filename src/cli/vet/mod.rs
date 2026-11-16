@@ -48,19 +48,19 @@ use std::io::{Read, Write};
 
 const VET_EXAMPLES: &str = "\
 Examples:
-  # Fast pre-flight compliance vetting on a unified diff using TypeSafe Jev:
-  git diff origin/main | canon-clerk vet --diff - --screener-model jev-latest
+  # Fast pre-flight compliance vetting on a unified diff (0 output tokens; defaults to gemini-decision-1):
+  git diff origin/main | canon-clerk vet --diff -
 
   # Vet explicit target paths or newline-delimited stdin paths:
-  canon-clerk vet src/cli src/vet --screener-model jev-latest
-  git diff origin/main --name-only | canon-clerk vet - --screener-model jev-latest
+  canon-clerk vet src/cli src/vet
+  git diff origin/main --name-only | canon-clerk vet -
 
   # Escalate to `canon-clerk audit` only when contested cases require remediation & line spans:
-  git diff origin/main | canon-clerk vet --diff - --screener-model jev-latest --output-caseload caseload.json \\
+  git diff origin/main | canon-clerk vet --diff - --output-caseload caseload.json \\
     || canon-clerk audit --caseload caseload.json
 
-  # Emit tab-separated compact records strictly for contested cases:
-  git diff origin/main | canon-clerk vet --diff - --format compact";
+  # Emit tab-separated compact records strictly for contested cases (or pin TypeSafe Jev explicitly):
+  git diff origin/main | canon-clerk vet --diff - --format compact --screener-model jev-latest";
 
 /// Output presentation format for `canon-clerk vet`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]

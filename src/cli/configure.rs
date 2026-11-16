@@ -206,7 +206,7 @@ mod tests {
     use super::*;
     use crate::caseload::{DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL};
     use crate::cli::{Cli, Commands};
-    use crate::configure::{DEFAULT_JEV_MODEL, ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY};
+    use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY};
     use clap::Parser;
     use std::io::Cursor;
 
@@ -267,7 +267,7 @@ mod tests {
             let secret = "synthetic-top-secret-never-echo-999";
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("gemini-4-hydrogen".to_string()),
+                    screener_model: Some("gemini-decision-1".to_string()),
                     auditor_model: Some("gemini-4-carbon".to_string()),
                     thinking_level: None,
                     reasoning_budget: Some(2048),
@@ -334,15 +334,16 @@ mod tests {
             run_configure_with_env(&compact_args, &mut stdin, &mut compact_out, &env)
                 .expect("compact configure");
             let compact_str = String::from_utf8(compact_out).expect("utf8");
-            assert!(compact_str.contains("screener_model\tgoogle:gemini-4-hydrogen"));
+            assert!(compact_str.contains("screener_model\tgoogle:gemini-decision-1"));
             assert!(compact_str.contains("auditor_model\tgoogle:gemini-4-carbon"));
             assert!(compact_str.contains("reasoning_budget\t1024"));
             assert!(!compact_str.contains(secret));
         }
 
         #[test]
-        fn test_hybrid_credentials_auto_select_jev_and_verify_both_keys_without_leakage() {
+        fn test_hybrid_credentials_auto_select_gemini_decision_and_allow_explicit_jev_override() {
             let ts_secret = "synthetic-typesafe-cli-secret-never-echo";
+            // 1. Unpinned hybrid credentials select google:gemini-decision-1 + google:gemini-4-carbon
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
                     typesafe_api_key: Some(ts_secret.to_string()),
@@ -354,25 +355,26 @@ mod tests {
             let mut stdin = Cursor::new(b"");
             let mut out = Vec::new();
             let caseload = run_configure_with_env(&args, &mut stdin, &mut out, &test_env())
-                .expect("hybrid configure should auto-select jev + carbon");
+                .expect("hybrid configure should auto-select gemini-decision-1 + carbon");
             let rendered = String::from_utf8(out).expect("utf8");
-            assert!(rendered.contains(DEFAULT_JEV_MODEL));
+            assert!(rendered.contains(DEFAULT_SCREENER_MODEL));
             assert!(rendered.contains(DEFAULT_AUDITOR_MODEL));
-            assert!(rendered.contains("GEMINI_API_KEY, TYPESAFE_API_KEY (verified)"));
+            assert!(rendered.contains("Credentials      : GEMINI_API_KEY (verified)"));
             assert!(!rendered.contains(ts_secret));
             assert_eq!(
                 caseload.config,
                 Some(CaseloadConfig {
-                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
                     thinking_level: None,
                     reasoning_budget: None,
                 })
             );
 
-            // Compact format also reflects auto-selected hybrid tiers and verified keys
+            // 2. Explicit --screener-model jev-latest pins TypeSafe Jev and verifies both keys without leakage
             let compact_args = ConfigureArgs {
                 provider: ProviderConfigArgs {
+                    screener_model: Some("jev-latest".to_string()),
                     typesafe_api_key: Some(ts_secret.to_string()),
                     ..ProviderConfigArgs::default()
                 },
@@ -381,7 +383,7 @@ mod tests {
             };
             let mut compact_out = Vec::new();
             run_configure_with_env(&compact_args, &mut stdin, &mut compact_out, &test_env())
-                .expect("compact hybrid configure");
+                .expect("compact explicit jev configure");
             let compact_rendered = String::from_utf8(compact_out).expect("utf8");
             assert!(compact_rendered.contains("screener_model\ttypesafe:jev-latest"));
             assert!(compact_rendered.contains("auditor_model\tgoogle:gemini-4-carbon"));
@@ -391,7 +393,7 @@ mod tests {
             );
             assert!(!compact_rendered.contains(ts_secret));
 
-            // Explicit --screener-model gemini-4-hydrogen overrides ambient TYPESAFE_API_KEY
+            // 3. Explicit --screener-model gemini-4-hydrogen overrides default gemini-decision-1
             let mut both_env = test_env();
             both_env.insert(ENV_TYPESAFE_API_KEY.to_string(), ts_secret.to_string());
             let override_args = ConfigureArgs {
@@ -405,13 +407,13 @@ mod tests {
             let mut override_out = Vec::new();
             let overridden =
                 run_configure_with_env(&override_args, &mut stdin, &mut override_out, &both_env)
-                    .expect("explicit flag overrides ambient typesafe key");
+                    .expect("explicit flag overrides default screener");
             let override_str = String::from_utf8(override_out).expect("utf8");
-            assert!(override_str.contains(DEFAULT_SCREENER_MODEL));
+            assert!(override_str.contains("google:gemini-4-hydrogen"));
             assert!(override_str.contains("Credentials      : GEMINI_API_KEY (verified)"));
             assert_eq!(
                 overridden.config.expect("config").screener_model,
-                DEFAULT_SCREENER_MODEL
+                "google:gemini-4-hydrogen"
             );
         }
     }
@@ -502,6 +504,56 @@ mod tests {
                 assert_eq!(alias_err.exit_code(), 2);
                 assert!(alias_err.to_string().contains("Invalid model specifier"));
                 assert!(alias_err.to_string().contains("Hint:"));
+            }
+        }
+
+        #[test]
+        fn test_discriminative_auditor_and_bare_gemini_decision_exit_with_code_2_and_hint() {
+            let mut stdin = Cursor::new(b"");
+            let mut stdout = Vec::new();
+            let mut both_env = test_env();
+            both_env.insert(
+                ENV_TYPESAFE_API_KEY.to_string(),
+                "synthetic-ts-key".to_string(),
+            );
+
+            for disc_auditor in [
+                "jev-latest",
+                "gemini-decision-1",
+                "google:gemini-decision-1",
+            ] {
+                let args = ConfigureArgs {
+                    provider: ProviderConfigArgs {
+                        auditor_model: Some(disc_auditor.to_string()),
+                        ..ProviderConfigArgs::default()
+                    },
+                    ..ConfigureArgs::default()
+                };
+                let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &both_env)
+                    .expect_err(&format!(
+                        "discriminative auditor `{disc_auditor}` must exit 2"
+                    ));
+                assert_eq!(err.exit_code(), 2);
+                assert!(
+                    err.to_string()
+                        .contains("cannot be configured as `auditor_model`")
+                );
+                assert!(err.to_string().contains("Hint:"));
+            }
+
+            for bare in ["gemini-decision", "google:gemini-decision"] {
+                let args = ConfigureArgs {
+                    provider: ProviderConfigArgs {
+                        screener_model: Some(bare.to_string()),
+                        ..ProviderConfigArgs::default()
+                    },
+                    ..ConfigureArgs::default()
+                };
+                let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &both_env)
+                    .expect_err(&format!("bare `{bare}` must exit 2"));
+                assert_eq!(err.exit_code(), 2);
+                assert!(err.to_string().contains("Invalid model specifier"));
+                assert!(err.to_string().contains("Hint:"));
             }
         }
 

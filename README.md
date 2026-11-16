@@ -81,15 +81,15 @@ Canon Clerk addresses the friction points where static code analysis ends and se
 The `canon-clerk` CLI evaluates diffs, target paths, and pull request metadata against `.canons/` rule packs locally or in CI:
 
 ```bash
-# Audit an in-flight diff against governing canons (auto-selects TypeSafe Jev screening + vet
-# alongside Gemini 4 Carbon when both TYPESAFE_API_KEY and GEMINI_API_KEY are configured):
+# Audit an in-flight diff against governing canons (auto-selects Gemini Decisions discriminative
+# screening + vet alongside Gemini 4 Carbon when GEMINI_API_KEY is configured):
 git diff origin/main | canon-clerk audit --diff -
 
-# Run a fast pre-flight prima facie compliance check (~1s, 0 output tokens on TypeSafe Jev;
-# works with TYPESAFE_API_KEY alone or GEMINI_API_KEY alone with zero model flags):
+# Run a fast pre-flight prima facie compliance check (~1s, 0 output tokens; defaults to
+# gemini-decision-1 with GEMINI_API_KEY, or jev-latest when only TYPESAFE_API_KEY is set):
 git diff origin/main | canon-clerk vet --diff -
 
-# Explicitly pin screener and auditor model tiers via flags:
+# Explicitly pin screener and auditor model tiers via flags (e.g., TypeSafe Jev or generative Gemini):
 git diff origin/main | canon-clerk audit --diff - --screener-model jev-latest --auditor-model gemini-4-carbon
 
 # Audit explicit target paths or run in GitHub Actions annotation mode with Caseload archival:
@@ -103,7 +103,7 @@ canon-clerk validate --all-canons
 canon-clerk apprise --intent "Add a new CLI subcommand flag" src/cli
 ```
 
-Unpinned `screener_model` and `auditor_model` tiers auto-resolve deterministically from available `TYPESAFE_API_KEY` and `GEMINI_API_KEY` credentials (`~/.config/canon-clerk/config.json`, environment variables, or CLI flags); see the [`configure` Stage Specification](docs/architecture/nodes/configure.md). Stage-specific flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--docket-batch-size`, `--docket-concurrency`, `--apprise-threshold`, `--apprise-batch-size`, `--apprise-concurrency`, `--auditor-model`, `--screener-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`) and bounded batch/slice execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [`docket` Stage Specification](docs/architecture/nodes/docket.md), [`apprise` Stage Specification](docs/architecture/nodes/apprise.md), [`admit` Stage Specification](docs/architecture/nodes/admit.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
+Unpinned `screener_model` and `auditor_model` tiers auto-resolve deterministically from available `GEMINI_API_KEY` and `TYPESAFE_API_KEY` credentials (`~/.config/canon-clerk/config.json`, environment variables, or CLI flags)—selecting `google:gemini-decision-1` + `google:gemini-4-carbon` when `GEMINI_API_KEY` is present and `typesafe:jev-latest` on screener closures when only `TYPESAFE_API_KEY` is present; see the [`configure` Stage Specification](docs/architecture/nodes/configure.md). Stage-specific flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--docket-batch-size`, `--docket-concurrency`, `--apprise-threshold`, `--apprise-batch-size`, `--apprise-concurrency`, `--auditor-model`, `--screener-model`, `--thinking-level`, `--reasoning-budget`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`) and bounded batch/slice execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [`docket` Stage Specification](docs/architecture/nodes/docket.md), [`apprise` Stage Specification](docs/architecture/nodes/apprise.md), [`admit` Stage Specification](docs/architecture/nodes/admit.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
 
 ---
 

@@ -355,7 +355,8 @@ mod tests {
             _thinking_level: Option<ThinkingLevel>,
             _reasoning_budget: Option<u32>,
         ) -> ProbeEndpointResult {
-            if model_specifier.contains("hydrogen")
+            if model_specifier.contains("decision")
+                || model_specifier.contains("hydrogen")
                 || model_specifier.contains("flash")
                 || model_specifier.contains("jev")
             {
@@ -499,9 +500,41 @@ mod tests {
         }
 
         #[test]
-        fn test_hybrid_credentials_auto_select_jev_and_probe_both_endpoints_without_key_leakage() {
+        fn test_hybrid_credentials_auto_select_gemini_decision_and_allow_explicit_jev_probe() {
             let ts_secret = "synthetic-typesafe-probe-secret-888";
-            let prober = MockProber {
+            let default_prober = MockProber {
+                screener: ProbeEndpointResult {
+                    status: ProbeStatus::Ok,
+                    latency_ms: 72,
+                    model: "gemini-decision-1".to_string(),
+                    error: None,
+                },
+                auditor: MockProber::healthy().auditor,
+            };
+            let unpinned_args = ProbeArgs {
+                provider: ProviderConfigArgs {
+                    typesafe_api_key: Some(ts_secret.to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                format: ProbeFormat::Stylish,
+                ..ProbeArgs::default()
+            };
+            let mut unpinned_out = Vec::new();
+            let unpinned_caseload = run_probe_with_env_and_prober(
+                &unpinned_args,
+                &mut Cursor::new(b""),
+                &mut unpinned_out,
+                &test_env(),
+                &default_prober,
+            )
+            .expect("zero-flag hybrid probe should auto-select gemini-decision-1");
+            assert_eq!(
+                unpinned_caseload.config.expect("config").screener_model,
+                DEFAULT_SCREENER_MODEL
+            );
+
+            // Explicit --screener-model jev-latest probes TypeSafe Jev alongside Gemini 4 Carbon
+            let jev_prober = MockProber {
                 screener: ProbeEndpointResult {
                     status: ProbeStatus::Ok,
                     latency_ms: 99,
@@ -512,6 +545,7 @@ mod tests {
             };
             let args = ProbeArgs {
                 provider: ProviderConfigArgs {
+                    screener_model: Some("jev-latest".to_string()),
                     typesafe_api_key: Some(ts_secret.to_string()),
                     ..ProviderConfigArgs::default()
                 },
@@ -524,9 +558,9 @@ mod tests {
                 &mut Cursor::new(b""),
                 &mut stdout,
                 &test_env(),
-                &prober,
+                &jev_prober,
             )
-            .expect("zero-flag hybrid probe should auto-select jev and succeed");
+            .expect("explicit jev-latest probe should succeed");
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains("jev-1.14.0"));
             assert!(!rendered.contains(ts_secret));

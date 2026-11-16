@@ -152,7 +152,7 @@ impl CanonSelectionArgs {
 /// Composable CLI argument group for model configuration, reasoning effort, and provider credentials (Branch B).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderConfigArgs {
-    /// Custom screener model specifier (`gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`; env: `CANON_CLERK_SCREENER_MODEL`).
+    /// Custom screener model specifier (`gemini-decision-1`, `gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`; env: `CANON_CLERK_SCREENER_MODEL`).
     #[arg(
         long = "screener-model",
         value_name = "MODEL",
@@ -161,7 +161,7 @@ pub struct ProviderConfigArgs {
     )]
     pub screener_model: Option<String>,
 
-    /// Custom auditor model specifier (`gemini-*`, `google:gemini-*`; env: `CANON_CLERK_AUDITOR_MODEL`).
+    /// Custom generative auditor model specifier (generative `gemini-*`, `google:gemini-*`; env: `CANON_CLERK_AUDITOR_MODEL`).
     #[arg(
         long = "auditor-model",
         value_name = "MODEL",

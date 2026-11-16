@@ -501,6 +501,10 @@ mod tests {
             "test-hermetic-gemini-key".to_string(),
         );
         env.insert(
+            crate::configure::ENV_SCREENER_MODEL.to_string(),
+            "gemini-4-hydrogen".to_string(),
+        );
+        env.insert(
             "XDG_CONFIG_HOME".to_string(),
             "/nonexistent-canon-clerk-xdg-dir".to_string(),
         );
@@ -1112,7 +1116,7 @@ index 0000000..1111111
                 })
                 .with_validation(CaseloadValidation::default())
                 .with_config(CaseloadConfig {
-                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
+                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
                     ..CaseloadConfig::default()
                 });
 
@@ -1378,12 +1382,11 @@ index 0000000..1111111
         use crate::provider::{DecisionRequest, DecisionResponse};
 
         #[test]
-        fn test_cli_batches_30_canons_by_default_on_generative_screener_and_keeps_single_turn_on_jev()
-         {
+        fn test_cli_batches_60_canons_by_paradigm_and_budget_profile() {
             use crate::configure::ENV_TYPESAFE_API_KEY;
 
             let mut ws = WorkspaceSnapshot::new().with_file("src/cli/docket.rs");
-            for i in 0..30 {
+            for i in 0..60 {
                 let canon_ref = format!(".canons/cli/rule-{i:03}.md");
                 ws = ws.with_canon_markdown(
                     &format!("---\ntriggers:\n  - \"src/cli/**\"\n---\n# Rule {i}\n\nRule {i} MUST hold.\n"),
@@ -1396,24 +1399,52 @@ index 0000000..1111111
                 dec_batch_sizes: Mutex::new(Vec::new()),
             };
 
-            let gen_args =
+            let base_args =
                 parse_docket_args(&["canon-clerk", "docket", "src/cli/docket.rs", "--json"]);
             run_docket_with_snapshot_and_provider(
-                &gen_args,
+                &base_args,
                 &mut Cursor::new(b""),
                 &mut Vec::new(),
                 &ws,
                 &env_with_key(),
                 &probe,
             )
-            .expect("default generative docket on 30 canons");
+            .expect("generative docket on 60 canons");
             assert_eq!(
                 *probe.gen_batch_sizes.lock().expect("lock"),
-                vec![15, 15],
-                "30 canons must partition into 2 balanced batches of 15 out of the box"
+                vec![20, 20, 20],
+                "60 canons must partition into 3 balanced batches of 20 on generative screener"
             );
 
-            let mut jev_env = env_with_key();
+            // Unpinned GEMINI_API_KEY selects google:gemini-decision-1 and packs 60 canons in 1 call
+            let unpinned_google_env = BTreeMap::from([
+                (
+                    ENV_GEMINI_API_KEY.to_string(),
+                    "test-gemini-key".to_string(),
+                ),
+                (
+                    "XDG_CONFIG_HOME".to_string(),
+                    "/nonexistent-canon-clerk-xdg-dir".to_string(),
+                ),
+            ]);
+            run_docket_with_snapshot_and_provider(
+                &base_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &ws,
+                &unpinned_google_env,
+                &probe,
+            )
+            .expect("default gemini-decision-1 docket on 60 canons");
+            assert_eq!(
+                *probe.dec_batch_sizes.lock().expect("lock"),
+                vec![60],
+                "default google:gemini-decision-1 must pack 60 canons into a single 256-noul pass"
+            );
+
+            // Explicit jev-latest preserves its 48-noul batch profile (48 + 12)
+            probe.dec_batch_sizes.lock().expect("lock").clear();
+            let mut jev_env = unpinned_google_env;
             jev_env.insert(ENV_TYPESAFE_API_KEY.to_string(), "test-jev-key".to_string());
             let jev_args = parse_docket_args(&[
                 "canon-clerk",
@@ -1431,11 +1462,12 @@ index 0000000..1111111
                 &jev_env,
                 &probe,
             )
-            .expect("default discriminative docket on 30 canons");
+            .expect("jev-latest docket on 60 canons");
+            probe.dec_batch_sizes.lock().expect("lock").sort_unstable();
             assert_eq!(
                 *probe.dec_batch_sizes.lock().expect("lock"),
-                vec![30],
-                "discriminative Jev must retain its 48-noul single-pass ceiling across 30 canons"
+                vec![12, 48],
+                "discriminative Jev must preserve its 48-noul batch ceiling across 60 canons"
             );
         }
     }

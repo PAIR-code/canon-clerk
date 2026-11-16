@@ -22,8 +22,7 @@ use super::guards::{
 use crate::admit::{AdmitOptions, execute_admit};
 use crate::audit::{AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit};
 use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadEvidence, CaseloadVerdict, CaseloadVetting,
-    TYPESAFE_PROVIDER, VerdictStatus,
+    CanonAdjudication, Caseload, CaseloadEvidence, CaseloadVerdict, CaseloadVetting, VerdictStatus,
 };
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
@@ -37,7 +36,7 @@ use crate::cli::vet::guards::resolve_vet_concurrency;
 use crate::cli::vet::stages::{
     populate_live_case_and_reference_snapshots, populate_live_target_snapshots,
 };
-use crate::configure::model_provider;
+use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
@@ -433,7 +432,7 @@ fn execute_vet_step(
     let uses_discriminative_screener = after_admit
         .config
         .as_ref()
-        .is_some_and(|c| model_provider(&c.screener_model) == TYPESAFE_PROVIDER);
+        .is_some_and(|c| is_discriminative_model(&c.screener_model));
     let mut cleared = after_admit;
     cleared.vetting = None;
     if !uses_discriminative_screener {

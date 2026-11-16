@@ -822,10 +822,8 @@ mod tests {
             serde_json::to_vec(&completed).expect("serialize mixed caseload")
         }
 
-        #[test]
-        fn test_passing_seven_stage_cascade_emits_telemetry_and_fast_forwards() {
-            let ws = sample_workspace();
-            let provider = FullCascadeProvider::new(
+        fn passing_cascade_provider() -> FullCascadeProvider {
+            FullCascadeProvider::new(
                 json!({
                     "cases": [{
                         "canon_path": ".canons/cli/cli-flags-kebab-case.md",
@@ -845,14 +843,25 @@ mod tests {
                     "compliance_score": 0.97,
                     "annotations": []
                 }),
-            );
-            let env = BTreeMap::from([(ENV_GEMINI_API_KEY.to_string(), "test-key".to_string())]);
+            )
+        }
+
+        #[test]
+        fn test_passing_seven_stage_cascade_emits_telemetry_and_fast_forwards() {
+            let ws = sample_workspace();
+            let provider = passing_cascade_provider();
+            let args = parse_audit(&["canon-clerk", "audit", "src/cli/audit.rs"]);
+            let env = BTreeMap::from([
+                (ENV_GEMINI_API_KEY.to_string(), "test-key".to_string()),
+                (
+                    crate::configure::ENV_SCREENER_MODEL.to_string(),
+                    "gemini-4-hydrogen".to_string(),
+                ),
+            ]);
+            let mut stdout = Vec::new();
             let sink = RecordingTelemetrySink::new();
             let clock = SteppingTelemetryClock::new(1_767_225_600_000, 30);
             let session = TelemetrySession::new(&sink, &clock);
-
-            let args = parse_audit(&["canon-clerk", "audit", "src/cli/audit.rs"]);
-            let mut stdout = Vec::new();
             let caseload = run_audit_with_telemetry(
                 &args,
                 &mut Cursor::new(b""),
@@ -909,16 +918,17 @@ mod tests {
             );
 
             let mut compact_out = Vec::new();
+            let ff_compact = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "-v",
+                "--caseload",
+                "-",
+                "--format",
+                "compact",
+            ]);
             run_audit_with_snapshot_and_provider(
-                &parse_audit(&[
-                    "canon-clerk",
-                    "audit",
-                    "-v",
-                    "--caseload",
-                    "-",
-                    "--format",
-                    "compact",
-                ]),
+                &ff_compact,
                 &mut Cursor::new(&serialized),
                 &mut compact_out,
                 &ws,
@@ -1102,6 +1112,8 @@ mod tests {
             let args = parse_audit(&[
                 "canon-clerk",
                 "audit",
+                "--screener-model",
+                "gemini-4-hydrogen",
                 "src/cli/audit.rs",
                 "--output-caseload",
                 &archived_str,
@@ -1396,10 +1408,9 @@ mod tests {
         }
 
         #[test]
-        fn test_hybrid_credentials_auto_activate_jev_screening_and_vet_while_typesafe_only_exits_2()
-        {
-            use crate::caseload::{CaseloadConfig, DEFAULT_AUDITOR_MODEL};
-            use crate::configure::{DEFAULT_JEV_MODEL, ENV_TYPESAFE_API_KEY};
+        fn test_default_gemini_decision_auto_activates_vet_while_typesafe_only_exits_2() {
+            use crate::caseload::{CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL};
+            use crate::configure::ENV_TYPESAFE_API_KEY;
 
             let ws = sample_workspace();
             let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
@@ -1431,40 +1442,90 @@ mod tests {
             assert!(ts_only_err.to_string().contains(ENV_GEMINI_API_KEY));
             assert_eq!(*provider_unused.decision_calls.lock().expect("lock"), 0);
 
-            // 2. Hybrid TYPESAFE_API_KEY + GEMINI_API_KEY with zero model flags auto-selects jev + carbon,
-            //    runs docket + admit + vet on Jev, and escalates contested cases to Carbon
-            let mut hybrid_env = ts_only_env;
-            hybrid_env.insert(ENV_GEMINI_API_KEY.to_string(), "gemini-secret".to_string());
-            let hybrid_provider = HybridCascadeProvider {
+            // 2. GEMINI_API_KEY alone with zero model flags auto-selects google:gemini-decision-1 + gemini-4-carbon,
+            //    automatically executes pre-trial `vet` before `audit`, and escalates contested cases to Carbon
+            let google_only_env = BTreeMap::from([
+                (ENV_GEMINI_API_KEY.to_string(), "gemini-secret".to_string()),
+                (
+                    "XDG_CONFIG_HOME".to_string(),
+                    "/nonexistent-canon-clerk-xdg-dir".to_string(),
+                ),
+            ]);
+            let google_dec_provider = HybridCascadeProvider {
                 decision_calls: Mutex::new(0),
                 audit_calls: Mutex::new(0),
                 vet_score: 0.30,
             };
-            let caseload = run_audit_with_snapshot_and_provider(
+            let google_caseload = run_audit_with_snapshot_and_provider(
                 &parse_audit(&["canon-clerk", "audit", "--diff", "-"]),
                 &mut Cursor::new(diff.as_bytes()),
                 &mut Vec::new(),
                 &ws,
-                &hybrid_env,
-                &hybrid_provider,
+                &google_only_env,
+                &google_dec_provider,
             )
-            .expect("hybrid zero-flag audit succeeds");
+            .expect("single-key Google zero-flag audit succeeds with auto-vet");
 
             assert_eq!(
-                caseload.config,
+                google_caseload.config,
                 Some(CaseloadConfig {
-                    screener_model: DEFAULT_JEV_MODEL.to_string(),
+                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
                     auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
                     thinking_level: None,
                     reasoning_budget: None,
                 })
             );
             assert!(
-                caseload.vetting.is_some(),
-                "vet must auto-activate on hybrid config"
+                google_caseload.vetting.is_some(),
+                "vet must auto-activate on default google:gemini-decision-1"
             );
+            assert_eq!(*google_dec_provider.decision_calls.lock().expect("lock"), 3);
+            assert_eq!(*google_dec_provider.audit_calls.lock().expect("lock"), 1);
+        }
+
+        #[test]
+        fn test_explicit_jev_screener_executes_vet_and_skips_all_vetted_audit_trials() {
+            use crate::configure::{DEFAULT_JEV_MODEL, ENV_TYPESAFE_API_KEY};
+
+            let ws = sample_workspace();
+            let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
+            let hybrid_env = BTreeMap::from([
+                (ENV_TYPESAFE_API_KEY.to_string(), "ts-secret".to_string()),
+                (ENV_GEMINI_API_KEY.to_string(), "gemini-secret".to_string()),
+                (
+                    "XDG_CONFIG_HOME".to_string(),
+                    "/nonexistent-canon-clerk-xdg-dir".to_string(),
+                ),
+            ]);
+            let hybrid_provider = HybridCascadeProvider {
+                decision_calls: Mutex::new(0),
+                audit_calls: Mutex::new(0),
+                vet_score: 0.95,
+            };
+            let caseload = run_audit_with_snapshot_and_provider(
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--diff",
+                    "-",
+                    "--screener-model",
+                    "jev-latest",
+                ]),
+                &mut Cursor::new(diff.as_bytes()),
+                &mut Vec::new(),
+                &ws,
+                &hybrid_env,
+                &hybrid_provider,
+            )
+            .expect("explicit jev-latest audit succeeds");
+
+            assert_eq!(
+                caseload.config.expect("config").screener_model,
+                DEFAULT_JEV_MODEL
+            );
+            assert!(caseload.vetting.is_some());
             assert_eq!(*hybrid_provider.decision_calls.lock().expect("lock"), 3);
-            assert_eq!(*hybrid_provider.audit_calls.lock().expect("lock"), 1);
+            assert_eq!(*hybrid_provider.audit_calls.lock().expect("lock"), 0);
         }
     }
 }

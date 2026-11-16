@@ -66,7 +66,7 @@ flowchart LR
 3. **Completion-Order-Independent Deterministic Folding:** Concurrent per-case vetting calls fold into a lexicographically ordered `cases` map alongside stably sorted `vetted_cases` and `contested_cases`, guaranteeing byte-for-byte identical `.vetting` envelopes regardless of async completion order.
 4. **Empty-Evidence Short-Circuit:** If `.evidence.active_cases` is empty, `vet` attaches an empty `.vetting` record (`cases: {}`, `vetted_cases: []`, `contested_cases: []`) and exits `0` immediately with zero model calls and without requiring provider credentials when `.docket` or `.evidence` was pre-populated empty.
 5. **All-Vetted Trial Elimination in `audit` Cascades:** When `vet` clears every active case (`contested_cases` is empty), downstream `audit` schedules zero `auditor_model` trials and folds `vetted_cases` directly into a passing `.verdict`.
-6. **Generative-Screener Pass-Through in Telescoping `audit`:** When `canon-clerk audit` telescopes with a purely generative `screener_model` (`google:*`) and `.vetting` is not pre-populated, executing a separate generative `vet` pass prior to `auditor_model` would duplicate autoregressive roundtrips on contested cases. The cascade scheduler therefore deterministically skips `vet` (`⊘ vet : skipped (all N active case(s) bound directly to audit)`), omitting `.vetting` from the `Caseload` envelope so `audit` adjudicates `.evidence.active_cases` directly.
+6. **Generative-Screener Pass-Through in Telescoping `audit`:** When `canon-clerk audit` telescopes with an explicitly configured generative `screener_model` (such as `google:gemini-4-hydrogen`) and `.vetting` is not pre-populated, executing a separate generative `vet` pass prior to `auditor_model` would duplicate autoregressive roundtrips on contested cases. The cascade scheduler therefore automatically executes `vet` whenever `screener_model` is discriminative (`google:gemini-decision-*` or `typesafe:jev-*`) and deterministically skips `vet` (`⊘ vet : skipped (all N active case(s) bound directly to audit)`) when `screener_model` is generative, omitting `.vetting` from the `Caseload` envelope so `audit` adjudicates `.evidence.active_cases` directly.
 
 ---
 
@@ -76,10 +76,10 @@ flowchart LR
    Verifies that `.intake`, `.discovery`, and `.evidence` are present and that static canon validation succeeded (`.validation.has_errors` is `false`). If `.evidence.active_cases` is empty, attaches an empty `.vetting` record and returns immediately with zero model calls.
 2. **Admitted Exhibit & Statutory Reference Assembly:**  
    For each canon on `.evidence.active_cases`, projects strictly its `"admitted"` exhibits from `.evidence.exhibits[canon_path]`, formats admitted file exhibits with 1-based target-file line coordinates alongside admitted metadata planes (`pr_title`, `pr_body`, `linked_issues`, `commit_messages`), and injects static frontmatter `references:` from the workspace snapshot.
-3. **Dual-Mode Prima Facie Vetting (`typesafe:*` Discriminative `Noul` vs. `google:*` Standalone Generative):**  
-   Evaluates active cases concurrently up to `--vet-concurrency` (default: `4`) using `caseload.config.screener_model`, emitting incremental per-case `StageProgress` completion events as cases finish and aggregating token accounting and thought events into `StageFinish` telemetry:
-   - **Discriminative `Noul` Vetting (`typesafe:*`, e.g., `jev-latest`):** Evaluates each case's admitted exhibits and statute via binary compliance `Noul` checks with zero output tokens—assessing whether the admitted exhibits satisfy the canon's Normative Invariant (or a declared `Exception`) with zero unexcused violations. When a multi-file case's admitted exhibits exceed a single discriminative context window, `vet` partitions the admitted file exhibits into context-budgeted slices—repeating the governing statute, grounding references (including pinned diffs for any admitted files declared in `references:`), admitted metadata exhibits, and full admitted-file path manifest on every slice—and records the conjunctive minimum score (`min` across slices) so every admitted exhibit is inspected in full. When at least one slice clears `>= --vet-threshold` while one or more slices score `< --vet-threshold`, `vet` records the stably sorted file exhibit paths from the un-cleared slice(s) in `contested_exhibits` so downstream `audit` skips summarily vetted slices (omitting `contested_exhibits` when all slices clear or when every slice fails). If an individual exhibit or reference set still exceeds the discriminative token ceiling, the case deterministically classifies as `"contested"` (`vetting_score: 0.0`, omitting `contested_exhibits`) so it binds over to long-context generative `audit` without aborting vetting of sibling cases.
-   - **Standalone Generative Vetting (`google:*`, e.g., `gemini-4-hydrogen`):** When `canon-clerk vet` is invoked explicitly with a generative `screener_model`, evaluates each active case in an isolated, minimal-reasoning structured turn at `temperature: 0.0` (with `thinkingLevel: "LOW"` and `includeThoughts: false` on Gemini 4 models and `thinkingBudget: 0` on Gemini 2.5/Flash-Lite models) enforcing a reason-first JSON schema (`vetting_summary` followed by `vetting_score` in `[0.0, 1.0]`):
+3. **Dual-Paradigm Prima Facie Vetting (Discriminative `Noul` vs. Standalone Generative):**  
+   Evaluates active cases concurrently up to `--vet-concurrency` (default: `4`) using `caseload.config.screener_model`, dispatching by model paradigm rather than provider prefix, emitting incremental per-case `StageProgress` completion events as cases finish, and aggregating token accounting and thought events into `StageFinish` telemetry:
+   - **Discriminative `Noul` Vetting (`google:gemini-decision-*`, e.g., default `gemini-decision-1`; `typesafe:jev-*`, e.g., `jev-latest`):** Evaluates each case's admitted exhibits and statute via binary compliance `Noul` checks with zero output tokens—assessing whether the admitted exhibits satisfy the canon's Normative Invariant (or a declared `Exception`) with zero unexcused violations. When a multi-file case's admitted exhibits exceed the active model's discriminative batch budget (`480,000` characters on `google:gemini-decision-*` vs. `64,000` characters on `typesafe:jev-*`), `vet` partitions the admitted file exhibits into context-budgeted slices—repeating the governing statute, grounding references (including pinned diffs for any admitted files declared in `references:`), admitted metadata exhibits, and full admitted-file path manifest on every slice—and records the conjunctive minimum score (`min` across slices) so every admitted exhibit is inspected in full. When at least one slice clears `>= --vet-threshold` while one or more slices score `< --vet-threshold`, `vet` records the stably sorted file exhibit paths from the un-cleared slice(s) in `contested_exhibits` so downstream `audit` skips summarily vetted slices (omitting `contested_exhibits` when all slices clear or when every slice fails). If an individual exhibit or reference set still exceeds the discriminative token ceiling, the case deterministically classifies as `"contested"` (`vetting_score: 0.0`, omitting `contested_exhibits`) so it binds over to long-context generative `audit` without aborting vetting of sibling cases.
+   - **Standalone Generative Vetting (generative `google:*`, e.g., `gemini-4-hydrogen`):** When `canon-clerk vet` is invoked explicitly with a generative `screener_model`, evaluates each active case in an isolated, minimal-reasoning structured turn at `temperature: 0.0` (with `thinkingLevel: "LOW"` and `includeThoughts: false` on Gemini 4 models and `thinkingBudget: 0` on Gemini 2.5/Flash-Lite models) enforcing a reason-first JSON schema (`vetting_summary` followed by `vetting_score` in `[0.0, 1.0]`):
      ```json
      {
        "vetting_summary": "All newly added CLI flags follow kebab-case naming conventions.",
@@ -96,19 +96,19 @@ flowchart LR
 The CLI exposes `vet` as a fast pre-flight compliance gate (analogous to `go vet` / `cargo vet`) that developers, pre-push hooks, and AI coding agents can run in ~1–1.5s on discriminative screeners before optionally escalating contested cases to `canon-clerk audit`:
 
 ```bash
-# 1. Fast pre-flight compliance check using TypeSafe Jev (0 output tokens):
-git diff origin/main | canon-clerk vet --diff - --screener-model jev-latest
+# 1. Fast pre-flight compliance check (0 output tokens; defaults to gemini-decision-1 when GEMINI_API_KEY is set, or jev-latest when only TYPESAFE_API_KEY is set):
+git diff origin/main | canon-clerk vet --diff -
 
 # 2. Vet explicit target paths or newline-delimited stdin paths:
-canon-clerk vet src/cli src/vet --screener-model jev-latest
-git diff origin/main --name-only | canon-clerk vet - --screener-model jev-latest
+canon-clerk vet src/cli src/vet
+git diff origin/main --name-only | canon-clerk vet -
 
 # 3. Chain vet into audit only when contested cases require remediation & line annotations:
-git diff origin/main | canon-clerk vet --diff - --screener-model jev-latest --output-caseload caseload.json \
+git diff origin/main | canon-clerk vet --diff - --output-caseload caseload.json \
   || canon-clerk audit --caseload caseload.json
 
-# 4. Emit tab-separated compact records strictly for contested cases:
-git diff origin/main | canon-clerk vet --diff - --format compact
+# 4. Emit tab-separated compact records strictly for contested cases (or pin TypeSafe Jev explicitly):
+git diff origin/main | canon-clerk vet --diff - --format compact --screener-model jev-latest
 ```
 
 ### Missing Input Source & Case-or-Controversy Guard

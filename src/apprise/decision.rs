@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Discriminative `Noul` batch screening for `apprise` (`typesafe:jev-*`).
+//! Discriminative `Noul` batch screening for `apprise` (`google:gemini-decision-*`, `typesafe:jev-*`).
 
 use super::prompt::{append_canon_section, build_apprise_intent_prefix};
 use super::{AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS};
@@ -23,8 +23,8 @@ use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::format_canon_batch_label;
 use crate::provider::{
-    DecisionRequest, DecisionResponse, MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL,
-    ProviderError, StructuredModelProvider, partition_decision_items,
+    DecisionBudgetProfile, DecisionRequest, DecisionResponse, ProviderError,
+    StructuredModelProvider, partition_decision_items,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -77,16 +77,17 @@ pub(super) fn execute_apprise_decisions(
         rendered_items.push((canon_ref.clone(), q_text));
     }
 
+    let budget = DecisionBudgetProfile::for_model(&config.screener_model);
     let max_per_call = options
         .max_canons_per_call
-        .map_or(MAX_DECISION_NOULS_PER_CALL, |n| {
-            n.min(MAX_DECISION_NOULS_PER_CALL)
+        .map_or(budget.max_nouls_per_call, |n| {
+            n.min(budget.max_nouls_per_call)
         });
     let batches = partition_decision_items(
         &rendered_items,
         shared_state.len(),
         max_per_call,
-        MAX_DECISION_BATCH_CHARS,
+        budget.max_batch_chars,
         |(_, q)| q.len(),
     );
 
@@ -316,6 +317,35 @@ mod tests {
         assert_eq!(
             apprisal.assessments[dis_ref].apprisal_status,
             ApprisalStatus::Dismissed
+        );
+
+        // Also verify default google:gemini-decision-1 takes the discriminative Noul path
+        let gemini_dec_caseload = Caseload::new()
+            .with_intake(CaseloadIntake {
+                intent: Some("Add a new CLI threshold flag".to_string()),
+                target_paths: vec!["src/cli/mod.rs".to_string()],
+                ..CaseloadIntake::default()
+            })
+            .with_discovery(CaseloadDiscovery {
+                mode: DiscoveryMode::Triggered,
+                candidate_canons: vec![app_ref.to_string(), dis_ref.to_string()],
+                ..CaseloadDiscovery::default()
+            })
+            .with_validation(CaseloadValidation::default())
+            .with_config(CaseloadConfig::default());
+        let gemini_out = execute_apprise(
+            &AppriseOptions {
+                max_canons_per_call: None,
+                ..AppriseOptions::default()
+            },
+            gemini_dec_caseload,
+            &ws,
+            &StubAppriseScreener,
+        )
+        .expect("gemini-decision-1 apprise screening");
+        assert_eq!(
+            gemini_out.apprisal.unwrap().assessments[app_ref].apprisal_status,
+            ApprisalStatus::Applicable
         );
     }
 }

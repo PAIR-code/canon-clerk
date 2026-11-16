@@ -485,6 +485,10 @@ mod tests {
             "synthetic-apprise-cli-test-key".to_string(),
         );
         env.insert(
+            crate::configure::ENV_SCREENER_MODEL.to_string(),
+            "gemini-4-hydrogen".to_string(),
+        );
+        env.insert(
             "XDG_CONFIG_HOME".to_string(),
             "/nonexistent-canon-clerk-xdg-dir".to_string(),
         );
@@ -1300,7 +1304,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default());
+                .with_config(CaseloadConfig {
+                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                    ..CaseloadConfig::default()
+                });
             let raw_upstream = serde_json::to_vec(&upstream).expect("serialize upstream");
 
             let ff_sink = RecordingTelemetrySink::new();
@@ -1468,12 +1475,11 @@ mod tests {
         }
 
         #[test]
-        fn test_cli_batches_30_canons_by_default_on_generative_screener_and_keeps_single_turn_on_jev()
-         {
+        fn test_cli_batches_60_canons_by_paradigm_and_budget_profile() {
             use crate::configure::ENV_TYPESAFE_API_KEY;
 
             let mut ws = WorkspaceSnapshot::new().with_file("src/auth/login.rs");
-            for i in 0..30 {
+            for i in 0..60 {
                 let canon_ref = format!(".canons/auth/rule-{i:03}.md");
                 ws = ws.with_canon_markdown(
                     &format!("---\ntriggers:\n  - \"src/auth/**\"\n---\n# Rule {i}\n\nRule {i} MUST hold.\n"),
@@ -1486,7 +1492,8 @@ mod tests {
                 dec_batch_sizes: Mutex::new(Vec::new()),
             };
 
-            let gen_args = AppriseArgs {
+            // 1. Generative screener (gemini-4-hydrogen via test_env_with_key) partitions 60 into 3x20
+            let base_args = AppriseArgs {
                 filing: FilingSourceArgs {
                     intent: Some("Refactor auth login".to_string()),
                     targets: vec!["src/auth/login.rs".to_string()],
@@ -1499,28 +1506,56 @@ mod tests {
                 ..AppriseArgs::default()
             };
             run_apprise_with_snapshot_and_provider(
-                &gen_args,
+                &base_args,
                 &mut Cursor::new(b""),
                 &mut Vec::new(),
                 &ws,
                 &test_env_with_key(),
                 &probe,
             )
-            .expect("default generative apprise on 30 canons");
+            .expect("generative apprise on 60 canons");
             assert_eq!(
                 *probe.gen_batch_sizes.lock().expect("lock"),
-                vec![15, 15],
-                "30 canons must partition into 2 balanced batches of 15 out of the box"
+                vec![20, 20, 20],
+                "60 canons must partition into 3 balanced batches of 20 on generative screener"
             );
 
-            let mut jev_env = test_env_with_key();
+            // 2. Unpinned GEMINI_API_KEY selects google:gemini-decision-1 and evaluates all 60 in 1 pass (256-noul budget)
+            let unpinned_google_env = BTreeMap::from([
+                (
+                    ENV_GEMINI_API_KEY.to_string(),
+                    "test-gemini-key".to_string(),
+                ),
+                (
+                    "XDG_CONFIG_HOME".to_string(),
+                    "/nonexistent-canon-clerk-xdg-dir".to_string(),
+                ),
+            ]);
+            run_apprise_with_snapshot_and_provider(
+                &base_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &ws,
+                &unpinned_google_env,
+                &probe,
+            )
+            .expect("default gemini-decision-1 apprise on 60 canons");
+            assert_eq!(
+                *probe.dec_batch_sizes.lock().expect("lock"),
+                vec![60],
+                "default google:gemini-decision-1 must pack 60 canons into a single 256-noul pass"
+            );
+
+            // 3. Explicit jev-latest preserves its 48-noul batch profile (48 + 12)
+            probe.dec_batch_sizes.lock().expect("lock").clear();
+            let mut jev_env = unpinned_google_env;
             jev_env.insert(ENV_TYPESAFE_API_KEY.to_string(), "test-jev-key".to_string());
             let jev_args = AppriseArgs {
                 provider: ProviderConfigArgs {
                     screener_model: Some("jev-latest".to_string()),
                     ..ProviderConfigArgs::default()
                 },
-                ..gen_args
+                ..base_args
             };
             run_apprise_with_snapshot_and_provider(
                 &jev_args,
@@ -1530,11 +1565,12 @@ mod tests {
                 &jev_env,
                 &probe,
             )
-            .expect("default discriminative apprise on 30 canons");
+            .expect("jev-latest apprise on 60 canons");
+            probe.dec_batch_sizes.lock().expect("lock").sort_unstable();
             assert_eq!(
                 *probe.dec_batch_sizes.lock().expect("lock"),
-                vec![30],
-                "discriminative Jev must retain its 48-noul single-pass ceiling across 30 canons"
+                vec![12, 48],
+                "discriminative Jev must preserve its 48-noul batch ceiling across 60 canons"
             );
         }
     }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Discriminative `Noul` batch screening for `docket` (`typesafe:jev-*`).
+//! Discriminative `Noul` batch screening for `docket` (`google:gemini-decision-*`, `typesafe:jev-*`).
 
 use super::prompt::{append_canon_section, build_bounded_docket_filing_prefix};
 use super::{
@@ -25,8 +25,8 @@ use crate::caseload::{
 use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
-    DecisionRequest, DecisionResponse, MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL,
-    MAX_DECISION_STATE_CHARS, ProviderError, StructuredModelProvider, partition_decision_items,
+    DecisionBudgetProfile, DecisionRequest, DecisionResponse, ProviderError,
+    StructuredModelProvider, partition_decision_items,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -56,8 +56,9 @@ pub(super) fn execute_docket_decisions(
         .ok_or(DocketError::MissingDiscovery)?;
     let config = caseload.config.as_ref().ok_or(DocketError::MissingConfig)?;
 
+    let budget = DecisionBudgetProfile::for_model(&config.screener_model);
     let shared_state =
-        build_bounded_docket_filing_prefix(intake, discovery, MAX_DECISION_STATE_CHARS);
+        build_bounded_docket_filing_prefix(intake, discovery, budget.max_state_chars);
     let mut rendered_items = Vec::with_capacity(discovery.candidate_canons.len());
     for canon_ref in &discovery.candidate_canons {
         let canon =
@@ -80,14 +81,14 @@ pub(super) fn execute_docket_decisions(
 
     let max_per_call = options
         .max_canons_per_call
-        .map_or(MAX_DECISION_NOULS_PER_CALL, |n| {
-            n.min(MAX_DECISION_NOULS_PER_CALL)
+        .map_or(budget.max_nouls_per_call, |n| {
+            n.min(budget.max_nouls_per_call)
         });
     let batches = partition_decision_items(
         &rendered_items,
         shared_state.len(),
         max_per_call,
-        MAX_DECISION_BATCH_CHARS,
+        budget.max_batch_chars,
         |(_, q)| q.len(),
     );
 
@@ -296,18 +297,38 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_docket_batch_size_preserves_48_noul_ceiling_for_typesafe_jev() {
-        use crate::caseload::DEFAULT_SCREENER_MODEL;
+    fn test_effective_docket_batch_size_and_per_model_budget_profiles() {
+        use crate::caseload::{DEFAULT_GENERATIVE_SCREENER_MODEL, DEFAULT_SCREENER_MODEL};
         use crate::docket::{DEFAULT_DOCKET_BATCH_SIZE, effective_docket_batch_size};
 
         assert_eq!(
-            effective_docket_batch_size(None, DEFAULT_SCREENER_MODEL),
+            effective_docket_batch_size(None, DEFAULT_GENERATIVE_SCREENER_MODEL),
             Some(DEFAULT_DOCKET_BATCH_SIZE)
+        );
+        assert_eq!(
+            effective_docket_batch_size(None, DEFAULT_SCREENER_MODEL),
+            None
         );
         assert_eq!(effective_docket_batch_size(None, DEFAULT_JEV_MODEL), None);
         assert_eq!(
-            effective_docket_batch_size(Some(12), DEFAULT_JEV_MODEL),
+            effective_docket_batch_size(Some(12), DEFAULT_SCREENER_MODEL),
             Some(12)
+        );
+        assert_eq!(
+            DecisionBudgetProfile::for_model(DEFAULT_SCREENER_MODEL),
+            DecisionBudgetProfile {
+                max_state_chars: 240_000,
+                max_batch_chars: 480_000,
+                max_nouls_per_call: 256,
+            }
+        );
+        assert_eq!(
+            DecisionBudgetProfile::for_model(DEFAULT_JEV_MODEL),
+            DecisionBudgetProfile {
+                max_state_chars: 36_000,
+                max_batch_chars: 64_000,
+                max_nouls_per_call: 48,
+            }
         );
     }
 }

@@ -16,6 +16,7 @@
 
 pub mod decision;
 pub mod gemini;
+pub mod gemini_decisions;
 mod gemini_wire;
 mod runtime;
 mod typesafe;
@@ -26,17 +27,21 @@ pub use crate::caseload::{
     DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL,
     DEFAULT_SCREENER_REASONING_BUDGET, ThinkingLevel,
 };
+pub(crate) use decision::partition_decision_items;
 pub use decision::{
-    DecisionModelProvider, DecisionRequest, DecisionResponse, MultiModelProvider,
-    TypesafeDecisionProvider,
-};
-pub(crate) use decision::{
-    MAX_DECISION_BATCH_CHARS, MAX_DECISION_NOULS_PER_CALL, MAX_DECISION_STATE_CHARS,
-    partition_decision_items,
+    DecisionBudgetProfile, DecisionModelProvider, DecisionRequest, DecisionResponse,
+    MultiModelProvider, TypesafeDecisionProvider,
 };
 pub use gemini::{
     DEFAULT_GEMINI_BASE_URL, GeminiModelProvider, build_generate_content_url,
     classify_gemini_http_error, extract_gemini_error_detail, strip_provider_prefix,
+};
+pub use gemini_decisions::{
+    GeminiDecisionProvider, build_decisions_url, classify_gemini_decisions_http_error,
+};
+pub(crate) use gemini_decisions::{
+    GeminiDecisionsRequest, GeminiDecisionsResponse, GeminiNoulQuestion,
+    is_decision_context_limit_error, post_gemini_decisions_json,
 };
 pub(crate) use gemini_wire::{GeminiThinkingConfig, build_probe_thinking_config};
 pub use typesafe::DEFAULT_TYPESAFE_BASE_URL;

@@ -19,7 +19,7 @@ use super::runtime::{
     HttpAuth, JsonPostRequest, RawHttpOutcome, build_pooled_http_client, execute_json_post,
 };
 use crate::caseload::DEFAULT_PROVIDER;
-use crate::configure::ENV_GEMINI_API_KEY;
+use crate::configure::{ENV_GEMINI_API_KEY, is_gemini_decision_model_name};
 use crate::provider::{
     GenerationRequest, GenerationResponse, ProviderError, StructuredModelProvider,
 };
@@ -115,6 +115,13 @@ fn validate_gemini_model_specifier(raw: &str) -> Result<&str, ProviderError> {
                 model_specifier: trimmed.to_string(),
             });
         }
+    }
+
+    if is_gemini_decision_model_name(strip_provider_prefix(trimmed)) {
+        return Err(ProviderError::InvalidModelSpecifier {
+            model_specifier: raw.to_string(),
+            reason: "discriminative Gemini Decisions models use `/v1beta/decisions` rather than `:generateContent`".to_string(),
+        });
     }
 
     Ok(trimmed)

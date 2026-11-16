@@ -706,6 +706,8 @@ mod tests {
             let args = parse_admit(&[
                 "canon-clerk",
                 "admit",
+                "--screener-model",
+                "gemini-4-hydrogen",
                 "--pr-title",
                 "feat(cli): add admit",
                 "src/cli/admit.rs",
@@ -762,6 +764,8 @@ mod tests {
             let args = parse_admit(&[
                 "canon-clerk",
                 "admit",
+                "--screener-model",
+                "gemini-4-hydrogen",
                 "--pr-title",
                 "feat(cli): add admit",
                 "src/cli/admit.rs",
