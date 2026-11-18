@@ -596,5 +596,127 @@ mod tests {
             assert!(enriched.intake.is_some());
             assert_eq!(enriched.config, Some(CaseloadConfig::default()));
         }
+
+        #[test]
+        fn test_retired_env_var_and_legacy_flat_config_json_keys_exit_2() {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let xdg_dir = std::env::temp_dir().join(format!("canon-clerk-cfg-retired-{unique}"));
+            let cfg_dir = xdg_dir.join("canon-clerk");
+            fs::create_dir_all(&cfg_dir).expect("create xdg dir");
+            let cfg_file = cfg_dir.join("config.json");
+
+            let mut retired_env = BTreeMap::from([
+                ("XDG_CONFIG_HOME".to_string(), xdg_dir.display().to_string()),
+                (ENV_GEMINI_API_KEY.to_string(), "test-key".to_string()),
+                (
+                    "CANON_CLERK_SCREENER_MODEL".to_string(),
+                    "google:gemini-decision-1".to_string(),
+                ),
+            ]);
+            let env_err = run_configure_with_env(
+                &ConfigureArgs::default(),
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &retired_env,
+            )
+            .expect_err("retired env var must fail exit 2");
+            assert_eq!(env_err.exit_code(), 2);
+            assert!(env_err.to_string().contains("Hint:"));
+
+            retired_env.remove("CANON_CLERK_SCREENER_MODEL");
+            fs::write(
+                &cfg_file,
+                r#"{"screenerModel": "google:gemini-decision-1"}"#,
+            )
+            .expect("write legacy config");
+            fs::set_permissions(&cfg_file, fs::Permissions::from_mode(0o600)).expect("chmod 0600");
+            let legacy_err = run_configure_with_env(
+                &ConfigureArgs::default(),
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &retired_env,
+            )
+            .expect_err("legacy flat config.json key must fail exit 2");
+            assert_eq!(legacy_err.exit_code(), 2);
+            assert!(legacy_err.to_string().contains("Hint:"));
+
+            let _ = fs::remove_dir_all(&xdg_dir);
+        }
+
+        #[test]
+        fn test_structured_host_config_json_resolves_cleanly() {
+            use crate::caseload::ThinkingLevel;
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let xdg_dir = std::env::temp_dir().join(format!("canon-clerk-cfg-struct-{unique}"));
+            let cfg_dir = xdg_dir.join("canon-clerk");
+            fs::create_dir_all(&cfg_dir).expect("create xdg dir");
+            let cfg_file = cfg_dir.join("config.json");
+            let xdg_env =
+                BTreeMap::from([("XDG_CONFIG_HOME".to_string(), xdg_dir.display().to_string())]);
+            fs::write(
+                &cfg_file,
+                r#"{
+                    "providers": {
+                        "google": { "apiKey": "cfg-google-key" },
+                        "typesafe": { "apiKey": "cfg-typesafe-key" }
+                    },
+                    "defaults": {
+                        "provider": "typesafe",
+                        "thinkingLevel": "high"
+                    },
+                    "nodes": {
+                        "audit": { "model": "google:gemini-4-carbon" }
+                    }
+                }"#,
+            )
+            .expect("write structured config");
+            fs::set_permissions(&cfg_file, fs::Permissions::from_mode(0o600)).expect("chmod 0600");
+
+            let resolved = run_configure_with_env(
+                &ConfigureArgs::default(),
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &xdg_env,
+            )
+            .expect("resolve structured config.json");
+            let resolved_cfg = resolved.config.expect("config");
+            assert_eq!(resolved_cfg.provider, "typesafe");
+            assert_eq!(
+                resolved_cfg.model_for(HeuristicNode::Docket),
+                Some("typesafe:jev-latest")
+            );
+            assert_eq!(
+                resolved_cfg
+                    .node(HeuristicNode::Docket)
+                    .and_then(|n| n.thinking_level),
+                None
+            );
+            assert_eq!(
+                resolved_cfg.model_for(HeuristicNode::Audit),
+                Some("google:gemini-4-carbon")
+            );
+            assert_eq!(
+                resolved_cfg
+                    .node(HeuristicNode::Audit)
+                    .and_then(|n| n.thinking_level),
+                Some(ThinkingLevel::High)
+            );
+
+            let _ = fs::remove_dir_all(&xdg_dir);
+        }
     }
 }
