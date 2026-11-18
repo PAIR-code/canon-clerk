@@ -32,13 +32,12 @@ pub(crate) use slices::{
 };
 
 use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadVerdict, DEFAULT_AUDITOR_THINKING_LEVEL, VerdictStatus,
+    CanonAdjudication, Caseload, CaseloadVerdict, HeuristicNode, ResolvedNodeConfig, VerdictStatus,
     normalize_compliance_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{GenerationRequest, StructuredModelProvider};
 use decode::decode_case_adjudication;
 use fold::fold_case_slice_adjudications;
@@ -98,7 +97,7 @@ fn validate_audit_options(options: &AuditOptions) -> Result<f64, AuditError> {
     if options.max_concurrent_calls == Some(0) {
         return Err(AuditError::InvalidConcurrency {
             detail: format!(
-                "max_concurrent_calls must be at least 1, got 0 (see `{ENV_AUDIT_CONCURRENCY}` / `{ENV_MAX_CONCURRENT_CALLS}`)"
+                "max_concurrent_calls must be at least 1, got 0 (see `{ENV_AUDIT_CONCURRENCY}`)"
             ),
         });
     }
@@ -203,16 +202,21 @@ pub fn execute_audit(
         return Ok(caseload.with_verdict(CaseloadVerdict::from_adjudications(adjudications)));
     }
 
-    let config = caseload.config.as_ref().ok_or(AuditError::MissingConfig)?;
-    if is_discriminative_model(&config.auditor_model) {
-        return Err(AuditError::DiscriminativeAuditorUnsupported {
-            specifier: config.auditor_model.clone(),
+    let node_cfg = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.node(HeuristicNode::Audit))
+        .ok_or(AuditError::MissingConfig)?;
+    if is_discriminative_model(&node_cfg.model) {
+        return Err(AuditError::DiscriminativeAuditUnsupported {
+            specifier: node_cfg.model.clone(),
         });
     }
 
+    let audit_model = node_cfg.model.clone();
     let (prepared_calls, case_slice_counts) = prepare_all_trial_calls(
         active_trials,
-        config,
+        node_cfg,
         options.timeout_ms,
         intake,
         discovery,
@@ -226,7 +230,7 @@ pub fn execute_audit(
         &prepared_calls,
         concurrency_limit,
         threshold,
-        &config.auditor_model,
+        &audit_model,
         provider,
     )?;
 
@@ -252,23 +256,15 @@ type ActiveTrialEntry<'a> = (
 
 fn prepare_all_trial_calls(
     active_trials: Vec<ActiveTrialEntry<'_>>,
-    config: &crate::caseload::CaseloadConfig,
+    node_cfg: &ResolvedNodeConfig,
     timeout_ms: u64,
     intake: &crate::caseload::CaseloadIntake,
     discovery: &crate::caseload::CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
 ) -> (Vec<PreparedTrialCall>, Vec<(String, usize)>) {
     let response_schema = build_audit_schema();
-    let effective_thinking_level = match (config.thinking_level, config.reasoning_budget) {
-        (Some(level), _) => Some(level),
-        (None, Some(_)) => None,
-        (None, None) => Some(DEFAULT_AUDITOR_THINKING_LEVEL),
-    };
-    let effective_reasoning_budget = if effective_thinking_level.is_some() {
-        None
-    } else {
-        config.reasoning_budget
-    };
+    let (effective_thinking_level, effective_reasoning_budget) =
+        node_cfg.effective_audit_thinking();
     let mut prepared_calls = Vec::with_capacity(active_trials.len());
     let mut case_slice_counts = Vec::with_capacity(active_trials.len());
 
@@ -292,7 +288,7 @@ fn prepare_all_trial_calls(
                 canon_ref.clone()
             };
             let request = GenerationRequest {
-                model_specifier: config.auditor_model.clone(),
+                model_specifier: node_cfg.model.clone(),
                 system_instruction: AUDIT_SYSTEM_INSTRUCTION.to_string(),
                 user_prompt: slice.user_prompt,
                 response_schema: response_schema.clone(),
@@ -362,8 +358,9 @@ mod tests {
     use crate::caseload::{
         AdmissibilityStatus, AnnotationLevel, CanonDocketAssessment, CaseloadConfig,
         CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake, CaseloadValidation,
-        ColorabilityStatus, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, DiscoveryMode,
-        ExhibitAssessment, FileArtifact, FileChangeStatus, ThinkingLevel, VerdictStatus,
+        ColorabilityStatus, DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL,
+        DiscoveryMode, ExhibitAssessment, FileArtifact, FileChangeStatus, ThinkingLevel,
+        VerdictStatus,
     };
     use crate::provider::{GenerationResponse, ProviderError, TokenUsage};
     use serde_json::{Value, json};
@@ -552,12 +549,10 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: DEFAULT_SCREENER_MODEL.to_string(),
-                auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                thinking_level: None,
-                reasoning_budget: Some(4096),
-            })
+            .with_config(CaseloadConfig::default().with_node(
+                HeuristicNode::Audit,
+                ResolvedNodeConfig::with_thinking(DEFAULT_GOOGLE_GENERATOR_MODEL, None, Some(4096)),
+            ))
             .with_docket(CaseloadDocket::from_cases(docket_cases))
             .with_evidence(CaseloadEvidence::from_exhibits(exhibits))
     }
@@ -690,7 +685,7 @@ mod tests {
             let requests = provider.captured_requests();
             assert_eq!(requests.len(), 2);
             for req in &requests {
-                assert_eq!(req.model_specifier, DEFAULT_AUDITOR_MODEL);
+                assert_eq!(req.model_specifier, DEFAULT_GOOGLE_GENERATOR_MODEL);
                 assert_eq!(req.reasoning_budget, Some(4096));
                 assert!(!req.user_prompt.contains("SECRET_EXCLUDED_SENTINEL"));
                 assert!(req.user_prompt.contains("+   2 |"));
@@ -804,7 +799,6 @@ mod tests {
     mod vetting_fold_forward_and_contested_isolation {
         use super::*;
         use crate::caseload::{CanonVettingAssessment, CaseloadVetting, VettingStatus};
-        use crate::configure::DEFAULT_JEV_MODEL;
         use crate::provider::{DecisionRequest, DecisionResponse};
         use crate::vet::{VetOptions, execute_vet};
 
@@ -857,7 +851,7 @@ mod tests {
             assert_eq!(
                 provider.captured_requests().len(),
                 1,
-                "only the 1 contested case must invoke auditor_model"
+                "only the 1 contested case must invoke audit node model"
             );
             let verdict = out.verdict.expect("verdict");
             assert_eq!(verdict.adjudications.len(), 2);
@@ -1039,12 +1033,18 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: DEFAULT_JEV_MODEL.to_string(),
-                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    thinking_level: None,
-                    reasoning_budget: Some(2048),
-                })
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Vet, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL)
+                        .with_node(
+                            HeuristicNode::Audit,
+                            ResolvedNodeConfig::with_thinking(
+                                DEFAULT_GOOGLE_GENERATOR_MODEL,
+                                None,
+                                Some(2048),
+                            ),
+                        ),
+                )
                 .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
                     canon_ref.to_string(),
                     CanonDocketAssessment {

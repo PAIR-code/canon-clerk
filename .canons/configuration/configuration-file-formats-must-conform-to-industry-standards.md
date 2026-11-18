@@ -1,11 +1,12 @@
 ---
 triggers:
-  - "packages/configuration/**"
+  - "**/src/**"
+inspect:
+  - diff
 tags:
-  - internal
   - configuration
   - api-design
 ---
-Persistent configuration file formats MUST organize settings into orthogonal, typed namespaces separating provider authentication and transport parameters from consumer execution profiles or tiers, rather than employing flat, ambiguous root keys.
+Persistent configuration file formats MUST organize settings into orthogonal, typed namespaces separating upstream provider settings from shared defaults and execution target overrides, rather than employing flat root keys.
 
-Rationale: Grounded in established cloud and container tooling conventions (such as Docker `~/.docker/config.json`, AWS CLI credential profiles, and Kubernetes `kubeconfig`), isolating upstream provider definitions from consumer task profiles prevents parameter collisions, eliminates multi-provider credential ambiguity, and affords extensible vendor options without bespoke key prefixes.
+Rationale: Following Docker (`config.json`), AWS CLI profiles, and Kubernetes `kubeconfig`, isolating provider definitions from target overrides prevents key collisions and supports extensible vendor settings without bespoke key prefixes.

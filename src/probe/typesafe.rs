@@ -14,8 +14,8 @@
 
 //! TypeSafe AI (`/v1/systemone`) diagnostic endpoint prober implementation.
 
-use crate::caseload::{ProbeEndpointResult, ProbeStatus, ThinkingLevel};
-use crate::probe::EndpointProber;
+use crate::caseload::{ProbeStatus, ThinkingLevel};
+use crate::probe::{EndpointProber, ProbeEndpointResult};
 use crate::provider::{
     DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
     TypesafeSystemOneResponse, build_pooled_http_client, classify_typesafe_http_error,
@@ -36,12 +36,12 @@ pub(super) fn decode_typesafe_probe_response(
             .and_then(|resp| resp.model)
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| model_specifier.to_string());
+            .unwrap_or_else(|| strip_typesafe_prefix(model_specifier).to_string());
 
         return ProbeEndpointResult {
             status: ProbeStatus::Ok,
             latency_ms,
-            model: resolved_model,
+            resolved_model: Some(resolved_model),
             error: None,
         };
     }
@@ -51,7 +51,7 @@ pub(super) fn decode_typesafe_probe_response(
     ProbeEndpointResult {
         status: ProbeStatus::Error,
         latency_ms,
-        model: model_specifier.to_string(),
+        resolved_model: None,
         error: Some(diagnostic),
     }
 }
@@ -126,7 +126,7 @@ impl EndpointProber for TypesafeEndpointProber {
             Err((err, latency_ms)) => ProbeEndpointResult {
                 status: ProbeStatus::Error,
                 latency_ms,
-                model: model_specifier.to_string(),
+                resolved_model: None,
                 error: Some(err.to_string()),
             },
         }

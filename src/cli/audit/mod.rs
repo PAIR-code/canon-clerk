@@ -28,6 +28,7 @@ use crate::cli::closure::{
     resolve_closure_validate,
 };
 use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::node_args::{AuditNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::cli::provenance::StageDisposition;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
@@ -58,8 +59,8 @@ Examples:
   # Run in GitHub Actions annotation mode while archiving caseload.json for CI forensics:
   git diff origin/main | canon-clerk audit --diff - --format github --output-caseload caseload.json
 
-  # Use TypeSafe Jev across docket, admit, and vet before escalating contested cases:
-  git diff origin/main | canon-clerk audit --diff - --screener-model jev-latest";
+  # Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini Carbon:
+  git diff origin/main | canon-clerk audit --diff - --provider typesafe --audit-model google:gemini-4-carbon";
 
 /// Output presentation format for `canon-clerk audit`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,13 +137,12 @@ pub struct AuditArgs {
     )]
     pub admit_threshold: Option<f64>,
 
-    /// Upstream maximum concurrent in-flight per-case `admit` screener calls (default: `4`; env: `CANON_CLERK_ADMIT_CONCURRENCY`).
+    /// Upstream maximum concurrent in-flight per-case `admit` calls (default: `4`; env: `CANON_CLERK_ADMIT_CONCURRENCY`).
     #[arg(
         long = "admit-concurrency",
-        visible_alias = "max-concurrent-calls",
         value_name = "COUNT",
         help_heading = "Admit Options",
-        help = "Maximum concurrent upstream admit screener calls (default: 4; fallback env: CANON_CLERK_ADMIT_CONCURRENCY)"
+        help = "Maximum concurrent upstream admit calls (default: 4; fallback env: CANON_CLERK_ADMIT_CONCURRENCY)"
     )]
     pub admit_concurrency: Option<usize>,
 
@@ -156,13 +156,12 @@ pub struct AuditArgs {
     )]
     pub docket_threshold: Option<f64>,
 
-    /// Upstream maximum candidate canons per `docket` screener call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
+    /// Upstream maximum candidate canons per `docket` call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
     #[arg(
         long = "docket-batch-size",
-        visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Docket Options",
-        help = "Maximum candidate canons per upstream docket screener call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
+        help = "Maximum candidate canons per upstream docket call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
     )]
     pub docket_batch_size: Option<usize>,
 
@@ -175,9 +174,8 @@ pub struct AuditArgs {
     )]
     pub docket_concurrency: Option<usize>,
 
-    /// Hidden capture rejecting ambiguous unqualified `--threshold` (`scheduling.md` §4 Pattern C).
-    #[arg(long = "threshold", hide = true, allow_hyphen_values = true)]
-    pub rejected_threshold: Option<String>,
+    #[command(flatten)]
+    pub rejected_unqualified: RejectedUnqualifiedTuningArgs,
 
     /// Hidden capture rejecting out-of-closure `--apprise-threshold` (`scheduling.md` §4 Pattern C).
     #[arg(long = "apprise-threshold", hide = true, allow_hyphen_values = true)]
@@ -190,6 +188,9 @@ pub struct AuditArgs {
     /// Hidden capture rejecting out-of-closure `--apprise-concurrency`.
     #[arg(long = "apprise-concurrency", hide = true, allow_hyphen_values = true)]
     pub rejected_apprise_concurrency: Option<String>,
+
+    #[command(flatten)]
+    pub models: AuditNodeModelArgs,
 
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
@@ -306,7 +307,7 @@ fn run_audit_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
-    let thresholds = resolve_and_validate_audit_cli_params(args, env)?;
+    let (thresholds, stored_config) = resolve_and_validate_audit_cli_params(args, env)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -383,6 +384,7 @@ fn run_audit_core(
     let outcome = execute_jit_configure_docket_admit_and_audit(
         args,
         env,
+        stored_config,
         thresholds,
         caseload_after_validate,
         &mut snapshot,
@@ -859,8 +861,16 @@ mod tests {
             let env = BTreeMap::from([
                 (ENV_GEMINI_API_KEY.to_string(), "test-key".to_string()),
                 (
-                    crate::configure::ENV_SCREENER_MODEL.to_string(),
-                    "gemini-4-hydrogen".to_string(),
+                    crate::configure::ENV_DOCKET_MODEL.to_string(),
+                    "google:gemini-4-hydrogen".to_string(),
+                ),
+                (
+                    crate::configure::ENV_ADMIT_MODEL.to_string(),
+                    "google:gemini-4-hydrogen".to_string(),
+                ),
+                (
+                    crate::configure::ENV_VET_MODEL.to_string(),
+                    "google:gemini-4-hydrogen".to_string(),
                 ),
             ]);
             let mut stdout = Vec::new();
@@ -1117,8 +1127,12 @@ mod tests {
             let args = parse_audit(&[
                 "canon-clerk",
                 "audit",
-                "--screener-model",
-                "gemini-4-hydrogen",
+                "--docket-model",
+                "google:gemini-4-hydrogen",
+                "--admit-model",
+                "google:gemini-4-hydrogen",
+                "--vet-model",
+                "google:gemini-4-hydrogen",
                 "src/cli/audit.rs",
                 "--output-caseload",
                 &archived_str,
@@ -1170,8 +1184,8 @@ mod tests {
             use crate::caseload::{
                 AdmissibilityStatus, CanonDocketAssessment, CanonVettingAssessment, CaseloadConfig,
                 CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
-                CaseloadValidation, CaseloadVetting, ColorabilityStatus, DEFAULT_AUDITOR_MODEL,
-                DEFAULT_SCREENER_MODEL, DiscoveryMode, ExhibitAssessment, VettingStatus,
+                CaseloadValidation, CaseloadVetting, ColorabilityStatus, DiscoveryMode,
+                ExhibitAssessment, VettingStatus,
             };
             use crate::cli::telemetry::{StderrProgressSink, StderrTelemetryOptions};
 
@@ -1252,12 +1266,7 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
-                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    thinking_level: None,
-                    reasoning_budget: Some(4096),
-                })
+                .with_config(CaseloadConfig::default())
                 .with_docket(CaseloadDocket::from_cases(docket_cases))
                 .with_evidence(CaseloadEvidence::from_exhibits(evidence_exhibits))
                 .with_vetting(CaseloadVetting::from_cases(contested_cases));
@@ -1380,7 +1389,7 @@ mod tests {
                         total_tokens: 260,
                     },
                     latency_ms: 90,
-                    resolved_model: crate::caseload::DEFAULT_AUDITOR_MODEL.to_string(),
+                    resolved_model: crate::caseload::DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                 })
             }
 
@@ -1414,13 +1423,16 @@ mod tests {
 
         #[test]
         fn test_default_gemini_decision_auto_activates_vet_while_typesafe_only_exits_2() {
-            use crate::caseload::{CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL};
+            use crate::caseload::{
+                CaseloadConfig, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+                HeuristicNode, ResolvedNodeConfig,
+            };
             use crate::configure::ENV_TYPESAFE_API_KEY;
 
             let ws = sample_workspace();
             let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
 
-            // 1. TYPESAFE_API_KEY alone on `audit` fails fast with exit 2 and generative auditor hint
+            // 1a. TYPESAFE_API_KEY alone without `--provider` defaults to `google` and exits 2 asking for GEMINI_API_KEY
             let ts_only_env = BTreeMap::from([
                 (ENV_TYPESAFE_API_KEY.to_string(), "ts-secret".to_string()),
                 (
@@ -1443,11 +1455,31 @@ mod tests {
             )
             .expect_err("audit with TYPESAFE_API_KEY alone must exit 2");
             assert_eq!(ts_only_err.exit_code(), 2);
-            assert!(ts_only_err.to_string().contains("generative auditor"));
             assert!(ts_only_err.to_string().contains(ENV_GEMINI_API_KEY));
             assert_eq!(*provider_unused.decision_calls.lock().expect("lock"), 0);
 
-            // 2. GEMINI_API_KEY alone with zero model flags auto-selects google:gemini-decision-1 + gemini-4-carbon,
+            // 1b. `--provider typesafe` on `audit` without `--audit-model` fails fast with UnprovisionedAuditModel (exit 2)
+            let unprovisioned_err = run_audit_with_snapshot_and_provider(
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--diff",
+                    "-",
+                    "--provider",
+                    "typesafe",
+                ]),
+                &mut Cursor::new(diff.as_bytes()),
+                &mut Vec::new(),
+                &ws,
+                &ts_only_env,
+                &provider_unused,
+            )
+            .expect_err("audit --provider typesafe without --audit-model must exit 2");
+            assert_eq!(unprovisioned_err.exit_code(), 2);
+            assert!(unprovisioned_err.to_string().contains("--audit-model"));
+            assert_eq!(*provider_unused.decision_calls.lock().expect("lock"), 0);
+
+            // 2. GEMINI_API_KEY alone with zero model flags auto-selects google:gemini-decision-1 + google:gemini-4-carbon,
             //    automatically executes pre-trial `vet` before `audit`, and escalates contested cases to Carbon
             let google_only_env = BTreeMap::from([
                 (ENV_GEMINI_API_KEY.to_string(), "gemini-secret".to_string()),
@@ -1471,15 +1503,28 @@ mod tests {
             )
             .expect("single-key Google zero-flag audit succeeds with auto-vet");
 
-            assert_eq!(
-                google_caseload.config,
-                Some(CaseloadConfig {
-                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
-                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    thinking_level: None,
-                    reasoning_budget: None,
-                })
-            );
+            let expected_closure_cfg = CaseloadConfig {
+                provider: "google".to_string(),
+                nodes: BTreeMap::from([
+                    (
+                        HeuristicNode::Docket,
+                        ResolvedNodeConfig::new(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
+                    ),
+                    (
+                        HeuristicNode::Admit,
+                        ResolvedNodeConfig::new(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
+                    ),
+                    (
+                        HeuristicNode::Vet,
+                        ResolvedNodeConfig::new(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
+                    ),
+                    (
+                        HeuristicNode::Audit,
+                        ResolvedNodeConfig::new(DEFAULT_GOOGLE_GENERATOR_MODEL),
+                    ),
+                ]),
+            };
+            assert_eq!(google_caseload.config, Some(expected_closure_cfg));
             assert!(
                 google_caseload.vetting.is_some(),
                 "vet must auto-activate on default google:gemini-decision-1"
@@ -1489,8 +1534,11 @@ mod tests {
         }
 
         #[test]
-        fn test_explicit_jev_screener_executes_vet_and_skips_all_vetted_audit_trials() {
-            use crate::configure::{DEFAULT_JEV_MODEL, ENV_TYPESAFE_API_KEY};
+        fn test_mixed_provider_typesafe_closure_skips_all_vetted_audit_trials() {
+            use crate::caseload::{
+                DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode,
+            };
+            use crate::configure::ENV_TYPESAFE_API_KEY;
 
             let ws = sample_workspace();
             let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
@@ -1513,8 +1561,10 @@ mod tests {
                     "audit",
                     "--diff",
                     "-",
-                    "--screener-model",
-                    "jev-latest",
+                    "--provider",
+                    "typesafe",
+                    "--audit-model",
+                    DEFAULT_GOOGLE_GENERATOR_MODEL,
                 ]),
                 &mut Cursor::new(diff.as_bytes()),
                 &mut Vec::new(),
@@ -1522,15 +1572,121 @@ mod tests {
                 &hybrid_env,
                 &hybrid_provider,
             )
-            .expect("explicit jev-latest audit succeeds");
+            .expect("explicit --provider typesafe --audit-model google:gemini-4-carbon succeeds");
 
+            let cfg = caseload.config.expect("config");
+            assert_eq!(cfg.provider, "typesafe");
             assert_eq!(
-                caseload.config.expect("config").screener_model,
-                DEFAULT_JEV_MODEL
+                cfg.model_for(HeuristicNode::Docket),
+                Some(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL)
+            );
+            assert_eq!(
+                cfg.model_for(HeuristicNode::Vet),
+                Some(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL)
+            );
+            assert_eq!(
+                cfg.model_for(HeuristicNode::Audit),
+                Some(DEFAULT_GOOGLE_GENERATOR_MODEL)
             );
             assert!(caseload.vetting.is_some());
             assert_eq!(*hybrid_provider.decision_calls.lock().expect("lock"), 3);
             assert_eq!(*hybrid_provider.audit_calls.lock().expect("lock"), 0);
+        }
+
+        #[test]
+        fn test_partial_closure_caseload_handoff_preserves_upstream_nodes() {
+            use crate::caseload::{
+                DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode,
+            };
+            use crate::cli::vet::{VetArgs, run_vet_with_snapshot_and_provider};
+            use crate::configure::ENV_TYPESAFE_API_KEY;
+
+            let ws = sample_workspace();
+            let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
+            let ts_only_env = BTreeMap::from([
+                (ENV_TYPESAFE_API_KEY.to_string(), "ts-secret".to_string()),
+                ("XDG_CONFIG_HOME".to_string(), "/nonexistent".to_string()),
+            ]);
+            let vet_provider = HybridCascadeProvider {
+                decision_calls: Mutex::new(0),
+                audit_calls: Mutex::new(0),
+                vet_score: 0.35,
+            };
+            let vet_args = VetArgs {
+                filing: FilingSourceArgs {
+                    diff: Some("-".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                provider: ProviderConfigArgs {
+                    provider: Some("typesafe".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
+                ..VetArgs::default()
+            };
+            let mut vet_json = Vec::new();
+            let vet_err = run_vet_with_snapshot_and_provider(
+                &vet_args,
+                &mut Cursor::new(diff.as_bytes()),
+                &mut vet_json,
+                &ws,
+                &ts_only_env,
+                &vet_provider,
+            )
+            .expect_err("contested vet exits 1 while emitting JSON caseload");
+            assert_eq!(vet_err.exit_code(), 1);
+            assert_eq!(*vet_provider.decision_calls.lock().expect("lock"), 3);
+
+            let google_only_env = BTreeMap::from([
+                (ENV_GEMINI_API_KEY.to_string(), "gemini-secret".to_string()),
+                ("XDG_CONFIG_HOME".to_string(), "/nonexistent".to_string()),
+            ]);
+            let audit_handoff_provider = HybridCascadeProvider {
+                decision_calls: Mutex::new(0),
+                audit_calls: Mutex::new(0),
+                vet_score: 0.35,
+            };
+            let mut handoff_stdout = Vec::new();
+            let final_caseload = run_audit_with_snapshot_and_provider(
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--caseload",
+                    "-",
+                    "--audit-model",
+                    DEFAULT_GOOGLE_GENERATOR_MODEL,
+                ]),
+                &mut Cursor::new(&vet_json),
+                &mut handoff_stdout,
+                &ws,
+                &google_only_env,
+                &audit_handoff_provider,
+            )
+            .expect("partial-closure audit handoff with only GEMINI_API_KEY succeeds");
+            assert_eq!(
+                *audit_handoff_provider.decision_calls.lock().expect("lock"),
+                0
+            );
+            assert_eq!(*audit_handoff_provider.audit_calls.lock().expect("lock"), 1);
+            let final_cfg = final_caseload.config.expect("final config");
+            assert_eq!(
+                final_cfg.model_for(HeuristicNode::Docket),
+                Some(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL)
+            );
+            assert_eq!(
+                final_cfg.model_for(HeuristicNode::Audit),
+                Some(DEFAULT_GOOGLE_GENERATOR_MODEL)
+            );
+            let receipt = String::from_utf8(handoff_stdout).expect("utf8");
+            assert!(
+                receipt.contains(
+                    "✓ configure : docket, admit, vet 'typesafe:jev-latest'; audit 'google:gemini-4-carbon'"
+                ),
+                "unexpected provenance receipt:\n{receipt}"
+            );
         }
     }
 }

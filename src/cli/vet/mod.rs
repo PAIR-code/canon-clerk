@@ -20,7 +20,6 @@ pub(crate) mod stages;
 
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVetting};
 use crate::cli::CliError;
-use crate::cli::admit::guards::{resolve_admit_concurrency, resolve_admit_threshold};
 use crate::cli::args::{
     CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
 };
@@ -28,19 +27,16 @@ use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
     resolve_closure_validate,
 };
-use crate::cli::docket::guards::{
-    resolve_docket_batch_size, resolve_docket_concurrency, resolve_docket_threshold,
-};
 use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::node_args::{RejectedUnqualifiedTuningArgs, VetNodeModelArgs};
 use crate::cli::provenance::StageDisposition;
-use crate::cli::telemetry::resolve_verbose_flag;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use guards::{
     can_fast_forward_completed_vet, enforce_filing_and_case_guard,
-    ensure_stage_prefixed_threshold_flags, resolve_vet_concurrency, resolve_vet_threshold,
+    ensure_stage_prefixed_threshold_flags, resolve_and_validate_vet_cli_params,
 };
 use render::{VetWatermarks, render_vet_output};
 use stages::{VetCascadeThresholds, execute_jit_configure_docket_admit_and_vet};
@@ -50,7 +46,7 @@ use std::io::{Read, Write};
 
 const VET_EXAMPLES: &str = "\
 Examples:
-  # Fast pre-flight compliance vetting on a unified diff (0 output tokens; defaults to gemini-decision-1):
+  # Fast pre-flight compliance vetting on a unified diff (0 output tokens; defaults to google:gemini-decision-1):
   git diff origin/main | canon-clerk vet --diff -
 
   # Vet explicit target paths or newline-delimited stdin paths:
@@ -61,8 +57,8 @@ Examples:
   git diff origin/main | canon-clerk vet --diff - --output-caseload caseload.json \\
     || canon-clerk audit --caseload caseload.json
 
-  # Emit tab-separated compact records strictly for contested cases (or pin TypeSafe Jev explicitly):
-  git diff origin/main | canon-clerk vet --diff - --format compact --screener-model jev-latest";
+  # Emit tab-separated compact records strictly for contested cases (or select TypeSafe Jev across closure):
+  git diff origin/main | canon-clerk vet --diff - --format compact --provider typesafe";
 
 /// Output presentation format for `canon-clerk vet`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -119,13 +115,12 @@ pub struct VetArgs {
     )]
     pub admit_threshold: Option<f64>,
 
-    /// Upstream maximum concurrent in-flight per-case `admit` screener calls (default: `4`; env: `CANON_CLERK_ADMIT_CONCURRENCY`).
+    /// Upstream maximum concurrent in-flight per-case `admit` calls (default: `4`; env: `CANON_CLERK_ADMIT_CONCURRENCY`).
     #[arg(
         long = "admit-concurrency",
-        visible_alias = "max-concurrent-calls",
         value_name = "COUNT",
         help_heading = "Admit Options",
-        help = "Maximum concurrent upstream admit screener calls (default: 4; fallback env: CANON_CLERK_ADMIT_CONCURRENCY)"
+        help = "Maximum concurrent upstream admit calls (default: 4; fallback env: CANON_CLERK_ADMIT_CONCURRENCY)"
     )]
     pub admit_concurrency: Option<usize>,
 
@@ -139,13 +134,12 @@ pub struct VetArgs {
     )]
     pub docket_threshold: Option<f64>,
 
-    /// Upstream maximum candidate canons per `docket` screener call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
+    /// Upstream maximum candidate canons per `docket` call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
     #[arg(
         long = "docket-batch-size",
-        visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Docket Options",
-        help = "Maximum candidate canons per upstream docket screener call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
+        help = "Maximum candidate canons per upstream docket call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
     )]
     pub docket_batch_size: Option<usize>,
 
@@ -158,9 +152,8 @@ pub struct VetArgs {
     )]
     pub docket_concurrency: Option<usize>,
 
-    /// Hidden capture rejecting ambiguous unqualified `--threshold`.
-    #[arg(long = "threshold", hide = true, allow_hyphen_values = true)]
-    pub rejected_threshold: Option<String>,
+    #[command(flatten)]
+    pub rejected_unqualified: RejectedUnqualifiedTuningArgs,
 
     /// Hidden capture rejecting out-of-closure `--audit-threshold`.
     #[arg(long = "audit-threshold", hide = true, allow_hyphen_values = true)]
@@ -181,6 +174,9 @@ pub struct VetArgs {
     /// Hidden capture rejecting out-of-closure `--apprise-concurrency`.
     #[arg(long = "apprise-concurrency", hide = true, allow_hyphen_values = true)]
     pub rejected_apprise_concurrency: Option<String>,
+
+    #[command(flatten)]
+    pub models: VetNodeModelArgs,
 
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
@@ -298,18 +294,7 @@ fn run_vet_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
-    let _ = resolve_verbose_flag(args.verbose, env)?;
-
-    let thresholds = VetCascadeThresholds {
-        docket_threshold: resolve_docket_threshold(args.docket_threshold, env)?,
-        admit_threshold: resolve_admit_threshold(args.admit_threshold, env)?,
-        vet_threshold: resolve_vet_threshold(args.vet_threshold, env)?,
-    };
-    let _validated_docket_batch = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
-    let _validated_docket_conc = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
-    let _validated_admit_conc = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
-    let _validated_vet_conc = resolve_vet_concurrency(args.vet_concurrency, env, None)?;
-    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
+    let (thresholds, stored_config) = resolve_and_validate_vet_cli_params(args, env)?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -384,6 +369,7 @@ fn run_vet_core(
     let outcome = execute_jit_configure_docket_admit_and_vet(
         args,
         env,
+        stored_config,
         thresholds,
         caseload_after_validate,
         &mut snapshot,
@@ -492,7 +478,8 @@ fn handle_validation_failure(
 mod tests {
     use super::*;
     use crate::canon::ParseCanonOptions;
-    use crate::configure::{DEFAULT_JEV_MODEL, ENV_TYPESAFE_API_KEY};
+    use crate::caseload::{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode};
+    use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY};
     use crate::provider::{
         DecisionRequest, DecisionResponse, GenerationRequest, GenerationResponse, ProviderError,
         TokenUsage,
@@ -624,15 +611,46 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_jev_only_credentials_exit_0_when_vetted_and_exit_1_when_contested() {
+        fn test_typesafe_only_env_without_provider_exits_2() {
             let ws = sample_ws();
             let diff = "--- a/src/cli/app.rs\n+++ b/src/cli/app.rs\n@@ -1,1 +1,2 @@\n pub fn main() {}\n+// ok\n";
-            let args = VetArgs {
+            let unpinned_args = VetArgs {
                 filing: FilingSourceArgs {
                     diff: Some("-".to_string()),
                     ..FilingSourceArgs::default()
                 },
                 provider: ProviderConfigArgs::default(),
+                ..VetArgs::default()
+            };
+            let sniff_err = run_vet_with_snapshot_and_provider(
+                &unpinned_args,
+                &mut Cursor::new(diff.as_bytes()),
+                &mut Vec::new(),
+                &ws,
+                &typesafe_only_env(),
+                &HermeticJevProvider {
+                    compliance_score: 0.95,
+                },
+            )
+            .expect_err("TYPESAFE_API_KEY alone without --provider must not auto-select typesafe");
+            assert_eq!(sniff_err.exit_code(), 2);
+            assert!(sniff_err.to_string().contains(ENV_GEMINI_API_KEY));
+        }
+
+        #[test]
+        fn test_jev_only_credentials_exit_0_when_vetted_and_exit_1_when_contested() {
+            let ws = sample_ws();
+            let diff = "--- a/src/cli/app.rs\n+++ b/src/cli/app.rs\n@@ -1,1 +1,2 @@\n pub fn main() {}\n+// ok\n";
+
+            let args = VetArgs {
+                filing: FilingSourceArgs {
+                    diff: Some("-".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                provider: ProviderConfigArgs {
+                    provider: Some("typesafe".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
                 ..VetArgs::default()
             };
 
@@ -653,10 +671,13 @@ mod tests {
                 },
                 &session,
             )
-            .expect("all vetted must exit 0 with TYPESAFE_API_KEY only and zero model flags");
+            .expect("all vetted must exit 0 with --provider typesafe and TYPESAFE_API_KEY");
             assert_eq!(
-                vetted_caseload.config.expect("config").screener_model,
-                DEFAULT_JEV_MODEL
+                vetted_caseload
+                    .config
+                    .expect("config")
+                    .model_for(HeuristicNode::Vet),
+                Some(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL)
             );
             assert!(vetted_caseload.vetting.expect("vetting").is_all_vetted());
             let rendered = String::from_utf8(stdout).expect("utf8");
@@ -687,14 +708,28 @@ mod tests {
                     PipelineStage::Vet,
                 ]
             );
+        }
 
-            // All-vetted `compact` exits 0 with empty stdout
+        #[test]
+        fn test_vet_compact_exits_0_when_all_vetted_and_exits_1_when_contested() {
+            let ws = sample_ws();
+            let diff = "--- a/src/cli/app.rs\n+++ b/src/cli/app.rs\n@@ -1,1 +1,2 @@\n pub fn main() {}\n+// ok\n";
+            let args = VetArgs {
+                filing: FilingSourceArgs {
+                    diff: Some("-".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                provider: ProviderConfigArgs {
+                    provider: Some("typesafe".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                format: VetFormat::Compact,
+                ..VetArgs::default()
+            };
+
             let mut compact_pass_out = Vec::new();
             run_vet_with_snapshot_and_provider(
-                &VetArgs {
-                    format: VetFormat::Compact,
-                    ..args.clone()
-                },
+                &args,
                 &mut Cursor::new(diff.as_bytes()),
                 &mut compact_pass_out,
                 &ws,
@@ -709,16 +744,10 @@ mod tests {
                 "all-vetted `compact` must emit empty stdout"
             );
 
-            // Contested case exits 1 while rendering CONTESTED summary + compact TSV
-            let mut stdin_fail = Cursor::new(diff.as_bytes());
             let mut stdout_fail = Vec::new();
-            let contested_args = VetArgs {
-                format: VetFormat::Compact,
-                ..args
-            };
             let err = run_vet_with_snapshot_and_provider(
-                &contested_args,
-                &mut stdin_fail,
+                &args,
+                &mut Cursor::new(diff.as_bytes()),
                 &mut stdout_fail,
                 &ws,
                 &typesafe_only_env(),

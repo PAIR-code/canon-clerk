@@ -16,8 +16,7 @@
 
 use super::{PreparedVettingCase, VetError};
 use crate::caseload::{
-    CanonVettingAssessment, DEFAULT_SCREENER_REASONING_BUDGET, VettingStatus,
-    normalize_vetting_score,
+    CanonVettingAssessment, ResolvedNodeConfig, VettingStatus, normalize_vetting_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::provider::{GenerationRequest, ProviderError, StructuredModelProvider};
@@ -98,7 +97,7 @@ fn decode_vet_payload(
 }
 
 pub(super) struct GenerativeVetParams<'a> {
-    pub(super) screener_model: &'a str,
+    pub(super) vet_node: &'a ResolvedNodeConfig,
     pub(super) threshold: f64,
     pub(super) concurrency_limit: usize,
     pub(super) timeout_ms: u64,
@@ -110,16 +109,17 @@ pub(super) fn execute_generative_vetting(
     provider: &dyn StructuredModelProvider,
 ) -> Result<BTreeMap<String, CanonVettingAssessment>, VetError> {
     let response_schema = build_vet_schema();
+    let (thinking_level, reasoning_budget) = params.vet_node.effective_screening_thinking();
     let prepared: Vec<(&PreparedVettingCase, GenerationRequest)> = prepared_cases
         .iter()
         .map(|case| {
             let req = GenerationRequest {
-                model_specifier: params.screener_model.to_string(),
+                model_specifier: params.vet_node.model.clone(),
                 system_instruction: VET_SYSTEM_INSTRUCTION.to_string(),
                 user_prompt: case.user_prompt.clone(),
                 response_schema: response_schema.clone(),
-                thinking_level: None,
-                reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
+                thinking_level,
+                reasoning_budget,
                 timeout_ms: params.timeout_ms,
                 call_label: Some(case.canon_ref.clone()),
             };
@@ -137,7 +137,7 @@ pub(super) fn execute_generative_vetting(
                 &resp.payload,
                 &case.canon_ref,
                 params.threshold,
-                params.screener_model,
+                &params.vet_node.model,
             )?;
             let label = format!("{} ({})", case.canon_ref, decoded.vetting_status.as_str());
             Ok::<_, VetError>(((case.canon_ref.clone(), decoded), label))

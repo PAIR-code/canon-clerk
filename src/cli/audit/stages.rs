@@ -22,21 +22,24 @@ use super::guards::{
 use crate::admit::{AdmitOptions, execute_admit};
 use crate::audit::{AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit};
 use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadEvidence, CaseloadVerdict, CaseloadVetting, VerdictStatus,
+    CanonAdjudication, Caseload, CaseloadEvidence, CaseloadVerdict, CaseloadVetting, HeuristicNode,
+    VerdictStatus,
 };
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
-use crate::cli::closure::{ClosureBackend, has_provider_overrides};
+use crate::cli::closure::ClosureBackend;
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, resolve_branch_b_options, run_branch_b_configure,
+    build_live_model_provider, resolve_closure_branch_b_options, run_branch_b_configure,
 };
 use crate::cli::vet::guards::resolve_vet_concurrency;
 use crate::cli::vet::stages::{
     populate_live_case_and_reference_snapshots, populate_live_target_snapshots,
 };
-use crate::configure::is_discriminative_model;
+use crate::configure::{
+    ConfigureScope, StoredConfig, can_fast_forward_existing_config, is_discriminative_model,
+};
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
@@ -179,22 +182,27 @@ struct PrePopulatedFlags {
     vetting: bool,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal stage helper threading CLI args, env, stored config, thresholds, caseload, workspace, backend, and telemetry"
+)]
 pub(super) fn execute_jit_configure_docket_admit_and_audit(
     args: &AuditArgs,
     env: &BTreeMap<String, String>,
+    stored_config: Option<StoredConfig>,
     thresholds: AuditCascadeThresholds,
     mut caseload: Caseload,
     snapshot: &mut WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<AuditCascadeOutcome, CliError> {
-    let provider_overridden = has_provider_overrides(&args.provider);
+    let provider_changed = args.provider.provider.is_some();
     let docket_pre_populated =
-        caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_overridden;
+        caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_changed;
     let evidence_pre_populated = caseload.evidence.is_some()
         && !has_admit_cli_overrides(args)
         && !has_docket_cli_overrides(args)
-        && !provider_overridden;
+        && !provider_changed;
     let vetting_pre_populated =
         caseload.vetting.is_some() && evidence_pre_populated && !has_vet_cli_overrides(args);
 
@@ -208,7 +216,25 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         return Ok(short_circuit);
     }
 
-    let configure_options = resolve_branch_b_options(&args.provider, env)?;
+    let mut required_nodes = Vec::new();
+    if !docket_pre_populated && !evidence_pre_populated {
+        required_nodes.push(HeuristicNode::Docket);
+    }
+    if !evidence_pre_populated {
+        required_nodes.push(HeuristicNode::Admit);
+    }
+    if !vetting_pre_populated {
+        required_nodes.push(HeuristicNode::Vet);
+    }
+    required_nodes.push(HeuristicNode::Audit);
+
+    let configure_options = resolve_closure_branch_b_options(
+        &args.provider,
+        args.models.resolve_node_models()?,
+        ConfigureScope::closure(required_nodes),
+        stored_config,
+        env,
+    )?;
     let stored = configure_options.stored_config.as_ref();
     let explicit_docket_batch_size =
         resolve_docket_batch_size(args.docket_batch_size, env, stored)?;
@@ -232,18 +258,18 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
 
     let config_was_present =
-        caseload.config.is_some() && !configure_options.has_explicit_overrides();
+        can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
     caseload.verdict = None;
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
     let cfg_snapshot = configured.config.clone().unwrap_or_default();
+    let docket_model = cfg_snapshot
+        .model_for(HeuristicNode::Docket)
+        .unwrap_or_default();
     let docket_opts = DocketOptions {
         threshold: thresholds.docket_threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call: effective_docket_batch_size(
-            explicit_docket_batch_size,
-            &cfg_snapshot.screener_model,
-        ),
+        max_canons_per_call: effective_docket_batch_size(explicit_docket_batch_size, docket_model),
         max_concurrent_calls: docket_concurrency,
     };
     let live_instance;
@@ -432,14 +458,15 @@ fn execute_vet_step(
     if vetting_pre_populated {
         return Ok((after_admit, StageDisposition::PrePopulated));
     }
-    let uses_discriminative_screener = after_admit
+    let uses_discriminative_vet = after_admit
         .config
         .as_ref()
-        .is_some_and(|c| is_discriminative_model(&c.screener_model));
+        .and_then(|c| c.model_for(HeuristicNode::Vet))
+        .is_some_and(is_discriminative_model);
     let mut cleared = after_admit;
     cleared.vetting = None;
-    if !uses_discriminative_screener {
-        return Ok((cleared, StageDisposition::SkippedGenerativeScreener));
+    if !uses_discriminative_vet {
+        return Ok((cleared, StageDisposition::SkippedGeneratorVet));
     }
     let vetted = telemetry
         .run_stage(PipelineStage::Vet, |scope| {

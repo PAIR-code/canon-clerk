@@ -16,15 +16,16 @@
 
 use super::DocketArgs;
 use super::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
-use crate::caseload::Caseload;
+use crate::caseload::{Caseload, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, map_discover_error, resolve_screener_branch_b_options,
+    build_live_model_provider, map_discover_error, resolve_closure_branch_b_options,
     run_branch_b_configure,
 };
+use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
@@ -116,16 +117,27 @@ pub(super) fn resolve_docket_discover(
     Ok((updated, StageDisposition::Executed))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal stage helper threading CLI args, env, stored config, threshold, caseload, workspace, backend, and telemetry"
+)]
 pub(super) fn execute_jit_configure_and_docket(
     args: &DocketArgs,
     env: &BTreeMap<String, String>,
+    stored_config: Option<StoredConfig>,
     threshold: f64,
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
-    let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
+    let configure_options = resolve_closure_branch_b_options(
+        &args.provider,
+        args.models.resolve_node_models()?,
+        ConfigureScope::closure([HeuristicNode::Docket]),
+        stored_config,
+        env,
+    )?;
     let max_canons_per_call = resolve_docket_batch_size(
         args.docket_batch_size,
         env,
@@ -140,7 +152,7 @@ pub(super) fn execute_jit_configure_and_docket(
         .transport
         .resolve_retry_policy(env, configure_options.stored_config.as_ref())?;
     let config_was_present =
-        caseload.config.is_some() && !configure_options.has_explicit_overrides();
+        can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
     caseload.docket = None;
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
@@ -153,13 +165,13 @@ pub(super) fn execute_jit_configure_and_docket(
             retry_policy,
         )?),
     };
+    let docket_model = cfg_snapshot
+        .model_for(HeuristicNode::Docket)
+        .unwrap_or_default();
     let docket_opts = DocketOptions {
         threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call: effective_docket_batch_size(
-            max_canons_per_call,
-            &cfg_snapshot.screener_model,
-        ),
+        max_canons_per_call: effective_docket_batch_size(max_canons_per_call, docket_model),
         max_concurrent_calls,
     };
 

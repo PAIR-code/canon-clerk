@@ -120,7 +120,7 @@ Standard provider rate limits enforce 60-second rolling token-per-minute (TPM) a
 
 The diagnostic health check leaf ([`nodes/probe.md`](nodes/probe.md)) verifies live endpoint reachability, authentication, and single-roundtrip latency. Accordingly, `probe` is isolated from heuristic retry orchestration:
 
-- **Zero Retries (`0`):** `probe` dispatches exactly one HTTP request per configured tier (`screener` and `auditor`).
+- **Zero Retries (`0`):** `probe` dispatches exactly one HTTP request per deduplicated target in `.probe.targets`.
 - **Cooldown Gate Bypass:** `probe` never sleeps on pre-dispatch origin cooldown gates and never mutates shared cooldown state, ensuring a throttled endpoint immediately reports its `HTTP 429` status on `.probe` within `--timeout` (`5000ms` default).
 - **Strict CLI Flag Scoping:** Passing `--max-retries` or `--max-backoff-ms` to `canon-clerk probe` (or to offline commands `intake`, `discover`, `validate`, `configure`) is rejected with exit code `2`.
 
@@ -138,11 +138,11 @@ Before sleeping on any pre-dispatch origin cooldown or inter-attempt retry backo
 
 ### Shared CLI Flags, Environment Fallbacks & `config.json` Keys
 
-All five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`) accept shared transport retry controls resolved via Canon Clerk's standard 4-level specificity cascade (explicit CLI flag $\succ$ environment variable $\succ$ `~/.config/canon-clerk/config.json` $\succ$ built-in default):
+All five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`) accept shared transport retry controls resolved via Canon Clerk's standard 4-level specificity cascade (explicit CLI flag $\succ$ environment variable $\succ$ `~/.config/canon-clerk/config.json` `defaults` $\succ$ built-in default):
 
 | CLI Flag | Environment Variable | `config.json` Key | Default | Domain & Validation Contract |
 | :--- | :--- | :--- | :--- | :--- |
-| `--max-retries <COUNT>` | `CANON_CLERK_MAX_RETRIES` | `maxRetries` (`max_retries`) | `2` | Non-negative integer (`>= 0`) bounding retry attempts after Attempt 1 (`2` $\implies$ up to `3` total attempts; `0` disables retries). Negative or non-integer values fail fast with exit code `2`. |
-| `--max-backoff-ms <MS>` | `CANON_CLERK_MAX_BACKOFF_MS` | `maxBackoffMs` (`max_backoff_ms`) | `90000` | Non-negative integer (`>= 0`) in milliseconds bounding any single cooldown or retry wait (`0` fails fast immediately on any rate-limit delay). Negative or non-integer values fail fast with exit code `2`. |
+| `--max-retries <COUNT>` | `CANON_CLERK_MAX_RETRIES` | `defaults.maxRetries` | `2` | Non-negative integer (`>= 0`) bounding retry attempts after Attempt 1 (`2` $\implies$ up to `3` total attempts; `0` disables retries). Negative or non-integer values fail fast with exit code `2`. |
+| `--max-backoff-ms <MS>` | `CANON_CLERK_MAX_BACKOFF_MS` | `defaults.maxBackoffMs` | `90000` | Non-negative integer (`>= 0`) in milliseconds bounding any single cooldown or retry wait (`0` fails fast immediately on any rate-limit delay). Negative or non-integer values fail fast with exit code `2`. |
 
 Like stage concurrency and batch-size settings, `--max-retries` and `--max-backoff-ms` govern live HTTP transport execution and are omitted from `Caseload.config`.

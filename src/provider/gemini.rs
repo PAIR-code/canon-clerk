@@ -70,7 +70,7 @@ pub fn classify_gemini_http_error(status_code: u16, model_specifier: &str, detai
         ),
         404 => format!(
             "HTTP 404: Model endpoint `{model_specifier}` was not found ({detail}). \
-             Hint: Specify a valid Gemini model via `--screener-model` or `--auditor-model` (e.g. `google:gemini-flash-lite-latest`)."
+             Hint: Specify a valid `<provider>:<model>` Gemini identifier via `--<node>-model` (e.g. `google:gemini-4-carbon`)."
         ),
         429 => format!(
             "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \
@@ -314,7 +314,7 @@ impl StructuredModelProvider for GeminiModelProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::caseload::{DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL};
+    use crate::caseload::{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL};
     use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, TokenUsage};
     use serde_json::json;
 
@@ -332,7 +332,7 @@ mod tests {
 
     fn sample_request(reasoning_budget: Option<u32>) -> GenerationRequest {
         GenerationRequest {
-            model_specifier: DEFAULT_AUDITOR_MODEL.to_string(),
+            model_specifier: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
             system_instruction: "Adjudicate compliance with the governing canon.".to_string(),
             user_prompt: "Canon: flags must be kebab-case.\nDiff: +--foo-bar".to_string(),
             response_schema: sample_schema(),
@@ -502,8 +502,9 @@ mod tests {
             })
             .to_string();
 
-            let resp = decode_generate_response(200, &raw_body, DEFAULT_AUDITOR_MODEL, 840)
-                .expect("decode valid response");
+            let resp =
+                decode_generate_response(200, &raw_body, DEFAULT_GOOGLE_GENERATOR_MODEL, 840)
+                    .expect("decode valid response");
 
             assert_eq!(resp.resolved_model, "gemini-2.5-pro-preview-06-05");
             assert_eq!(resp.latency_ms, 840);
@@ -549,10 +550,15 @@ mod tests {
             })
             .to_string();
 
-            let resp = decode_generate_response(200, &minimal_body, DEFAULT_SCREENER_MODEL, 195)
-                .expect("decode minimal response");
+            let resp = decode_generate_response(
+                200,
+                &minimal_body,
+                DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+                195,
+            )
+            .expect("decode minimal response");
 
-            assert_eq!(resp.resolved_model, DEFAULT_SCREENER_MODEL);
+            assert_eq!(resp.resolved_model, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL);
             assert!(resp.thoughts.is_empty());
             assert_eq!(
                 resp.usage,
@@ -583,7 +589,7 @@ mod tests {
                     404,
                     r#"{"error":{"message":"models/gemini-missing not found"}}"#,
                     "HTTP 404",
-                    "--screener-model",
+                    "--<node>-model",
                 ),
                 (
                     429,
@@ -596,8 +602,9 @@ mod tests {
             ];
 
             for (status, body, expected_status, expected_substr) in cases {
-                let err = decode_generate_response(status, body, DEFAULT_SCREENER_MODEL, 60)
-                    .expect_err("non-2xx status must return error");
+                let err =
+                    decode_generate_response(status, body, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, 60)
+                        .expect_err("non-2xx status must return error");
                 match &err {
                     ProviderError::HttpStatus { status_code, .. } => {
                         assert_eq!(*status_code, status);
@@ -618,15 +625,19 @@ mod tests {
             })
             .to_string();
             let err_prompt =
-                decode_generate_response(200, &prompt_blocked, DEFAULT_AUDITOR_MODEL, 45)
+                decode_generate_response(200, &prompt_blocked, DEFAULT_GOOGLE_GENERATOR_MODEL, 45)
                     .expect_err("prompt block must fail");
             assert!(matches!(err_prompt, ProviderError::BlockedResponse { .. }));
             assert!(err_prompt.to_string().contains("SAFETY"));
 
             let empty_candidates = json!({ "candidates": [] }).to_string();
-            let err_empty =
-                decode_generate_response(200, &empty_candidates, DEFAULT_SCREENER_MODEL, 30)
-                    .expect_err("empty candidates must fail");
+            let err_empty = decode_generate_response(
+                200,
+                &empty_candidates,
+                DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+                30,
+            )
+            .expect_err("empty candidates must fail");
             assert!(matches!(err_empty, ProviderError::BlockedResponse { .. }));
 
             let safety_candidate = json!({
@@ -636,9 +647,13 @@ mod tests {
                 }]
             })
             .to_string();
-            let err_recitation =
-                decode_generate_response(200, &safety_candidate, DEFAULT_AUDITOR_MODEL, 50)
-                    .expect_err("RECITATION finishReason must fail");
+            let err_recitation = decode_generate_response(
+                200,
+                &safety_candidate,
+                DEFAULT_GOOGLE_GENERATOR_MODEL,
+                50,
+            )
+            .expect_err("RECITATION finishReason must fail");
             assert!(matches!(
                 err_recitation,
                 ProviderError::BlockedResponse { .. }
@@ -653,9 +668,13 @@ mod tests {
                 }]
             })
             .to_string();
-            let err_max_tokens =
-                decode_generate_response(200, &exhausted_thinking, DEFAULT_AUDITOR_MODEL, 900)
-                    .expect_err("MAX_TOKENS with zero output parts must fail");
+            let err_max_tokens = decode_generate_response(
+                200,
+                &exhausted_thinking,
+                DEFAULT_GOOGLE_GENERATOR_MODEL,
+                900,
+            )
+            .expect_err("MAX_TOKENS with zero output parts must fail");
             assert!(matches!(
                 err_max_tokens,
                 ProviderError::BlockedResponse { .. }
@@ -665,9 +684,13 @@ mod tests {
 
         #[test]
         fn test_classifies_malformed_envelopes_and_schema_decoding_failures() {
-            let err_html =
-                decode_generate_response(200, "<html>gateway</html>", DEFAULT_SCREENER_MODEL, 20)
-                    .expect_err("non-JSON 200 envelope must fail");
+            let err_html = decode_generate_response(
+                200,
+                "<html>gateway</html>",
+                DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+                20,
+            )
+            .expect_err("non-JSON 200 envelope must fail");
             assert!(matches!(err_html, ProviderError::MalformedResponse { .. }));
 
             let no_parts = json!({
@@ -677,8 +700,9 @@ mod tests {
                 }]
             })
             .to_string();
-            let err_no_parts = decode_generate_response(200, &no_parts, DEFAULT_SCREENER_MODEL, 20)
-                .expect_err("STOP candidate with empty parts must fail");
+            let err_no_parts =
+                decode_generate_response(200, &no_parts, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, 20)
+                    .expect_err("STOP candidate with empty parts must fail");
             assert!(matches!(
                 err_no_parts,
                 ProviderError::MalformedResponse { .. }
@@ -692,7 +716,7 @@ mod tests {
             })
             .to_string();
             let err_trunc =
-                decode_generate_response(200, &truncated_json, DEFAULT_AUDITOR_MODEL, 120)
+                decode_generate_response(200, &truncated_json, DEFAULT_GOOGLE_GENERATOR_MODEL, 120)
                     .expect_err("truncated JSON text must fail SchemaDecode");
             assert!(matches!(err_trunc, ProviderError::SchemaDecode { .. }));
 
@@ -704,7 +728,7 @@ mod tests {
             })
             .to_string();
             let err_array =
-                decode_generate_response(200, &array_payload, DEFAULT_AUDITOR_MODEL, 120)
+                decode_generate_response(200, &array_payload, DEFAULT_GOOGLE_GENERATOR_MODEL, 120)
                     .expect_err("non-object JSON payload must fail SchemaDecode");
             assert!(matches!(err_array, ProviderError::SchemaDecode { .. }));
         }
@@ -897,7 +921,7 @@ mod tests {
             assert_eq!(
                 err,
                 ProviderError::Timeout {
-                    model_specifier: DEFAULT_AUDITOR_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                     timeout_ms: 50,
                 }
             );
@@ -1222,7 +1246,7 @@ mod tests {
             assert_eq!(
                 err,
                 ProviderError::Timeout {
-                    model_specifier: DEFAULT_AUDITOR_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                     timeout_ms: 60,
                 }
             );

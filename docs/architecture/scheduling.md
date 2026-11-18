@@ -90,7 +90,7 @@ flowchart TD
 1. **`intake` and `discover` execute first.** If zero candidate canons match the modified paths and state preconditions, Canon Clerk immediately logs `0 candidate canons matched` and exits with code `0`.
 2. **Branch B (`configure`) is never evaluated if candidates count is zero.** Fork pull requests, documentation updates, and changes to un-governed directories succeed in ~15ms without configured provider credentials (`GEMINI_API_KEY` / `TYPESAFE_API_KEY`).
 3. **`validate` evaluates candidate syntax before credentials are checked.** If a canon contains YAML or markdown errors, the runner fails fast with exit code `1` before loading provider credentials.
-4. **`configure` resolves JIT with closure-aware credential sufficiency** only when valid candidate canons exist and heuristic screening is imminent. When model tiers are unpinned, `configure` deterministically selects `google:gemini-decision-1` + `google:gemini-4-carbon` whenever `GEMINI_API_KEY` is available (unlocking zero-output-token discriminative `docket`, `admit`, and automatic pre-trial `vet` ahead of `audit` with a single API key), and selects `typesafe:jev-latest` on screener-only closures (`apprise`, `docket`, `admit`, `vet`) when only `TYPESAFE_API_KEY` is available—while full-bench closures (`configure`, `probe`, `audit`) require both screener and generative auditor credentials.
+4. **`configure` resolves JIT with closure-exact node bindings and credential sufficiency** only when valid candidate canons exist and heuristic evaluation is imminent. `configure` resolves the active default provider (`--provider <slug>` $\succ$ `CANON_CLERK_PROVIDER` $\succ$ `defaults.provider` $\succ$ `"google"`) and each closure node's `<provider>:<model>` binding along the 4-level per-node specificity cascade, verifying credentials strictly for the providers referenced by the heuristic nodes executed in that closure (for example, allowing `--provider typesafe` with `TYPESAFE_API_KEY` alone to execute `apprise`, `docket`, `admit`, and `vet` without `GEMINI_API_KEY`, while failing fast with exit code `2` on `audit` unless `audit` is provisioned with a `Generator` model and its provider credential). When `--caseload` chains a partial upstream closure into a downstream command (`vet` $\to$ `audit`), downstream `audit` preserves pre-populated upstream node bindings and resolves `audit` JIT, invalidating upstream/downstream stages only when an upstream stage's model or active provider is explicitly overridden.
 5. **Stage-seam concurrency drains to zero and remains thread-identity isolated.** Multi-unit heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) execute bounded concurrent work uniformly within each stage over the shared pooled provider requester ([`transport.md`](transport.md)) and drain all in-flight worker activity—including waking any cooldown-parked sibling workers upon cooperative stage abort—before advancing to the next DAG node, guaranteeing that upstream cardinality (`1` unit vs. `N` units) never alters the transport liveness or execution behavior of downstream stages.
 
 ---
@@ -107,7 +107,7 @@ git diff origin/main | canon-clerk audit --diff -
 The runner:
 1. Initializes a blank `Caseload`.
 2. Resolves the transitive closure for `audit`: `[intake, discover, validate, configure, docket, admit, vet, audit]`.
-3. Executes each node in-memory sequentially according to the guarded scheduling invariant (automatically skipping `vet` when `screener_model` is generative so contested cases proceed directly to `audit` without duplicate autoregressive turns).
+3. Executes each node in-memory sequentially according to the guarded scheduling invariant (inspecting `vet`'s resolved model capability in `.config.nodes.vet.model`: executing `vet` when `vet` resolves to a `Discriminator` model and deterministically skipping `vet` when `vet` resolves to a `Generator` model unless `.vetting` is already pre-populated on `--caseload`, avoiding duplicate autoregressive turns ahead of `audit`).
 4. Returns the final verdict and exit code.
 
 ### Pattern B: Composable Unix Pipelining (`--caseload <path|->`)
@@ -128,23 +128,23 @@ canon-clerk vet --caseload caseload-6.json --output-caseload caseload-7.json \
 ```
 
 ### Pattern C: The Stage-Prefixed Flag Scoping Contract
-To prevent cross-stage parameter leakage in telescoping cascades, all stage-specific tuning parameters use **explicit stage-prefixed flags**:
-- `--docket-threshold <float>` (sets `docket`'s colorability threshold, default: `0.5`)
-- `--admit-threshold <float>` (sets `admit`'s admissibility threshold, default: `0.5`)
-- `--vet-threshold <float>` (sets `vet`'s prima facie compliance threshold, default: `0.8`)
-- `--audit-threshold <float>` (sets `audit`'s substantive compliance threshold, default: `0.5`)
-- `--apprise-threshold <float>` (sets `apprise`'s apprisal threshold, default: `0.5`)
+To prevent cross-stage parameter leakage in telescoping cascades, all stage-specific model, threshold, batching, and concurrency options use **explicit stage-prefixed flags**:
+- **Per-Node Model (`--<node>-model <provider:model>`):** `--apprise-model`, `--docket-model`, `--admit-model`, `--vet-model`, `--audit-model`
+- **Per-Node Threshold (`--<node>-threshold <float>`):** `--docket-threshold` (`0.5`), `--admit-threshold` (`0.5`), `--vet-threshold` (`0.8`), `--audit-threshold` (`0.5`), `--apprise-threshold` (`0.5`)
+- **Per-Node Batch Size (`--<node>-batch-size <count>`):** `--apprise-batch-size`, `--docket-batch-size`
+- **Per-Node Concurrency (`--<node>-concurrency <count>`):** `--apprise-concurrency`, `--docket-concurrency`, `--admit-concurrency`, `--vet-concurrency`, `--audit-concurrency`
 
 #### Scoping & Validation Invariants:
-1. **Transitive Acceptance:** A subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure.
-   - `canon-clerk audit` accepts `--audit-threshold`, `--vet-threshold`, `--admit-threshold`, and `--docket-threshold` because `docket`, `admit`, and `vet` precede `audit`.
-   - `canon-clerk vet` accepts `--vet-threshold`, `--admit-threshold`, and `--docket-threshold`.
-   - `canon-clerk admit` accepts `--docket-threshold` and `--admit-threshold`.
-   - `canon-clerk docket` accepts `--docket-threshold`.
-   - `canon-clerk apprise` accepts `--apprise-threshold`.
+1. **Transitive Acceptance on Evaluation Closures:** An evaluation subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure (while standalone `configure` and `probe` accept all five `--<node>-model` flags to inspect and probe full bench configurations):
+   - `canon-clerk audit` accepts `--audit-*`, `--vet-*`, `--admit-*`, and `--docket-*` flags because `docket`, `admit`, and `vet` precede `audit`.
+   - `canon-clerk vet` accepts `--vet-*`, `--admit-*`, and `--docket-*` flags.
+   - `canon-clerk admit` accepts `--docket-*` and `--admit-*` flags.
+   - `canon-clerk docket` accepts `--docket-*` flags.
+   - `canon-clerk apprise` accepts `--apprise-*` flags.
 2. **Strict Rejection (Exit 2):** Any subcommand whose closure does NOT execute a stage rejects that stage's flags with exit code `2` (Usage Error). For example:
    - `canon-clerk discover --admit-threshold 0.7` $\implies$ Exit `2` (unexpected flag; prevents dead-letter configuration).
-3. **No Unqualified `--threshold`:** The ambiguous generic flag `--threshold` is disallowed. Invoking `--threshold` fails fast with exit code `2`, directing the operator to the stage-prefixed alternatives.
+   - `canon-clerk vet --audit-model google:gemini-4-carbon` $\implies$ Exit `2` (`audit` is outside `vet`'s closure).
+3. **No Unqualified or Retired Tier Aliases:** Ambiguous generic flags (`--threshold`, `--model`, `--batch-size`, `--max-canons-per-call`, `--concurrency`, `--max-concurrent-calls`) and retired tier flags (`--screener-model`, `--auditor-model`) are disallowed and fail fast with exit code `2`, directing the operator to `--provider <slug>` and the stage-prefixed `--<node>-*` alternatives.
 
 ---
 
@@ -162,7 +162,7 @@ The scheduler determines the node sequence using a deterministic static table. F
 | `canon-clerk docket` | `[intake, discover, validate, configure, docket]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`) is already present |
 | `canon-clerk admit` | `[intake, discover, validate, configure, docket, admit]` | Skips any node whose corresponding field is already populated |
 | `canon-clerk vet` | `[intake, discover, validate, configure, docket, admit, vet]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`, `.evidence`, `.vetting`) is already populated |
-| `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, vet, audit]` | Skips any node whose corresponding field is already populated (and deterministically skips `vet` when `screener_model` is generative and `.vetting` is absent) |
+| `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, vet, audit]` | Skips any node whose corresponding field is already populated (and deterministically skips `vet` when `vet` resolves to a `Generator` model and `.vetting` is absent) |
 | `canon-clerk apprise` | `[intake, discover, validate, configure, apprise]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.apprisal`) is already present |
 
 ### Missing Input Source Guard vs. Empty Stream Short-Circuit
@@ -186,7 +186,7 @@ Across the pipeline, six deterministic short-circuit conditions trigger early te
 2. **At `validate`:** If `validation.has_errors == true` $\implies$ Exit `1` immediately (malformed canon syntax; zero tokens spent).
 3. **At `docket`:** If `active_docket` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at macro screening; zero trials scheduled).
 4. **At `admit`:** If all active cases retain zero admitted exhibits $\implies$ Exit `0` immediately (no admissible evidence; zero trials scheduled).
-5. **At `vet` (cascading into `audit`):** If `contested_cases` is empty $\implies$ `audit` folds `vetted_cases` into a passing `.verdict` and exits `0` immediately with zero `auditor_model` calls.
+5. **At `vet` (cascading into `audit`):** If `contested_cases` is empty $\implies$ `audit` folds `vetted_cases` into a passing `.verdict` and exits `0` immediately with zero `audit` model calls.
 6. **At `apprise`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at discovery; empty apprisal brief attached to emitted Caseload).
 
 ---
@@ -200,20 +200,20 @@ A zero-result or clean run can occur at any stage along the DAG:
 1. **At `intake`:** An invalid or un-matched target path produced a null filing.
 2. **At `discover`:** Target paths did not match any canon triggers, or state preconditions (`exists:`) were unmet.
 3. **At `validate`:** Candidate canons failed AST linting (aborts with Exit 1).
-4. **At `docket`:** Canons were dismissed by the screener model as uncolorable for the change.
+4. **At `docket`:** Canons were dismissed during macro triage as uncolorable for the change.
 5. **At `admit`:** Diff hunks and files failed admissibility thresholds (insufficient relevant evidence).
-6. **At `vet`:** Active cases passed prima facie compliance vetting on the papers (`contested_cases: []`, zero `auditor_model` trials required).
+6. **At `vet`:** Active cases passed prima facie compliance vetting on the papers (`contested_cases: []`, zero `audit` trials required).
 7. **At `audit`:** Contested exhibits were adjudicated compliant with canon statutes (or satisfied declared `Exception` clauses).
 
 ### The Funnel Receipt Format
-When a multi-stage command runs in human-readable mode (default TTY stdout), the terminal output prints a compact **Pipeline Funnel Receipt** summarizing the operational watermark of every executed ancestor node in the closure:
+When a multi-stage command runs in human-readable mode (default TTY stdout), the terminal output prints a compact **Pipeline Funnel Receipt** summarizing the operational watermark of every executed ancestor node in the closure (grouping closure nodes that share identical resolved models on the `configure` line):
 
 ```text
 Pipeline Provenance:
   ✓ intake    : 1 target file ingested ('src/parser.rs', 45 diff lines)
   ✓ discover  : 3 candidate canons matched triggers (14 canons un-triggered)
   ✓ validate  : 3 candidate canons valid (0 errors, 0 warnings)
-  ✓ configure : screener 'google:gemini-decision-1', auditor 'google:gemini-4-carbon'
+  ✓ configure : docket, admit, vet 'google:gemini-decision-1'; audit 'google:gemini-4-carbon'
   ✓ docket    : 2 case(s) colorable (1 dismissed, threshold 0.50)
   ✓ admit     : 2 exhibit(s) admitted across 2 case(s) (0 excluded, threshold 0.50)
   ✓ vet       : 2 case(s) vetted, 0 contested (threshold 0.80)

@@ -223,7 +223,7 @@ pub(crate) fn classify_http_retry_disposition(
         return HttpRetryDisposition::FailFast {
             diagnostic_suffix: Some(
                 "Non-recoverable daily or `limit: 0` billing quota exhausted; automatic retry skipped. \
-                 Hint: Upgrade your provider quota/billing tier or switch models via `--screener-model` / `--auditor-model`."
+                 Hint: Upgrade your provider quota/billing tier or switch models via `--provider` / `--<node>-model`."
                     .to_string(),
             ),
         };

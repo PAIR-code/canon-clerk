@@ -18,14 +18,15 @@ mod decision;
 mod decode;
 mod prompt;
 
-use crate::caseload::{CanonApprisalAssessment, Caseload, CaseloadApprisal, normalize_unit_score};
+use crate::caseload::{
+    CanonApprisalAssessment, Caseload, CaseloadApprisal, HeuristicNode, normalize_unit_score,
+};
 use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{format_canon_batch_label, partition_candidate_canons};
 use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
-    ProviderError, StructuredModelProvider,
+    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
 };
 use decode::decode_apprise_assessments;
 use prompt::{
@@ -38,10 +39,10 @@ use std::fmt;
 /// Default prospective applicability score threshold for `apprise` (`docs/architecture/nodes/apprise.md` §4.4).
 pub const DEFAULT_APPRISE_THRESHOLD: f64 = 0.5;
 
-/// Default maximum candidate canons evaluated per generative `apprise` screener call (`docs/architecture/nodes/apprise.md` §4.2).
+/// Default maximum candidate canons evaluated per generative `apprise` model call (`docs/architecture/nodes/apprise.md` §4.2).
 pub const DEFAULT_APPRISE_BATCH_SIZE: usize = 25;
 
-/// Default maximum concurrent in-flight screener model calls when `apprise` executes multiple batches.
+/// Default maximum concurrent in-flight `apprise` model calls when executing multiple batches.
 pub const DEFAULT_APPRISE_MAX_CONCURRENT_CALLS: usize = 4;
 
 /// Environment variable name for overriding `--apprise-threshold` (`docs/architecture/nodes/apprise.md` §5).
@@ -60,9 +61,9 @@ pub struct AppriseOptions {
     pub threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
-    /// Optional maximum candidate canons evaluated per screener model call (`>= 1`; defaults to `Some(DEFAULT_APPRISE_BATCH_SIZE)`, while `None` evaluates all in a single unbounded turn).
+    /// Optional maximum candidate canons evaluated per `apprise` model call (`>= 1`; defaults to `Some(DEFAULT_APPRISE_BATCH_SIZE)`, while `None` evaluates all in a single unbounded turn).
     pub max_canons_per_call: Option<usize>,
-    /// Optional maximum concurrent in-flight screener model calls when batched (`>= 1`; defaults to [`DEFAULT_APPRISE_MAX_CONCURRENT_CALLS`]).
+    /// Optional maximum concurrent in-flight `apprise` model calls when batched (`>= 1`; defaults to [`DEFAULT_APPRISE_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
 }
 
@@ -78,15 +79,15 @@ impl Default for AppriseOptions {
 }
 
 /// Resolves the effective `max_canons_per_call` for `apprise` given an optional explicit override
-/// and the configured `screener_model` (`None` on discriminative models so their `DecisionBudgetProfile`
+/// and the configured `apprise_model` (`None` on discriminative models so their `DecisionBudgetProfile`
 /// governs batching, `Some(DEFAULT_APPRISE_BATCH_SIZE)` on generative models).
 pub(crate) fn effective_apprise_batch_size(
     explicit: Option<usize>,
-    screener_model: &str,
+    apprise_model: &str,
 ) -> Option<usize> {
     if explicit.is_some() {
         explicit
-    } else if is_discriminative_model(screener_model) {
+    } else if is_discriminative_model(apprise_model) {
         None
     } else {
         Some(DEFAULT_APPRISE_BATCH_SIZE)
@@ -271,16 +272,19 @@ pub fn execute_apprise(
         return Err(AppriseError::ValidationFailed);
     }
 
-    let config = caseload
+    let node_cfg = caseload
         .config
         .as_ref()
+        .and_then(|c| c.node(HeuristicNode::Apprise))
         .ok_or(AppriseError::MissingConfig)?;
-    if is_discriminative_model(&config.screener_model) {
+    if is_discriminative_model(&node_cfg.model) {
         return decision::execute_apprise_decisions(
             options, caseload, threshold, workspace, provider,
         );
     }
 
+    let apprise_model = node_cfg.model.clone();
+    let (thinking_level, reasoning_budget) = node_cfg.effective_screening_thinking();
     let intent_prefix = build_apprise_intent_prefix(intake, discovery);
     let response_schema = build_apprise_schema();
     let batches =
@@ -294,12 +298,12 @@ pub fn execute_apprise(
                 .map_err(|canon_ref| AppriseError::MissingCandidateCanon { canon_ref })?;
         let call_label = (total_batches > 1).then(|| format!("batch {}/{total_batches}", idx + 1));
         let request = GenerationRequest {
-            model_specifier: config.screener_model.clone(),
+            model_specifier: apprise_model.clone(),
             system_instruction: APPRISE_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            thinking_level: None,
-            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
+            thinking_level,
+            reasoning_budget,
             timeout_ms: options.timeout_ms,
             call_label,
         };
@@ -313,7 +317,7 @@ pub fn execute_apprise(
         &prepared_batches,
         concurrency_limit,
         threshold,
-        &config.screener_model,
+        &apprise_model,
         provider,
     )?;
 
@@ -364,9 +368,9 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         ApprisalStatus, CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
-        DEFAULT_GENERATIVE_SCREENER_MODEL,
+        DEFAULT_GENERATIVE_SCREENING_MODEL,
     };
-    use crate::provider::{GenerationResponse, TokenUsage};
+    use crate::provider::{DEFAULT_SCREENING_REASONING_BUDGET, GenerationResponse, TokenUsage};
     use serde_json::{Value, json};
     use std::sync::Mutex;
 
@@ -452,10 +456,10 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                ..CaseloadConfig::default()
-            })
+            .with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Apprise, DEFAULT_GENERATIVE_SCREENING_MODEL),
+            )
     }
 
     mod zero_candidate_and_prerequisite_guards {
@@ -631,8 +635,8 @@ mod tests {
                 "must screen all candidates in a single turn"
             );
             let req = &requests[0];
-            assert_eq!(req.model_specifier, DEFAULT_GENERATIVE_SCREENER_MODEL);
-            assert_eq!(req.reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
+            assert_eq!(req.model_specifier, DEFAULT_GENERATIVE_SCREENING_MODEL);
+            assert_eq!(req.reasoning_budget, DEFAULT_SCREENING_REASONING_BUDGET);
             assert!(req.user_prompt.contains("Refactor auth provider dispatch"));
             assert!(req.user_prompt.contains(".canons/auth/cache-expiry.md"));
             assert!(req.user_prompt.contains(".canons/auth/db-rollback.md"));
@@ -961,23 +965,24 @@ Interactive UI controls MUST provide accessible labels.
                 vec!["src/cli/apprise.rs".to_string()],
             );
 
-            let caseload = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    intent: Some("Add new CLI subcommand flag for apprise".to_string()),
-                    target_paths: vec!["src/cli".to_string()],
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery {
-                    target_files: vec!["src/cli/apprise.rs".to_string()],
-                    candidate_canons: candidates,
-                    triggers_join,
-                    ..CaseloadDiscovery::default()
-                })
-                .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                    ..CaseloadConfig::default()
-                });
+            let caseload =
+                Caseload::new()
+                    .with_intake(CaseloadIntake {
+                        intent: Some("Add new CLI subcommand flag for apprise".to_string()),
+                        target_paths: vec!["src/cli".to_string()],
+                        ..CaseloadIntake::default()
+                    })
+                    .with_discovery(CaseloadDiscovery {
+                        target_files: vec!["src/cli/apprise.rs".to_string()],
+                        candidate_canons: candidates,
+                        triggers_join,
+                        ..CaseloadDiscovery::default()
+                    })
+                    .with_validation(CaseloadValidation::default())
+                    .with_config(CaseloadConfig::default().with_node_model(
+                        HeuristicNode::Apprise,
+                        DEFAULT_GENERATIVE_SCREENING_MODEL,
+                    ));
 
             let provider = RecordingMockProvider::with_payload(json!({
                 "assessments": [
@@ -1016,7 +1021,7 @@ Interactive UI controls MUST provide accessible labels.
 
             let auth_fail_provider = RecordingMockProvider::with_error(ProviderError::HttpStatus {
                 status_code: 401,
-                model_specifier: DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
+                model_specifier: DEFAULT_GENERATIVE_SCREENING_MODEL.to_string(),
                 detail: "API key not valid".to_string(),
                 diagnostic: "HTTP 401: Invalid API key.\n  Hint: Check GEMINI_API_KEY.".to_string(),
             });

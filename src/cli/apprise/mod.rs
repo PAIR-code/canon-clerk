@@ -25,7 +25,9 @@ use crate::cli::args::{
 };
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::node_args::{AppriseNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::cli::provenance::StageDisposition;
+use crate::cli::runners::load_optional_host_stored_config;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
@@ -91,29 +93,26 @@ pub struct AppriseArgs {
     )]
     pub apprise_threshold: Option<f64>,
 
-    /// Optional maximum candidate canons evaluated per screener model call (default: `25`; env: `CANON_CLERK_APPRISE_BATCH_SIZE`).
+    /// Optional maximum candidate canons evaluated per `apprise` model call (default: `25`; env: `CANON_CLERK_APPRISE_BATCH_SIZE`).
     #[arg(
         long = "apprise-batch-size",
-        visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Apprisal Options",
-        help = "Maximum candidate canons per screener model call (default: 25; fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
+        help = "Maximum candidate canons per apprise model call (default: 25; fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
     )]
     pub apprise_batch_size: Option<usize>,
 
-    /// Optional maximum concurrent in-flight screener model calls when batched (default: `4`; env: `CANON_CLERK_APPRISE_CONCURRENCY`).
+    /// Optional maximum concurrent in-flight `apprise` model calls when batched (default: `4`; env: `CANON_CLERK_APPRISE_CONCURRENCY`).
     #[arg(
         long = "apprise-concurrency",
-        visible_alias = "max-concurrent-calls",
         value_name = "COUNT",
         help_heading = "Apprisal Options",
-        help = "Maximum concurrent in-flight screener calls when batched (default: 4; fallback env: CANON_CLERK_APPRISE_CONCURRENCY)"
+        help = "Maximum concurrent in-flight apprise calls when batched (default: 4; fallback env: CANON_CLERK_APPRISE_CONCURRENCY)"
     )]
     pub apprise_concurrency: Option<usize>,
 
-    /// Hidden capture rejecting ambiguous unqualified `--threshold` (`scheduling.md` §4 Pattern C).
-    #[arg(long = "threshold", hide = true, allow_hyphen_values = true)]
-    pub rejected_threshold: Option<String>,
+    #[command(flatten)]
+    pub rejected_unqualified: RejectedUnqualifiedTuningArgs,
 
     /// Hidden capture rejecting out-of-closure `--docket-threshold` (`scheduling.md` §4 Pattern C).
     #[arg(long = "docket-threshold", hide = true, allow_hyphen_values = true)]
@@ -130,6 +129,9 @@ pub struct AppriseArgs {
     /// Hidden capture rejecting out-of-closure `--docket-concurrency`.
     #[arg(long = "docket-concurrency", hide = true, allow_hyphen_values = true)]
     pub rejected_docket_concurrency: Option<String>,
+
+    #[command(flatten)]
+    pub models: AppriseNodeModelArgs,
 
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
@@ -243,10 +245,15 @@ fn run_apprise_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
-    let threshold = resolve_apprise_threshold(args.apprise_threshold, env)?;
-    let _validated_batch_size = resolve_apprise_batch_size(args.apprise_batch_size, env, None)?;
-    let _validated_concurrency = resolve_apprise_concurrency(args.apprise_concurrency, env, None)?;
-    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
+    let stored_config = load_optional_host_stored_config(env)?;
+    let threshold = resolve_apprise_threshold(args.apprise_threshold, env, stored_config.as_ref())?;
+    let _validated_batch_size =
+        resolve_apprise_batch_size(args.apprise_batch_size, env, stored_config.as_ref())?;
+    let _validated_concurrency =
+        resolve_apprise_concurrency(args.apprise_concurrency, env, stored_config.as_ref())?;
+    let _validated_retry = args
+        .transport
+        .resolve_retry_policy(env, stored_config.as_ref())?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -317,6 +324,7 @@ fn run_apprise_core(
     let (final_caseload, configure_disp) = execute_jit_configure_and_apprise(
         args,
         env,
+        stored_config,
         threshold,
         caseload_after_validate,
         &snapshot,
@@ -414,7 +422,7 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         ApprisalStatus, CanonApprisalAssessment, CaseloadConfig, CaseloadDiscovery, CaseloadIntake,
-        DEFAULT_SCREENER_MODEL,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
     };
     use crate::cli::{Cli, Commands};
     use crate::configure::ENV_GEMINI_API_KEY;
@@ -491,8 +499,8 @@ mod tests {
             "synthetic-apprise-cli-test-key".to_string(),
         );
         env.insert(
-            crate::configure::ENV_SCREENER_MODEL.to_string(),
-            "gemini-4-hydrogen".to_string(),
+            crate::configure::ENV_APPRISE_MODEL.to_string(),
+            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL.to_string(),
         );
         env.insert(
             "XDG_CONFIG_HOME".to_string(),
@@ -538,8 +546,8 @@ mod tests {
                 "15",
                 "--apprise-concurrency",
                 "3",
-                "--screener-model",
-                "gemini-2.5-flash-lite",
+                "--apprise-model",
+                "google:gemini-2.5-flash-lite",
                 "--format",
                 "compact",
             ])
@@ -553,31 +561,12 @@ mod tests {
                     assert_eq!(args.apprise_batch_size, Some(15));
                     assert_eq!(args.apprise_concurrency, Some(3));
                     assert_eq!(
-                        args.provider.screener_model.as_deref(),
-                        Some("gemini-2.5-flash-lite")
+                        args.models.apprise_model.as_deref(),
+                        Some("google:gemini-2.5-flash-lite")
                     );
                     assert_eq!(args.format, AppriseFormat::Compact);
                 }
                 _ => panic!("expected Apprise subcommand"),
-            }
-
-            let alias_cli = Cli::try_parse_from([
-                "canon-clerk",
-                "apprise",
-                "--intent",
-                "Rotate auth provider",
-                "src/auth",
-                "--max-canons-per-call",
-                "12",
-                "--max-concurrent-calls",
-                "2",
-            ])
-            .expect("parse apprise batching aliases");
-            if let Some(Commands::Apprise(args)) = alias_cli.command {
-                assert_eq!(args.apprise_batch_size, Some(12));
-                assert_eq!(args.apprise_concurrency, Some(2));
-            } else {
-                panic!("expected Apprise subcommand");
             }
         }
 
@@ -592,6 +581,19 @@ mod tests {
                 ("--admit-threshold", "0.7", "--apprise-threshold"),
                 ("--docket-batch-size", "15", "--apprise-batch-size"),
                 ("--docket-concurrency", "4", "--apprise-concurrency"),
+                ("--max-canons-per-call", "12", "--apprise-batch-size"),
+                ("--max-concurrent-calls", "2", "--apprise-concurrency"),
+                ("--model", "google:gemini-4-hydrogen", "--apprise-model"),
+                (
+                    "--docket-model",
+                    "google:gemini-4-hydrogen",
+                    "--apprise-model",
+                ),
+                (
+                    "--screener-model",
+                    "google:gemini-4-hydrogen",
+                    "--apprise-model",
+                ),
             ] {
                 let cli = Cli::try_parse_from([
                     "canon-clerk",
@@ -663,9 +665,9 @@ mod tests {
 
             for env_key in [
                 crate::apprise::ENV_APPRISE_BATCH_SIZE,
-                crate::docket::ENV_MAX_CANONS_PER_CALL,
+                "CANON_CLERK_MAX_CANONS_PER_CALL",
                 crate::apprise::ENV_APPRISE_CONCURRENCY,
-                crate::docket::ENV_MAX_CONCURRENT_CALLS,
+                "CANON_CLERK_MAX_CONCURRENT_CALLS",
             ] {
                 let mut zero_env = test_env_with_key();
                 zero_env.insert(env_key.to_string(), "0".to_string());
@@ -1103,7 +1105,7 @@ mod tests {
             assert!(no_key_err.to_string().contains(ENV_GEMINI_API_KEY));
 
             let net_fail_provider = StubProvider::failing(ProviderError::Timeout {
-                model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                 timeout_ms: 60_000,
             });
             let provider_err = run_apprise_with_snapshot_and_provider(
@@ -1316,10 +1318,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                    ..CaseloadConfig::default()
-                });
+                .with_config(CaseloadConfig::default().with_node_model(
+                    crate::caseload::HeuristicNode::Apprise,
+                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+                ));
             let raw_upstream = serde_json::to_vec(&upstream).expect("serialize upstream");
 
             let ff_sink = RecordingTelemetrySink::new();
@@ -1504,7 +1506,7 @@ mod tests {
                 dec_batch_sizes: Mutex::new(Vec::new()),
             };
 
-            // 1. Generative screener (gemini-4-hydrogen via test_env_with_key) partitions 60 into 3x20
+            // 1. Generative model (google:gemini-4-hydrogen via test_env_with_key) partitions 60 into 3x20
             let base_args = AppriseArgs {
                 filing: FilingSourceArgs {
                     intent: Some("Refactor auth login".to_string()),
@@ -1529,7 +1531,7 @@ mod tests {
             assert_eq!(
                 *probe.gen_batch_sizes.lock().expect("lock"),
                 vec![20, 20, 20],
-                "60 canons must partition into 3 balanced batches of 20 on generative screener"
+                "60 canons must partition into 3 balanced batches of 20 on generative model"
             );
 
             // 2. Unpinned GEMINI_API_KEY selects google:gemini-decision-1 and evaluates all 60 in 1 pass (256-noul budget)
@@ -1558,14 +1560,16 @@ mod tests {
                 "default google:gemini-decision-1 must pack 60 canons into a single 256-noul pass"
             );
 
-            // 3. Explicit jev-latest preserves its 48-noul batch profile (48 + 12)
+            // 3. Explicit typesafe:jev-latest preserves its 48-noul batch profile (48 + 12)
             probe.dec_batch_sizes.lock().expect("lock").clear();
             let mut jev_env = unpinned_google_env;
             jev_env.insert(ENV_TYPESAFE_API_KEY.to_string(), "test-jev-key".to_string());
             let jev_args = AppriseArgs {
-                provider: ProviderConfigArgs {
-                    screener_model: Some("jev-latest".to_string()),
-                    ..ProviderConfigArgs::default()
+                models: AppriseNodeModelArgs {
+                    apprise_model: Some(
+                        crate::caseload::DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL.to_string(),
+                    ),
+                    ..AppriseNodeModelArgs::default()
                 },
                 ..base_args
             };

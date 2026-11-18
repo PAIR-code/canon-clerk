@@ -8,7 +8,7 @@
 
 # 📜 Canon Clerk
 
-[![Canons](https://img.shields.io/badge/canons-111_active-e3b341?style=flat-square)](.canons/)
+[![Canons](https://img.shields.io/badge/canons-114_active-e3b341?style=flat-square)](.canons/)
 [![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 
@@ -81,16 +81,16 @@ Canon Clerk addresses the friction points where static code analysis ends and se
 The `canon-clerk` CLI evaluates diffs, target paths, and pull request metadata against `.canons/` rule packs locally or in CI:
 
 ```bash
-# Audit an in-flight diff against governing canons (auto-selects Gemini Decisions discriminative
-# screening + vet alongside Gemini 4 Carbon when GEMINI_API_KEY is configured):
+# Audit an in-flight diff against governing canons (defaults to google:gemini-decision-1 across
+# docket, admit, and vet alongside google:gemini-4-carbon on audit):
 git diff origin/main | canon-clerk audit --diff -
 
 # Run a fast pre-flight prima facie compliance check (~1s, 0 output tokens; defaults to
-# gemini-decision-1 with GEMINI_API_KEY, or jev-latest when only TYPESAFE_API_KEY is set):
+# google:gemini-decision-1, or select TypeSafe Jev via --provider typesafe):
 git diff origin/main | canon-clerk vet --diff -
 
-# Explicitly pin screener and auditor model tiers via flags (e.g., TypeSafe Jev or generative Gemini):
-git diff origin/main | canon-clerk audit --diff - --screener-model jev-latest --auditor-model gemini-4-carbon
+# Mix providers across nodes using explicit <provider>:<model> specifiers:
+git diff origin/main | canon-clerk audit --diff - --provider typesafe --audit-model google:gemini-4-carbon
 
 # Audit explicit target paths or run in GitHub Actions annotation mode with Caseload archival:
 canon-clerk audit src/cli
@@ -103,17 +103,17 @@ canon-clerk validate --all-canons
 canon-clerk apprise --intent "Add a new CLI subcommand flag" src/cli
 ```
 
-Unpinned `screener_model` and `auditor_model` tiers auto-resolve deterministically from available `GEMINI_API_KEY` and `TYPESAFE_API_KEY` credentials (`~/.config/canon-clerk/config.json`, environment variables, or CLI flags)—selecting `google:gemini-decision-1` + `google:gemini-4-carbon` when `GEMINI_API_KEY` is present and `typesafe:jev-latest` on screener closures when only `TYPESAFE_API_KEY` is present; see the [`configure` Stage Specification](docs/architecture/nodes/configure.md). Stage-specific and shared transport flags (`--audit-threshold`, `--audit-concurrency`, `--vet-threshold`, `--vet-concurrency`, `--admit-threshold`, `--admit-concurrency`, `--docket-threshold`, `--docket-batch-size`, `--docket-concurrency`, `--apprise-threshold`, `--apprise-batch-size`, `--apprise-concurrency`, `--auditor-model`, `--screener-model`, `--thinking-level`, `--reasoning-budget`, `--max-retries`, `--max-backoff-ms`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`), coordinated per-origin `429` cooldown gating, and bounded batch/slice execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [Provider Transport & Rate-Limit Scheduling](docs/architecture/transport.md), [`docket` Stage Specification](docs/architecture/nodes/docket.md), [`apprise` Stage Specification](docs/architecture/nodes/apprise.md), [`admit` Stage Specification](docs/architecture/nodes/admit.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
+Model bindings cascade deterministically across explicit per-node CLI flags (`--apprise-model`, `--docket-model`, `--admit-model`, `--vet-model`, `--audit-model`), environment variables (`CANON_CLERK_<NODE>_MODEL`, `CANON_CLERK_PROVIDER`), structured host configuration (`~/.config/canon-clerk/config.json` with `{ providers, defaults, nodes }`), and the active provider's per-node defaults (`google` by default: `google:gemini-decision-1` on `apprise`/`docket`/`admit`/`vet` and `google:gemini-4-carbon` on `audit`; `typesafe` via `--provider typesafe`: `typesafe:jev-latest` across discriminative screening/vetting nodes), verifying credentials strictly for the providers used by the executed closure; see the [`configure` Stage Specification](docs/architecture/nodes/configure.md). Stage-specific and shared transport flags (`--provider`, `--audit-model`, `--audit-threshold`, `--audit-concurrency`, `--vet-model`, `--vet-threshold`, `--vet-concurrency`, `--admit-model`, `--admit-threshold`, `--admit-concurrency`, `--docket-model`, `--docket-threshold`, `--docket-batch-size`, `--docket-concurrency`, `--apprise-model`, `--apprise-threshold`, `--apprise-batch-size`, `--apprise-concurrency`, `--thinking-level`, `--reasoning-budget`, `--max-retries`, `--max-backoff-ms`, `--gemini-api-key`, `--typesafe-api-key`, `--caseload`, `--json`), coordinated per-origin `429` cooldown gating, and bounded batch/slice execution mechanics are documented in the [Caseload Pipeline Architecture](docs/architecture/overview.md), [Provider Transport & Rate-Limit Scheduling](docs/architecture/transport.md), [`docket` Stage Specification](docs/architecture/nodes/docket.md), [`apprise` Stage Specification](docs/architecture/nodes/apprise.md), [`admit` Stage Specification](docs/architecture/nodes/admit.md), [`vet` Stage Specification](docs/architecture/nodes/vet.md), and [`audit` Stage Specification](docs/architecture/nodes/audit.md).
 
 ---
 
 ## The Canon Corpus
 
-Canon Clerk includes a production-grade corpus of **111 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)), ready to explore, adapt, and enforce:
+Canon Clerk includes a production-grade corpus of **modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)), ready to explore, adapt, and enforce:
 
 | Domain Pack | Path | Count | Governed Conventions |
 | :--- | :--- | :--- | :--- |
-| 🛠️ **CLI Ergonomics** | [`.canons/cli/`](.canons/cli/) | 23 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
+| 🛠️ **CLI Ergonomics** | [`.canons/cli/`](.canons/cli/) | 24 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
 | 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 14 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
 | 🤖 **Agent Scripts** | [`.canons/agent-scripts/`](.canons/agent-scripts/) | 9 | Runtime script standards for AI agent helpers: POSIX shell portability, command echo traces, passthrough fidelity, and `>8KB` output shunting. |
 | 🧪 **Testing** | [`.canons/testing/`](.canons/testing/) | 9 | Behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
@@ -122,12 +122,12 @@ Canon Clerk includes a production-grade corpus of **111 modular, domain-scoped c
 | 📐 **OpenSpec** | [`.canons/openspec/`](.canons/openspec/) | 5 | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
 | 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 5 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps, feature parity, responsive dark/light hero banners, and shunting architecture to `docs/`. |
 | 🛡️ **Repository Governance** | [`.canons/repo-governance/`](.canons/repo-governance/) | 5 | GitHub repository metadata parity, workflow script delegation, and third-party GitHub App restrictions. |
-| 🏗️ **Architecture** | [`.canons/architecture/`](.canons/architecture/) | 4 | Pure format validators, explicit library dependencies, Hexagonal workspace boundaries, and standard-solution reuse. |
+| 🏗️ **Architecture** | [`.canons/architecture/`](.canons/architecture/) | 5 | Pure format validators, explicit library dependencies, narrow module option boundaries, and Hexagonal workspace isolation. |
 | 🏷️ **Conventional Commits** | [`.canons/conventional-commits/`](.canons/conventional-commits/) | 4 | Semantic commit and PR invariants (`feat` for user-facing functionality, `fix` for user-facing defect repairs). |
 | 🧩 **Agent Skills** | [`.canons/agent-skills/`](.canons/agent-skills/) | 3 | Procedural runtime execution targets and non-duplicative skill metadata. |
+| ⚙️ **Configuration** | [`.canons/configuration/`](.canons/configuration/) | 3 | Orthogonal configuration namespaces, `<provider>:<name>` specifier qualification, and deterministic specificity cascades. |
 | 🔒 **Security** | [`.canons/security/`](.canons/security/) | 3 | Workspace-external secret storage and POSIX `0600` owner-only credential file enforcement. |
 | 📦 **Build Systems** | [`.canons/build-systems/`](.canons/build-systems/) | 2 | Consolidated monorepo root bundling and private-package declaration hygiene. |
-| ⚙️ **Configuration** | [`.canons/configuration/`](.canons/configuration/) | 2 | Industry-standard configuration formats and deterministic specificity cascades. |
 | 🔀 **Git Workflow** | [`.canons/git-workflow/`](.canons/git-workflow/) | 2 | Sanctioned issue scope hygiene and independent precursor domain-contract delivery. |
 | 🔍 **Parser Design** | [`.canons/parser-design/`](.canons/parser-design/) | 2 | Lexical/semantic phase separation and explicit multi-occurrence/blank semantics. |
 | 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |

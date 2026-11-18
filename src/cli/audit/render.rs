@@ -17,12 +17,13 @@
 use super::stages::AuditCascadeThresholds;
 use super::{AuditArgs, AuditFormat};
 use crate::caseload::{
-    AnnotationLevel, CanonAdjudication, Caseload, CaseloadVerdict, CodeAnnotation, VerdictStatus,
+    AnnotationLevel, CanonAdjudication, Caseload, CaseloadVerdict, CodeAnnotation, HeuristicNode,
+    VerdictStatus,
 };
 use crate::cli::CliError;
 use crate::cli::provenance::{
-    StageDisposition, write_admit_provenance, write_audit_configure_provenance,
-    write_audit_provenance, write_discover_provenance, write_docket_provenance,
+    StageDisposition, write_admit_provenance, write_audit_provenance,
+    write_closure_configure_provenance, write_discover_provenance, write_docket_provenance,
     write_filing_intake_provenance, write_validate_provenance, write_vet_provenance,
 };
 use crate::cli::telemetry::resolve_verbose_flag;
@@ -67,7 +68,7 @@ impl AuditWatermarks {
             vet: if vet_was_present {
                 StageDisposition::PrePopulated
             } else {
-                StageDisposition::SkippedGenerativeScreener
+                StageDisposition::SkippedGeneratorVet
             },
             audit: StageDisposition::PrePopulated,
             total_workspace_canons: None,
@@ -367,7 +368,17 @@ fn write_seven_stage_provenance(
         out,
     )?;
     write_validate_provenance(caseload.validation.as_ref(), wm.validate, out)?;
-    write_audit_configure_provenance(caseload, wm.configure, out)?;
+    write_closure_configure_provenance(
+        caseload,
+        &[
+            HeuristicNode::Docket,
+            HeuristicNode::Admit,
+            HeuristicNode::Vet,
+            HeuristicNode::Audit,
+        ],
+        wm.configure,
+        out,
+    )?;
     write_docket_provenance(
         caseload.docket.as_ref(),
         wm.docket,

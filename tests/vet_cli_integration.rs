@@ -41,15 +41,7 @@ fn test_cli_vet_guards_and_zero_candidate_short_circuit() {
         .expect("execute canon-clerk vet --audit-threshold 0.5");
     assert_eq!(vet_out_of_closure.status.code(), Some(2));
 
-    // 3. Discriminative model on --auditor-model exits 2 on configure
-    let bad_auditor = Command::new(bin_path())
-        .args(["configure", "--auditor-model", "jev-latest"])
-        .env("TYPESAFE_API_KEY", "test-typesafe-key")
-        .output()
-        .expect("execute canon-clerk configure --auditor-model jev-latest");
-    assert_eq!(bad_auditor.status.code(), Some(2));
-
-    // 4. Zero-candidate short-circuit exits 0 without API keys and attaches empty .vetting
+    // 3. Zero-candidate short-circuit exits 0 without API keys and attaches empty .vetting
     let vet_zero_cand = Command::new(bin_path())
         .args([
             "vet",

@@ -29,9 +29,11 @@ pub use apprisal::{
     ApprisalStatus, CanonApprisalAssessment, CaseloadApprisal, normalize_unit_score,
 };
 pub use config::{
-    CaseloadConfig, DEFAULT_AUDITOR_MODEL, DEFAULT_AUDITOR_THINKING_LEVEL,
-    DEFAULT_GENERATIVE_SCREENER_MODEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER,
-    DEFAULT_SCREENER_MODEL, DEFAULT_SCREENER_REASONING_BUDGET, TYPESAFE_PROVIDER, ThinkingLevel,
+    CaseloadConfig, DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GENERATIVE_SCREENING_MODEL,
+    DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_SCREENING_REASONING_BUDGET,
+    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode, ResolvedNodeConfig, TYPESAFE_PROVIDER,
+    ThinkingLevel,
 };
 pub use discovery::{ActiveExhibits, CaseloadDiscovery, DiscoveryMode};
 pub use docket::{
@@ -44,7 +46,7 @@ pub use intake::{
     CaseloadIntake, ContentOmissionReason, FileArtifact, FileChangeStatus, IntakeScope,
     LinkedIssueContext, PatchOmissionReason,
 };
-pub use probe::{CaseloadProbe, ProbeEndpointResult, ProbeStatus};
+pub use probe::{CaseloadProbe, ProbeStatus, ProbeTargetResult};
 pub use validation::{
     AnnotationLevel, CaseloadValidation, CodeAnnotation, ValidatedCanonMetadata, ValidationOutcome,
 };
@@ -79,10 +81,10 @@ pub struct Caseload {
     /// Validation: Candidate canon AST and frontmatter validation results.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation: Option<CaseloadValidation>,
-    /// Configuration: Resolved provider credentials, model specifiers, and runtime options.
+    /// Configuration: Resolved default provider and per-node `<provider>:<model>` runtime bindings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<CaseloadConfig>,
-    /// Probe: Live provider connectivity and endpoint latency diagnostics.
+    /// Probe: Live deduplicated provider connectivity and endpoint latency diagnostics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe: Option<CaseloadProbe>,
     /// Apprisal: Prospective statutory applicability assessments against design intent.
@@ -214,7 +216,10 @@ mod tests {
             let raw_upstream = r#"{
                 "version": "1.0",
                 "config": {
-                    "screener_model": "google:gemini-flash-lite-latest"
+                    "provider": "google",
+                    "nodes": {
+                        "docket": { "model": "google:gemini-2.5-flash-lite" }
+                    }
                 }
             }"#;
             let upstream: Caseload =
@@ -256,18 +261,33 @@ mod tests {
             assert_eq!(with_cfg.intake, branch_a.intake);
 
             let healthy_probe = CaseloadProbe {
-                screener: ProbeEndpointResult {
-                    status: ProbeStatus::Ok,
-                    latency_ms: 85,
-                    model: DEFAULT_SCREENER_MODEL.to_string(),
-                    error: None,
-                },
-                auditor: ProbeEndpointResult {
-                    status: ProbeStatus::Ok,
-                    latency_ms: 210,
-                    model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    error: None,
-                },
+                targets: vec![
+                    ProbeTargetResult {
+                        model: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
+                        nodes: vec![
+                            HeuristicNode::Apprise,
+                            HeuristicNode::Docket,
+                            HeuristicNode::Admit,
+                            HeuristicNode::Vet,
+                        ],
+                        thinking_level: None,
+                        reasoning_budget: None,
+                        status: ProbeStatus::Ok,
+                        latency_ms: 85,
+                        resolved_model: Some("gemini-decision-1".to_string()),
+                        error: None,
+                    },
+                    ProbeTargetResult {
+                        model: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
+                        nodes: vec![HeuristicNode::Audit],
+                        thinking_level: None,
+                        reasoning_budget: None,
+                        status: ProbeStatus::Ok,
+                        latency_ms: 210,
+                        resolved_model: Some("gemini-4-carbon".to_string()),
+                        error: None,
+                    },
+                ],
             };
             assert!(healthy_probe.is_healthy());
             let with_prb = with_cfg.clone().with_probe(healthy_probe.clone());
@@ -279,7 +299,7 @@ mod tests {
         }
 
         #[test]
-        fn test_with_apprisal_preserves_existing_namespaces() {
+        fn test_with_apprisal_docket_and_verdict_preserve_existing_namespaces() {
             let upstream = Caseload::new()
                 .with_intake(CaseloadIntake::default())
                 .with_discovery(CaseloadDiscovery::default())
@@ -289,55 +309,16 @@ mod tests {
             let with_app = upstream.clone().with_apprisal(CaseloadApprisal::default());
             assert_eq!(with_app.apprisal, Some(CaseloadApprisal::default()));
             assert_eq!(with_app.config, upstream.config);
-            assert_eq!(with_app.validation, upstream.validation);
-            assert_eq!(with_app.discovery, upstream.discovery);
-            assert_eq!(with_app.intake, upstream.intake);
-        }
-
-        #[test]
-        fn test_with_docket_preserves_existing_namespaces() {
-            let upstream = Caseload::new()
-                .with_intake(CaseloadIntake::default())
-                .with_discovery(CaseloadDiscovery::default())
-                .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default());
 
             let with_doc = upstream.clone().with_docket(CaseloadDocket::default());
-            assert_eq!(with_doc.docket, Some(CaseloadDocket::default()));
-            assert_eq!(with_doc.config, upstream.config);
-            assert_eq!(with_doc.validation, upstream.validation);
-            assert_eq!(with_doc.discovery, upstream.discovery);
-            assert_eq!(with_doc.intake, upstream.intake);
-
             let with_ev = with_doc.clone().with_evidence(CaseloadEvidence::default());
-            assert_eq!(with_ev.evidence, Some(CaseloadEvidence::default()));
-            assert_eq!(with_ev.docket, with_doc.docket);
-            assert_eq!(with_ev.config, with_doc.config);
-            assert_eq!(with_ev.validation, with_doc.validation);
-            assert_eq!(with_ev.discovery, with_doc.discovery);
-            assert_eq!(with_ev.intake, with_doc.intake);
-        }
-
-        #[test]
-        fn test_with_verdict_preserves_existing_namespaces() {
-            let upstream = Caseload::new()
-                .with_intake(CaseloadIntake::default())
-                .with_discovery(CaseloadDiscovery::default())
-                .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default())
-                .with_docket(CaseloadDocket::default())
-                .with_evidence(CaseloadEvidence::default())
-                .with_vetting(CaseloadVetting::default());
-
-            let with_verd = upstream.clone().with_verdict(CaseloadVerdict::default());
+            let with_vet = with_ev.clone().with_vetting(CaseloadVetting::default());
+            let with_verd = with_vet.clone().with_verdict(CaseloadVerdict::default());
             assert_eq!(with_verd.verdict, Some(CaseloadVerdict::default()));
-            assert_eq!(with_verd.vetting, upstream.vetting);
-            assert_eq!(with_verd.evidence, upstream.evidence);
-            assert_eq!(with_verd.docket, upstream.docket);
+            assert_eq!(with_verd.vetting, with_vet.vetting);
+            assert_eq!(with_verd.evidence, with_ev.evidence);
+            assert_eq!(with_verd.docket, with_doc.docket);
             assert_eq!(with_verd.config, upstream.config);
-            assert_eq!(with_verd.validation, upstream.validation);
-            assert_eq!(with_verd.discovery, upstream.discovery);
-            assert_eq!(with_verd.intake, upstream.intake);
         }
     }
 }

@@ -18,15 +18,16 @@ use super::VetArgs;
 use super::guards::{has_admit_cli_overrides, has_docket_cli_overrides, resolve_vet_concurrency};
 use crate::admit::{AdmitOptions, execute_admit};
 use crate::audit::resolve_canon_reference_paths;
-use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVetting};
+use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVetting, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
-use crate::cli::closure::{ClosureBackend, has_provider_overrides};
+use crate::cli::closure::ClosureBackend;
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, resolve_screener_branch_b_options, run_branch_b_configure,
+    build_live_model_provider, resolve_closure_branch_b_options, run_branch_b_configure,
 };
+use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
@@ -106,22 +107,27 @@ fn try_pre_populated_short_circuit(
     None
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal stage helper threading CLI args, env, stored config, thresholds, caseload, workspace, backend, and telemetry"
+)]
 pub(super) fn execute_jit_configure_docket_admit_and_vet(
     args: &VetArgs,
     env: &BTreeMap<String, String>,
+    stored_config: Option<StoredConfig>,
     thresholds: VetCascadeThresholds,
     mut caseload: Caseload,
     snapshot: &mut WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<VetCascadeOutcome, CliError> {
-    let provider_overridden = has_provider_overrides(&args.provider);
+    let provider_changed = args.provider.provider.is_some();
     let docket_pre_populated =
-        caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_overridden;
+        caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_changed;
     let evidence_pre_populated = caseload.evidence.is_some()
         && !has_admit_cli_overrides(args)
         && !has_docket_cli_overrides(args)
-        && !provider_overridden;
+        && !provider_changed;
 
     if let Some(short_circuit) =
         try_pre_populated_short_circuit(&caseload, docket_pre_populated, evidence_pre_populated)
@@ -129,7 +135,22 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
         return Ok(short_circuit);
     }
 
-    let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
+    let mut required_nodes = Vec::new();
+    if !docket_pre_populated && !evidence_pre_populated {
+        required_nodes.push(HeuristicNode::Docket);
+    }
+    if !evidence_pre_populated {
+        required_nodes.push(HeuristicNode::Admit);
+    }
+    required_nodes.push(HeuristicNode::Vet);
+
+    let configure_options = resolve_closure_branch_b_options(
+        &args.provider,
+        args.models.resolve_node_models()?,
+        ConfigureScope::closure(required_nodes),
+        stored_config,
+        env,
+    )?;
     let stored = configure_options.stored_config.as_ref();
     let explicit_docket_batch_size =
         resolve_docket_batch_size(args.docket_batch_size, env, stored)?;
@@ -148,19 +169,19 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
 
     let config_was_present =
-        caseload.config.is_some() && !configure_options.has_explicit_overrides();
+        can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
     caseload.vetting = None;
     caseload.verdict = None;
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
     let cfg_snapshot = configured.config.clone().unwrap_or_default();
+    let docket_model = cfg_snapshot
+        .model_for(HeuristicNode::Docket)
+        .unwrap_or_default();
     let docket_opts = DocketOptions {
         threshold: thresholds.docket_threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call: effective_docket_batch_size(
-            explicit_docket_batch_size,
-            &cfg_snapshot.screener_model,
-        ),
+        max_canons_per_call: effective_docket_batch_size(explicit_docket_batch_size, docket_model),
         max_concurrent_calls: docket_concurrency,
     };
     let live_instance;

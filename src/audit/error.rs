@@ -18,7 +18,7 @@ use super::{
     DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD, ENV_AUDIT_CONCURRENCY,
     ENV_AUDIT_THRESHOLD,
 };
-use crate::caseload::DEFAULT_AUDITOR_MODEL;
+use crate::caseload::DEFAULT_GOOGLE_GENERATOR_MODEL;
 use crate::provider::ProviderError;
 use std::fmt;
 
@@ -39,8 +39,8 @@ pub enum AuditError {
     MissingEvidence,
     /// Prerequisite `.config` namespace is missing when active cases require trial adjudication.
     MissingConfig,
-    /// Configured `auditor_model` is a discriminative classifier incapable of structured decrees or line annotations.
-    DiscriminativeAuditorUnsupported { specifier: String },
+    /// Configured `audit` node model is a discriminative classifier incapable of structured decrees or line annotations.
+    DiscriminativeAuditUnsupported { specifier: String },
     /// An active canon listed in `.evidence.active_cases` is absent from the workspace snapshot.
     MissingActiveCanon { canon_ref: String },
     /// Trial slice call failed with contextual `canon_ref` and 1-based slice coordinates.
@@ -115,12 +115,12 @@ impl fmt::Display for AuditError {
                 "Cannot execute `audit` trials without a resolved `.config` namespace on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk audit` directly to resolve configuration JIT."
             ),
-            Self::DiscriminativeAuditorUnsupported { specifier } => write!(
+            Self::DiscriminativeAuditUnsupported { specifier } => write!(
                 f,
                 "Discriminative model `{specifier}` cannot adjudicate `audit` trials \
                  (`audit` requires a generative model for exception rulings, remediation guidance, and line annotations).\n  \
-                 Hint: Use `canon-clerk vet --screener-model {specifier}` for discriminative vetting, or configure \
-                 `{DEFAULT_AUDITOR_MODEL}` (`gemini-4-carbon`) as `--auditor-model`."
+                 Hint: Use `canon-clerk vet --vet-model {specifier}` for discriminative vetting, or configure \
+                 `{DEFAULT_GOOGLE_GENERATOR_MODEL}` (`gemini-4-carbon`) via `--audit-model`."
             ),
             Self::MissingActiveCanon { canon_ref } => write!(
                 f,

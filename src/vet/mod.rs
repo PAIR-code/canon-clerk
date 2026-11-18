@@ -19,10 +19,13 @@ mod slices;
 mod structured;
 
 use crate::audit::build_audit_case_user_prompt;
-use crate::caseload::{Caseload, CaseloadVetting, normalize_vetting_score};
+use crate::canon::Canon;
+use crate::caseload::{
+    Caseload, CaseloadDiscovery, CaseloadIntake, CaseloadVetting, ExhibitAssessment, HeuristicNode,
+    normalize_vetting_score,
+};
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
 use slices::{DiscriminativeCasePlan, build_discriminative_case_plan};
 use std::fmt;
@@ -154,7 +157,7 @@ fn validate_vet_options(options: &VetOptions) -> Result<f64, VetError> {
     if options.max_concurrent_calls == Some(0) {
         return Err(VetError::InvalidConcurrency {
             detail: format!(
-                "max_concurrent_calls must be at least 1, got 0 (see `{ENV_VET_CONCURRENCY}` / `{ENV_MAX_CONCURRENT_CALLS}`)"
+                "max_concurrent_calls must be at least 1, got 0 (see `{ENV_VET_CONCURRENCY}`)"
             ),
         });
     }
@@ -216,11 +219,62 @@ pub fn execute_vet(
         return Ok(caseload.with_vetting(CaseloadVetting::default()));
     }
 
-    let config = caseload.config.as_ref().ok_or(VetError::MissingConfig)?;
-    let is_discriminative = is_discriminative_model(&config.screener_model);
-    let max_state_chars = decision::max_discriminative_state_chars(&config.screener_model);
+    let node_cfg = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.node(HeuristicNode::Vet))
+        .ok_or(VetError::MissingConfig)?;
+    let is_discriminative = is_discriminative_model(&node_cfg.model);
+    let prepared_cases = prepare_vetting_cases(
+        active_entries,
+        &node_cfg.model,
+        is_discriminative,
+        intake,
+        discovery,
+        workspace,
+    );
 
-    let prepared_cases: Vec<PreparedVettingCase> = active_entries
+    let concurrency_limit = options
+        .max_concurrent_calls
+        .unwrap_or(DEFAULT_VET_MAX_CONCURRENT_CALLS);
+
+    let cases = if is_discriminative {
+        decision::execute_discriminative_vetting(
+            &prepared_cases,
+            &decision::DiscriminativeVetParams {
+                vet_model: &node_cfg.model,
+                threshold,
+                concurrency_limit,
+                timeout_ms: options.timeout_ms,
+            },
+            provider,
+        )?
+    } else {
+        structured::execute_generative_vetting(
+            &prepared_cases,
+            &structured::GenerativeVetParams {
+                vet_node: node_cfg,
+                threshold,
+                concurrency_limit,
+                timeout_ms: options.timeout_ms,
+            },
+            provider,
+        )?
+    };
+
+    Ok(caseload.with_vetting(CaseloadVetting::from_cases(cases)))
+}
+
+fn prepare_vetting_cases<'a>(
+    active_entries: Vec<(String, &'a Canon, Vec<&'a ExhibitAssessment>)>,
+    vet_model: &str,
+    is_discriminative: bool,
+    intake: &CaseloadIntake,
+    discovery: &CaseloadDiscovery,
+    workspace: &WorkspaceSnapshot,
+) -> Vec<PreparedVettingCase> {
+    let max_state_chars = decision::max_discriminative_state_chars(vet_model);
+    active_entries
         .into_iter()
         .map(|(canon_ref, canon, admitted)| {
             let (user_prompt, _) = build_audit_case_user_prompt(
@@ -246,37 +300,7 @@ pub fn execute_vet(
                 discriminative_plan,
             }
         })
-        .collect();
-
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_VET_MAX_CONCURRENT_CALLS);
-
-    let cases = if is_discriminative {
-        decision::execute_discriminative_vetting(
-            &prepared_cases,
-            &decision::DiscriminativeVetParams {
-                screener_model: &config.screener_model,
-                threshold,
-                concurrency_limit,
-                timeout_ms: options.timeout_ms,
-            },
-            provider,
-        )?
-    } else {
-        structured::execute_generative_vetting(
-            &prepared_cases,
-            &structured::GenerativeVetParams {
-                screener_model: &config.screener_model,
-                threshold,
-                concurrency_limit,
-                timeout_ms: options.timeout_ms,
-            },
-            provider,
-        )?
-    };
-
-    Ok(caseload.with_vetting(CaseloadVetting::from_cases(cases)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -286,10 +310,10 @@ mod tests {
     use crate::caseload::{
         AdmissibilityStatus, CanonDocketAssessment, CaseloadConfig, CaseloadDiscovery,
         CaseloadDocket, CaseloadEvidence, CaseloadIntake, CaseloadValidation, ColorabilityStatus,
-        DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, DEFAULT_SCREENER_REASONING_BUDGET,
-        DiscoveryMode, ExhibitAssessment, FileArtifact, FileChangeStatus, VettingStatus,
+        DEFAULT_GENERATIVE_SCREENING_MODEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+        DEFAULT_SCREENING_REASONING_BUDGET, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
+        ExhibitAssessment, FileArtifact, FileChangeStatus, VettingStatus,
     };
-    use crate::configure::DEFAULT_JEV_MODEL;
     use crate::provider::{
         DecisionRequest, DecisionResponse, GenerationRequest, GenerationResponse, TokenUsage,
     };
@@ -386,7 +410,7 @@ mod tests {
         }
     }
 
-    fn sample_fixture(screener_model: &str) -> (WorkspaceSnapshot, Caseload) {
+    fn sample_fixture(vet_model: &str) -> (WorkspaceSnapshot, Caseload) {
         let clean_ref = ".canons/cli/clean-rule.md";
         let contested_ref = ".canons/cli/contested-rule.md";
         let ws = WorkspaceSnapshot::new()
@@ -451,12 +475,7 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: screener_model.to_string(),
-                auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                thinking_level: None,
-                reasoning_budget: Some(4096),
-            })
+            .with_config(CaseloadConfig::default().with_node_model(HeuristicNode::Vet, vet_model))
             .with_docket(CaseloadDocket::from_cases(docket_cases))
             .with_evidence(CaseloadEvidence::from_exhibits(exhibits));
         (ws, caseload)
@@ -467,7 +486,7 @@ mod tests {
 
         #[test]
         fn test_empty_evidence_short_circuits_without_config_or_provider_calls() {
-            let (ws, mut caseload) = sample_fixture(DEFAULT_JEV_MODEL);
+            let (ws, mut caseload) = sample_fixture(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL);
             caseload.config = None;
             caseload.evidence = Some(CaseloadEvidence::default());
             let provider = MockVetProvider::empty();
@@ -482,7 +501,7 @@ mod tests {
 
         #[test]
         fn test_validates_options_prerequisites_and_fast_forwards_populated_vetting() {
-            let (ws, _) = sample_fixture(DEFAULT_JEV_MODEL);
+            let (ws, _) = sample_fixture(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL);
             let provider = MockVetProvider::empty();
             assert!(matches!(
                 execute_vet(
@@ -526,7 +545,7 @@ mod tests {
 
         #[test]
         fn test_discriminative_jev_vetting_partitions_vetted_and_contested_at_080() {
-            let (ws, caseload) = sample_fixture(DEFAULT_JEV_MODEL);
+            let (ws, caseload) = sample_fixture(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL);
             let mut provider = MockVetProvider::empty();
             provider
                 .decision_scores
@@ -630,12 +649,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: DEFAULT_JEV_MODEL.to_string(),
-                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    thinking_level: None,
-                    reasoning_budget: None,
-                })
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Vet, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+                )
                 .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
                     canon_ref.to_string(),
                     CanonDocketAssessment {
@@ -735,7 +752,7 @@ mod tests {
 
         #[test]
         fn test_max_tokens_exceeded_binds_case_over_as_contested_without_aborting_siblings() {
-            let (ws, caseload) = sample_fixture(DEFAULT_JEV_MODEL);
+            let (ws, caseload) = sample_fixture(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL);
             let mut provider = MockVetProvider::empty();
             provider.max_tokens_trigger = Some(".canons/cli/contested-rule.md".to_string());
 
@@ -758,7 +775,7 @@ mod tests {
 
         #[test]
         fn test_standalone_generative_vetting_omits_reasoning_budget_and_decodes_scores() {
-            let (ws, caseload) = sample_fixture(crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL);
+            let (ws, caseload) = sample_fixture(DEFAULT_GENERATIVE_SCREENING_MODEL);
             let mut provider = MockVetProvider::empty();
             provider.structured_routes.insert(
                 ".canons/cli/clean-rule.md".to_string(),
@@ -781,7 +798,7 @@ mod tests {
             assert_eq!(reqs.len(), 2);
             assert!(
                 reqs.iter()
-                    .all(|r| r.reasoning_budget == DEFAULT_SCREENER_REASONING_BUDGET)
+                    .all(|r| r.reasoning_budget == DEFAULT_SCREENING_REASONING_BUDGET)
             );
 
             let vetting = out.vetting.expect("vetting");
@@ -790,8 +807,8 @@ mod tests {
         }
 
         #[test]
-        fn test_default_gemini_decision_screener_executes_discriminative_noul_vetting() {
-            let (ws, caseload) = sample_fixture(DEFAULT_SCREENER_MODEL);
+        fn test_default_gemini_decision_model_executes_discriminative_noul_vetting() {
+            let (ws, caseload) = sample_fixture(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL);
             let mut provider = MockVetProvider::empty();
             provider
                 .decision_scores

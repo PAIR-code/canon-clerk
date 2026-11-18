@@ -40,13 +40,13 @@ The DAG consists of **Two Feeder Branches** that converge at `docket` (for dispu
 1. **Branch A: The Filing Track (`intake` $\longrightarrow$ `discover` $\longrightarrow$ `validate`):**  
    Ingests in-flight diffs, target paths, or prospective design intent, verifies state preconditions (`exists:`), matches candidate canon triggers, and validates candidate canon ASTs and schemas. Completely local, deterministic, and requires 0 tokens and zero API credentials.
 2. **Branch B: The Environment Track (`configure`):**  
-   Resolves active provider credentials (`GEMINI_API_KEY`, `TYPESAFE_API_KEY`), canonical `<provider>:<model>` specifiers, and reasoning budgets. Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
+   Resolves the active default provider (`--provider <slug>`), per-node `<provider>:<model>` bindings across the invoked closure (`apprise`, `docket`, `admit`, `vet`, `audit`), extended thinking controls, and required provider credentials (`GEMINI_API_KEY`, `TYPESAFE_API_KEY`). Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
 3. **Diagnostic Leaf (`probe`):**  
-   An auxiliary termination node depending strictly on `configure`. Executes live provider connectivity and latency tests without triggering an audit run.
+   An auxiliary termination node depending strictly on `configure`. Concurrently probes deduplicated configured model targets for live reachability and roundtrip latency without triggering an evaluation run.
 4. **The Heuristic Cascade (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`):**  
-   Converges at `docket` (requiring both validated candidate canons and active provider configuration), followed by exhibit admissibility screening (`admit`), prima facie compliance vetting on the papers (`vet`), and isolated generative adjudication of contested cases (`audit`).
+   Converges at `docket` (requiring both validated candidate canons and active node configuration), followed by exhibit admissibility screening (`admit`), prima facie compliance vetting on the papers (`vet`), and isolated generative adjudication of contested cases (`audit`).
 5. **The Prospective Apprisal Track (`apprise`):**  
-   Converges at `apprise` (requiring validated candidate canons and provider configuration) to evaluate prospective design intent before implementation, completely bypassing diff parsing, `docket`, `admit`, `vet`, and `audit`.
+   Converges at `apprise` (requiring validated candidate canons and `apprise` node configuration) to evaluate prospective design intent before implementation, completely bypassing diff parsing, `docket`, `admit`, `vet`, and `audit`.
 
 ```mermaid
 flowchart TD
@@ -57,14 +57,14 @@ flowchart TD
     end
 
     subgraph BranchB ["Branch B: The Environment (Deterministic · 100% Local · 0 Tokens)"]
-        Env["Environment & Flags<br/>(API keys, model tiers, reasoning budgets)"] --> S4["configure<br/>(Resolve & normalize provider configuration)"]
+        Env["Environment & Flags<br/>(Provider selector, per-node models, API keys, thinking controls)"] --> S4["configure<br/>(Resolve per-node models & verify closure credentials)"]
     end
 
     subgraph DiagnosticLeaf ["Diagnostic Leaf (Network · Latency · 0 Tokens)"]
-        S4 -.-> S4_Probe["probe<br/>(Live provider connectivity & latency test)"]
+        S4 -.-> S4_Probe["probe<br/>(Live deduplicated endpoint connectivity & latency check)"]
     end
 
-    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · Screener AI)"]
+    subgraph ApprisalTrack ["The Apprisal Track (Design-Time · Statutory Notice · Discriminator / Generator)"]
         S_Apprise["apprise<br/>(Statutory Notice: Candidate canons → Applicable Canons)"]
     end
 
@@ -119,13 +119,13 @@ flowchart TD
 ### The Domain Engine (The Hexagon Core)
 - **Schema Layer:** Defines the canonical representations for canons, frontmatter, ASTs, and the cumulative `Caseload` state container.
 - **Evaluation Engine:** Houses pure implementations of all evaluation stages (`intake`, `discover`, `validate`, `docket`, `admit`, `vet`, `audit`, `apprise`), DAG scheduling algorithms, prompt assembly, and constrained decoding schemas. It has no dependencies on CLI flags, stdout formatting, external environments, or vendor-specific HTTP payloads.
-- **Configuration & Probe:** Resolves runtime environment and API credentials, normalizes model specifiers, and implements the diagnostic `probe` provider health check.
+- **Configuration & Probe:** Resolves the active default provider, per-node `<provider>:<model>` bindings, and API credentials across the invoked closure, and implements the diagnostic `probe` endpoint health check.
 
 ### The Driven Adapter (The Model Provider Boundary)
-- **Provider-Neutral Structured Generation Port:** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (generative `google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) evaluate against normalized model specifiers, system instructions, prompts, and JSON Schemas.
-- **Discriminative Decision Model Port:** Encapsulates discriminative classifier endpoints (`google:gemini-decision-*` via `/v1beta/decisions` and `typesafe:jev-*` via `/v1/systemone`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus prima facie compliance vetting in `vet`, under per-model context and question-batching budget profiles.
-- **Deterministic Reason-First Constrained Decoding:** Enforces deterministic generation (`temperature: 0.0`) paired with strict JSON Schema output enforcement (`application/json`) on generative tiers so rationale scratchpad fields precede numeric scores across generative calls.
-- **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps discrete qualitative thinking tiers (`thinking_level`: `minimal`, `low`, `medium`, `high`) and optional token ceilings (`reasoning_budget`) to mutually exclusive provider-native extended thinking controls—enforcing bounded minimal/zero screener reasoning (`thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models and `thinkingBudget: 0` on Gemini 2.5/Flash-Lite models) while applying bounded `"LOW"` thinking (`includeThoughts: true`) by default on `audit` trials—separates intermediate reasoning thought summaries from decoded payloads, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for immediate per-call and stage-summary emission on the out-of-band Telemetry Event Stream.
+- **Provider-Neutral Structured Generation Port (`Generator`):** Encapsulates vendor-specific generative LLM transport protocols, REST wire types, and authentication headers (generative `google:gemini-*`) behind a provider-agnostic port so heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) evaluate against canonical `<provider>:<model>` specifiers, system instructions, prompts, and JSON Schemas.
+- **Discriminative Decision Model Port (`Discriminator`):** Encapsulates discriminative classifier endpoints (`google:gemini-decision-*` via `/v1beta/decisions` and `typesafe:jev-*` via `/v1/systemone`) behind a parallel binary-question (`Noul`) port that evaluates batched yes/no hypotheses against shared filing context in a single forward pass with zero autoregressive output tokens—powering ultra-low-latency screening across `apprise`, `docket`, and `admit`, plus prima facie compliance vetting in `vet`, under per-model context and question-batching budget profiles.
+- **Deterministic Reason-First Constrained Decoding:** Enforces deterministic generation (`temperature: 0.0`) paired with strict JSON Schema output enforcement (`application/json`) on generative models so rationale scratchpad fields precede numeric scores across generative calls.
+- **Extended Reasoning & Out-of-Band Telemetry Capture:** Maps per-node discrete qualitative thinking tiers (`thinking_level`: `minimal`, `low`, `medium`, `high`) and optional token ceilings (`reasoning_budget`) to mutually exclusive provider-native extended thinking controls on `Generator`-bound nodes—enforcing bounded minimal/zero reasoning (`thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models and `thinkingBudget: 0` on Gemini 2.5/Flash-Lite models) by default on generative screening/vetting nodes (`apprise`, `docket`, `admit`, `vet`) while applying bounded `"LOW"` thinking (`includeThoughts: true`) by default on `audit` trials—separates intermediate reasoning thought summaries from decoded payloads, and captures prompt, completion, reasoning, and total token accounting alongside roundtrip latency for immediate per-call and stage-summary emission on the out-of-band Telemetry Event Stream.
 - **Credential Encapsulation & Actionable Error Classification:** Secret API keys are bound to concrete provider adapters at construction rather than carried on evaluation requests or `Caseload` envelopes, and upstream HTTP or transport failures (`401`/`403`, `404`, `429`, `5xx`, context token limits, timeouts, safety blocks, or malformed responses) are classified into actionable diagnostics with provider-specific remediation hints.
 - **Pooled Provider Transport, Per-Origin Cooldown Coordination & Bounded Transient Retry:** Generative and discriminative provider adapters share a persistent-reactor HTTPS connection pool coordinated by per-origin `429`/`503` cooldown gates, wire-only per-attempt timeouts, 4-tier retry-delay parsing, and bounded transient retry (`--max-retries`, `--max-backoff-ms`) across heuristic evaluation stages while keeping offline closures zero-overhead and diagnostic `probe` checks strictly single-shot; see [`transport.md`](transport.md) for the authoritative transport and rate-limit scheduling specification.
 
@@ -187,18 +187,18 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 
 ## 5. The Caseload Pipeline Nodes
 
-| Node / Verb | Track | Engine / Tier | Cost / Latency | Gate Rule |
+| Node / Verb | Track | Engine / Capability | Cost / Latency | Gate Rule |
 | :--- | :--- | :--- | :--- | :--- |
 | `intake` | Branch A (Filing) | Deterministic | 0 tokens, ~5ms | Parsed context; fail fast (code 2) on corrupted input |
 | `discover` | Branch A (Filing) | Deterministic | 0 tokens, ~8ms | Matches > 0; verifies `exists:` & `triggers:`; short-circuits (exit 0) on 0 candidates |
 | `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
-| `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid config; fails fast (code 2) on missing keys |
-| `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Endpoint reachable; fails fast (code 2) on failure |
-| `apprise` | Apprisal Track | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
-| `docket` | Cascade Spine | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
-| `admit` | Cascade Spine | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~200–600ms, 0–low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `vet` | Cascade Spine | Screener AI (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
-| `audit` | Cascade Spine | Generative Auditor (`gemini-4-carbon`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid node config & closure keys; fails fast (code 2) on invalid flags or missing keys |
+| `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Deduplicated targets reachable; fails fast (code 2) on failure |
+| `apprise` | Apprisal Track | `Discriminator` / `Generator` (`google:gemini-decision-1` / `typesafe:jev-latest` / `google:gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `apprisal_score >= 0.5`; exits 0 if candidates empty |
+| `docket` | Cascade Spine | `Discriminator` / `Generator` (`google:gemini-decision-1` / `typesafe:jev-latest` / `google:gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `colorability_score >= 0.5`; exits 0 if docket empty |
+| `admit` | Cascade Spine | `Discriminator` / `Generator` (`google:gemini-decision-1` / `typesafe:jev-latest` / `google:gemini-4-hydrogen`) | ~200–600ms, 0–low \$ | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `vet` | Cascade Spine | `Discriminator` / `Generator` (`google:gemini-decision-1` / `typesafe:jev-latest` / `google:gemini-4-hydrogen`) | ~150–400ms, 0–low \$ | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Cascade Spine | `Generator` (`google:gemini-4-carbon`) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
@@ -220,27 +220,27 @@ flowchart TD
     S4 --> G5{"docket Gate<br/>(Colorability ≥ 0.5)"}
     
     G5 -- "Dismissed (< 0.5)" --> SievePrune1["Pruned"]
-    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~200ms · gemini-decision-1)"]
+    G5 -- "Docketed (≥ 0.5)" --> C3["3 Active Cases<br/>(~200ms · google:gemini-decision-1)"]
     
     C3 --> G6{"admit Gate<br/>(Admissibility ≥ 0.5)"}
     G6 -- "Inadmissible (< 0.5)" --> SievePrune2["Pruned"]
-    G6 -- "Admitted (≥ 0.5)" --> E5["3 Active Cases · 5 Admitted Exhibits<br/>(~250ms · Screener AI)"]
+    G6 -- "Admitted (≥ 0.5)" --> E5["3 Active Cases · 5 Admitted Exhibits<br/>(~250ms · Discriminator)"]
     
-    E5 --> G6_Vet{"vet Gate<br/>(Prima Facie ≥ 0.8 · Discriminative Screener)"}
+    E5 --> G6_Vet{"vet Gate<br/>(Prima Facie ≥ 0.8 · Discriminator on vet)"}
     G6_Vet -- "Vetted (≥ 0.8)" --> VettedPass["2 Vetted Cases<br/>(0 output tokens · Folded into Verdict)"]
-    G6_Vet -- "Contested (< 0.8)" --> G7["audit Adjudication<br/>(1 Contested Trial · gemini-4-carbon)"]
+    G6_Vet -- "Contested (< 0.8)" --> G7["audit Adjudication<br/>(1 Contested Trial · google:gemini-4-carbon)"]
     VettedPass --> FinalVerdict["Final Verdict & Decree<br/>(~1.8s · Targeted Reasoning)"]
     G7 --> FinalVerdict
 ```
 
-| Pipeline Step | Canons / Cases in Flight | Target Exhibits | Model Tier | Token Cost | Latency |
+| Pipeline Step | Canons / Cases in Flight | Target Exhibits | Model Capability | Token Cost | Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Initial Workspace** | 100 canons | All repo files | Local AST / Globs | 0 tokens | ~25ms |
 | **`discover` Gate** | 20 candidates | 6 touched files | Local Regex / Globs | 0 tokens | ~8ms |
-| **`docket` Gate** | 3 active Cases | 6 touched files | Screener (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | 0 output tokens (~1,200 input) | ~200ms |
-| **`admit` Gate** | 3 active Cases | 5 admitted hunks | Screener (`gemini-decision-1` / `jev-latest` / `gemini-4-hydrogen`) | 0 output tokens (~1,800 input) | ~250ms |
-| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | Discriminative Screener (`gemini-decision-1` / `jev-latest`) | 0 output tokens | ~200ms |
-| **`audit` Adjudication** | 1 contested trial | 2 exhibits | `gemini-4-carbon` | ~1,500 tokens | ~1,200ms |
+| **`docket` Gate** | 3 active Cases | 6 touched files | `Discriminator` / `Generator` (`google:gemini-decision-1` / `typesafe:jev-latest` / `google:gemini-4-hydrogen`) | 0 output tokens (~1,200 input) | ~200ms |
+| **`admit` Gate** | 3 active Cases | 5 admitted hunks | `Discriminator` / `Generator` (`google:gemini-decision-1` / `typesafe:jev-latest` / `google:gemini-4-hydrogen`) | 0 output tokens (~1,800 input) | ~250ms |
+| **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | `Discriminator` (`google:gemini-decision-1` / `typesafe:jev-latest`) | 0 output tokens | ~200ms |
+| **`audit` Adjudication** | 1 contested trial | 2 exhibits | `Generator` (`google:gemini-4-carbon`) | ~1,500 tokens | ~1,200ms |
 | **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.0s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
@@ -257,9 +257,9 @@ The formal Caseload domain models and granular payload schemas are specified in 
 
 1. **Schema Versioning (`version`):** Every serialized `Caseload` envelope carries a top-level `version` identifier (currently `"1.0"`) establishing wire-format compatibility across piped CLI invocations and archived CI artifacts.
 2. **Stage Namespace Isolation:** Each pipeline stage owns a dedicated, non-overlapping top-level optional namespace on the `Caseload` envelope (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.vetting`, `.verdict`). Unexecuted or pruned stages are omitted from serialized JSON rather than emitted as null placeholders.
-3. **Additive Immutability:** Stages enrich only their designated namespace while preserving all pre-existing upstream namespaces bit-for-bit.
+3. **Additive Immutability:** Stages enrich only their designated namespace while preserving pre-existing upstream namespaces bit-for-bit (and when chaining partial closures via `--caseload`, `configure` additively resolves unpopulated downstream node bindings onto `.config.nodes` while preserving un-overridden upstream node bindings).
 4. **Three-Tier Determinism & Stability Contract:**
-   - **Engine & Wire Determinism (Bit-for-Bit):** All map keys, entity collections, per-case adjudications, and line annotations across stage payloads serialize in canonical lexicographical order so identical model responses, `--caseload` fast-forwards, and concurrent fold completion orders produce byte-for-byte identical JSON envelopes.
+   - **Engine & Wire Determinism (Bit-for-Bit):** Heuristic node collections serialize in canonical DAG stage order (`apprise`, `docket`, `admit`, `vet`, `audit`), while all canon/file map keys, entity collections, per-case adjudications, and line annotations across stage payloads serialize in canonical lexicographical order so identical model responses, `--caseload` fast-forwards, and concurrent fold completion orders produce byte-for-byte identical JSON envelopes.
    - **Gate Verdict Stability (1D Flipper Contract):** Across repeated live runs at `temperature: 0.0`, heuristic stages anchor numeric scores to polarized bands away from their decision boundaries (`0.5` for `apprise`, `docket`, `admit`, `audit`; `0.8` for `vet`) so per-canon gate classifications (`applicable`, `docketed`, `admitted`, `vetted`/`contested`, `pass`/`fail`) remain unanimous even when extended reasoning trajectories vary.
    - **Guidance & Span Granularity (Benign Generative Variance):** Natural wording variations in rationale/remediation prose and minor line-span granularity shifts under extended reasoning are tolerated and never constitute verdict flippers, bounded by deterministic structural anchoring guardrails.
 
@@ -272,8 +272,8 @@ Each pipeline stage owns a dedicated, non-overlapping field on the cumulative `C
 | `.intake` | `intake` | Branch A (Filing) | Tendered exhibits: diff hunks, target paths, PR metadata, or intent queries | [`nodes/intake.md`](nodes/intake.md#caseload-delta) |
 | `.discovery` | `discover` | Branch A (Filing) | Candidate canons matching path triggers & target file intersections | [`nodes/discover.md`](nodes/discover.md#caseload-delta) |
 | `.validation` | `validate` | Branch A (Filing) | Deterministic AST linting and frontmatter schema validation results | [`nodes/validate.md`](nodes/validate.md#caseload-delta) |
-| `.config` | `configure` | Branch B (Env) | Resolved screener/auditor model specifiers, reasoning budget, provider runtime options | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
-| `.probe` | `probe` | Diagnostic Leaf | Live endpoint reachability, roundtrip latency (ms), and resolved models | [`nodes/probe.md`](nodes/probe.md#caseload-delta) |
+| `.config` | `configure` | Branch B (Env) | Resolved default `provider` slug and per-node `<provider>:<model>` + optional thinking bindings | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
+| `.probe` | `probe` | Diagnostic Leaf | Deduplicated target endpoint reachability, bound nodes, roundtrip latency (ms), and resolved models | [`nodes/probe.md`](nodes/probe.md#caseload-delta) |
 | `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisal_score`, `apprisal_summary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
 | `.docket` | `docket` | Dispute Spine | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |
 | `.evidence` | `admit` | Dispute Spine | Micro triage evidence admissibility: admitted file exhibits per active case | [`nodes/admit.md`](nodes/admit.md#caseload-delta) |

@@ -24,6 +24,7 @@ pub mod discover;
 pub mod docket;
 pub mod intake;
 pub mod io;
+pub mod node_args;
 pub mod probe;
 mod provenance;
 pub mod runners;
@@ -62,6 +63,10 @@ pub use intake::{IntakeArgs, run_intake, run_intake_with_telemetry};
 pub use io::{
     ensure_single_stdin_source, read_caseload_operand, read_operand_source,
     resolve_target_operands, write_caseload_file,
+};
+pub use node_args::{
+    AdmitNodeModelArgs, AllNodeModelArgs, AppriseNodeModelArgs, AuditNodeModelArgs,
+    DocketNodeModelArgs, RejectedUnqualifiedTuningArgs, VetNodeModelArgs,
 };
 pub use probe::{
     ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,

@@ -17,16 +17,17 @@
 use super::AdmitArgs;
 use super::guards::{has_docket_cli_overrides, resolve_admit_concurrency};
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::caseload::{Caseload, CaseloadEvidence};
+use crate::caseload::{Caseload, CaseloadEvidence, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
-use crate::cli::closure::{ClosureBackend, has_provider_overrides, merge_metadata_onto_intake};
+use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, map_discover_error, resolve_screener_branch_b_options,
+    build_live_model_provider, map_discover_error, resolve_closure_branch_b_options,
     run_branch_b_configure,
 };
+use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
@@ -158,9 +159,14 @@ fn try_pre_populated_empty_docket(
     None
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal stage helper threading CLI args, env, stored config, thresholds, caseload, workspace, backend, and telemetry"
+)]
 pub(super) fn execute_jit_configure_docket_and_admit(
     args: &AdmitArgs,
     env: &BTreeMap<String, String>,
+    stored_config: Option<StoredConfig>,
     thresholds: CascadeThresholds,
     mut caseload: Caseload,
     snapshot: &mut WorkspaceSnapshot,
@@ -169,13 +175,23 @@ pub(super) fn execute_jit_configure_docket_and_admit(
 ) -> Result<CascadeOutcome, CliError> {
     let docket_pre_populated = caseload.docket.is_some()
         && !has_docket_cli_overrides(args)
-        && !has_provider_overrides(&args.provider);
+        && args.provider.provider.is_none();
 
     if let Some(outcome) = try_pre_populated_empty_docket(&caseload, docket_pre_populated) {
         return Ok(outcome);
     }
 
-    let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
+    let mut required_nodes = vec![HeuristicNode::Admit];
+    if !docket_pre_populated {
+        required_nodes.insert(0, HeuristicNode::Docket);
+    }
+    let configure_options = resolve_closure_branch_b_options(
+        &args.provider,
+        args.models.resolve_node_models()?,
+        ConfigureScope::closure(required_nodes),
+        stored_config,
+        env,
+    )?;
     let docket_batch_size = resolve_docket_batch_size(
         args.docket_batch_size,
         env,
@@ -197,7 +213,7 @@ pub(super) fn execute_jit_configure_docket_and_admit(
         .resolve_retry_policy(env, configure_options.stored_config.as_ref())?;
 
     let config_was_present =
-        caseload.config.is_some() && !configure_options.has_explicit_overrides();
+        can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
     caseload.evidence = None;
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
@@ -216,23 +232,55 @@ pub(super) fn execute_jit_configure_docket_and_admit(
     } else {
         StageDisposition::Executed
     };
+    let docket_model = cfg_snapshot
+        .model_for(HeuristicNode::Docket)
+        .unwrap_or_default();
+    let docket_opts = DocketOptions {
+        threshold: thresholds.docket_threshold,
+        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        max_canons_per_call: effective_docket_batch_size(docket_batch_size, docket_model),
+        max_concurrent_calls: docket_concurrency,
+    };
+    let admit_opts = AdmitOptions {
+        threshold: thresholds.admit_threshold,
+        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        max_concurrent_calls: admit_concurrency,
+    };
 
+    execute_configured_admit_spine(
+        configured,
+        configure_disp,
+        docket_pre_populated,
+        (&docket_opts, &admit_opts),
+        snapshot,
+        backend,
+        active_provider,
+        telemetry,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal spine runner threading pre-resolved stage options, workspace snapshot, backend, provider, and telemetry"
+)]
+fn execute_configured_admit_spine(
+    configured: Caseload,
+    configure_disp: StageDisposition,
+    docket_pre_populated: bool,
+    stage_opts: (&DocketOptions, &AdmitOptions),
+    snapshot: &mut WorkspaceSnapshot,
+    backend: &ClosureBackend<'_>,
+    active_provider: &dyn StructuredModelProvider,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<CascadeOutcome, CliError> {
+    let (docket_opts, admit_opts) = stage_opts;
     let (after_docket, docket_disp) = if docket_pre_populated {
         (configured, StageDisposition::PrePopulated)
     } else {
         let mut cleared = configured;
         cleared.docket = None;
-        let docket_opts = DocketOptions {
-            threshold: thresholds.docket_threshold,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_canons_per_call: effective_docket_batch_size(
-                docket_batch_size,
-                &cfg_snapshot.screener_model,
-            ),
-            max_concurrent_calls: docket_concurrency,
-        };
         let docketed =
-            run_docket_stage(&docket_opts, cleared, snapshot, active_provider, telemetry)?;
+            run_docket_stage(docket_opts, cleared, snapshot, active_provider, telemetry)?;
         (docketed, StageDisposition::Executed)
     };
 
@@ -250,14 +298,8 @@ pub(super) fn execute_jit_configure_docket_and_admit(
     }
 
     populate_live_target_file_snapshots(&after_docket, snapshot, backend);
-
-    let admit_opts = AdmitOptions {
-        threshold: thresholds.admit_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_concurrent_calls: admit_concurrency,
-    };
     let after_admit = run_admit_stage(
-        &admit_opts,
+        admit_opts,
         after_docket,
         snapshot,
         active_provider,

@@ -15,10 +15,12 @@
 //! Terminal Funnel Provenance receipt and `stylish`/`compact`/`json` output formatters for `canon-clerk admit`.
 
 use super::{AdmitArgs, AdmitFormat};
-use crate::caseload::{Caseload, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence};
+use crate::caseload::{
+    Caseload, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, HeuristicNode,
+};
 use crate::cli::CliError;
 use crate::cli::provenance::{
-    StageDisposition, write_admit_configure_provenance, write_admit_provenance,
+    StageDisposition, write_admit_provenance, write_closure_configure_provenance,
     write_discover_provenance, write_docket_provenance, write_filing_intake_provenance,
     write_validate_provenance,
 };
@@ -112,7 +114,12 @@ fn render_stylish_output(
         stdout,
     )?;
     write_validate_provenance(caseload.validation.as_ref(), wm.validate, stdout)?;
-    write_admit_configure_provenance(caseload, wm.configure, stdout)?;
+    write_closure_configure_provenance(
+        caseload,
+        &[HeuristicNode::Docket, HeuristicNode::Admit],
+        wm.configure,
+        stdout,
+    )?;
     write_docket_provenance(
         caseload.docket.as_ref(),
         wm.docket,

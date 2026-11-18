@@ -157,7 +157,7 @@ pub(crate) fn classify_typesafe_http_error(
     match status_code {
         400 if detail.contains("max_tokens_exceeded") => format!(
             "HTTP 400: Input context exceeded TypeSafe Jev token limit for `{model_specifier}` ({detail}). \
-             Hint: Pair `--screener-model jev-latest` with a long-context `--auditor-model` (e.g. `gemini-4-carbon`) or narrow target scope."
+             Hint: Pair `--provider typesafe` with `--audit-model google:gemini-4-carbon` or narrow target scope."
         ),
         401 | 403 => format!(
             "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
@@ -165,7 +165,7 @@ pub(crate) fn classify_typesafe_http_error(
         ),
         404 => format!(
             "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
-             Hint: Specify a valid TypeSafe Jev model via `--screener-model` (e.g. `typesafe:jev-latest` or `jev-latest`)."
+             Hint: Specify a valid TypeSafe Jev model via `--provider typesafe` or `--<node>-model` (e.g. `typesafe:jev-latest`)."
         ),
         429 => format!(
             "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \

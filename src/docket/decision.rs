@@ -19,7 +19,7 @@ use super::{
     DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DocketError, DocketOptions, format_canon_batch_label,
 };
 use crate::caseload::{
-    CanonDocketAssessment, Caseload, CaseloadDocket, ColorabilityStatus,
+    CanonDocketAssessment, Caseload, CaseloadDocket, ColorabilityStatus, HeuristicNode,
     normalize_colorability_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
@@ -53,9 +53,14 @@ pub(super) fn execute_docket_decisions(
         .discovery
         .as_ref()
         .ok_or(DocketError::MissingDiscovery)?;
-    let config = caseload.config.as_ref().ok_or(DocketError::MissingConfig)?;
+    let docket_model = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.model_for(HeuristicNode::Docket))
+        .ok_or(DocketError::MissingConfig)?
+        .to_string();
 
-    let budget = DecisionBudgetProfile::for_model(&config.screener_model);
+    let budget = DecisionBudgetProfile::for_model(&docket_model);
     let shared_state =
         build_bounded_docket_filing_prefix(intake, discovery, budget.max_state_chars);
     let mut rendered_items = Vec::with_capacity(discovery.candidate_canons.len());
@@ -104,7 +109,7 @@ pub(super) fn execute_docket_decisions(
         prepared.push((
             batch_canons,
             DecisionRequest {
-                model_specifier: config.screener_model.clone(),
+                model_specifier: docket_model.clone(),
                 state: shared_state.clone(),
                 questions,
                 timeout_ms: options.timeout_ms,
@@ -120,7 +125,7 @@ pub(super) fn execute_docket_decisions(
         &prepared,
         concurrency_limit,
         threshold,
-        &config.screener_model,
+        &docket_model,
         provider,
     )?;
 
@@ -207,24 +212,25 @@ mod tests {
     use super::*;
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
-        CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation, DiscoveryMode,
+        CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
+        DEFAULT_GENERATIVE_SCREENING_MODEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
     };
-    use crate::configure::DEFAULT_JEV_MODEL;
     use crate::docket::execute_docket;
     use crate::provider::{GenerationRequest, GenerationResponse, TokenUsage};
 
-    struct StubDecisionScreener {
+    struct StubDecisionProvider {
         scores: BTreeMap<String, f64>,
     }
 
-    impl StructuredModelProvider for StubDecisionScreener {
+    impl StructuredModelProvider for StubDecisionProvider {
         fn generate_structured(
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
             Err(ProviderError::UnsupportedProvider {
                 provider: "typesafe".to_string(),
-                model_specifier: DEFAULT_JEV_MODEL.to_string(),
+                model_specifier: DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL.to_string(),
             })
         }
 
@@ -277,11 +283,11 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: DEFAULT_JEV_MODEL.to_string(),
-                ..CaseloadConfig::default()
-            });
-        let provider = StubDecisionScreener {
+            .with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Docket, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+            );
+        let provider = StubDecisionProvider {
             scores: BTreeMap::from([(keep_ref.to_string(), 0.92), (drop_ref.to_string(), 0.04)]),
         };
 
@@ -297,24 +303,26 @@ mod tests {
 
     #[test]
     fn test_effective_docket_batch_size_and_per_model_budget_profiles() {
-        use crate::caseload::{DEFAULT_GENERATIVE_SCREENER_MODEL, DEFAULT_SCREENER_MODEL};
         use crate::docket::{DEFAULT_DOCKET_BATCH_SIZE, effective_docket_batch_size};
 
         assert_eq!(
-            effective_docket_batch_size(None, DEFAULT_GENERATIVE_SCREENER_MODEL),
+            effective_docket_batch_size(None, DEFAULT_GENERATIVE_SCREENING_MODEL),
             Some(DEFAULT_DOCKET_BATCH_SIZE)
         );
         assert_eq!(
-            effective_docket_batch_size(None, DEFAULT_SCREENER_MODEL),
+            effective_docket_batch_size(None, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
             None
         );
-        assert_eq!(effective_docket_batch_size(None, DEFAULT_JEV_MODEL), None);
         assert_eq!(
-            effective_docket_batch_size(Some(12), DEFAULT_SCREENER_MODEL),
+            effective_docket_batch_size(None, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+            None
+        );
+        assert_eq!(
+            effective_docket_batch_size(Some(12), DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
             Some(12)
         );
         assert_eq!(
-            DecisionBudgetProfile::for_model(DEFAULT_SCREENER_MODEL),
+            DecisionBudgetProfile::for_model(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
             DecisionBudgetProfile {
                 max_state_chars: 240_000,
                 max_batch_chars: 480_000,
@@ -322,7 +330,7 @@ mod tests {
             }
         );
         assert_eq!(
-            DecisionBudgetProfile::for_model(DEFAULT_JEV_MODEL),
+            DecisionBudgetProfile::for_model(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
             DecisionBudgetProfile {
                 max_state_chars: 36_000,
                 max_batch_chars: 64_000,
