@@ -22,7 +22,7 @@
 flowchart LR
     subgraph Inputs["Inputs"]
         Env["Host Environment & User Config<br/><i>(Env vars, ~/.config/canon-clerk/config.json)</i>"]
-        Params["Provider & Node Flags<br/><i>(--provider, --*-model, --thinking-level, --reasoning-budget)</i>"]
+        Params["Provider, Endpoint & Node Flags<br/><i>(--provider, --*-model, --*-base-url, --thinking-level, --reasoning-budget)</i>"]
     end
 
     Env --> Config["configure<br/><b>(Current Node)</b><br/><code>.config</code>"]
@@ -52,33 +52,44 @@ flowchart LR
 ### Caseload Delta
 `configure` populates the `.config` namespace on the cumulative `Caseload` envelope with resolved provider and per-node runtime bindings:
 
-- **Default Provider (`provider`):** Canonical slug of the resolved active default provider (`"google"` or `"typesafe"`).
+- **Default Provider (`provider`):** Canonical slug of the resolved active default provider (`"google"`, `"typesafe"`, or a custom profile slug declared under `providers.<slug>` in `config.json`).
 - **Resolved Heuristic Node Bindings (`nodes`):** Deterministic map ordered by canonical DAG stage (`apprise`, `docket`, `admit`, `vet`, `audit`) across the heuristic nodes resolved for the active closure. Each node entry records:
-  - **Model Specifier (`model`):** Canonical `<provider>:<model>` identifier bound to that node (for example, `"google:gemini-decision-1"`, `"typesafe:jev-latest"`, or `"google:gemini-4-carbon"`).
+  - **Model Specifier (`model`):** Canonical `<provider>:<model>` identifier bound to that node (for example, `"google:gemini-decision-1"`, `"typesafe:jev-latest"`, `"local-dev:kev-0.8b"`, or `"google:gemini-4-carbon"`).
   - **Thinking Level (`thinking_level`):** Optional qualitative reasoning effort tier (`"minimal"`, `"low"`, `"medium"`, `"high"`) resolved for a `Generator`-bound node (mutually exclusive with `reasoning_budget`; omitted when unset or when the node binds to a `Discriminator` model).
   - **Reasoning Budget (`reasoning_budget`):** Optional non-negative integer token ceiling resolved for a `Generator`-bound node (mutually exclusive with `thinking_level`; omitted when unset or when the node binds to a `Discriminator` model).
 
 ### Data Plane & Security Invariants
-1. **Credential Non-Persistence & Zero Context Egress:** While `configure` verifies that required credentials (`GEMINI_API_KEY` / `providers.google.apiKey` and/or `TYPESAFE_API_KEY` / `providers.typesafe.apiKey`) are present for the providers referenced by the active closure, raw API keys and secret tokens are **never** serialized into `.config` on the `Caseload` envelope or echoed to terminal output, keeping `caseload.json` artifacts and AI coding assistant tool traces safe from credential exfiltration.
+1. **Credential & Endpoint Non-Persistence (Zero Context Egress):** While `configure` validates endpoint base URLs and verifies required credentials across the providers referenced by the active closure, resolved API keys and `baseUrl` transport endpoints live strictly in memory for runtime adapter construction and are **never** serialized into `.config` on the `Caseload` envelope or echoed to terminal output, keeping `caseload.json` artifacts portable and free of internal gateway URLs or secret material.
 2. **Workspace-External Credential Sourcing:** File-based configuration and credentials are sourced exclusively from user-level configuration directories outside the repository workspace envelope (`$XDG_CONFIG_HOME/canon-clerk/config.json` or `~/.config/canon-clerk/config.json` on Unix/macOS; `%APPDATA%\canon-clerk\config.json` on Windows). Any configuration file located inside the repository workspace is rejected with exit code `2` so workspace-scoped AI coding agents cannot read local secret files.
 3. **POSIX Owner-Only Permission Enforcement:** On POSIX platforms, `configure` inspects file mode permissions before reading the user configuration file and fails fast with exit code `2` (suggesting `chmod 600`) if group or world permissions are granted (`(mode & 0o077) != 0`; only `0600` or `0400` are accepted).
-4. **Strict `<provider>:<model>` Specifier Grammar:** Every model specifier across CLI flags, environment variables, `config.json` node pins, and `.config.nodes` records must conform to canonical `<provider>:<model>` syntax with non-empty provider and model segments separated by a single `:` delimiter and no whitespace. Bare short-name prefix inference (`gemini-decision-1`, `gemini-*`, `jev-*`), retired pet-name aliases, unversioned `google:gemini-decision`, and structured `{ provider, model }` object shims are rejected with exit code `2` and an actionable remediation hint (for example, ``Invalid model specifier `gemini-decision-1`: expected `<provider>:<model>` format (for example, `google:gemini-decision-1`).``).
-5. **Orthogonal `{ providers, defaults, nodes }` Configuration File Schema:** `~/.config/canon-clerk/config.json` is strictly restricted to three orthogonal top-level namespaces—`providers`, `defaults`, and `nodes`. Retired flat root keys (`screenerModel`, `auditorModel`, `thinkingLevel`, `reasoningBudget`, `<stage>BatchSize`, `<stage>Concurrency`, `maxCanonsPerCall`, `maxConcurrentCalls`, `maxRetries`, `maxBackoffMs`) and any unrecognized keys across root, `providers.<slug>`, `defaults`, or `nodes.<node>` fail fast with exit code `2` and an actionable migration `Hint:`.
+4. **Strict `<provider>:<model>` Specifier Grammar & Protocol-Bound Capabilities:** Every model specifier across CLI flags, environment variables, `config.json` defaults/node pins, and `.config.nodes` records must conform to canonical `<provider>:<model>` syntax with non-empty provider and model segments separated by a single `:` delimiter and no whitespace. Bare short-name prefix inference (`gemini-decision-1`, `gemini-*`, `jev-*`), retired pet-name aliases (`google:carbon`, `google:hydrogen`, `typesafe:jev`), unversioned `google:gemini-decision`, and structured `{ provider, model }` object shims are rejected with exit code `2` and an actionable remediation hint. Model syntax validation, `<provider>:` prefix stripping, `Discriminator` vs. `Generator` capability classification, and discriminative context/question-batching budgets bind to the profile's wire protocol (`gemini` or `systemone`) rather than hardcoded vendor slugs:
+   - **`gemini` Protocol Profiles (`google` and custom `"protocol": "gemini"` profiles):** Classify `<slug>:gemini-decision-*` as `Discriminator` (`240,000` state chars / `256` questions per call) and other `<slug>:gemini-*` identifiers as `Generator`.
+   - **`systemone` Protocol Profiles (`typesafe` and custom `"protocol": "systemone"` profiles):** Classify `<slug>:<model>` as `Discriminator` (`36,000` state chars / `48` questions per call); built-in `typesafe` validates `jev-*` model identifiers, while custom `systemone` profiles accept any non-empty `[A-Za-z0-9._-]+` `<model>` identifier (such as `local-dev:kev-0.8b` or `lan-gpu:clef-flash`, rejecting generative `gemini-*` names).
+5. **Orthogonal `{ providers, defaults, nodes }` Configuration File Schema & Custom Profiles:** `~/.config/canon-clerk/config.json` is strictly restricted to three orthogonal top-level namespaces—`providers`, `defaults`, and `nodes`. Each `providers.<slug>` object accepts `{ protocol?, baseUrl?, apiKey?, defaultDiscriminator?, defaultGenerator? }`:
+   - **Built-In Profiles (`google`, `typesafe`):** Inherit their built-in wire protocol, default `baseUrl`, required API-key policy, and default per-capability models when omitted, and reject conflicting `protocol` overrides with exit code `2`.
+   - **Zero-Code Custom Profiles (e.g., `local-dev`, `lan-gpu`, `google-corp`):** Must use lowercase kebab-case `<slug>` identifiers (`[a-z0-9]+(-[a-z0-9]+)*`) and explicitly declare both `protocol` (`"gemini"` or `"systemone"`) and `baseUrl` (`http://` or `https://` URL), exiting `2` with an actionable `Hint:` when omitted or malformed. When `defaultDiscriminator` or `defaultGenerator` is declared on a profile, it must carry the matching `<slug>:` prefix and satisfy the corresponding capability (`systemone` profiles reject `defaultGenerator` with exit code `2`).
+   - Retired flat root keys (`screenerModel`, `auditorModel`, `thinkingLevel`, `reasoningBudget`, `<stage>BatchSize`, `<stage>Concurrency`, `maxCanonsPerCall`, `maxConcurrentCalls`, `maxRetries`, `maxBackoffMs`) and any unrecognized keys across root, `providers.<slug>`, `defaults`, or `nodes.<node>` fail fast with exit code `2` and an actionable migration `Hint:`.
 6. **Mutual Exclusivity & Capability Scoping of Reasoning Controls:** `thinking_level` and `reasoning_budget` are mutually exclusive within any single configuration layer (CLI flags, environment variables, `nodes.<node>`, or `defaults`), failing fast with exit code `2` when both appear at the same layer; across distinct precedence layers, the higher-precedence layer supersedes and clears the lower-precedence alternative. Shared/ambient thinking controls (`--thinking-level`, `--reasoning-budget`, `CANON_CLERK_THINKING_LEVEL`, `CANON_CLERK_REASONING_BUDGET`, `defaults.thinkingLevel`, `defaults.reasoningBudget`) apply strictly to `Generator`-bound nodes and leave `Discriminator`-bound nodes unset, whereas explicitly declaring per-node `nodes.<node>.thinkingLevel` or `nodes.<node>.reasoningBudget` on a node whose resolved model is a `Discriminator` fails fast with exit code `2`.
 
 ---
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Deterministic Active Provider Cascade (Zero Ambient Credential Sniffing):**  
-   Ambient `*_API_KEY` environment variables never implicitly switch the active provider or models. Instead, the active default provider resolves deterministically along a strict specificity cascade:
+1. **Decoupled Provider Profiles, Wire Protocols & Deterministic Active Provider Cascade:**  
+   Canon Clerk separates **who hosts an endpoint** (provider profile `<slug>`) from **what wire protocol it speaks** (`gemini` or `systemone`) and **what domain capability port a model satisfies** (`Discriminator` or `Generator`). Ambient `*_API_KEY` environment variables never implicitly switch the active provider or models; instead, the active default provider resolves deterministically along a strict specificity cascade:
    $$\texttt{--provider <slug>} \;\succ\; \texttt{CANON\_CLERK\_PROVIDER} \;\succ\; \texttt{config.json defaults.provider} \;\succ\; \texttt{"google"}$$
-   Unrecognized provider slugs fail fast with exit code `2` and a remediation hint listing supported providers:
+   Unrecognized provider slugs (not matching a built-in profile or a configured `providers.<slug>` profile in `config.json`) fail fast with exit code `2` and an actionable remediation hint:
 
-   | Provider Slug | Default `Discriminator` (`apprise`, `docket`, `admit`, `vet`) | Default `Generator` (`audit`) | Credential Source |
-   | :--- | :--- | :--- | :--- |
-   | `google` *(built-in default)* | `google:gemini-decision-1` | `google:gemini-4-carbon` | `--gemini-api-key` $\succ$ `GEMINI_API_KEY` $\succ$ `providers.google.apiKey` |
-   | `typesafe` | `typesafe:jev-latest` | *(none)* | `--typesafe-api-key` $\succ$ `TYPESAFE_API_KEY` $\succ$ `providers.typesafe.apiKey` |
+   | Profile Slug | Wire Protocol | Default `baseUrl` | Auth Policy | Default `Discriminator` (`apprise`..`vet`) | Default `Generator` (`audit`) |
+   | :--- | :--- | :--- | :--- | :--- | :--- |
+   | `google` *(built-in default)* | `gemini` | `https://generativelanguage.googleapis.com/v1beta` | Required API key (`x-goog-api-key`) | `google:gemini-decision-1` | `google:gemini-4-carbon` |
+   | `typesafe` *(built-in)* | `systemone` | `https://api.typesafe.ai/v1` | Required API key (`Bearer`) | `typesafe:jev-latest` | *(none)* |
+   | Custom `<slug>` (`"protocol": "systemone"`) | `systemone` | Explicit `providers.<slug>.baseUrl` | **Optional API key** (`Bearer` when set; unauthenticated otherwise) | `providers.<slug>.defaultDiscriminator` *(optional)* | *(none)* |
+   | Custom `<slug>` (`"protocol": "gemini"`) | `gemini` | Explicit `providers.<slug>.baseUrl` | Required API key (`x-goog-api-key`) | `providers.<slug>.defaultDiscriminator` *(optional)* | `providers.<slug>.defaultGenerator` *(optional)* |
+
+   For any referenced profile `<slug>` (with `<UPPER_SLUG>` formed by uppercasing `<slug>` and replacing `-` with `_`), transport credentials and endpoint URLs resolve independently along deterministic specificity cascades:
+   - **API Key Precedence:** Built-in CLI flag (`--gemini-api-key` on `google`, `--typesafe-api-key` on `typesafe`) $\succ$ `CANON_CLERK_<UPPER_SLUG>_API_KEY` $\succ$ `<UPPER_SLUG>_API_KEY` (plus `GEMINI_API_KEY` on `google`) $\succ$ `providers.<slug>.apiKey` in `config.json`. Profiles with a required API-key policy fail fast with exit code `2` when no key resolves; custom `systemone` profiles omit the `Authorization` header when no key resolves so keyless localhost `/v1/systemone` daemons work without dummy tokens.
+   - **Base URL Precedence:** Built-in CLI flag (`--gemini-base-url` on `google`, `--typesafe-base-url` on `typesafe`) $\succ$ `CANON_CLERK_<UPPER_SLUG>_BASE_URL` $\succ$ `<UPPER_SLUG>_BASE_URL` (plus `GEMINI_BASE_URL` on `google`) $\succ$ `providers.<slug>.baseUrl` in `config.json` $\succ$ built-in profile default. Resolved URLs must begin with `http://` or `https://` and name a non-empty host authority, failing fast with exit code `2` during `configure` when malformed.
 
 2. **4-Level Node Model Specificity Cascade (Per Heuristic Node `<node>`):**  
    Each heuristic DAG node (`apprise`, `docket`, `admit`, `vet`, `audit`) resolves its `<provider>:<model>` binding independently along a 4-level specificity cascade:
@@ -86,17 +97,28 @@ flowchart LR
    - **Level 2 — Stage Environment Variable:** `CANON_CLERK_APPRISE_MODEL`, `CANON_CLERK_DOCKET_MODEL`, `CANON_CLERK_ADMIT_MODEL`, `CANON_CLERK_VET_MODEL`, `CANON_CLERK_AUDIT_MODEL`.
    - **Level 3 — User Configuration File Node Pin:** `nodes.<node>.model` in `~/.config/canon-clerk/config.json`.
    - **Level 4 — Active Provider Capability Default:**
-     - **Screening & Vetting Nodes (`apprise`, `docket`, `admit`, `vet`):** Uses the active provider's default `Discriminator` if defined, otherwise its default `Generator` (both `Discriminator` models—`google:gemini-decision-*`, `typesafe:jev-*`—and `Generator` models—`google:gemini-*`—are valid on screening and vetting nodes).
-     - **Judicial Adjudication Node (`audit`):** Uses the active provider's default `Generator`. Because `audit` synthesizes structured prose decrees, `Exception` rulings, `Remediation` guidance, and 1-based `CodeAnnotation` spans, configuring any `Discriminator` model on `audit` fails fast with exit code `2`. When the active provider defines no default `Generator` (such as `--provider typesafe`) and `audit` is unpinned across Levels 1–3, `audit` remains unprovisioned—allowing `apprise`..`vet` and standalone `configure`/`probe` to succeed cleanly while failing fast with exit code `2` and an actionable remediation hint if `audit` adjudication is invoked.
+     - **Screening & Vetting Nodes (`apprise`, `docket`, `admit`, `vet`):** Uses the active provider profile's `defaultDiscriminator` if defined, otherwise its `defaultGenerator` (both `Discriminator` and `Generator` models are valid on screening and vetting nodes). If a custom profile defines neither default and a required node is unpinned across Levels 1–3, `configure` exits `2` with an actionable `Hint:`.
+     - **Judicial Adjudication Node (`audit`):** Uses the active provider profile's `defaultGenerator`. Because `audit` synthesizes structured prose decrees, `Exception` rulings, `Remediation` guidance, and 1-based `CodeAnnotation` spans, configuring any `Discriminator` model on `audit` fails fast with exit code `2`. When the active profile defines no `defaultGenerator` (such as `typesafe` or a custom `systemone` profile) and `audit` is unpinned across Levels 1–3, `audit` remains unprovisioned—allowing `apprise`..`vet` and standalone `configure`/`probe` to succeed cleanly while failing fast with exit code `2` and an actionable remediation hint if `audit` adjudication is invoked.
 
-3. **Co-Located Operational Knobs (`defaults` & `nodes.<node>`):**  
-   User-level `~/.config/canon-clerk/config.json` co-locates global operational defaults under `defaults` and stage-specific overrides under `nodes.<node>`:
+3. **Co-Located Provider Profiles & Operational Knobs (`providers`, `defaults` & `nodes.<node>`):**  
+   User-level `~/.config/canon-clerk/config.json` co-locates built-in and custom provider profiles under `providers`, global defaults under `defaults`, and stage-specific overrides under `nodes.<node>`:
 
    ```json
    {
      "providers": {
-       "google":   { "apiKey": "..." },
-       "typesafe": { "apiKey": "..." }
+       "google": { "apiKey": "..." },
+       "local-dev": {
+         "protocol": "systemone",
+         "baseUrl": "http://127.0.0.1:8080/v1",
+         "defaultDiscriminator": "local-dev:kev-0.8b"
+       },
+       "google-corp": {
+         "protocol": "gemini",
+         "baseUrl": "https://gemini-gateway.corp.example.com/v1beta",
+         "apiKey": "...",
+         "defaultDiscriminator": "google-corp:gemini-decision-1",
+         "defaultGenerator": "google-corp:gemini-4-carbon"
+       }
      },
      "defaults": {
        "provider": "google",
@@ -105,10 +127,10 @@ flowchart LR
        "maxBackoffMs": 60000
      },
      "nodes": {
-       "apprise": { "batchSize": 256, "concurrency": 4 },
-       "docket":  { "model": "typesafe:jev-latest", "batchSize": 48, "concurrency": 4 },
-       "admit":   { "model": "typesafe:jev-latest", "concurrency": 4 },
-       "vet":     { "model": "google:gemini-decision-1", "threshold": 0.80, "concurrency": 4 },
+       "apprise": { "model": "local-dev:kev-0.8b", "concurrency": 4 },
+       "docket":  { "model": "local-dev:kev-0.8b", "batchSize": 48, "concurrency": 4 },
+       "admit":   { "model": "local-dev:kev-0.8b", "concurrency": 4 },
+       "vet":     { "model": "local-dev:kev-0.8b", "threshold": 0.80, "concurrency": 4 },
        "audit":   { "model": "google:gemini-4-carbon", "thinkingLevel": "low", "concurrency": 4 }
      }
    }
@@ -117,7 +139,7 @@ flowchart LR
    | Knob | Specificity Cascade | Built-In Default | Envelope Persistence |
    | :--- | :--- | :--- | :--- |
    | `threshold` | `--<node>-threshold` $\succ$ `CANON_CLERK_<NODE>_THRESHOLD` $\succ$ `nodes.<node>.threshold` $\succ$ default | `0.80` on `vet`; `0.50` on `apprise`, `docket`, `admit`, `audit` | Execution parameter (not in `.config`) |
-   | `batchSize` *(`apprise`, `docket` only)* | `--<node>-batch-size` $\succ$ `CANON_CLERK_<NODE>_BATCH_SIZE` $\succ$ `nodes.<node>.batchSize` $\succ$ model default | `256` on `google:gemini-decision-*`, `48` on `typesafe:jev-*`, `25` on `Generator` | Execution parameter (not in `.config`; rejected on `admit`, `vet`, `audit`) |
+   | `batchSize` *(`apprise`, `docket` only)* | `--<node>-batch-size` $\succ$ `CANON_CLERK_<NODE>_BATCH_SIZE` $\succ$ `nodes.<node>.batchSize` $\succ$ model default | `256` on `gemini` `Discriminator`, `48` on `systemone` `Discriminator`, `25` on `Generator` | Execution parameter (not in `.config`; rejected on `admit`, `vet`, `audit`) |
    | `concurrency` | `--<node>-concurrency` $\succ$ `CANON_CLERK_<NODE>_CONCURRENCY` $\succ$ `nodes.<node>.concurrency` $\succ$ default | `4` | Execution parameter (not in `.config`) |
    | `thinkingLevel` / `reasoningBudget` | `--thinking-level` / `--reasoning-budget` $\succ$ `CANON_CLERK_THINKING_LEVEL` / `CANON_CLERK_REASONING_BUDGET` $\succ$ `nodes.<node>.*` $\succ$ `defaults.*` $\succ$ stage default | `"low"` (`includeThoughts: true`) on `audit`; minimal/`0` on `Generator` screening/vetting | Recorded on `.config.nodes.<node>` when explicitly set on a `Generator` node |
    | `maxRetries` / `maxBackoffMs` | `--max-retries` / `--max-backoff-ms` $\succ$ `CANON_CLERK_MAX_RETRIES` / `CANON_CLERK_MAX_BACKOFF_MS` $\succ$ `defaults.*` $\succ$ default | `2` retries, `90000` ms | Live transport parameter ([`../transport.md` §6](../transport.md#6-out-of-band-telemetry--cli-transport-controls)) |
@@ -147,22 +169,25 @@ canon-clerk configure --provider typesafe --audit-model google:gemini-4-carbon
 ```
 
 ### CLI Flags & Environment
-- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider selector (`google`, `typesafe`; default: `google`).
+- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider profile slug (`google`, `typesafe`, or any custom `providers.<slug>` profile in `config.json`; default: `google`).
 - `--apprise-model <PROVIDER:MODEL>` (`CANON_CLERK_APPRISE_MODEL`), `--docket-model <PROVIDER:MODEL>` (`CANON_CLERK_DOCKET_MODEL`), `--admit-model <PROVIDER:MODEL>` (`CANON_CLERK_ADMIT_MODEL`), `--vet-model <PROVIDER:MODEL>` (`CANON_CLERK_VET_MODEL`), `--audit-model <PROVIDER:MODEL>` (`CANON_CLERK_AUDIT_MODEL`): Per-node canonical `<provider>:<model>` overrides (`Discriminator` models on `--audit-model` and retired `--screener-model` / `--auditor-model` flags are rejected with exit code `2`).
 - `--thinking-level <minimal|low|medium|high>` (fallback env: `CANON_CLERK_THINKING_LEVEL`; config keys: `nodes.<node>.thinkingLevel`, `defaults.thinkingLevel`): Qualitative reasoning effort tier for `Generator`-bound nodes (mutually exclusive with `--reasoning-budget`).
 - `--reasoning-budget <TOKENS>` (fallback env: `CANON_CLERK_REASONING_BUDGET`; config keys: `nodes.<node>.reasoningBudget`, `defaults.reasoningBudget`): Maximum reasoning budget tokens for `Generator`-bound nodes (mutually exclusive with `--thinking-level`).
-- `--gemini-api-key <KEY>` (fallback env: `GEMINI_API_KEY`; config key: `providers.google.apiKey`): Google Gemini API key override.
-- `--typesafe-api-key <KEY>` (fallback env: `TYPESAFE_API_KEY`; config key: `providers.typesafe.apiKey`): TypeSafe AI Jev API key override.
+- `--gemini-api-key <KEY>` (fallback env: `CANON_CLERK_GOOGLE_API_KEY`, `GEMINI_API_KEY`; config key: `providers.google.apiKey`): Google Gemini API key override.
+- `--typesafe-api-key <KEY>` (fallback env: `CANON_CLERK_TYPESAFE_API_KEY`, `TYPESAFE_API_KEY`; config key: `providers.typesafe.apiKey`): TypeSafe AI Jev API key override.
+- `--gemini-base-url <URL>` (fallback env: `CANON_CLERK_GOOGLE_BASE_URL`, `GEMINI_BASE_URL`; config key: `providers.google.baseUrl`): Google Generative Language API base URL override.
+- `--typesafe-base-url <URL>` (fallback env: `CANON_CLERK_TYPESAFE_BASE_URL`, `TYPESAFE_BASE_URL`; config key: `providers.typesafe.baseUrl`): TypeSafe AI System One API base URL override.
+- *(Custom `providers.<slug>` profiles additionally support `CANON_CLERK_<UPPER_SLUG>_API_KEY` / `<UPPER_SLUG>_API_KEY` and `CANON_CLERK_<UPPER_SLUG>_BASE_URL` / `<UPPER_SLUG>_BASE_URL` environment overrides.)*
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload`.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of `stdout`.
 - `--json`: Emits enriched `Caseload` JSON to `stdout`.
 
 ### CLI Output Modes
-- **`stylish` (Default):** Renders a human-readable `Configuration Summary (READY):` listing the resolved default `Provider`, each provisioned node binding in canonical DAG order (and noting `audit` as unprovisioned on discriminator-only setups when unpinned), effective extended thinking controls, and redacted verified `Credentials`.
-- **`compact`:** Emits unadorned tab-separated `<key>\t<value>` records in canonical order (`provider\t<slug>`, `<node>_model\t<provider:model>`, optional `<node>_thinking_level\t<level>` / `<node>_reasoning_budget\t<tokens>`, and `credentials\t<verified_env_vars>`).
+- **`stylish` (Default):** Renders a human-readable `Configuration Summary (READY):` listing the resolved default `Provider`, each provisioned node binding in canonical DAG order (and noting `audit` as unprovisioned on discriminator-only setups when unpinned), effective extended thinking controls, and redacted `Credentials` (`<env_vars> (verified)` when credentials resolve, or `none (optional — unauthenticated)` when all provisioned nodes target keyless `systemone` profiles).
+- **`compact`:** Emits unadorned tab-separated `<key>\t<value>` records in canonical order (`provider\t<slug>`, `<node>_model\t<provider:model>`, optional `<node>_thinking_level\t<level>` / `<node>_reasoning_budget\t<tokens>`, and `credentials\t<verified_env_vars_or_none>`).
 - **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope with `.config` populated.
 
 ### CLI Exit Codes
-- **0:** Configuration valid, node bindings resolved, and referenced provider credentials verified.
-- **2:** Missing required provider credentials, bare or unrecognized `<provider>:<model>` specifier, unrecognized `--provider`, `Discriminator` model on `audit`, retired root or unknown `config.json` keys, insecure or workspace-resident configuration file, or conflicting extended thinking options.
+- **0:** Configuration valid, node bindings and endpoint URLs resolved, and referenced provider credentials verified.
+- **2:** Missing required provider credentials, malformed `baseUrl` or missing custom-profile `protocol`/`baseUrl`, bare or unrecognized `<provider>:<model>` specifier, unrecognized `--provider`, `Discriminator` model on `audit`, retired root or unknown `config.json` keys, insecure or workspace-resident configuration file, or conflicting extended thinking options.
