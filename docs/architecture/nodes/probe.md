@@ -11,8 +11,8 @@
 `probe` serves as the **Diagnostic Network Health Check** for configured model endpoints. In the court clerkship taxonomy, it represents testing the teleconferencing equipment and audio-visual communication links before a remote hearing begins.
 
 - **Imperative Verb:** `probe`
-- **Court Clerkship Role:** Live connectivity and latency verification of provider endpoints.
-- **Metric Pair:** N/A (Live connectivity probe; reports `status` and `latency_ms`).
+- **Court Clerkship Role:** Live connectivity and single-roundtrip latency verification across deduplicated configured model targets.
+- **Metric Pair:** N/A (Live connectivity probe; reports per-target `status` and `latency_ms`).
 
 ---
 
@@ -22,48 +22,53 @@
 flowchart LR
     subgraph Inputs["Inputs"]
         Config["configure (or --caseload)<br/><code>.config</code>"]
-        Params["Stage Flags<br/><i>(--timeout)</i>"]
+        Params["Stage Flags<br/><i>(--timeout, --provider, --*-model)</i>"]
     end
 
     Config --> Probe["probe<br/><b>(Current Node)</b><br/><code>.probe</code>"]
     Params --> Probe
 
-    Probe --> Report["Diagnostic Health Report<br/><i>(Endpoint latency & reachability, Exit 0)</i>"]
+    Probe --> Report["Diagnostic Health Report<br/><i>(Deduplicated target latency & reachability, Exit 0)</i>"]
     Probe -. "connectivity failure" .-> Failure["Connection Error<br/><i>(Unreachable / bad key, Exit 2)</i>"]
 
     style Probe fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style Failure stroke-dasharray: 5 5
 ```
 
-- **Direct Prerequisites:** `configure` (requires resolved provider credentials and model specifiers in `caseload.config`).
+- **Direct Prerequisites:** `configure` (requires resolved per-node model bindings in `caseload.config.nodes` and verified provider credentials).
 - **Transitive Prerequisites:** None.
-- **Pruned from Cascades:** `probe` is **never executed during review cascades** (`canon-clerk vet`, `canon-clerk audit`). This ensures that evaluation runs do not incur redundant health-check latency prior to screening.
+- **Pruned from Cascades:** `probe` is **never executed during review cascades** (`canon-clerk apprise`, `docket`, `admit`, `vet`, `audit`). This ensures evaluation runs never incur redundant health-check roundtrips prior to screening.
 
 ---
 
 ## 3. Caseload Contribution & Data Plane Constraints
 
 ### Caseload Delta
-`probe` populates the `.probe` namespace on the cumulative `Caseload` envelope with live diagnostic health records for the configured model tiers:
+`probe` populates the `.probe` namespace on the cumulative `Caseload` envelope with live diagnostic health records across the deduplicated model targets bound in `.config.nodes`:
 
-- **Screener Endpoint Health (`screener`):** Connectivity probe result for `.config.screener_model`, capturing connection `status` (`"ok"` or `"error"`), roundtrip `latency_ms`, resolved `model` identifier, and an optional diagnostic `error` message when unreachable or unauthorized.
-- **Auditor Endpoint Health (`auditor`):** Connectivity probe result for `.config.auditor_model` with the same diagnostic fields (`status`, `latency_ms`, `model`, and optional `error`).
+- **Deduplicated Probe Targets (`targets`):** Ordered list of endpoint probe records grouped by unique `(model, thinking_level, reasoning_budget)` tuple in canonical DAG stage encounter order (`apprise` $\to$ `docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`). Each target record captures:
+  - **Configured Model (`model`):** Canonical `<provider>:<model>` specifier probed.
+  - **Bound Heuristic Nodes (`nodes`):** Ordered list of provisioned heuristic nodes sharing this target (for example, `["apprise", "docket", "admit", "vet"]` or `["audit"]`).
+  - **Extended Thinking Controls (`thinking_level` / `reasoning_budget`):** Optional thinking configuration forwarded on the probe when explicitly configured on a `Generator` target (omitted when unset).
+  - **Health Status (`status`):** `"ok"` when reachable and authenticated, or `"error"` on timeout, authentication rejection, or HTTP error.
+  - **Roundtrip Latency (`latency_ms`):** Measured single-shot roundtrip latency in milliseconds.
+  - **Resolved Upstream Model (`resolved_model`):** Concrete model identifier reported by the upstream provider when available (omitted when a transport failure occurs prior to upstream model resolution).
+  - **Diagnostic Error (`error`):** Optional actionable error message and remediation hint when `status` is `"error"` (omitted when `"ok"`).
 
 ### Data Plane & Diagnostic Invariants
-1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`docket`, `admit`, `vet`, `audit`, `apprise`), substantive review runs never populate or depend on `.probe`.
-2. **Non-Throwing Diagnostic Capture:** Endpoint timeouts, HTTP 4xx/5xx responses, and authentication rejections are captured inside the respective endpoint health record (`status: "error"`, `error: "<reason>"`) on `.probe` before the CLI adapter maps any failure to exit code `2`.
-3. **Single-Shot Diagnostic Isolation:** Unlike heuristic evaluation stages, `probe` executes strictly single-shot (`0` retries), bypasses per-origin rate-limit cooldown gates, and rejects heuristic retry flags (`--max-retries`, `--max-backoff-ms`) with exit code `2` so health checks immediately measure raw single-roundtrip reachability and latency within `--timeout` ([`../transport.md` §5](../transport.md#5-single-shot-diagnostic-probe-isolation)).
+1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`apprise`, `docket`, `admit`, `vet`, `audit`), substantive review runs never populate or depend on `.probe`.
+2. **Deduplicated Target Grouping:** Nodes sharing identical `(model, thinking_level, reasoning_budget)` bindings coalesce into a single probe target in canonical stage encounter order—issuing two concurrent probes on the default `google` configuration (`google:gemini-decision-1` for `[apprise, docket, admit, vet]` and `google:gemini-4-carbon` for `[audit]`) and a single probe on `--provider typesafe` (`typesafe:jev-latest` for `[apprise, docket, admit, vet]`) rather than firing five redundant requests at the same endpoint.
+3. **Non-Throwing Diagnostic Capture:** Endpoint timeouts, HTTP 4xx/5xx responses, and authentication rejections are captured inside each target's health record (`status: "error"`, `error: "<reason>"`) on `.probe` and written to `stdout` / `--output-caseload` before the CLI adapter maps any unhealthy target to exit code `2`.
+4. **Single-Shot Diagnostic Isolation:** Unlike heuristic evaluation stages, `probe` executes strictly single-shot (`0` retries), bypasses per-origin rate-limit cooldown gates, and rejects heuristic retry flags (`--max-retries`, `--max-backoff-ms`) with exit code `2` so health checks immediately measure raw single-roundtrip reachability and latency within `--timeout` ([`../transport.md` §5](../transport.md#5-single-shot-diagnostic-probe-isolation)).
 
 ---
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Endpoint & Credential Resolution:** Reads configured `screener_model` and `auditor_model` from `caseload.config`, resolves credentials by provider namespace (`google:*` $\to$ `GEMINI_API_KEY`, `typesafe:*` $\to$ `TYPESAFE_API_KEY`), and dispatches each tier's network probe by model capability.
-2. **Capability-Specific Ping Assembly:** Constructs minimal probe requests matched to each endpoint's wire protocol—a single-question `/v1beta/decisions` `noul` decision ping for `google:gemini-decision-*`, a single-question `/v1/systemone` `noul` decision ping for `typesafe:jev-*`, and a lightweight `:generateContent` ping for generative `google:*` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring an explicit auditor `--thinking-level` / `--reasoning-budget` override)—to verify authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
-3. **Concurrent Multi-Provider Probe:** Concurrently sends probe requests to both configured tiers in parallel:
-   - Measures roundtrip response latency in milliseconds (`latency_ms`) and captures the concrete resolved model identifier returned by each provider.
-   - Verifies model availability and provider credential validity across both homogeneous and mixed-provider tier pairings.
-4. **Diagnostic Record:** Attaches endpoint latency and reachability metadata to `Caseload.probe`.
+1. **Target Deduplication & Credential Resolution:** Reads provisioned node bindings from `caseload.config.nodes` in canonical DAG order, groups identical `(model, thinking_level, reasoning_budget)` tuples while preserving each target's ordered `nodes` list, and resolves credentials by provider namespace (`google:*` $\to$ `GEMINI_API_KEY`, `typesafe:*` $\to$ `TYPESAFE_API_KEY`).
+2. **Capability-Specific Ping Assembly:** Constructs minimal probe requests matched to each target's wire protocol—a single-question `/v1beta/decisions` `noul` decision ping for `google:gemini-decision-*`, a single-question `/v1/systemone` `noul` decision ping for `typesafe:jev-*`, and a lightweight `:generateContent` ping for generative `google:*` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring the target's explicit `thinking_level` / `reasoning_budget`)—verifying authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
+3. **Concurrent Multi-Target Probe:** Dispatches all deduplicated probe targets concurrently in parallel, measuring roundtrip latency (`latency_ms`) and capturing each provider's concrete `resolved_model` identifier while preserving deterministic target ordering in `.probe.targets`.
+4. **Diagnostic Record:** Attaches `.probe` to the `Caseload` envelope; the run is healthy if and only if every target in `.probe.targets` reports `status: "ok"`.
 
 ---
 
@@ -72,29 +77,36 @@ flowchart LR
 The CLI exposes `probe` as an imperative subcommand:
 
 ```bash
-# Human-readable connectivity and latency check:
+# 1. Probe default Google discriminator + generator targets concurrently:
 canon-clerk probe
 
-# Probe TypeSafe Jev screener alongside Gemini 4 Carbon auditor:
-canon-clerk probe --screener-model jev-latest
+# 2. Probe TypeSafe Jev as sole discriminative provider (single deduplicated target):
+canon-clerk probe --provider typesafe
 
-# Emit structured JSON probe record:
+# 3. Probe hybrid TypeSafe Jev screening alongside Gemini 4 Carbon audit:
+canon-clerk probe --provider typesafe --audit-model google:gemini-4-carbon
+
+# 4. Emit structured Caseload JSON probe record:
 canon-clerk probe --json
 ```
 
 ### CLI Flags & Options
-- `--timeout <ms>`: Request timeout in milliseconds (default: `5000ms`).
-- `--screener-model <model>` (fallback env: `CANON_CLERK_SCREENER_MODEL`): Custom screener model specifier (`gemini-decision-1`, `gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`).
-- `--auditor-model <model>` (fallback env: `CANON_CLERK_AUDITOR_MODEL`): Custom generative auditor model specifier (generative `gemini-*`, `google:gemini-*`).
-- `--thinking-level <minimal|low|medium|high>` (fallback env: `CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier (mutually exclusive with `--reasoning-budget`).
-- `--reasoning-budget <tokens>` (fallback env: `CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens (mutually exclusive with `--thinking-level`).
-- `--gemini-api-key <key>` (fallback env: `GEMINI_API_KEY`): Google Gemini API key override.
-- `--typesafe-api-key <key>` (fallback env: `TYPESAFE_API_KEY`): TypeSafe AI Jev API key override.
-- `--format <stylish|json|compact>`: Output presentation format.
-- `--caseload <path|->`: Ingests upstream Caseload.
-- `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of stdout.
-- `--json`: Emits enriched Caseload JSON.
+- `--timeout <MS>` (fallback env: `CANON_CLERK_PROBE_TIMEOUT_MS`): Per-target request timeout in milliseconds (default: `5000ms`; `0` is rejected with exit code `2`).
+- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider selector (`google`, `typesafe`; default: `google`).
+- `--apprise-model <PROVIDER:MODEL>` (`CANON_CLERK_APPRISE_MODEL`), `--docket-model <PROVIDER:MODEL>` (`CANON_CLERK_DOCKET_MODEL`), `--admit-model <PROVIDER:MODEL>` (`CANON_CLERK_ADMIT_MODEL`), `--vet-model <PROVIDER:MODEL>` (`CANON_CLERK_VET_MODEL`), `--audit-model <PROVIDER:MODEL>` (`CANON_CLERK_AUDIT_MODEL`): Per-node canonical `<provider>:<model>` overrides.
+- `--thinking-level <minimal|low|medium|high>` (`CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier for `Generator` targets (mutually exclusive with `--reasoning-budget`).
+- `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens for `Generator` targets (mutually exclusive with `--thinking-level`).
+- `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Provider API key overrides.
+- `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
+- `--caseload <PATH|->`: Ingests upstream `Caseload`.
+- `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of `stdout`.
+- `--json`: Emits enriched `Caseload` JSON to `stdout`.
+
+### CLI Output Modes
+- **`stylish` (Default):** Renders `Endpoint Health Check (HEALTHY):` or `Endpoint Health Check (FAILED):` followed by one status line per deduplicated target displaying its configured `<provider>:<model>`, bound `[nodes]`, status, `latency_ms`, `resolved_model`, and error reason on failure.
+- **`compact`:** Emits unadorned tab-separated `<model>\t<nodes_csv>\t<status>\t<latency_ms>ms\t<resolved_model_or_->` records (appending `\t<error>` when `status` is `"error"`), one line per deduplicated target in canonical encounter order.
+- **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope with `.config` and `.probe` populated.
 
 ### CLI Exit Codes
-- **0:** All configured endpoints are reachable, authenticated, and responsive.
-- **2:** Missing provider credentials, invalid configuration options, or any endpoint probe failed (authentication/permission rejection `401`/`403`, model not found `404`, quota/rate limit `429`, server error `5xx`, or request timeout).
+- **0:** All deduplicated targets in `.probe.targets` are reachable, authenticated, and responsive (`status: "ok"`).
+- **2:** Missing provider credentials, invalid configuration or `--timeout` options, rejected `--max-retries` / `--max-backoff-ms` flags, or any target probe failed (`401`/`403`, `404`, `429`, `5xx`, or request timeout).
