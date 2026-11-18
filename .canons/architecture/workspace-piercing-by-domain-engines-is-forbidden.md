@@ -1,11 +1,14 @@
 ---
 triggers:
-  - "packages/core/**"
+  - "**/src/**"
+inspect:
+  - diff
 tags:
-  - internal
   - architecture
   - modularity
 ---
-Reusable domain evaluation engines and core library packages MUST NOT probe user home directories, ambient host profile stores (`~/.config`), or global system state outside the workspace envelope; all host operating system interactions MUST be mediated by presentation adapters or configuration packages.
+Domain engines and core library modules MUST NOT read user home directories, host profile stores (`~/.config`), or ambient process state outside the workspace envelope.
 
-Rationale: Following Hexagonal Architecture (Cockburn) and Clean Architecture (Martin) Ports and Adapters principles, domain engines must remain pure and portable across web workers, edge runtimes, browser sandboxes, and containerized CI runners without inheriting host filesystem assumptions.
+Exception: CLI adapters, configuration loaders, and application entrypoints MAY read host configuration files and environment variables IFF passing the resolved values into domain engines as explicit in-memory parameters.
+
+Rationale: Following Hexagonal Architecture (Cockburn) and Clean Architecture (Martin), isolating domain engines from host filesystem state guarantees deterministic execution across hermetic tests, sandboxes, and containerized CI runners.

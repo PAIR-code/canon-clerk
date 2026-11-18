@@ -8,7 +8,7 @@
 
 # 📜 Canon Clerk
 
-[![Canons](https://img.shields.io/badge/canons-111_active-e3b341?style=flat-square)](.canons/)
+[![Canons](https://img.shields.io/badge/canons-114_active-e3b341?style=flat-square)](.canons/)
 [![Spec Version](https://img.shields.io/badge/spec-v0.1-orange?style=flat-square)](SPEC.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square)](LICENSE)
 
@@ -109,11 +109,11 @@ Model bindings cascade deterministically across explicit per-node CLI flags (`--
 
 ## The Canon Corpus
 
-Canon Clerk includes a production-grade corpus of **111 modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)), ready to explore, adapt, and enforce:
+Canon Clerk includes a production-grade corpus of **modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)), ready to explore, adapt, and enforce:
 
 | Domain Pack | Path | Count | Governed Conventions |
 | :--- | :--- | :--- | :--- |
-| 🛠️ **CLI Ergonomics** | [`.canons/cli/`](.canons/cli/) | 23 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stable sorting, error remediation hints, exit codes, and non-interactive environment handling. |
+| 🛠️ **CLI Ergonomics** | [`.canons/cli/`](.canons/cli/) | 24 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
 | 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 14 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
 | 🤖 **Agent Scripts** | [`.canons/agent-scripts/`](.canons/agent-scripts/) | 9 | Runtime script standards for AI agent helpers: POSIX shell portability, command echo traces, passthrough fidelity, and `>8KB` output shunting. |
 | 🧪 **Testing** | [`.canons/testing/`](.canons/testing/) | 9 | Behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
@@ -122,12 +122,12 @@ Canon Clerk includes a production-grade corpus of **111 modular, domain-scoped c
 | 📐 **OpenSpec** | [`.canons/openspec/`](.canons/openspec/) | 5 | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
 | 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | 5 | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps, feature parity, responsive dark/light hero banners, and shunting architecture to `docs/`. |
 | 🛡️ **Repository Governance** | [`.canons/repo-governance/`](.canons/repo-governance/) | 5 | GitHub repository metadata parity, workflow script delegation, and third-party GitHub App restrictions. |
-| 🏗️ **Architecture** | [`.canons/architecture/`](.canons/architecture/) | 4 | Pure format validators, explicit library dependencies, Hexagonal workspace boundaries, and standard-solution reuse. |
+| 🏗️ **Architecture** | [`.canons/architecture/`](.canons/architecture/) | 5 | Pure format validators, explicit library dependencies, narrow module option boundaries, and Hexagonal workspace isolation. |
 | 🏷️ **Conventional Commits** | [`.canons/conventional-commits/`](.canons/conventional-commits/) | 4 | Semantic commit and PR invariants (`feat` for user-facing functionality, `fix` for user-facing defect repairs). |
 | 🧩 **Agent Skills** | [`.canons/agent-skills/`](.canons/agent-skills/) | 3 | Procedural runtime execution targets and non-duplicative skill metadata. |
+| ⚙️ **Configuration** | [`.canons/configuration/`](.canons/configuration/) | 3 | Orthogonal configuration namespaces, `<provider>:<name>` specifier qualification, and deterministic specificity cascades. |
 | 🔒 **Security** | [`.canons/security/`](.canons/security/) | 3 | Workspace-external secret storage and POSIX `0600` owner-only credential file enforcement. |
 | 📦 **Build Systems** | [`.canons/build-systems/`](.canons/build-systems/) | 2 | Consolidated monorepo root bundling and private-package declaration hygiene. |
-| ⚙️ **Configuration** | [`.canons/configuration/`](.canons/configuration/) | 2 | Industry-standard configuration formats and deterministic specificity cascades. |
 | 🔀 **Git Workflow** | [`.canons/git-workflow/`](.canons/git-workflow/) | 2 | Sanctioned issue scope hygiene and independent precursor domain-contract delivery. |
 | 🔍 **Parser Design** | [`.canons/parser-design/`](.canons/parser-design/) | 2 | Lexical/semantic phase separation and explicit multi-occurrence/blank semantics. |
 | 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | 1 | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
