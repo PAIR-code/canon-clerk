@@ -14,6 +14,7 @@
 
 //! Data plane models for the `.probe` namespace (`docs/architecture/nodes/probe.md` §3).
 
+use crate::caseload::{HeuristicNode, ThinkingLevel};
 use serde::{Deserialize, Serialize};
 
 /// Connectivity and health status of a probed model endpoint (`docs/architecture/nodes/probe.md` §3).
@@ -29,7 +30,7 @@ pub enum ProbeStatus {
 
 impl ProbeStatus {
     /// Returns the canonical wire representation (`"ok"` or `"error"`).
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Ok => "ok",
             Self::Error => "error",
@@ -37,68 +38,101 @@ impl ProbeStatus {
     }
 }
 
-/// Live connectivity and latency diagnostic record for a single configured model endpoint (`docs/architecture/nodes/probe.md` §3).
+/// Live connectivity and latency diagnostic record for a single deduplicated `(model, thinking_level, reasoning_budget)`
+/// probe target (`docs/architecture/nodes/probe.md` §3).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ProbeEndpointResult {
+pub struct ProbeTargetResult {
+    /// Configured canonical `<provider>:<model>` specifier probed.
+    pub model: String,
+    /// Ordered list of provisioned heuristic nodes bound to this target.
+    pub nodes: Vec<HeuristicNode>,
+    /// Optional qualitative reasoning effort tier forwarded on the probe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<ThinkingLevel>,
+    /// Optional token ceiling forwarded on the probe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget: Option<u32>,
     /// Connection and authorization status (`"ok"` or `"error"`).
     pub status: ProbeStatus,
     /// Roundtrip request latency in milliseconds.
     pub latency_ms: u64,
-    /// Resolved model identifier reported by the provider (or configured specifier on failure).
-    pub model: String,
+    /// Concrete model identifier reported by the upstream provider when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
     /// Optional diagnostic error message and remediation hint when `status == ProbeStatus::Error`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// Live provider connectivity and endpoint latency diagnostics captured during the `probe` stage (`docs/architecture/nodes/probe.md` §3).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+/// Live deduplicated provider connectivity and endpoint latency diagnostics captured during `probe` (`probe.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct CaseloadProbe {
-    /// Diagnostic probe result for the configured screener model endpoint (`.config.screener_model`).
-    pub screener: ProbeEndpointResult,
-    /// Diagnostic probe result for the configured auditor model endpoint (`.config.auditor_model`).
-    pub auditor: ProbeEndpointResult,
+    /// Deduplicated target probe results in canonical DAG stage encounter order.
+    pub targets: Vec<ProbeTargetResult>,
 }
 
 impl CaseloadProbe {
-    /// Returns `true` when both `screener` and `auditor` endpoints succeeded (`status == ProbeStatus::Ok`).
+    /// Returns `true` when at least one target was probed and every target succeeded (`status == ProbeStatus::Ok`).
     pub fn is_healthy(&self) -> bool {
-        self.screener.status == ProbeStatus::Ok && self.auditor.status == ProbeStatus::Ok
+        !self.targets.is_empty() && self.targets.iter().all(|t| t.status == ProbeStatus::Ok)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::caseload::{Caseload, DEFAULT_AUDITOR_MODEL};
+    use crate::caseload::{
+        Caseload, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+    };
 
-    #[test]
-    fn test_caseload_probe_round_trip_and_optional_error_omission() {
-        let probe = CaseloadProbe {
-            screener: ProbeEndpointResult {
-                status: ProbeStatus::Ok,
-                latency_ms: 142,
-                model: "gemini-2.5-flash-lite".to_string(),
-                error: None,
-            },
-            auditor: ProbeEndpointResult {
-                status: ProbeStatus::Error,
-                latency_ms: 5001,
-                model: DEFAULT_AUDITOR_MODEL.to_string(),
-                error: Some("Request timed out after 5000ms".to_string()),
-            },
-        };
-        assert!(!probe.is_healthy());
-        assert_eq!(ProbeStatus::Ok.as_str(), "ok");
-        assert_eq!(ProbeStatus::Error.as_str(), "error");
+    mod serialization {
+        use super::*;
 
-        let caseload = Caseload::new().with_probe(probe);
-        let encoded = serde_json::to_string(&caseload).expect("serialize probe caseload");
-        assert!(encoded.contains(r#""status":"ok""#));
-        assert!(encoded.contains(r#""status":"error""#));
-        assert!(encoded.contains(r#""Request timed out after 5000ms""#));
+        #[test]
+        fn test_caseload_probe_round_trip_and_optional_field_omission() {
+            let probe = CaseloadProbe {
+                targets: vec![
+                    ProbeTargetResult {
+                        model: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
+                        nodes: vec![
+                            HeuristicNode::Apprise,
+                            HeuristicNode::Docket,
+                            HeuristicNode::Admit,
+                            HeuristicNode::Vet,
+                        ],
+                        thinking_level: None,
+                        reasoning_budget: None,
+                        status: ProbeStatus::Ok,
+                        latency_ms: 88,
+                        resolved_model: Some("gemini-decision-1".to_string()),
+                        error: None,
+                    },
+                    ProbeTargetResult {
+                        model: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
+                        nodes: vec![HeuristicNode::Audit],
+                        thinking_level: Some(ThinkingLevel::Low),
+                        reasoning_budget: None,
+                        status: ProbeStatus::Error,
+                        latency_ms: 5001,
+                        resolved_model: None,
+                        error: Some("Request timed out after 5000ms".to_string()),
+                    },
+                ],
+            };
+            assert!(!probe.is_healthy());
+            assert_eq!(ProbeStatus::Ok.as_str(), "ok");
+            assert_eq!(ProbeStatus::Error.as_str(), "error");
 
-        let decoded: Caseload = serde_json::from_str(&encoded).expect("deserialize probe caseload");
-        assert_eq!(decoded, caseload);
+            let caseload = Caseload::new().with_probe(probe);
+            let encoded = serde_json::to_string(&caseload).expect("serialize probe caseload");
+            assert!(encoded.contains(r#""status":"ok""#));
+            assert!(encoded.contains(r#""status":"error""#));
+            assert!(encoded.contains(r#""resolved_model":"gemini-decision-1""#));
+            assert!(encoded.contains(r#""Request timed out after 5000ms""#));
+
+            let decoded: Caseload =
+                serde_json::from_str(&encoded).expect("deserialize probe caseload");
+            assert_eq!(decoded, caseload);
+        }
     }
 }

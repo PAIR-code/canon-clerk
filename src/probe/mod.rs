@@ -12,30 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core domain execution engine and hexagonal endpoint prober for the `probe` diagnostic stage (`docs/architecture/nodes/probe.md`).
+//! Core domain execution engine and hexagonal endpoint prober for the deduplicated `probe`
+//! diagnostic stage (`docs/architecture/nodes/probe.md`).
 
+mod gemini;
 mod gemini_decisions;
 mod typesafe;
 
+pub use gemini::{GeminiEndpointProber, MultiProviderEndpointProber, decode_gemini_probe_response};
 pub use gemini_decisions::{GeminiDecisionsEndpointProber, decode_gemini_decisions_probe_response};
 pub use typesafe::TypesafeEndpointProber;
 
 use crate::caseload::{
-    Caseload, CaseloadProbe, ProbeEndpointResult, ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel,
+    Caseload, CaseloadProbe, HeuristicNode, ProbeStatus, ProbeTargetResult, TYPESAFE_PROVIDER,
+    ThinkingLevel,
 };
-use crate::configure::{
-    ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, is_discriminative_model, model_provider,
-};
-use crate::provider::gemini::post_gemini_json;
+use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
 pub use crate::provider::{
     DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, build_generate_content_url,
     strip_provider_prefix,
 };
-use crate::provider::{
-    GeminiThinkingConfig, build_pooled_http_client, build_probe_thinking_config,
-    classify_gemini_http_error, extract_gemini_error_detail,
-};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// Default per-endpoint timeout in milliseconds for `canon-clerk probe` (`docs/architecture/nodes/probe.md` §5).
@@ -51,7 +49,7 @@ pub struct ProbeOptions {
     pub api_key: String,
     /// Optional TypeSafe AI API key used to authenticate `typesafe:*` probe requests.
     pub typesafe_api_key: Option<String>,
-    /// Per-endpoint request timeout in milliseconds (defaults to [`DEFAULT_PROBE_TIMEOUT_MS`]).
+    /// Per-target request timeout in milliseconds (defaults to [`DEFAULT_PROBE_TIMEOUT_MS`]).
     pub timeout_ms: u64,
 }
 
@@ -65,10 +63,25 @@ impl Default for ProbeOptions {
     }
 }
 
+/// Single-endpoint probe outcome returned by [`EndpointProber::probe_endpoint`].
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProbeEndpointResult {
+    /// Connection and authorization status (`"ok"` or `"error"`).
+    pub status: ProbeStatus,
+    /// Roundtrip request latency in milliseconds.
+    pub latency_ms: u64,
+    /// Concrete model identifier reported by the upstream provider when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
+    /// Optional diagnostic error message and remediation hint when `status == ProbeStatus::Error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Pre-flight domain errors when `execute_probe` cannot be initiated due to missing prerequisites or invalid options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProbeError {
-    /// Incoming `Caseload` is missing the `.config` prerequisite namespace.
+    /// Incoming `Caseload` is missing the `.config` prerequisite namespace (or has zero provisioned nodes).
     MissingConfig,
     /// Required Google Gemini API key in `ProbeOptions` is empty or whitespace.
     MissingApiKey,
@@ -83,7 +96,7 @@ impl fmt::Display for ProbeError {
         match self {
             Self::MissingConfig => write!(
                 f,
-                "Cannot execute `probe` without a resolved `.config` namespace on the Caseload.\n  \
+                "Cannot execute `probe` without resolved node bindings in `.config` on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk probe` directly to telescope `[configure, probe]`."
             ),
             Self::MissingApiKey => write!(
@@ -113,12 +126,8 @@ impl std::error::Error for ProbeError {}
 
 /// Hexagonal port for executing a live or simulated connectivity health probe against a model endpoint.
 pub trait EndpointProber: Send + Sync {
-    /// Probes a single canonical model specifier (e.g. `"google:gemini-4-hydrogen"`)
-    /// using the provided API key, timeout budget in milliseconds, and optional thinking overrides (`probe.md` §4).
-    ///
-    /// Implementations uphold the Non-Throwing Diagnostic Capture Invariant (`probe.md` §3) by
-    /// returning a [`ProbeEndpointResult`] with `status: ProbeStatus::Error` and an actionable
-    /// `error` message when the endpoint is unreachable, times out, or returns an HTTP error.
+    /// Probes a single canonical `<provider>:<model>` specifier using the provided API key,
+    /// timeout budget in milliseconds, and optional thinking overrides (`probe.md` §4).
     fn probe_endpoint(
         &self,
         model_specifier: &str,
@@ -129,10 +138,18 @@ pub trait EndpointProber: Send + Sync {
     ) -> ProbeEndpointResult;
 }
 
-/// Executes the `probe` diagnostic stage concurrently across `.config.screener_model` and
-/// `.config.auditor_model` (`std::thread::scope`) and populates `.probe` on the [`Caseload`].
-///
-/// Fast-forwards without issuing network calls when `caseload.probe` is already populated.
+struct DeduplicatedProbeSpec<'a> {
+    model: String,
+    nodes: Vec<HeuristicNode>,
+    thinking_level: Option<ThinkingLevel>,
+    reasoning_budget: Option<u32>,
+    api_key: &'a str,
+}
+
+type TargetKey = (String, Option<ThinkingLevel>, Option<u32>);
+
+/// Executes the `probe` diagnostic stage concurrently across deduplicated `(model, thinking_level, reasoning_budget)`
+/// targets bound in `.config.nodes` (`std::thread::scope`) and populates `.probe` on the [`Caseload`].
 pub fn execute_probe(
     options: &ProbeOptions,
     prober: &dyn EndpointProber,
@@ -149,60 +166,85 @@ pub fn execute_probe(
     }
 
     let config = caseload.config.as_ref().ok_or(ProbeError::MissingConfig)?;
-    let screener_spec = config.screener_model.clone();
-    let auditor_spec = config.auditor_model.clone();
-    let auditor_thinking_level = config.thinking_level;
-    let auditor_reasoning_budget = config.reasoning_budget;
-    let screener_key = resolve_endpoint_probe_key(&screener_spec, options)?;
-    let auditor_key = resolve_endpoint_probe_key(&auditor_spec, options)?;
+    if config.nodes.is_empty() {
+        return Err(ProbeError::MissingConfig);
+    }
+
+    let mut index_by_key: BTreeMap<TargetKey, usize> = BTreeMap::new();
+    let mut specs: Vec<DeduplicatedProbeSpec<'_>> = Vec::new();
+    for (&node, node_cfg) in &config.nodes {
+        let key: TargetKey = (
+            node_cfg.model.clone(),
+            node_cfg.thinking_level,
+            node_cfg.reasoning_budget,
+        );
+        if let Some(&idx) = index_by_key.get(&key) {
+            specs[idx].nodes.push(node);
+        } else {
+            let api_key = resolve_endpoint_probe_key(&node_cfg.model, options)?;
+            let idx = specs.len();
+            index_by_key.insert(key, idx);
+            specs.push(DeduplicatedProbeSpec {
+                model: node_cfg.model.clone(),
+                nodes: vec![node],
+                thinking_level: node_cfg.thinking_level,
+                reasoning_budget: node_cfg.reasoning_budget,
+                api_key,
+            });
+        }
+    }
+
     let timeout_ms = options.timeout_ms;
+    let specs_ref = &specs;
+    let endpoints: Vec<ProbeEndpointResult> = std::thread::scope(|scope| {
+        let handles: Vec<_> = specs_ref
+            .iter()
+            .map(|spec| {
+                scope.spawn(move || {
+                    prober.probe_endpoint(
+                        &spec.model,
+                        spec.api_key,
+                        timeout_ms,
+                        spec.thinking_level,
+                        spec.reasoning_budget,
+                    )
+                })
+            })
+            .collect();
 
-    let (screener_result, auditor_result) = std::thread::scope(|scope| {
-        let screener_ref = &screener_spec;
-        let auditor_ref = &auditor_spec;
-        let screener_handle = scope.spawn(move || {
-            prober.probe_endpoint(screener_ref, screener_key, timeout_ms, None, None)
-        });
-        let auditor_handle = scope.spawn(move || {
-            prober.probe_endpoint(
-                auditor_ref,
-                auditor_key,
-                timeout_ms,
-                auditor_thinking_level,
-                auditor_reasoning_budget,
-            )
-        });
-
-        let screener = screener_handle
-            .join()
-            .unwrap_or_else(|_| ProbeEndpointResult {
-                status: ProbeStatus::Error,
-                latency_ms: 0,
-                model: screener_spec.clone(),
-                error: Some(
-                    "Screener probe worker thread terminated unexpectedly. Hint: Retry `canon-clerk probe`."
-                        .to_string(),
-                ),
-            });
-        let auditor = auditor_handle
-            .join()
-            .unwrap_or_else(|_| ProbeEndpointResult {
-                status: ProbeStatus::Error,
-                latency_ms: 0,
-                model: auditor_spec.clone(),
-                error: Some(
-                    "Auditor probe worker thread terminated unexpectedly. Hint: Retry `canon-clerk probe`."
-                        .to_string(),
-                ),
-            });
-
-        (screener, auditor)
+        specs_ref
+            .iter()
+            .zip(handles)
+            .map(|(spec, handle)| {
+                handle.join().unwrap_or_else(|_| ProbeEndpointResult {
+                    status: ProbeStatus::Error,
+                    latency_ms: 0,
+                    resolved_model: None,
+                    error: Some(format!(
+                        "Probe worker thread for `{}` terminated unexpectedly. Hint: Retry `canon-clerk probe`.",
+                        spec.model
+                    )),
+                })
+            })
+            .collect()
     });
 
-    Ok(caseload.with_probe(CaseloadProbe {
-        screener: screener_result,
-        auditor: auditor_result,
-    }))
+    let targets = specs
+        .into_iter()
+        .zip(endpoints)
+        .map(|(spec, endpoint)| ProbeTargetResult {
+            model: spec.model,
+            nodes: spec.nodes,
+            thinking_level: spec.thinking_level,
+            reasoning_budget: spec.reasoning_budget,
+            status: endpoint.status,
+            latency_ms: endpoint.latency_ms,
+            resolved_model: endpoint.resolved_model,
+            error: endpoint.error,
+        })
+        .collect();
+
+    Ok(caseload.with_probe(CaseloadProbe { targets }))
 }
 
 fn resolve_endpoint_probe_key<'a>(
@@ -226,251 +268,14 @@ fn resolve_endpoint_probe_key<'a>(
     }
 }
 
-#[derive(Debug, Serialize)]
-struct GeminiGenerateContentRequest<'a> {
-    contents: Vec<GeminiContent<'a>>,
-    #[serde(rename = "generationConfig")]
-    generation_config: GeminiGenerationConfig,
-}
-
-#[derive(Debug, Serialize)]
-struct GeminiContent<'a> {
-    parts: Vec<GeminiPart<'a>>,
-}
-
-#[derive(Debug, Serialize)]
-struct GeminiPart<'a> {
-    text: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-struct GeminiGenerationConfig {
-    #[serde(rename = "maxOutputTokens")]
-    max_output_tokens: u32,
-    temperature: f32,
-    #[serde(rename = "thinkingConfig", skip_serializing_if = "Option::is_none")]
-    thinking_config: Option<GeminiThinkingConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GeminiGenerateContentResponse {
-    #[serde(rename = "modelVersion")]
-    model_version: Option<String>,
-}
-
-/// Decodes and classifies an HTTP status code and response payload from a Gemini `:generateContent` probe.
-pub fn decode_gemini_probe_response(
-    status_code: u16,
-    body: &str,
-    model_specifier: &str,
-    latency_ms: u64,
-) -> ProbeEndpointResult {
-    if (200..300).contains(&status_code) {
-        let resolved_model = serde_json::from_str::<GeminiGenerateContentResponse>(body)
-            .ok()
-            .and_then(|resp| resp.model_version)
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| model_specifier.to_string());
-
-        return ProbeEndpointResult {
-            status: ProbeStatus::Ok,
-            latency_ms,
-            model: resolved_model,
-            error: None,
-        };
-    }
-
-    let upstream_detail = extract_gemini_error_detail(body);
-    let diagnostic = classify_gemini_http_error(status_code, model_specifier, &upstream_detail);
-    ProbeEndpointResult {
-        status: ProbeStatus::Error,
-        latency_ms,
-        model: model_specifier.to_string(),
-        error: Some(diagnostic),
-    }
-}
-
-/// Live Google Gemini HTTPS implementation of [`EndpointProber`] (`POST /v1beta/models/{model}:generateContent`).
-#[derive(Debug, Clone)]
-pub struct GeminiEndpointProber {
-    base_url: String,
-    client: reqwest::Client,
-}
-
-impl Default for GeminiEndpointProber {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GeminiEndpointProber {
-    /// Constructs a new live [`GeminiEndpointProber`] targeting the default Google Generative Language API endpoint.
-    pub fn new() -> Self {
-        Self::with_base_url(DEFAULT_GEMINI_BASE_URL)
-    }
-
-    /// Constructs a [`GeminiEndpointProber`] with a custom base URL.
-    pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        Self::with_client_and_base_url(build_pooled_http_client(), base_url)
-    }
-
-    /// Constructs a [`GeminiEndpointProber`] with a custom [`reqwest::Client`] and base URL.
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-            client,
-        }
-    }
-}
-
-impl EndpointProber for GeminiEndpointProber {
-    fn probe_endpoint(
-        &self,
-        model_specifier: &str,
-        api_key: &str,
-        timeout_ms: u64,
-        thinking_level: Option<ThinkingLevel>,
-        reasoning_budget: Option<u32>,
-    ) -> ProbeEndpointResult {
-        let payload = GeminiGenerateContentRequest {
-            contents: vec![GeminiContent {
-                parts: vec![GeminiPart { text: "ping" }],
-            }],
-            generation_config: GeminiGenerationConfig {
-                max_output_tokens: 16,
-                temperature: 0.0,
-                thinking_config: build_probe_thinking_config(
-                    model_specifier,
-                    thinking_level,
-                    reasoning_budget,
-                ),
-            },
-        };
-
-        match post_gemini_json(
-            &self.client,
-            &self.base_url,
-            model_specifier,
-            api_key,
-            timeout_ms,
-            &payload,
-        ) {
-            Ok(outcome) => decode_gemini_probe_response(
-                outcome.status_code,
-                &outcome.body,
-                model_specifier,
-                outcome.latency_ms,
-            ),
-            Err((err, latency_ms)) => ProbeEndpointResult {
-                status: ProbeStatus::Error,
-                latency_ms,
-                model: model_specifier.to_string(),
-                error: Some(err.to_string()),
-            },
-        }
-    }
-}
-
-/// Composite live [`EndpointProber`] routing generative `google:*` specifiers to [`GeminiEndpointProber`],
-/// `google:gemini-decision-*` specifiers to [`GeminiDecisionsEndpointProber`],
-/// and `typesafe:*` specifiers to [`TypesafeEndpointProber`].
-#[derive(Debug, Clone)]
-pub struct MultiProviderEndpointProber {
-    gemini: GeminiEndpointProber,
-    gemini_decisions: GeminiDecisionsEndpointProber,
-    typesafe: TypesafeEndpointProber,
-}
-
-impl Default for MultiProviderEndpointProber {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MultiProviderEndpointProber {
-    /// Constructs a new [`MultiProviderEndpointProber`] targeting default Gemini and TypeSafe endpoints.
-    pub fn new() -> Self {
-        let client = build_pooled_http_client();
-        Self {
-            gemini: GeminiEndpointProber::with_client_and_base_url(
-                client.clone(),
-                DEFAULT_GEMINI_BASE_URL,
-            ),
-            gemini_decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
-                client,
-                DEFAULT_GEMINI_BASE_URL,
-            ),
-            typesafe: TypesafeEndpointProber::new(),
-        }
-    }
-
-    /// Constructs a [`MultiProviderEndpointProber`] targeting custom base URLs (for hermetic loopback tests).
-    pub fn with_base_urls(
-        gemini_base_url: impl Into<String>,
-        typesafe_base_url: impl Into<String>,
-    ) -> Self {
-        let gemini_base = gemini_base_url.into();
-        let client = build_pooled_http_client();
-        Self {
-            gemini: GeminiEndpointProber::with_client_and_base_url(
-                client.clone(),
-                gemini_base.clone(),
-            ),
-            gemini_decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
-                client,
-                gemini_base,
-            ),
-            typesafe: TypesafeEndpointProber::with_base_url(typesafe_base_url),
-        }
-    }
-}
-
-impl EndpointProber for MultiProviderEndpointProber {
-    fn probe_endpoint(
-        &self,
-        model_specifier: &str,
-        api_key: &str,
-        timeout_ms: u64,
-        thinking_level: Option<ThinkingLevel>,
-        reasoning_budget: Option<u32>,
-    ) -> ProbeEndpointResult {
-        if model_provider(model_specifier) == TYPESAFE_PROVIDER {
-            self.typesafe.probe_endpoint(
-                model_specifier,
-                api_key,
-                timeout_ms,
-                thinking_level,
-                reasoning_budget,
-            )
-        } else if is_discriminative_model(model_specifier) {
-            self.gemini_decisions.probe_endpoint(
-                model_specifier,
-                api_key,
-                timeout_ms,
-                thinking_level,
-                reasoning_budget,
-            )
-        } else {
-            self.gemini.probe_endpoint(
-                model_specifier,
-                api_key,
-                timeout_ms,
-                thinking_level,
-                reasoning_budget,
-            )
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::caseload::{
         CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
-        DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, ResolvedNodeConfig,
     };
-    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct StubEndpointProber {
@@ -507,7 +312,7 @@ mod tests {
                 .unwrap_or_else(|| ProbeEndpointResult {
                     status: ProbeStatus::Ok,
                     latency_ms: 42,
-                    model: model_specifier.to_string(),
+                    resolved_model: Some(strip_provider_prefix(model_specifier).to_string()),
                     error: None,
                 })
         }
@@ -517,51 +322,21 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_strip_provider_prefix_and_build_generate_content_url() {
-            assert_eq!(
-                strip_provider_prefix("google:gemini-flash-lite-latest"),
-                "gemini-flash-lite-latest"
-            );
-            assert_eq!(strip_provider_prefix("gemini-2.5-pro"), "gemini-2.5-pro");
-            assert_eq!(
-                build_generate_content_url(
-                    "https://generativelanguage.googleapis.com/v1beta/",
-                    "google:gemini-flash-lite-latest"
-                ),
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
-            );
-        }
-
-        #[test]
-        fn test_decode_200_ok_extracts_model_version_or_falls_back_to_specifier() {
+        fn test_decode_200_ok_and_http_errors() {
             let body = r#"{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"modelVersion":"gemini-2.5-flash-lite-preview-06-17"}"#;
-            let res = decode_gemini_probe_response(200, body, DEFAULT_SCREENER_MODEL, 118);
+            let res =
+                decode_gemini_probe_response(200, body, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, 118);
             assert_eq!(res.status, ProbeStatus::Ok);
             assert_eq!(res.latency_ms, 118);
-            assert_eq!(res.model, "gemini-2.5-flash-lite-preview-06-17");
+            assert_eq!(
+                res.resolved_model.as_deref(),
+                Some("gemini-2.5-flash-lite-preview-06-17")
+            );
             assert_eq!(res.error, None);
 
-            let empty_json = r#"{}"#;
-            let fallback = decode_gemini_probe_response(200, empty_json, DEFAULT_AUDITOR_MODEL, 95);
-            assert_eq!(fallback.status, ProbeStatus::Ok);
-            assert_eq!(fallback.model, DEFAULT_AUDITOR_MODEL);
-            assert_eq!(fallback.error, None);
-        }
-
-        #[test]
-        fn test_decode_http_auth_and_not_found_errors_401_403_404() {
-            let auth_body = r#"{"error":{"code":401,"message":"API key not valid. Please pass a valid API key.","status":"UNAUTHENTICATED"}}"#;
-            let r401 = decode_gemini_probe_response(401, auth_body, DEFAULT_SCREENER_MODEL, 55);
-            assert_eq!(r401.status, ProbeStatus::Error);
-            let err401 = r401.error.expect("401 error message");
-            assert!(err401.contains("HTTP 401"));
-            assert!(err401.contains("API key not valid"));
-            assert!(err401.contains("Hint:"));
-
-            let r403 =
-                decode_gemini_probe_response(403, "Permission denied", DEFAULT_AUDITOR_MODEL, 61);
-            assert_eq!(r403.status, ProbeStatus::Error);
-            assert!(r403.error.expect("403").contains("HTTP 403"));
+            let fallback =
+                decode_gemini_probe_response(200, r#"{}"#, DEFAULT_GOOGLE_GENERATOR_MODEL, 95);
+            assert_eq!(fallback.resolved_model.as_deref(), Some("gemini-4-carbon"));
 
             let r404 = decode_gemini_probe_response(
                 404,
@@ -570,86 +345,32 @@ mod tests {
                 40,
             );
             assert_eq!(r404.status, ProbeStatus::Error);
-            let err404 = r404.error.expect("404 error");
-            assert!(err404.contains("HTTP 404"));
-            assert!(err404.contains("--screener-model"));
-        }
-
-        #[test]
-        fn test_probe_thinking_config_defaults_gemini_4_to_low_and_omits_legacy_when_unspecified() {
-            assert_eq!(
-                build_probe_thinking_config("google:gemini-4-carbon", None, None),
-                Some(GeminiThinkingConfig {
-                    include_thoughts: false,
-                    thinking_level: Some("LOW"),
-                    thinking_budget: None,
-                })
-            );
-            assert_eq!(
-                build_probe_thinking_config(
-                    "google:gemini-4-carbon",
-                    Some(ThinkingLevel::Medium),
-                    None
-                ),
-                Some(GeminiThinkingConfig {
-                    include_thoughts: false,
-                    thinking_level: Some("MEDIUM"),
-                    thinking_budget: None,
-                })
-            );
-            assert_eq!(
-                build_probe_thinking_config("google:gemini-pro-latest", None, None),
-                None
-            );
-        }
-
-        #[test]
-        fn test_decode_http_rate_limit_and_server_errors_429_5xx() {
-            let r429 = decode_gemini_probe_response(
-                429,
-                r#"{"error":{"message":"Resource has been exhausted (e.g. check quota)."}}"#,
-                DEFAULT_AUDITOR_MODEL,
-                77,
-            );
-            assert_eq!(r429.status, ProbeStatus::Error);
-            let err429 = r429.error.expect("429 error");
-            assert!(err429.contains("HTTP 429"));
-            assert!(err429.contains("quota"));
-
-            let r503 = decode_gemini_probe_response(
-                503,
-                "Service Unavailable",
-                DEFAULT_AUDITOR_MODEL,
-                310,
-            );
-            assert_eq!(r503.status, ProbeStatus::Error);
-            let err503 = r503.error.expect("503 error");
-            assert!(err503.contains("HTTP 503"));
-            assert!(err503.contains("Hint:"));
+            assert_eq!(r404.resolved_model, None);
+            assert!(r404.error.expect("404").contains("--<node>-model"));
         }
     }
 
-    mod concurrent_execution_and_invariants {
+    mod deduplication_and_concurrent_execution {
         use super::*;
 
         #[test]
-        fn test_execute_probe_populates_both_endpoints_concurrently() {
+        fn test_deduplicates_five_google_nodes_into_two_concurrent_targets_in_canonical_order() {
             let mut responses = BTreeMap::new();
             responses.insert(
-                DEFAULT_SCREENER_MODEL.to_string(),
+                DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                 ProbeEndpointResult {
                     status: ProbeStatus::Ok,
-                    latency_ms: 110,
-                    model: "gemini-2.5-flash-lite".to_string(),
+                    latency_ms: 88,
+                    resolved_model: Some("gemini-decision-1".to_string()),
                     error: None,
                 },
             );
             responses.insert(
-                DEFAULT_AUDITOR_MODEL.to_string(),
+                DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                 ProbeEndpointResult {
                     status: ProbeStatus::Ok,
-                    latency_ms: 245,
-                    model: "gemini-2.5-pro".to_string(),
+                    latency_ms: 195,
+                    resolved_model: Some("gemini-4-carbon".to_string()),
                     error: None,
                 },
             );
@@ -665,185 +386,100 @@ mod tests {
             assert_eq!(prober.calls(), 2);
             let probe = result.probe.expect("probe populated");
             assert!(probe.is_healthy());
-            assert_eq!(probe.screener.latency_ms, 110);
-            assert_eq!(probe.screener.model, "gemini-2.5-flash-lite");
-            assert_eq!(probe.auditor.latency_ms, 245);
-            assert_eq!(probe.auditor.model, "gemini-2.5-pro");
+            assert_eq!(probe.targets.len(), 2);
+            assert_eq!(probe.targets[0].model, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL);
+            assert_eq!(
+                probe.targets[0].nodes,
+                vec![
+                    HeuristicNode::Apprise,
+                    HeuristicNode::Docket,
+                    HeuristicNode::Admit,
+                    HeuristicNode::Vet,
+                ]
+            );
+            assert_eq!(probe.targets[1].model, DEFAULT_GOOGLE_GENERATOR_MODEL);
+            assert_eq!(probe.targets[1].nodes, vec![HeuristicNode::Audit]);
         }
 
         #[test]
-        fn test_non_throwing_capture_records_partial_and_full_endpoint_failures_on_caseload() {
+        fn test_typesafe_sole_provider_deduplicates_four_nodes_into_single_target() {
+            let prober = StubEndpointProber::new(BTreeMap::new());
+            let mut nodes = BTreeMap::new();
+            for node in [
+                HeuristicNode::Apprise,
+                HeuristicNode::Docket,
+                HeuristicNode::Admit,
+                HeuristicNode::Vet,
+            ] {
+                nodes.insert(
+                    node,
+                    ResolvedNodeConfig::new(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+                );
+            }
+            let cfg = CaseloadConfig {
+                provider: "typesafe".to_string(),
+                nodes,
+            };
+            let result = execute_probe(
+                &ProbeOptions {
+                    api_key: String::new(),
+                    typesafe_api_key: Some("ts-key".to_string()),
+                    timeout_ms: 2000,
+                },
+                &prober,
+                Caseload::new().with_config(cfg),
+            )
+            .expect("typesafe-only probe succeeds without google key");
+
+            assert_eq!(prober.calls(), 1);
+            let probe = result.probe.expect("probe");
+            assert!(probe.is_healthy());
+            assert_eq!(probe.targets.len(), 1);
+            assert_eq!(probe.targets[0].model, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL);
+            assert_eq!(probe.targets[0].nodes.len(), 4);
+        }
+
+        #[test]
+        fn test_non_throwing_capture_and_fast_forward_invariants() {
             let mut responses = BTreeMap::new();
             responses.insert(
-                DEFAULT_SCREENER_MODEL.to_string(),
-                ProbeEndpointResult {
-                    status: ProbeStatus::Ok,
-                    latency_ms: 95,
-                    model: "gemini-2.5-flash-lite".to_string(),
-                    error: None,
-                },
-            );
-            responses.insert(
-                DEFAULT_AUDITOR_MODEL.to_string(),
+                DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                 ProbeEndpointResult {
                     status: ProbeStatus::Error,
                     latency_ms: 5001,
-                    model: DEFAULT_AUDITOR_MODEL.to_string(),
+                    resolved_model: None,
                     error: Some(
-                        "Request to `google:gemini-pro-latest` timed out after 5000ms. Hint: Increase `--timeout <MS>`."
-                            .to_string(),
+                        "Request timed out after 5000ms. Hint: Increase `--timeout`.".to_string(),
                     ),
                 },
             );
             let prober = StubEndpointProber::new(responses);
-            let caseload = Caseload::new().with_config(CaseloadConfig::default());
-            let opts = ProbeOptions {
-                api_key: "synthetic-test-key".to_string(),
-                typesafe_api_key: None,
-                timeout_ms: DEFAULT_PROBE_TIMEOUT_MS,
-            };
-
-            let enriched =
-                execute_probe(&opts, &prober, caseload).expect("non-throwing capture must succeed");
-            let probe = enriched.probe.expect("probe namespace populated");
-            assert!(!probe.is_healthy());
-            assert_eq!(probe.screener.status, ProbeStatus::Ok);
-            assert_eq!(probe.auditor.status, ProbeStatus::Error);
-            assert!(
-                probe
-                    .auditor
-                    .error
-                    .as_deref()
-                    .unwrap_or_default()
-                    .contains("timed out")
-            );
-        }
-
-        #[test]
-        fn test_fast_forwards_when_probe_namespace_already_populated() {
-            let existing_probe = CaseloadProbe {
-                screener: ProbeEndpointResult {
-                    status: ProbeStatus::Ok,
-                    latency_ms: 50,
-                    model: DEFAULT_SCREENER_MODEL.to_string(),
-                    error: None,
-                },
-                auditor: ProbeEndpointResult {
-                    status: ProbeStatus::Ok,
-                    latency_ms: 80,
-                    model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    error: None,
-                },
-            };
-            let caseload = Caseload::new()
-                .with_config(CaseloadConfig::default())
-                .with_probe(existing_probe.clone());
-            let prober = StubEndpointProber::new(BTreeMap::new());
-            let opts = ProbeOptions::default();
-
-            let result = execute_probe(&opts, &prober, caseload).expect("fast-forward");
-            assert_eq!(prober.calls(), 0);
-            assert_eq!(result.probe, Some(existing_probe));
-        }
-
-        #[test]
-        fn test_preserves_upstream_namespaces_and_validates_prerequisites() {
-            let prober = StubEndpointProber::new(BTreeMap::new());
-
-            let no_cfg = Caseload::new();
-            let err_cfg = execute_probe(
-                &ProbeOptions {
-                    api_key: "key".to_string(),
-                    typesafe_api_key: None,
-                    timeout_ms: 1000,
-                },
-                &prober,
-                no_cfg,
-            )
-            .expect_err("missing config must error");
-            assert_eq!(err_cfg, ProbeError::MissingConfig);
-            assert!(err_cfg.to_string().contains("Hint:"));
-
-            let with_cfg = Caseload::new().with_config(CaseloadConfig::default());
-            let err_key = execute_probe(
-                &ProbeOptions {
-                    api_key: "   ".to_string(),
-                    typesafe_api_key: None,
-                    timeout_ms: 1000,
-                },
-                &prober,
-                with_cfg.clone(),
-            )
-            .expect_err("blank key must error");
-            assert_eq!(err_key, ProbeError::MissingApiKey);
-
-            let err_timeout = execute_probe(
-                &ProbeOptions {
-                    api_key: "key".to_string(),
-                    typesafe_api_key: None,
-                    timeout_ms: 0,
-                },
-                &prober,
-                with_cfg,
-            )
-            .expect_err("zero timeout must error");
-            assert_eq!(err_timeout, ProbeError::InvalidTimeout { timeout_ms: 0 });
-
-            let full_upstream = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    pr_title: Some("feat: probe".to_string()),
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery::default())
-                .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default());
-
             let enriched = execute_probe(
                 &ProbeOptions {
-                    api_key: "valid-key".to_string(),
+                    api_key: "key".to_string(),
                     typesafe_api_key: None,
-                    timeout_ms: 2500,
+                    timeout_ms: DEFAULT_PROBE_TIMEOUT_MS,
                 },
                 &prober,
-                full_upstream.clone(),
+                Caseload::new()
+                    .with_intake(CaseloadIntake::default())
+                    .with_discovery(CaseloadDiscovery::default())
+                    .with_validation(CaseloadValidation::default())
+                    .with_config(CaseloadConfig::default()),
             )
-            .expect("enrich full caseload");
-            assert_eq!(enriched.intake, full_upstream.intake);
-            assert_eq!(enriched.discovery, full_upstream.discovery);
-            assert_eq!(enriched.validation, full_upstream.validation);
-            assert_eq!(enriched.config, full_upstream.config);
-            assert!(enriched.probe.is_some());
+            .expect("non-throwing capture");
 
-            // Hybrid screener=typesafe:jev-latest + auditor=google:gemini-4-carbon requires typesafe_api_key
-            let hybrid_cfg = Caseload::new().with_config(CaseloadConfig {
-                screener_model: "typesafe:jev-latest".to_string(),
-                auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                thinking_level: None,
-                reasoning_budget: None,
-            });
-            let err_ts = execute_probe(
-                &ProbeOptions {
-                    api_key: "valid-google-key".to_string(),
-                    typesafe_api_key: None,
-                    timeout_ms: 2500,
-                },
-                &prober,
-                hybrid_cfg.clone(),
-            )
-            .expect_err("missing typesafe key must error");
-            assert_eq!(err_ts, ProbeError::MissingTypesafeApiKey);
+            assert_eq!(prober.calls(), 2);
+            let probe = enriched.probe.clone().expect("probe");
+            assert!(!probe.is_healthy());
+            assert_eq!(probe.targets[0].status, ProbeStatus::Ok);
+            assert_eq!(probe.targets[1].status, ProbeStatus::Error);
 
-            let ok_hybrid = execute_probe(
-                &ProbeOptions {
-                    api_key: "valid-google-key".to_string(),
-                    typesafe_api_key: Some("valid-typesafe-key".to_string()),
-                    timeout_ms: 2500,
-                },
-                &prober,
-                hybrid_cfg,
-            )
-            .expect("hybrid probe with both keys");
-            assert!(ok_hybrid.probe.expect("probe").is_healthy());
+            // Fast-forward when .probe is already present
+            let ff = execute_probe(&ProbeOptions::default(), &prober, enriched.clone())
+                .expect("fast-forward");
+            assert_eq!(prober.calls(), 2);
+            assert_eq!(ff, enriched);
         }
 
         #[test]
@@ -924,8 +560,14 @@ mod tests {
             server.join().expect("server joined");
             let probe = out.probe.expect("probe populated");
             assert!(probe.is_healthy());
-            assert_eq!(probe.screener.model, "gemini-decision-1");
-            assert_eq!(probe.auditor.model, "gemini-4-carbon");
+            assert_eq!(
+                probe.targets[0].resolved_model.as_deref(),
+                Some("gemini-decision-1")
+            );
+            assert_eq!(
+                probe.targets[1].resolved_model.as_deref(),
+                Some("gemini-4-carbon")
+            );
 
             let mut paths = seen_paths.lock().unwrap().clone();
             paths.sort();

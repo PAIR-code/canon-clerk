@@ -17,15 +17,16 @@
 use super::AppriseArgs;
 use super::guards::{resolve_apprise_batch_size, resolve_apprise_concurrency};
 use crate::apprise::{AppriseOptions, effective_apprise_batch_size, execute_apprise};
-use crate::caseload::{Caseload, IntakeScope};
+use crate::caseload::{Caseload, HeuristicNode, IntakeScope};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
-    build_live_model_provider, map_discover_error, resolve_screener_branch_b_options,
+    build_live_model_provider, map_discover_error, resolve_closure_branch_b_options,
     run_branch_b_configure,
 };
+use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::DEFAULT_GENERATION_TIMEOUT_MS;
@@ -117,16 +118,27 @@ pub(super) fn resolve_apprise_discover(
     Ok((updated, StageDisposition::Executed))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal stage helper threading CLI args, env, stored config, threshold, caseload, workspace, backend, and telemetry"
+)]
 pub(super) fn execute_jit_configure_and_apprise(
     args: &AppriseArgs,
     env: &BTreeMap<String, String>,
+    stored_config: Option<StoredConfig>,
     threshold: f64,
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition), CliError> {
-    let configure_options = resolve_screener_branch_b_options(&args.provider, env)?;
+    let configure_options = resolve_closure_branch_b_options(
+        &args.provider,
+        args.models.resolve_node_models()?,
+        ConfigureScope::closure([HeuristicNode::Apprise]),
+        stored_config,
+        env,
+    )?;
     let max_canons_per_call = resolve_apprise_batch_size(
         args.apprise_batch_size,
         env,
@@ -141,7 +153,7 @@ pub(super) fn execute_jit_configure_and_apprise(
         .transport
         .resolve_retry_policy(env, configure_options.stored_config.as_ref())?;
     let config_was_present =
-        caseload.config.is_some() && !configure_options.has_explicit_overrides();
+        can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
     caseload.apprisal = None;
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
@@ -154,13 +166,13 @@ pub(super) fn execute_jit_configure_and_apprise(
             retry_policy,
         )?),
     };
+    let apprise_model = cfg_snapshot
+        .model_for(HeuristicNode::Apprise)
+        .unwrap_or_default();
     let apprise_opts = AppriseOptions {
         threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call: effective_apprise_batch_size(
-            max_canons_per_call,
-            &cfg_snapshot.screener_model,
-        ),
+        max_canons_per_call: effective_apprise_batch_size(max_canons_per_call, apprise_model),
         max_concurrent_calls,
     };
 

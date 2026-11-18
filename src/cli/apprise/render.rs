@@ -15,10 +15,12 @@
 //! Terminal Funnel Provenance receipt and `stylish`/`compact`/`json` output formatters for `canon-clerk apprise`.
 
 use super::{AppriseArgs, AppriseFormat};
-use crate::caseload::{ApprisalStatus, Caseload, CaseloadApprisal, CaseloadDiscovery};
+use crate::caseload::{
+    ApprisalStatus, Caseload, CaseloadApprisal, CaseloadDiscovery, HeuristicNode,
+};
 use crate::cli::CliError;
 use crate::cli::provenance::{
-    StageDisposition, fast_forward_suffix, glyph_for, write_configure_provenance,
+    StageDisposition, fast_forward_suffix, glyph_for, write_closure_configure_provenance,
     write_discover_provenance, write_intent_intake_provenance, write_validate_provenance,
 };
 use std::io::Write;
@@ -106,7 +108,7 @@ fn render_stylish_output(
         stdout,
     )?;
     write_validate_provenance(caseload.validation.as_ref(), wm.validate, stdout)?;
-    write_configure_provenance(caseload, wm.configure, stdout)?;
+    write_closure_configure_provenance(caseload, &[HeuristicNode::Apprise], wm.configure, stdout)?;
     write_apprise_provenance(caseload.apprisal.as_ref(), wm.apprise, wm.threshold, stdout)?;
     writeln!(stdout)?;
 

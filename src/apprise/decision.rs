@@ -17,7 +17,8 @@
 use super::prompt::{append_canon_section, build_apprise_intent_prefix};
 use super::{AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS};
 use crate::caseload::{
-    ApprisalStatus, CanonApprisalAssessment, Caseload, CaseloadApprisal, normalize_unit_score,
+    ApprisalStatus, CanonApprisalAssessment, Caseload, CaseloadApprisal, HeuristicNode,
+    normalize_unit_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
@@ -51,10 +52,12 @@ pub(super) fn execute_apprise_decisions(
         .discovery
         .as_ref()
         .ok_or(AppriseError::MissingDiscovery)?;
-    let config = caseload
+    let apprise_model = caseload
         .config
         .as_ref()
-        .ok_or(AppriseError::MissingConfig)?;
+        .and_then(|c| c.model_for(HeuristicNode::Apprise))
+        .ok_or(AppriseError::MissingConfig)?
+        .to_string();
 
     let shared_state = build_apprise_intent_prefix(intake, discovery);
     let mut rendered_items = Vec::with_capacity(discovery.candidate_canons.len());
@@ -77,7 +80,7 @@ pub(super) fn execute_apprise_decisions(
         rendered_items.push((canon_ref.clone(), q_text));
     }
 
-    let budget = DecisionBudgetProfile::for_model(&config.screener_model);
+    let budget = DecisionBudgetProfile::for_model(&apprise_model);
     let max_per_call = options
         .max_canons_per_call
         .map_or(budget.max_nouls_per_call, |n| {
@@ -104,7 +107,7 @@ pub(super) fn execute_apprise_decisions(
         prepared.push((
             batch_canons,
             DecisionRequest {
-                model_specifier: config.screener_model.clone(),
+                model_specifier: apprise_model.clone(),
                 state: shared_state.clone(),
                 questions,
                 timeout_ms: options.timeout_ms,
@@ -120,7 +123,7 @@ pub(super) fn execute_apprise_decisions(
         &prepared,
         concurrency_limit,
         threshold,
-        &config.screener_model,
+        &apprise_model,
         workspace,
         provider,
     )?;
@@ -227,21 +230,21 @@ mod tests {
     use crate::apprise::execute_apprise;
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
-        CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation, DiscoveryMode,
+        CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
+        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
     };
-    use crate::configure::DEFAULT_JEV_MODEL;
     use crate::provider::{GenerationRequest, GenerationResponse, TokenUsage};
 
-    struct StubAppriseScreener;
+    struct StubAppriseDecisions;
 
-    impl StructuredModelProvider for StubAppriseScreener {
+    impl StructuredModelProvider for StubAppriseDecisions {
         fn generate_structured(
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
             Err(ProviderError::UnsupportedProvider {
                 provider: "typesafe".to_string(),
-                model_specifier: DEFAULT_JEV_MODEL.to_string(),
+                model_specifier: DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL.to_string(),
             })
         }
 
@@ -292,16 +295,16 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: DEFAULT_JEV_MODEL.to_string(),
-                ..CaseloadConfig::default()
-            });
+            .with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Apprise, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+            );
 
         let out = execute_apprise(
             &AppriseOptions::default(),
             caseload,
             &ws,
-            &StubAppriseScreener,
+            &StubAppriseDecisions,
         )
         .expect("apprise decision screening");
         let apprisal = out.apprisal.expect("apprisal populated");
@@ -340,7 +343,7 @@ mod tests {
             },
             gemini_dec_caseload,
             &ws,
-            &StubAppriseScreener,
+            &StubAppriseDecisions,
         )
         .expect("gemini-decision-1 apprise screening");
         assert_eq!(

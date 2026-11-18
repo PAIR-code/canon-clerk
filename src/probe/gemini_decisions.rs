@@ -14,8 +14,8 @@
 
 //! Google Gemini Decisions (`POST /v1beta/decisions`) diagnostic endpoint prober implementation.
 
-use crate::caseload::{ProbeEndpointResult, ProbeStatus, ThinkingLevel};
-use crate::probe::EndpointProber;
+use crate::caseload::{ProbeStatus, ThinkingLevel};
+use crate::probe::{EndpointProber, ProbeEndpointResult};
 use crate::provider::{
     DEFAULT_GEMINI_BASE_URL, GeminiDecisionsRequest, GeminiDecisionsResponse, GeminiNoulQuestion,
     build_pooled_http_client, classify_gemini_decisions_http_error, extract_gemini_error_detail,
@@ -36,12 +36,12 @@ pub fn decode_gemini_decisions_probe_response(
             .and_then(|resp| resp.model)
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| model_specifier.to_string());
+            .unwrap_or_else(|| strip_provider_prefix(model_specifier).to_string());
 
         return ProbeEndpointResult {
             status: ProbeStatus::Ok,
             latency_ms,
-            model: resolved_model,
+            resolved_model: Some(resolved_model),
             error: None,
         };
     }
@@ -52,7 +52,7 @@ pub fn decode_gemini_decisions_probe_response(
     ProbeEndpointResult {
         status: ProbeStatus::Error,
         latency_ms,
-        model: model_specifier.to_string(),
+        resolved_model: None,
         error: Some(diagnostic),
     }
 }
@@ -127,7 +127,7 @@ impl EndpointProber for GeminiDecisionsEndpointProber {
             Err((err, latency_ms)) => ProbeEndpointResult {
                 status: ProbeStatus::Error,
                 latency_ms,
-                model: model_specifier.to_string(),
+                resolved_model: None,
                 error: Some(err.to_string()),
             },
         }

@@ -39,10 +39,9 @@ pub(crate) enum ClosureBackend<'a> {
     },
 }
 
-/// Returns `true` if any explicit CLI provider or model override flag was passed.
+/// Returns `true` if any explicit CLI provider, reasoning, or credential override flag was passed.
 pub(crate) fn has_provider_overrides(provider: &ProviderConfigArgs) -> bool {
-    provider.screener_model.is_some()
-        || provider.auditor_model.is_some()
+    provider.provider.is_some()
         || provider.thinking_level.is_some()
         || provider.reasoning_budget.is_some()
         || provider.gemini_api_key.is_some()

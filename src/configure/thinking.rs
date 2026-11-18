@@ -12,12 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Thinking level and reasoning budget parsing, precedence cascade, and mutual-exclusivity checks.
+//! Extended-thinking parsing, per-layer mutual exclusivity, and per-node cascade resolution (`configure.md` §3–4).
 
-use crate::caseload::{CaseloadConfig, ThinkingLevel};
+use crate::caseload::{HeuristicNode, ResolvedNodeConfig, ThinkingLevel};
 use crate::configure::{
     ConfigureError, ConfigureOptions, ENV_REASONING_BUDGET, ENV_THINKING_LEVEL, StoredConfig,
+    is_discriminative_model,
 };
+
+pub(super) type ThinkingPair = (Option<ThinkingLevel>, Option<u32>);
+
+/// Pre-validated global thinking layers (`CLI` ≻ `Env` and `config.json defaults`).
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct GlobalThinkingLayers {
+    pub cli_or_env: Option<ThinkingPair>,
+    pub stored_defaults: Option<ThinkingPair>,
+}
 
 /// Parses a raw `--thinking-level` / `CANON_CLERK_THINKING_LEVEL` / `thinkingLevel` string.
 pub fn parse_thinking_level(raw: &str) -> Result<ThinkingLevel, ConfigureError> {
@@ -35,23 +45,37 @@ fn parse_reasoning_budget(raw: &str) -> Result<u32, ConfigureError> {
         })
 }
 
-/// Resolves mutually exclusive `(thinking_level, reasoning_budget)` across CLI overrides,
-/// environment variables, user `config.json`, and upstream `caseload.config`.
-pub(super) fn resolve_thinking_options(
+fn parse_stored_pair(
+    raw_level: Option<&str>,
+    budget: Option<u32>,
+    source_label: &str,
+) -> Result<Option<ThinkingPair>, ConfigureError> {
+    let trimmed_lvl = raw_level.map(str::trim).filter(|s| !s.is_empty());
+    match (trimmed_lvl, budget) {
+        (Some(_), Some(_)) => Err(ConfigureError::ConflictingThinkingOptions {
+            source: source_label.to_string(),
+        }),
+        (Some(lvl), None) => Ok(Some((Some(parse_thinking_level(lvl)?), None))),
+        (None, Some(bud)) => Ok(Some((None, Some(bud)))),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Validates global CLI, environment, and `defaults` extended-thinking layers up front.
+pub(super) fn resolve_global_thinking_layers(
     options: &ConfigureOptions,
     stored: Option<&StoredConfig>,
-    existing_config: Option<&CaseloadConfig>,
-) -> Result<(Option<ThinkingLevel>, Option<u32>), ConfigureError> {
-    match (options.thinking_level, options.reasoning_budget) {
+) -> Result<GlobalThinkingLayers, ConfigureError> {
+    let cli_pair = match (options.thinking_level, options.reasoning_budget) {
         (Some(_), Some(_)) => {
             return Err(ConfigureError::ConflictingThinkingOptions {
                 source: "CLI flags (`--thinking-level` and `--reasoning-budget`)".to_string(),
             });
         }
-        (Some(level), None) => return Ok((Some(level), None)),
-        (None, Some(budget)) => return Ok((None, Some(budget))),
-        (None, None) => {}
-    }
+        (Some(level), None) => Some((Some(level), None)),
+        (None, Some(budget)) => Some((None, Some(budget))),
+        (None, None) => None,
+    };
 
     let env_level = options
         .env
@@ -64,7 +88,7 @@ pub(super) fn resolve_thinking_options(
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
 
-    match (env_level, env_budget) {
+    let env_pair = match (env_level, env_budget) {
         (Some(_), Some(_)) => {
             return Err(ConfigureError::ConflictingThinkingOptions {
                 source: format!(
@@ -72,33 +96,73 @@ pub(super) fn resolve_thinking_options(
                 ),
             });
         }
-        (Some(raw_lvl), None) => return Ok((Some(parse_thinking_level(raw_lvl)?), None)),
-        (None, Some(raw_bud)) => return Ok((None, Some(parse_reasoning_budget(raw_bud)?))),
-        (None, None) => {}
-    }
+        (Some(raw_lvl), None) => Some((Some(parse_thinking_level(raw_lvl)?), None)),
+        (None, Some(raw_bud)) => Some((None, Some(parse_reasoning_budget(raw_bud)?))),
+        (None, None) => None,
+    };
 
-    let stored_level = stored
-        .and_then(|s| s.thinking_level.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let stored_budget = stored.and_then(|s| s.reasoning_budget);
+    let stored_defaults = match stored {
+        Some(cfg) => parse_stored_pair(
+            cfg.defaults.thinking_level.as_deref(),
+            cfg.defaults.reasoning_budget,
+            "configuration file (`defaults.thinkingLevel` and `defaults.reasoningBudget`)",
+        )?,
+        None => None,
+    };
 
-    match (stored_level, stored_budget) {
-        (Some(_), Some(_)) => {
-            return Err(ConfigureError::ConflictingThinkingOptions {
-                source: "configuration file (`thinkingLevel` and `reasoningBudget`)".to_string(),
+    Ok(GlobalThinkingLayers {
+        cli_or_env: cli_pair.or(env_pair),
+        stored_defaults,
+    })
+}
+
+/// Resolves `(thinking_level, reasoning_budget)` for a single `node` and its resolved `model`:
+/// - `Discriminator` models reject explicit per-node `nodes.<node>.{thinkingLevel, reasoningBudget}`
+///   with exit `2` while leaving shared/ambient thinking unset (`(None, None)`).
+/// - `Generator` models cascade: `CLI` ≻ `Env` ≻ `nodes.<node>.*` ≻ `defaults.*` ≻ `existing_node` ≻ `(None, None)`.
+pub(super) fn resolve_node_thinking_options(
+    node: HeuristicNode,
+    model: &str,
+    global: GlobalThinkingLayers,
+    stored: Option<&StoredConfig>,
+    existing_node: Option<&ResolvedNodeConfig>,
+) -> Result<ThinkingPair, ConfigureError> {
+    let node_stored = match stored.and_then(|s| s.node(node)) {
+        Some(n) => parse_stored_pair(
+            n.thinking_level.as_deref(),
+            n.reasoning_budget,
+            &format!(
+                "configuration file (`nodes.{node}.thinkingLevel` and `nodes.{node}.reasoningBudget`)"
+            ),
+        )?,
+        None => None,
+    };
+
+    if is_discriminative_model(model) {
+        if node_stored.is_some() {
+            return Err(ConfigureError::DiscriminativeNodeThinkingUnsupported {
+                node,
+                specifier: model.to_string(),
             });
         }
-        (Some(raw_lvl), None) => return Ok((Some(parse_thinking_level(raw_lvl)?), None)),
-        (None, Some(budget)) => return Ok((None, Some(budget))),
-        (None, None) => {}
+        return Ok((None, None));
     }
 
-    if let Some(existing) = existing_config {
+    if let Some(pair) = global.cli_or_env {
+        return Ok(pair);
+    }
+    if let Some(pair) = node_stored {
+        return Ok(pair);
+    }
+    if let Some(pair) = global.stored_defaults {
+        return Ok(pair);
+    }
+    if let Some(existing) = existing_node {
         if existing.thinking_level.is_some() && existing.reasoning_budget.is_some() {
             return Err(ConfigureError::ConflictingThinkingOptions {
-                source: "upstream Caseload `.config` (`thinking_level` and `reasoning_budget`)"
-                    .to_string(),
+                source: format!(
+                    "upstream Caseload `.config.nodes.{node}` (`thinking_level` and `reasoning_budget`)"
+                ),
             });
         }
         return Ok((existing.thinking_level, existing.reasoning_budget));

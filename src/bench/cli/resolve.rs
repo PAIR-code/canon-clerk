@@ -20,11 +20,13 @@ use crate::apprise::ENV_APPRISE_THRESHOLD;
 use crate::audit::ENV_AUDIT_THRESHOLD;
 use crate::bench::{
     BenchmarkStage, ConsistencyBenchError, DEFAULT_BENCHMARK_TRIALS, ENV_BENCH_FORMAT,
-    ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_OUTPUT_JSON, ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD,
-    ENV_BENCH_TRIALS,
+    ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_MODEL, ENV_BENCH_OUTPUT_JSON, ENV_BENCH_STAGE,
+    ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS,
 };
-use crate::caseload::normalize_unit_score;
+use crate::caseload::{Caseload, HeuristicNode, normalize_unit_score};
 use crate::cli::CliError;
+use crate::cli::runners::resolve_closure_branch_b_options;
+use crate::configure::{ConfigureOptions, ConfigureScope, StoredConfig};
 use crate::docket::ENV_DOCKET_THRESHOLD;
 use crate::vet::ENV_VET_THRESHOLD;
 use clap::ValueEnum;
@@ -43,10 +45,11 @@ pub(super) struct ResolvedCliParams {
 pub(super) fn resolve_cli_parameters(
     cli: &ConsistencyBenchCli,
     env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
 ) -> Result<ResolvedCliParams, CliError> {
     let stage = resolve_stage(cli.stage, env)?;
     let trials = resolve_trials(cli.trials, env)?;
-    let threshold = resolve_threshold(stage, cli.threshold, env)?;
+    let threshold = resolve_threshold(stage, cli.threshold, env, stored)?;
     let format = resolve_format(cli.format, cli.json, env)?;
     let include_stable = resolve_include_stable(cli.include_stable, env)?;
     let output_json = cli.output_json.clone().or_else(|| {
@@ -64,6 +67,73 @@ pub(super) fn resolve_cli_parameters(
         include_stable,
         output_json,
     })
+}
+
+pub(super) fn resolve_bench_configure_options(
+    cli: &ConsistencyBenchCli,
+    stage: BenchmarkStage,
+    incoming: Option<&Caseload>,
+    stored_config: Option<StoredConfig>,
+    env: &BTreeMap<String, String>,
+) -> Result<ConfigureOptions, CliError> {
+    let mut node_models = cli.models.to_node_map();
+    let target_node = stage.heuristic_node();
+    if let std::collections::btree_map::Entry::Vacant(slot) = node_models.entry(target_node) {
+        if let Some(raw_flag) = cli
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            slot.insert(raw_flag.to_string());
+        } else if let Some(raw_env) = env
+            .get(ENV_BENCH_MODEL)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            slot.insert(raw_env.to_string());
+        }
+    }
+
+    let required_nodes = required_closure_nodes(stage, incoming);
+    resolve_closure_branch_b_options(
+        &cli.provider,
+        node_models,
+        ConfigureScope::closure(required_nodes),
+        stored_config,
+        env,
+    )
+}
+
+fn required_closure_nodes(
+    stage: BenchmarkStage,
+    incoming: Option<&Caseload>,
+) -> Vec<HeuristicNode> {
+    let has_docket = incoming.is_some_and(|c| c.docket.is_some());
+    let has_evidence = incoming.is_some_and(|c| c.evidence.is_some());
+    match stage {
+        BenchmarkStage::Apprise => vec![HeuristicNode::Apprise],
+        BenchmarkStage::Docket => vec![HeuristicNode::Docket],
+        BenchmarkStage::Admit => {
+            if has_docket {
+                vec![HeuristicNode::Admit]
+            } else {
+                vec![HeuristicNode::Docket, HeuristicNode::Admit]
+            }
+        }
+        BenchmarkStage::Vet | BenchmarkStage::Audit => {
+            let mut nodes = Vec::new();
+            if !has_evidence && !has_docket {
+                nodes.push(HeuristicNode::Docket);
+            }
+            if !has_evidence {
+                nodes.push(HeuristicNode::Admit);
+            }
+            nodes.push(stage.heuristic_node());
+            nodes
+        }
+    }
 }
 
 pub(super) fn map_bench_error(err: ConsistencyBenchError) -> CliError {
@@ -131,6 +201,7 @@ fn resolve_threshold(
     stage: BenchmarkStage,
     flag_threshold: Option<f64>,
     env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
 ) -> Result<f64, CliError> {
     let default_val = stage.default_threshold();
     if let Some(val) = flag_threshold {
@@ -165,6 +236,17 @@ fn resolve_threshold(
             });
         }
     }
+
+    if let Some(stored_val) = stored.and_then(|s| s.node_threshold(stage.heuristic_node())) {
+        return normalize_unit_score(stored_val).map_err(|detail| {
+            CliError::usage(format!(
+                "Invalid `nodes.{}.threshold` value `{stored_val}` in user configuration: {detail}.\n  \
+                 Hint: Configure a finite float in `[0.0, 1.0]` in `config.json` or override with `--threshold <FLOAT>`.",
+                stage.as_str()
+            ))
+        });
+    }
+
     Ok(default_val)
 }
 

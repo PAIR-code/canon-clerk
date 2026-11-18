@@ -26,10 +26,12 @@ use super::{
 };
 use crate::audit::DEFAULT_AUDIT_TIMEOUT_MS;
 use crate::caseload::Caseload;
+use crate::cli::node_args::AllNodeModelArgs;
+use crate::cli::runners::load_optional_host_stored_config;
 use crate::cli::{
     CanonSelectionArgs, CliError, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
     build_live_model_provider, ensure_single_stdin_source, read_caseload_operand,
-    resolve_branch_b_options, write_caseload_file,
+    write_caseload_file,
 };
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, MultiModelProvider, StructuredModelProvider};
@@ -39,7 +41,9 @@ use io::{
     emit_stdout_report, materialize_disk_snapshot, populate_stage_disk_contents,
     write_report_json_file,
 };
-use resolve::{ResolvedCliParams, map_bench_error, resolve_cli_parameters};
+use resolve::{
+    ResolvedCliParams, map_bench_error, resolve_bench_configure_options, resolve_cli_parameters,
+};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{Read, Write};
@@ -152,6 +156,18 @@ pub struct ConsistencyBenchCli {
     #[command(flatten)]
     pub canons: CanonSelectionArgs,
 
+    /// Canonical `<provider>:<model>` override for the benchmarked `--stage` (`CANON_CLERK_BENCH_MODEL`).
+    #[arg(
+        long = "model",
+        value_name = "PROVIDER:MODEL",
+        help_heading = "Model & Reasoning Options",
+        help = "Canonical <provider>:<model> override for the target --stage (fallback env: CANON_CLERK_BENCH_MODEL)"
+    )]
+    pub model: Option<String>,
+
+    #[command(flatten)]
+    pub models: AllNodeModelArgs,
+
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
@@ -237,11 +253,17 @@ pub fn run_consistency_bench_cli(
     let env_map: BTreeMap<String, String> = env::vars().collect();
     ensure_single_stdin_source(&cli.filing, cli.caseload.as_deref())?;
 
-    let resolved = resolve_cli_parameters(cli, &env_map)?;
+    let stored_config = load_optional_host_stored_config(&env_map)?;
+    let resolved = resolve_cli_parameters(cli, &env_map, stored_config.as_ref())?;
     let incoming = read_caseload_operand(cli.caseload.as_deref(), streams.stdin)?;
     let intake_opts = cli.filing.resolve_intake_options(streams.stdin)?;
-    let mut configure_opts = resolve_branch_b_options(&cli.provider, &env_map)?;
-    configure_opts.screener_only_closure = resolved.stage != BenchmarkStage::Audit;
+    let configure_opts = resolve_bench_configure_options(
+        cli,
+        resolved.stage,
+        incoming.as_ref(),
+        stored_config,
+        &env_map,
+    )?;
 
     let mut snapshot = materialize_disk_snapshot(&cwd, &cli.canons.canon, incoming.as_ref())?;
     let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
@@ -260,9 +282,14 @@ pub fn run_consistency_bench_cli(
     } else {
         DEFAULT_GENERATION_TIMEOUT_MS
     };
+    let stage_model = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.model_for(resolved.stage.heuristic_node()));
     let specs = resolve_config_specs(&ConfigSweepInputs {
         stage: resolved.stage,
         threshold: resolved.threshold,
+        stage_model,
         raw_batch_specs: &cli.batch_size,
         flag_concurrency: cli.concurrency,
         env: &env_map,
@@ -310,11 +337,17 @@ pub fn run_consistency_bench_hermetic(
     streams: &mut BenchIoStreams<'_>,
 ) -> Result<ConsistencyBenchReport, CliError> {
     ensure_single_stdin_source(&cli.filing, cli.caseload.as_deref())?;
-    let resolved = resolve_cli_parameters(cli, deps.env)?;
+    let stored_config = load_optional_host_stored_config(deps.env)?;
+    let resolved = resolve_cli_parameters(cli, deps.env, stored_config.as_ref())?;
     let incoming = read_caseload_operand(cli.caseload.as_deref(), streams.stdin)?;
     let intake_opts = cli.filing.resolve_intake_options(streams.stdin)?;
-    let mut configure_opts = resolve_branch_b_options(&cli.provider, deps.env)?;
-    configure_opts.screener_only_closure = resolved.stage != BenchmarkStage::Audit;
+    let configure_opts = resolve_bench_configure_options(
+        cli,
+        resolved.stage,
+        incoming.as_ref(),
+        stored_config,
+        deps.env,
+    )?;
 
     let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
         stage: resolved.stage,
@@ -326,9 +359,14 @@ pub fn run_consistency_bench_hermetic(
     })
     .map_err(map_bench_error)?;
 
+    let stage_model = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.model_for(resolved.stage.heuristic_node()));
     let specs = resolve_config_specs(&ConfigSweepInputs {
         stage: resolved.stage,
         threshold: resolved.threshold,
+        stage_model,
         raw_batch_specs: &cli.batch_size,
         flag_concurrency: cli.concurrency,
         env: deps.env,
@@ -599,8 +637,8 @@ mod tests {
                 "apprise",
                 "--trials",
                 "3",
-                "--screener-model",
-                "gemini-4-hydrogen",
+                "--model",
+                "google:gemini-4-hydrogen",
                 "--intent",
                 "Add CLI flag",
                 "src/cli/mod.rs",
@@ -622,6 +660,7 @@ mod tests {
             .expect("run hermetic bench");
 
             assert_eq!(report.trials, 3);
+            assert_eq!(report.configs[0].model, "google:gemini-4-hydrogen");
             assert_eq!(report.configs[0].flipper_count, 1);
 
             let stdout_text = String::from_utf8(stdout).expect("utf8 stdout");
@@ -640,8 +679,8 @@ mod tests {
                 "apprise",
                 "-n",
                 "2",
-                "--screener-model",
-                "gemini-4-hydrogen",
+                "--apprise-model",
+                "google:gemini-4-hydrogen",
                 "-q",
                 "--json",
                 "--intent",

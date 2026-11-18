@@ -20,18 +20,21 @@ use super::{
 };
 use crate::admit::{DEFAULT_ADMIT_MAX_CONCURRENT_CALLS, ENV_ADMIT_CONCURRENCY};
 use crate::apprise::{
-    DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, ENV_APPRISE_BATCH_SIZE,
-    ENV_APPRISE_CONCURRENCY,
+    DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY,
+    effective_apprise_batch_size,
 };
 use crate::audit::{DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, ENV_AUDIT_CONCURRENCY};
-use crate::caseload::{Caseload, IntakeScope, normalize_unit_score};
+use crate::caseload::{Caseload, HeuristicNode, IntakeScope, normalize_unit_score};
 use crate::cli::CanonSelectionArgs;
 use crate::cli::closure::merge_metadata_onto_intake;
-use crate::configure::{ConfigureOptions, StoredConfig, execute_configure};
+use crate::cli::node_args::check_retired_tuning_env_vars;
+use crate::configure::{
+    ConfigureOptions, StoredConfig, can_fast_forward_existing_config, execute_configure,
+};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{
-    DEFAULT_DOCKET_BATCH_SIZE, DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, ENV_DOCKET_BATCH_SIZE,
-    ENV_DOCKET_CONCURRENCY, ENV_MAX_CANONS_PER_CALL, ENV_MAX_CONCURRENT_CALLS,
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY,
+    effective_docket_batch_size,
 };
 use crate::intake::{IntakeOptions, execute_intake};
 use crate::validate::{ValidateOptions, execute_validate};
@@ -45,6 +48,8 @@ pub struct ConfigSweepInputs<'a> {
     pub stage: BenchmarkStage,
     /// Validated score threshold in `[0.0, 1.0]`.
     pub threshold: f64,
+    /// Optional resolved `<provider>:<model>` specifier for `stage` (selects model-aware default batch sizes).
+    pub stage_model: Option<&'a str>,
     /// Explicit `--batch-size` tokens (each token may be comma-separated, e.g. `"unbounded,15,25"`).
     pub raw_batch_specs: &'a [String],
     /// Optional explicit `--concurrency` override (`>= 1`).
@@ -61,6 +66,9 @@ pub struct ConfigSweepInputs<'a> {
 pub fn resolve_config_specs(
     inputs: &ConfigSweepInputs<'_>,
 ) -> Result<Vec<ConsistencyConfigSpec>, ConsistencyBenchError> {
+    check_retired_tuning_env_vars(inputs.env).map_err(|err| ConsistencyBenchError::Setup {
+        detail: err.to_string(),
+    })?;
     let threshold = normalize_unit_score(inputs.threshold)
         .map_err(|detail| ConsistencyBenchError::InvalidThreshold { detail })?;
     let concurrency = resolve_effective_concurrency(
@@ -72,6 +80,7 @@ pub fn resolve_config_specs(
 
     let batch_values = resolve_batch_sweep_values(
         inputs.stage,
+        inputs.stage_model.unwrap_or_default(),
         inputs.raw_batch_specs,
         inputs.env,
         inputs.stored_config,
@@ -131,7 +140,7 @@ fn resolve_effective_concurrency(
         BenchmarkStage::Vet => ENV_VET_CONCURRENCY,
         BenchmarkStage::Audit => ENV_AUDIT_CONCURRENCY,
     };
-    for key in [ENV_BENCH_CONCURRENCY, stage_key, ENV_MAX_CONCURRENT_CALLS] {
+    for key in [ENV_BENCH_CONCURRENCY, stage_key] {
         if let Some(raw) = non_empty_env(env, key) {
             let parsed = raw
                 .parse::<usize>()
@@ -144,23 +153,13 @@ fn resolve_effective_concurrency(
         }
     }
 
-    if let Some(cfg) = stored {
-        let stored_val = match stage {
-            BenchmarkStage::Apprise => cfg.apprise_concurrency,
-            BenchmarkStage::Admit => cfg.admit_concurrency,
-            BenchmarkStage::Docket => cfg.docket_concurrency,
-            BenchmarkStage::Vet => cfg.vet_concurrency,
-            BenchmarkStage::Audit => cfg.audit_concurrency,
-        };
-        if let Some(val) = stored_val {
-            if val == 0 {
-                return Err(ConsistencyBenchError::InvalidConcurrency {
-                    detail: "stored concurrency in `config.json` must be at least 1, got 0"
-                        .to_string(),
-                });
-            }
-            return Ok(Some(val));
+    if let Some(val) = stored.and_then(|cfg| cfg.node_concurrency(stage.heuristic_node())) {
+        if val == 0 {
+            return Err(ConsistencyBenchError::InvalidConcurrency {
+                detail: "stored concurrency in `config.json` must be at least 1, got 0".to_string(),
+            });
         }
+        return Ok(Some(val));
     }
 
     Ok(None)
@@ -168,6 +167,7 @@ fn resolve_effective_concurrency(
 
 fn resolve_batch_sweep_values(
     stage: BenchmarkStage,
+    stage_model: &str,
     raw_specs: &[String],
     env: &BTreeMap<String, String>,
     stored: Option<&StoredConfig>,
@@ -180,48 +180,36 @@ fn resolve_batch_sweep_values(
         return parse_batch_tokens(std::slice::from_ref(&raw_env));
     }
 
-    let stage_key = match stage {
-        BenchmarkStage::Apprise => ENV_APPRISE_BATCH_SIZE,
+    let (stage_key, batch_node) = match stage {
+        BenchmarkStage::Apprise => (ENV_APPRISE_BATCH_SIZE, HeuristicNode::Apprise),
         BenchmarkStage::Docket
         | BenchmarkStage::Admit
         | BenchmarkStage::Vet
-        | BenchmarkStage::Audit => ENV_DOCKET_BATCH_SIZE,
+        | BenchmarkStage::Audit => (ENV_DOCKET_BATCH_SIZE, HeuristicNode::Docket),
     };
-    for key in [stage_key, ENV_MAX_CANONS_PER_CALL] {
-        if let Some(raw) = non_empty_env(env, key) {
-            let parsed = raw
-                .parse::<usize>()
-                .ok()
-                .filter(|v| *v >= 1)
-                .ok_or_else(|| ConsistencyBenchError::InvalidBatchSpec {
-                    detail: format!("`{key}` must be a positive integer (`>= 1`), got `{raw}`"),
-                })?;
-            return Ok(vec![Some(parsed)]);
-        }
+    if let Some(raw) = non_empty_env(env, stage_key) {
+        let parsed = raw
+            .parse::<usize>()
+            .ok()
+            .filter(|v| *v >= 1)
+            .ok_or_else(|| ConsistencyBenchError::InvalidBatchSpec {
+                detail: format!("`{stage_key}` must be a positive integer (`>= 1`), got `{raw}`"),
+            })?;
+        return Ok(vec![Some(parsed)]);
     }
 
-    if let Some(cfg) = stored {
-        let stored_val = match stage {
-            BenchmarkStage::Apprise => cfg.apprise_batch_size,
-            BenchmarkStage::Docket
-            | BenchmarkStage::Admit
-            | BenchmarkStage::Vet
-            | BenchmarkStage::Audit => cfg.docket_batch_size,
-        };
-        if let Some(val) = stored_val {
-            if val == 0 {
-                return Err(ConsistencyBenchError::InvalidBatchSpec {
-                    detail: "stored batch size in `config.json` must be at least 1, got 0"
-                        .to_string(),
-                });
-            }
-            return Ok(vec![Some(val)]);
+    if let Some(val) = stored.and_then(|cfg| cfg.node_batch_size(batch_node)) {
+        if val == 0 {
+            return Err(ConsistencyBenchError::InvalidBatchSpec {
+                detail: "stored batch size in `config.json` must be at least 1, got 0".to_string(),
+            });
         }
+        return Ok(vec![Some(val)]);
     }
 
     let default_batch = match stage {
-        BenchmarkStage::Apprise => Some(DEFAULT_APPRISE_BATCH_SIZE),
-        BenchmarkStage::Docket => Some(DEFAULT_DOCKET_BATCH_SIZE),
+        BenchmarkStage::Apprise => effective_apprise_batch_size(None, stage_model),
+        BenchmarkStage::Docket => effective_docket_batch_size(None, stage_model),
         BenchmarkStage::Admit | BenchmarkStage::Vet | BenchmarkStage::Audit => None,
     };
     Ok(vec![default_batch])
@@ -475,7 +463,7 @@ fn resolve_upstream_configure(
     if !has_candidates && caseload.config.is_none() && !configure_opts.has_explicit_overrides() {
         return Ok(caseload);
     }
-    if caseload.config.is_some() && !configure_opts.has_explicit_overrides() {
+    if can_fast_forward_existing_config(configure_opts, caseload.config.as_ref()) {
         return Ok(caseload);
     }
 
@@ -487,8 +475,9 @@ fn resolve_upstream_configure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apprise::DEFAULT_APPRISE_THRESHOLD;
+    use crate::apprise::{DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_THRESHOLD};
     use crate::canon::ParseCanonOptions;
+    use crate::docket::DEFAULT_DOCKET_BATCH_SIZE;
     use crate::provider::DEFAULT_GENERATION_TIMEOUT_MS;
 
     mod batch_sweep_parsing {
@@ -501,6 +490,7 @@ mod tests {
             let specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Apprise,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
+                stage_model: None,
                 raw_batch_specs: &raw,
                 flag_concurrency: Some(3),
                 env: &env,
@@ -521,6 +511,7 @@ mod tests {
             let default_apprise_specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Apprise,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
+                stage_model: None,
                 raw_batch_specs: &[],
                 flag_concurrency: None,
                 env: &env,
@@ -538,6 +529,7 @@ mod tests {
             let default_docket_specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Docket,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
+                stage_model: None,
                 raw_batch_specs: &[],
                 flag_concurrency: None,
                 env: &env,
@@ -563,6 +555,7 @@ mod tests {
             let zero_conc = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Docket,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
+                stage_model: None,
                 raw_batch_specs: &[],
                 flag_concurrency: Some(0),
                 env: &env,

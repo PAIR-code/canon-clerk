@@ -129,7 +129,7 @@ pub fn classify_gemini_decisions_http_error(
         ),
         404 => format!(
             "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
-             Hint: Specify a valid Gemini Decisions model via `--screener-model` (e.g. `google:gemini-decision-1` or `gemini-decision-1`)."
+             Hint: Specify a valid Gemini Decisions model via `--<node>-model` (e.g. `google:gemini-decision-1`)."
         ),
         429 => format!(
             "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \

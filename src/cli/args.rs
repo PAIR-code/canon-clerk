@@ -153,28 +153,19 @@ impl CanonSelectionArgs {
     }
 }
 
-/// Composable CLI argument group for model configuration, reasoning effort, and provider credentials (Branch B).
+/// Composable CLI argument group for active provider selection, reasoning effort, and provider credentials (Branch B).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderConfigArgs {
-    /// Custom screener model specifier (`gemini-decision-1`, `gemini-*`, `jev-*`, `google:gemini-*`, `typesafe:jev-*`; env: `CANON_CLERK_SCREENER_MODEL`).
+    /// Active default provider slug (`google`, `typesafe`; env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`).
     #[arg(
-        long = "screener-model",
-        value_name = "MODEL",
+        long = "provider",
+        value_name = "SLUG",
         help_heading = "Model & Reasoning Options",
-        help = "Screener model specifier (fallback env: CANON_CLERK_SCREENER_MODEL)"
+        help = "Default model provider slug: google or typesafe (fallback env: CANON_CLERK_PROVIDER)"
     )]
-    pub screener_model: Option<String>,
+    pub provider: Option<String>,
 
-    /// Custom generative auditor model specifier (generative `gemini-*`, `google:gemini-*`; env: `CANON_CLERK_AUDITOR_MODEL`).
-    #[arg(
-        long = "auditor-model",
-        value_name = "MODEL",
-        help_heading = "Model & Reasoning Options",
-        help = "Auditor model specifier (fallback env: CANON_CLERK_AUDITOR_MODEL)"
-    )]
-    pub auditor_model: Option<String>,
-
-    /// Qualitative reasoning effort tier (`minimal`, `low`, `medium`, `high`) for `audit` trials (env: `CANON_CLERK_THINKING_LEVEL`).
+    /// Qualitative reasoning effort tier (`minimal`, `low`, `medium`, `high`) for `Generator`-bound nodes (env: `CANON_CLERK_THINKING_LEVEL`).
     #[arg(
         long = "thinking-level",
         value_name = "LEVEL",
@@ -183,7 +174,7 @@ pub struct ProviderConfigArgs {
     )]
     pub thinking_level: Option<String>,
 
-    /// Maximum reasoning budget in tokens for extended thinking during `audit` trials (env: `CANON_CLERK_REASONING_BUDGET`).
+    /// Maximum reasoning budget in tokens for extended thinking on `Generator`-bound nodes (env: `CANON_CLERK_REASONING_BUDGET`).
     #[arg(
         long = "reasoning-budget",
         value_name = "TOKENS",
@@ -209,11 +200,33 @@ pub struct ProviderConfigArgs {
         help = "TypeSafe AI API key for Jev models (fallback env: TYPESAFE_API_KEY)"
     )]
     pub typesafe_api_key: Option<String>,
+
+    /// Hidden capture rejecting retired `--screener-model` flag (`configure.md` §5).
+    #[arg(long = "screener-model", hide = true, allow_hyphen_values = true)]
+    pub rejected_screener_model: Option<String>,
+
+    /// Hidden capture rejecting retired `--auditor-model` flag (`configure.md` §5).
+    #[arg(long = "auditor-model", hide = true, allow_hyphen_values = true)]
+    pub rejected_auditor_model: Option<String>,
 }
 
 impl ProviderConfigArgs {
-    /// Validates `--thinking-level` syntax and mutual exclusivity against `--reasoning-budget`.
+    /// Rejects retired tier flags (`--screener-model`, `--auditor-model`) and validates `--thinking-level`
+    /// syntax and mutual exclusivity against `--reasoning-budget`.
     pub fn validate_thinking_flags(&self) -> Result<Option<ThinkingLevel>, CliError> {
+        if self.rejected_screener_model.is_some() {
+            return Err(CliError::usage(
+                "Retired flag `--screener-model` is no longer supported.\n  \
+                 Hint: Pass `--provider <google|typesafe>` to select a default provider, or pin per-node \
+                 `<provider>:<model>` specifiers via `--apprise-model`, `--docket-model`, `--admit-model`, or `--vet-model`.",
+            ));
+        }
+        if self.rejected_auditor_model.is_some() {
+            return Err(CliError::usage(
+                "Retired flag `--auditor-model` is no longer supported.\n  \
+                 Hint: Pass `--audit-model <PROVIDER:MODEL>` (for example, `--audit-model google:gemini-4-carbon`).",
+            ));
+        }
         let parsed_level = match self.thinking_level.as_deref() {
             Some(raw) => {
                 Some(parse_thinking_level(raw).map_err(|err| CliError::usage(err.to_string()))?)
@@ -297,7 +310,7 @@ impl ProviderTransportArgs {
         }
 
         Ok(stored
-            .and_then(|s| s.max_retries)
+            .and_then(|s| s.defaults.max_retries)
             .unwrap_or(DEFAULT_MAX_RETRIES))
     }
 
@@ -329,7 +342,7 @@ impl ProviderTransportArgs {
         }
 
         Ok(stored
-            .and_then(|s| s.max_backoff_ms)
+            .and_then(|s| s.defaults.max_backoff_ms)
             .unwrap_or(DEFAULT_MAX_BACKOFF_MS))
     }
 }
@@ -432,11 +445,9 @@ mod tests {
         assert_eq!(default_policy.max_retries, 2);
         assert_eq!(default_policy.max_backoff_ms, 90_000);
 
-        let stored = StoredConfig {
-            max_retries: Some(4),
-            max_backoff_ms: Some(45_000),
-            ..StoredConfig::default()
-        };
+        let mut stored = StoredConfig::default();
+        stored.defaults.max_retries = Some(4);
+        stored.defaults.max_backoff_ms = Some(45_000);
         let from_store = ProviderTransportArgs::default()
             .resolve_retry_policy(&empty_env, Some(&stored))
             .expect("stored retry policy");

@@ -17,6 +17,7 @@
 use crate::admit::{AdmitError, DEFAULT_ADMIT_THRESHOLD};
 use crate::apprise::{AppriseError, DEFAULT_APPRISE_THRESHOLD};
 use crate::audit::{AuditError, DEFAULT_AUDIT_THRESHOLD};
+use crate::caseload::HeuristicNode;
 use crate::docket::{DEFAULT_DOCKET_THRESHOLD, DocketError};
 use crate::telemetry::PipelineStage;
 use crate::vet::{DEFAULT_VET_THRESHOLD, VetError};
@@ -31,6 +32,8 @@ pub const DEFAULT_BENCHMARK_TRIALS: usize = 5;
 pub const ENV_BENCH_STAGE: &str = "CANON_CLERK_BENCH_STAGE";
 /// Environment variable name overriding `--trials` on `consistency_bench`.
 pub const ENV_BENCH_TRIALS: &str = "CANON_CLERK_BENCH_TRIALS";
+/// Environment variable name overriding stage-scoped `--model` on `consistency_bench`.
+pub const ENV_BENCH_MODEL: &str = "CANON_CLERK_BENCH_MODEL";
 /// Environment variable name overriding `--threshold` on `consistency_bench`.
 pub const ENV_BENCH_THRESHOLD: &str = "CANON_CLERK_BENCH_THRESHOLD";
 /// Environment variable name overriding `--batch-size` on `consistency_bench`.
@@ -71,6 +74,17 @@ impl BenchmarkStage {
             Self::Admit => "admit",
             Self::Vet => "vet",
             Self::Audit => "audit",
+        }
+    }
+
+    /// Maps the benchmark target to its [`HeuristicNode`] configuration key.
+    pub const fn heuristic_node(self) -> HeuristicNode {
+        match self {
+            Self::Apprise => HeuristicNode::Apprise,
+            Self::Docket => HeuristicNode::Docket,
+            Self::Admit => HeuristicNode::Admit,
+            Self::Vet => HeuristicNode::Vet,
+            Self::Audit => HeuristicNode::Audit,
         }
     }
 

@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CLI driving adapter for the `canon-clerk configure` subcommand.
+//! CLI driving adapter for the `canon-clerk configure` subcommand (`docs/architecture/nodes/configure.md` §5).
 
-use crate::caseload::{Caseload, CaseloadConfig, DEFAULT_AUDITOR_THINKING_LEVEL};
+use crate::caseload::{
+    Caseload, CaseloadConfig, DEFAULT_AUDIT_THINKING_LEVEL, HeuristicNode, ResolvedNodeConfig,
+};
 use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
+use crate::cli::node_args::AllNodeModelArgs;
 use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
-use crate::configure::verified_credential_env_vars;
+use crate::configure::{is_discriminative_model, verified_credential_env_vars};
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
@@ -27,19 +30,19 @@ use std::io::{Read, Write};
 
 const CONFIGURE_EXAMPLES: &str = "\
 Examples:
-  # Auto-select optimal screener and auditor tiers from available credentials:
+  # Resolve default Google provider node bindings and verify GEMINI_API_KEY:
   canon-clerk configure
 
-  # Explicitly pin screener and auditor models via provider-omitted upstream IDs:
-  canon-clerk configure --screener-model gemini-4-hydrogen --auditor-model gemini-4-carbon
+  # Configure TypeSafe AI across all discriminative screening/vetting nodes:
+  canon-clerk configure --provider typesafe
 
-  # Explicitly pair TypeSafe Jev fast screener with Gemini 4 Carbon auditor:
-  canon-clerk configure --screener-model jev-latest --auditor-model gemini-4-carbon
+  # Pair TypeSafe Jev screening/vetting with Google Gemini 4 Carbon on audit:
+  canon-clerk configure --provider typesafe --audit-model google:gemini-4-carbon
 
-  # Configure custom models via fully-qualified specifiers:
-  canon-clerk configure --screener-model google:gemini-4-hydrogen --auditor-model google:gemini-4-carbon
+  # Override individual node models via canonical <provider>:<model> specifiers:
+  canon-clerk configure --docket-model google:gemini-4-hydrogen --audit-model google:gemini-4-carbon
 
-  # Configure maximum reasoning budget tokens:
+  # Configure maximum reasoning budget tokens for Generator-bound nodes:
   canon-clerk configure --reasoning-budget 4096
 
   # Emit tab-separated configuration key-value lines:
@@ -63,13 +66,20 @@ pub enum ConfigureFormat {
 /// Command-line arguments for `canon-clerk configure`.
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 #[command(
-    about = "Resolve and normalize provider credentials, model specifiers, and reasoning budgets",
-    long_about = "Operational Environment Normalizer of the Caseload DAG (Branch B). Verifies active runtime provider credentials (GEMINI_API_KEY, TYPESAFE_API_KEY), normalizes screener and auditor model specifiers into canonical provider:model identifiers, and populates `.config` on the cumulative Caseload without persisting secret material.",
+    about = "Resolve and normalize provider credentials, per-node model bindings, and reasoning budgets",
+    long_about = "Operational Environment Normalizer of the Caseload DAG (Branch B). Resolves the active default provider, cascades canonical <provider>:<model> bindings across heuristic nodes (apprise, docket, admit, vet, audit), verifies referenced runtime provider credentials (GEMINI_API_KEY, TYPESAFE_API_KEY), and populates `.config` on the cumulative Caseload without persisting secret material.",
     after_help = CONFIGURE_EXAMPLES
 )]
 pub struct ConfigureArgs {
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
+
+    #[command(flatten)]
+    pub models: AllNodeModelArgs,
+
+    /// Hidden capture rejecting ambiguous unqualified `--model` (`scheduling.md` §4).
+    #[arg(long = "model", hide = true, allow_hyphen_values = true)]
+    pub rejected_model: Option<String>,
 
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(
@@ -93,8 +103,14 @@ pub fn run_configure_with_telemetry(
     env: &BTreeMap<String, String>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
+    if args.rejected_model.is_some() {
+        return Err(CliError::usage(
+            "Ambiguous unqualified flag `--model` is disallowed on `canon-clerk configure`.\n  \
+             Hint: Pass `--provider <slug>` or per-node `--apprise-model`, `--docket-model`, `--admit-model`, `--vet-model`, or `--audit-model`.",
+        ));
+    }
     let incoming_caseload = args.io.read_caseload(stdin)?;
-    let options = resolve_branch_b_options(&args.provider, env)?;
+    let options = resolve_branch_b_options(&args.provider, args.models.to_node_map(), env)?;
     let caseload = run_branch_b_configure(&options, incoming_caseload, telemetry)?;
     telemetry.finish_pipeline();
 
@@ -165,33 +181,55 @@ fn verified_credentials_label(config: &CaseloadConfig) -> String {
 }
 
 fn render_compact_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(stdout, "screener_model\t{}", config.screener_model)?;
-    writeln!(stdout, "auditor_model\t{}", config.auditor_model)?;
-    if let Some(level) = config.thinking_level {
-        writeln!(stdout, "thinking_level\t{level}")?;
-    }
-    if let Some(budget) = config.reasoning_budget {
-        writeln!(stdout, "reasoning_budget\t{budget}")?;
+    writeln!(stdout, "provider\t{}", config.provider)?;
+    for (node, node_cfg) in &config.nodes {
+        writeln!(stdout, "{}_model\t{}", node.as_str(), node_cfg.model)?;
+        if let Some(level) = node_cfg.thinking_level {
+            writeln!(stdout, "{}_thinking_level\t{level}", node.as_str())?;
+        }
+        if let Some(budget) = node_cfg.reasoning_budget {
+            writeln!(stdout, "{}_reasoning_budget\t{budget}", node.as_str())?;
+        }
     }
     writeln!(
         stdout,
         "credentials\t{}",
-        verified_credentials_label(config)
+        verified_credential_env_vars(config).join(",")
     )?;
     Ok(())
 }
 
+fn format_stylish_thinking_suffix(node: HeuristicNode, node_cfg: &ResolvedNodeConfig) -> String {
+    if is_discriminative_model(&node_cfg.model) {
+        return String::new();
+    }
+    match (node_cfg.thinking_level, node_cfg.reasoning_budget) {
+        (Some(level), _) => format!(" (thinking: {level})"),
+        (None, Some(budget)) => format!(" (reasoning budget: {budget} tokens)"),
+        (None, None) if node == HeuristicNode::Audit => {
+            format!(" (thinking: {DEFAULT_AUDIT_THINKING_LEVEL} default)")
+        }
+        (None, None) => String::new(),
+    }
+}
+
 fn render_stylish_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std::io::Result<()> {
     writeln!(stdout, "Configuration Summary (READY):")?;
-    writeln!(stdout, "  Screener Model   : {}", config.screener_model)?;
-    writeln!(stdout, "  Auditor Model    : {}", config.auditor_model)?;
-    match (config.thinking_level, config.reasoning_budget) {
-        (Some(level), _) => writeln!(stdout, "  Thinking Level   : {level}")?,
-        (None, Some(budget)) => writeln!(stdout, "  Reasoning Budget : {budget} tokens")?,
-        (None, None) => writeln!(
-            stdout,
-            "  Thinking Level   : {DEFAULT_AUDITOR_THINKING_LEVEL} (audit default)"
-        )?,
+    writeln!(stdout, "  Provider         : {}", config.provider)?;
+    for node in HeuristicNode::ALL {
+        let label = format!("{} model", node.as_str());
+        match config.node(node) {
+            Some(node_cfg) => {
+                let suffix = format_stylish_thinking_suffix(node, node_cfg);
+                writeln!(stdout, "  {label:<16} : {}{suffix}", node_cfg.model)?;
+            }
+            None => {
+                writeln!(
+                    stdout,
+                    "  {label:<16} : (unprovisioned — pass --audit-model <provider:model>)"
+                )?;
+            }
+        }
     }
     writeln!(
         stdout,
@@ -204,7 +242,10 @@ fn render_stylish_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::caseload::{DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL};
+    use crate::caseload::{
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, TYPESAFE_PROVIDER,
+    };
     use crate::cli::{Cli, Commands};
     use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY};
     use clap::Parser;
@@ -231,10 +272,12 @@ mod tests {
             let cli = Cli::try_parse_from([
                 "canon-clerk",
                 "configure",
-                "--screener-model",
-                "gemini-2.5-flash-lite",
-                "--auditor-model",
-                "gemini-2.5-pro",
+                "--provider",
+                "typesafe",
+                "--docket-model",
+                "google:gemini-2.5-flash-lite",
+                "--audit-model",
+                "google:gemini-2.5-pro",
                 "--reasoning-budget",
                 "4096",
                 "--json",
@@ -243,13 +286,14 @@ mod tests {
 
             match cli.command {
                 Some(Commands::Configure(args)) => {
+                    assert_eq!(args.provider.provider.as_deref(), Some("typesafe"));
                     assert_eq!(
-                        args.provider.screener_model.as_deref(),
-                        Some("gemini-2.5-flash-lite")
+                        args.models.docket_model.as_deref(),
+                        Some("google:gemini-2.5-flash-lite")
                     );
                     assert_eq!(
-                        args.provider.auditor_model.as_deref(),
-                        Some("gemini-2.5-pro")
+                        args.models.audit_model.as_deref(),
+                        Some("google:gemini-2.5-pro")
                     );
                     assert_eq!(args.provider.reasoning_budget, Some(4096));
                     assert!(args.io.json);
@@ -267,12 +311,9 @@ mod tests {
             let secret = "synthetic-top-secret-never-echo-999";
             let args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("gemini-decision-1".to_string()),
-                    auditor_model: Some("gemini-4-carbon".to_string()),
-                    thinking_level: None,
                     reasoning_budget: Some(2048),
                     gemini_api_key: Some(secret.to_string()),
-                    typesafe_api_key: None,
+                    ..ProviderConfigArgs::default()
                 },
                 io: CaseloadIoArgs {
                     json: true,
@@ -293,12 +334,14 @@ mod tests {
             assert_eq!(parsed, caseload);
             assert_eq!(
                 parsed.config,
-                Some(CaseloadConfig {
-                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
-                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    thinking_level: None,
-                    reasoning_budget: Some(2048),
-                })
+                Some(CaseloadConfig::default().with_node(
+                    HeuristicNode::Audit,
+                    ResolvedNodeConfig::with_thinking(
+                        DEFAULT_GOOGLE_GENERATOR_MODEL,
+                        None,
+                        Some(2048)
+                    ),
+                ))
             );
         }
 
@@ -307,6 +350,10 @@ mod tests {
             let secret = "synthetic-secret-key-material-should-stay-hidden";
             let mut env = BTreeMap::new();
             env.insert(ENV_GEMINI_API_KEY.to_string(), secret.to_string());
+            env.insert(
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            );
 
             let stylish_args = ConfigureArgs {
                 format: ConfigureFormat::Stylish,
@@ -318,7 +365,8 @@ mod tests {
                 .expect("stylish configure");
             let stylish_str = String::from_utf8(stylish_out).expect("utf8");
             assert!(stylish_str.contains("Configuration Summary (READY):"));
-            assert!(stylish_str.contains("Thinking Level   : low (audit default)"));
+            assert!(stylish_str.contains("Provider         : google"));
+            assert!(stylish_str.contains("google:gemini-4-carbon (thinking: low default)"));
             assert!(stylish_str.contains("GEMINI_API_KEY (verified)"));
             assert!(!stylish_str.contains(secret));
 
@@ -334,87 +382,79 @@ mod tests {
             run_configure_with_env(&compact_args, &mut stdin, &mut compact_out, &env)
                 .expect("compact configure");
             let compact_str = String::from_utf8(compact_out).expect("utf8");
-            assert!(compact_str.contains("screener_model\tgoogle:gemini-decision-1"));
-            assert!(compact_str.contains("auditor_model\tgoogle:gemini-4-carbon"));
-            assert!(compact_str.contains("reasoning_budget\t1024"));
+            assert!(compact_str.contains("provider\tgoogle"));
+            assert!(compact_str.contains("docket_model\tgoogle:gemini-decision-1"));
+            assert!(compact_str.contains("audit_model\tgoogle:gemini-4-carbon"));
+            assert!(compact_str.contains("audit_reasoning_budget\t1024"));
+            assert!(!compact_str.contains("docket_reasoning_budget"));
             assert!(!compact_str.contains(secret));
         }
 
         #[test]
-        fn test_hybrid_credentials_auto_select_gemini_decision_and_allow_explicit_jev_override() {
+        fn test_typesafe_standalone_and_hybrid_audit_pin_configure_cleanly() {
             let ts_secret = "synthetic-typesafe-cli-secret-never-echo";
-            // 1. Unpinned hybrid credentials select google:gemini-decision-1 + google:gemini-4-carbon
-            let args = ConfigureArgs {
+            let mut ts_only_env = BTreeMap::new();
+            ts_only_env.insert(ENV_TYPESAFE_API_KEY.to_string(), ts_secret.to_string());
+            ts_only_env.insert(
+                "XDG_CONFIG_HOME".to_string(),
+                "/nonexistent-canon-clerk-xdg-dir".to_string(),
+            );
+
+            // 1. Standalone `--provider typesafe` succeeds with ONLY `TYPESAFE_API_KEY`
+            let ts_args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    typesafe_api_key: Some(ts_secret.to_string()),
+                    provider: Some(TYPESAFE_PROVIDER.to_string()),
                     ..ProviderConfigArgs::default()
                 },
                 format: ConfigureFormat::Stylish,
                 ..ConfigureArgs::default()
             };
-            let mut stdin = Cursor::new(b"");
-            let mut out = Vec::new();
-            let caseload = run_configure_with_env(&args, &mut stdin, &mut out, &test_env())
-                .expect("hybrid configure should auto-select gemini-decision-1 + carbon");
-            let rendered = String::from_utf8(out).expect("utf8");
-            assert!(rendered.contains(DEFAULT_SCREENER_MODEL));
-            assert!(rendered.contains(DEFAULT_AUDITOR_MODEL));
-            assert!(rendered.contains("Credentials      : GEMINI_API_KEY (verified)"));
+            let mut stylish_out = Vec::new();
+            let ts_caseload = run_configure_with_env(
+                &ts_args,
+                &mut Cursor::new(b""),
+                &mut stylish_out,
+                &ts_only_env,
+            )
+            .expect("standalone --provider typesafe must succeed without GEMINI_API_KEY");
+            let rendered = String::from_utf8(stylish_out).expect("utf8");
+            assert!(rendered.contains("Provider         : typesafe"));
+            assert!(rendered.contains(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL));
+            assert!(rendered.contains("(unprovisioned — pass --audit-model <provider:model>)"));
+            assert!(rendered.contains("Credentials      : TYPESAFE_API_KEY (verified)"));
             assert!(!rendered.contains(ts_secret));
-            assert_eq!(
-                caseload.config,
-                Some(CaseloadConfig {
-                    screener_model: DEFAULT_SCREENER_MODEL.to_string(),
-                    auditor_model: DEFAULT_AUDITOR_MODEL.to_string(),
-                    thinking_level: None,
-                    reasoning_budget: None,
-                })
-            );
+            let ts_cfg = ts_caseload.config.expect("config");
+            assert_eq!(ts_cfg.nodes.len(), 4);
+            assert!(!ts_cfg.nodes.contains_key(&HeuristicNode::Audit));
 
-            // 2. Explicit --screener-model jev-latest pins TypeSafe Jev and verifies both keys without leakage
-            let compact_args = ConfigureArgs {
+            // 2. Hybrid `--provider typesafe --audit-model google:gemini-4-carbon` verifies both keys
+            let hybrid_args = ConfigureArgs {
                 provider: ProviderConfigArgs {
-                    screener_model: Some("jev-latest".to_string()),
+                    provider: Some(TYPESAFE_PROVIDER.to_string()),
                     typesafe_api_key: Some(ts_secret.to_string()),
                     ..ProviderConfigArgs::default()
+                },
+                models: AllNodeModelArgs {
+                    audit_model: Some(DEFAULT_GOOGLE_GENERATOR_MODEL.to_string()),
+                    ..AllNodeModelArgs::default()
                 },
                 format: ConfigureFormat::Compact,
                 ..ConfigureArgs::default()
             };
             let mut compact_out = Vec::new();
-            run_configure_with_env(&compact_args, &mut stdin, &mut compact_out, &test_env())
-                .expect("compact explicit jev configure");
-            let compact_rendered = String::from_utf8(compact_out).expect("utf8");
-            assert!(compact_rendered.contains("screener_model\ttypesafe:jev-latest"));
-            assert!(compact_rendered.contains("auditor_model\tgoogle:gemini-4-carbon"));
-            assert!(
-                compact_rendered
-                    .contains("credentials\tGEMINI_API_KEY, TYPESAFE_API_KEY (verified)")
-            );
-            assert!(!compact_rendered.contains(ts_secret));
-
-            // 3. Explicit --screener-model gemini-4-hydrogen overrides default gemini-decision-1
-            let mut both_env = test_env();
-            both_env.insert(ENV_TYPESAFE_API_KEY.to_string(), ts_secret.to_string());
-            let override_args = ConfigureArgs {
-                provider: ProviderConfigArgs {
-                    screener_model: Some("gemini-4-hydrogen".to_string()),
-                    ..ProviderConfigArgs::default()
-                },
-                format: ConfigureFormat::Stylish,
-                ..ConfigureArgs::default()
-            };
-            let mut override_out = Vec::new();
-            let overridden =
-                run_configure_with_env(&override_args, &mut stdin, &mut override_out, &both_env)
-                    .expect("explicit flag overrides default screener");
-            let override_str = String::from_utf8(override_out).expect("utf8");
-            assert!(override_str.contains("google:gemini-4-hydrogen"));
-            assert!(override_str.contains("Credentials      : GEMINI_API_KEY (verified)"));
-            assert_eq!(
-                overridden.config.expect("config").screener_model,
-                "google:gemini-4-hydrogen"
-            );
+            run_configure_with_env(
+                &hybrid_args,
+                &mut Cursor::new(b""),
+                &mut compact_out,
+                &test_env(),
+            )
+            .expect("hybrid typesafe + google audit");
+            let compact_str = String::from_utf8(compact_out).expect("utf8");
+            assert!(compact_str.contains("provider\ttypesafe"));
+            assert!(compact_str.contains("vet_model\ttypesafe:jev-latest"));
+            assert!(compact_str.contains("audit_model\tgoogle:gemini-4-carbon"));
+            assert!(compact_str.contains("credentials\tGEMINI_API_KEY,TYPESAFE_API_KEY"));
+            assert!(!compact_str.contains(ts_secret));
         }
     }
 
@@ -438,77 +478,21 @@ mod tests {
             assert!(err.to_string().contains(ENV_GEMINI_API_KEY));
             assert!(err.to_string().contains("Hint:"));
 
-            // TypeSafe-only env on full-bench `configure` exits 2 requesting generative auditor key
+            // Ambient TYPESAFE_API_KEY alone does NOT silently switch provider away from google
             let mut ts_only_env = empty_env;
             ts_only_env.insert(
                 ENV_TYPESAFE_API_KEY.to_string(),
                 "ts-only-secret".to_string(),
             );
             let ts_err = run_configure_with_env(&args, &mut stdin, &mut stdout, &ts_only_env)
-                .expect_err("typesafe-only configure must exit 2");
+                .expect_err("default google configure without GEMINI_API_KEY must exit 2");
             assert_eq!(ts_err.exit_code(), 2);
-            assert!(ts_err.to_string().contains("generative auditor"));
             assert!(ts_err.to_string().contains(ENV_GEMINI_API_KEY));
             assert!(ts_err.to_string().contains("Hint:"));
         }
 
         #[test]
-        fn test_conflicting_or_invalid_thinking_flags_exit_with_code_2_and_hint() {
-            let args = ConfigureArgs {
-                provider: ProviderConfigArgs {
-                    thinking_level: Some("low".to_string()),
-                    reasoning_budget: Some(2048),
-                    ..ProviderConfigArgs::default()
-                },
-                ..ConfigureArgs::default()
-            };
-            let mut stdin = Cursor::new(b"");
-            let mut stdout = Vec::new();
-            let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &test_env())
-                .expect_err("conflicting thinking flags must fail");
-            assert_eq!(err.exit_code(), 2);
-            assert!(err.to_string().contains("mutually exclusive"));
-            assert!(err.to_string().contains("Hint:"));
-
-            let invalid_args = ConfigureArgs {
-                provider: ProviderConfigArgs {
-                    thinking_level: Some("turbo".to_string()),
-                    ..ProviderConfigArgs::default()
-                },
-                ..ConfigureArgs::default()
-            };
-            let invalid_err =
-                run_configure_with_env(&invalid_args, &mut stdin, &mut stdout, &test_env())
-                    .expect_err("invalid thinking level must fail");
-            assert_eq!(invalid_err.exit_code(), 2);
-            assert!(invalid_err.to_string().contains("Invalid thinking level"));
-            assert!(invalid_err.to_string().contains("Hint:"));
-
-            for retired_alias in [
-                "hydrogen",
-                "carbon",
-                "jev",
-                "google:hydrogen",
-                "typesafe:jev",
-            ] {
-                let alias_args = ConfigureArgs {
-                    provider: ProviderConfigArgs {
-                        screener_model: Some(retired_alias.to_string()),
-                        ..ProviderConfigArgs::default()
-                    },
-                    ..ConfigureArgs::default()
-                };
-                let alias_err =
-                    run_configure_with_env(&alias_args, &mut stdin, &mut stdout, &test_env())
-                        .expect_err(&format!("retired alias `{retired_alias}` must exit 2"));
-                assert_eq!(alias_err.exit_code(), 2);
-                assert!(alias_err.to_string().contains("Invalid model specifier"));
-                assert!(alias_err.to_string().contains("Hint:"));
-            }
-        }
-
-        #[test]
-        fn test_discriminative_auditor_and_bare_gemini_decision_exit_with_code_2_and_hint() {
+        fn test_retired_flags_bare_specifiers_and_discriminative_audit_exit_with_code_2_and_hint() {
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
             let mut both_env = test_env();
@@ -517,54 +501,71 @@ mod tests {
                 "synthetic-ts-key".to_string(),
             );
 
-            for disc_auditor in [
-                "jev-latest",
-                "gemini-decision-1",
-                "google:gemini-decision-1",
-            ] {
-                let args = ConfigureArgs {
-                    provider: ProviderConfigArgs {
-                        auditor_model: Some(disc_auditor.to_string()),
-                        ..ProviderConfigArgs::default()
-                    },
-                    ..ConfigureArgs::default()
+            for retired_flag in ["--screener-model", "--auditor-model", "--model"] {
+                let parsed = Cli::try_parse_from([
+                    "canon-clerk",
+                    "configure",
+                    retired_flag,
+                    "google:gemini-4-carbon",
+                ])
+                .expect("hidden capture parses flag");
+                let Some(Commands::Configure(cfg_args)) = parsed.command else {
+                    panic!("expected Configure");
                 };
-                let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &both_env)
-                    .expect_err(&format!(
-                        "discriminative auditor `{disc_auditor}` must exit 2"
-                    ));
+                let err = run_configure_with_env(&cfg_args, &mut stdin, &mut stdout, &both_env)
+                    .expect_err("retired/ambiguous flag must exit 2");
                 assert_eq!(err.exit_code(), 2);
-                assert!(
-                    err.to_string()
-                        .contains("cannot be configured as `auditor_model`")
-                );
                 assert!(err.to_string().contains("Hint:"));
             }
 
-            for bare in ["gemini-decision", "google:gemini-decision"] {
+            for bad_spec in [
+                "gemini-4-hydrogen",
+                "jev-latest",
+                "gemini-decision-1",
+                "google:hydrogen",
+                "typesafe:jev",
+                "google:gemini-decision",
+            ] {
+                let spec_args = ConfigureArgs {
+                    models: AllNodeModelArgs {
+                        docket_model: Some(bad_spec.to_string()),
+                        ..AllNodeModelArgs::default()
+                    },
+                    ..ConfigureArgs::default()
+                };
+                let err = run_configure_with_env(&spec_args, &mut stdin, &mut stdout, &both_env)
+                    .expect_err(&format!("invalid specifier `{bad_spec}` must exit 2"));
+                assert_eq!(err.exit_code(), 2);
+                assert!(err.to_string().contains("Invalid model specifier"));
+                assert!(err.to_string().contains("Hint:"));
+            }
+
+            for disc_audit in [
+                DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL,
+                DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+            ] {
                 let args = ConfigureArgs {
-                    provider: ProviderConfigArgs {
-                        screener_model: Some(bare.to_string()),
-                        ..ProviderConfigArgs::default()
+                    models: AllNodeModelArgs {
+                        audit_model: Some(disc_audit.to_string()),
+                        ..AllNodeModelArgs::default()
                     },
                     ..ConfigureArgs::default()
                 };
                 let err = run_configure_with_env(&args, &mut stdin, &mut stdout, &both_env)
-                    .expect_err(&format!("bare `{bare}` must exit 2"));
+                    .expect_err("discriminative audit model must exit 2");
                 assert_eq!(err.exit_code(), 2);
-                assert!(err.to_string().contains("Invalid model specifier"));
+                assert!(err.to_string().contains("cannot be configured on `audit`"));
                 assert!(err.to_string().contains("Hint:"));
             }
         }
 
         #[test]
-        fn test_caseload_stdin_fast_forwards_when_config_already_present() {
-            let upstream = Caseload::new().with_config(CaseloadConfig {
-                screener_model: "google:gemini-2.5-flash-lite".to_string(),
-                auditor_model: "google:gemini-2.5-pro".to_string(),
-                thinking_level: None,
-                reasoning_budget: Some(4096),
-            });
+        fn test_caseload_stdin_fast_forwards_and_enriches_upstream_branch_a_caseload() {
+            let upstream = Caseload::new().with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Docket, "google:gemini-2.5-flash-lite")
+                    .with_node_model(HeuristicNode::Audit, "google:gemini-2.5-pro"),
+            );
             let upstream_json = serde_json::to_string(&upstream).expect("serialize upstream");
 
             let args = ConfigureArgs {
@@ -575,33 +576,25 @@ mod tests {
                 },
                 ..ConfigureArgs::default()
             };
-            let mut stdin = Cursor::new(upstream_json.into_bytes());
-            let mut stdout = Vec::new();
-            let empty_env = BTreeMap::new();
-
-            let result = run_configure_with_env(&args, &mut stdin, &mut stdout, &empty_env)
-                .expect("fast-forward on pre-populated caseload.config");
+            let result = run_configure_with_env(
+                &args,
+                &mut Cursor::new(upstream_json.into_bytes()),
+                &mut Vec::new(),
+                &BTreeMap::new(),
+            )
+            .expect("fast-forward on pre-populated caseload.config");
             assert_eq!(result, upstream);
-        }
 
-        #[test]
-        fn test_enriches_upstream_branch_a_caseload_from_stdin() {
             let raw = r#"{"version":"1.0","intake":{"scope":"targeted","target_paths":["src/lib.rs"],"diffs":{}}}"#;
-            let args = ConfigureArgs {
-                io: CaseloadIoArgs {
-                    caseload: Some("-".to_string()),
-                    json: true,
-                    ..CaseloadIoArgs::default()
-                },
-                ..ConfigureArgs::default()
-            };
-            let mut stdin = Cursor::new(raw.as_bytes());
-            let mut stdout = Vec::new();
-
-            let result = run_configure_with_env(&args, &mut stdin, &mut stdout, &test_env())
-                .expect("enrich branch A caseload");
-            assert!(result.intake.is_some());
-            assert_eq!(result.config, Some(CaseloadConfig::default()));
+            let enriched = run_configure_with_env(
+                &args,
+                &mut Cursor::new(raw.as_bytes()),
+                &mut Vec::new(),
+                &test_env(),
+            )
+            .expect("enrich branch A caseload");
+            assert!(enriched.intake.is_some());
+            assert_eq!(enriched.config, Some(CaseloadConfig::default()));
         }
     }
 }

@@ -14,11 +14,14 @@
 
 //! Shared upstream stage runners for Branch A (Filing) and Branch B (Environment) pipelines.
 
-use crate::caseload::{Caseload, CaseloadConfig, DEFAULT_PROVIDER, TYPESAFE_PROVIDER};
+use crate::caseload::{
+    Caseload, CaseloadConfig, DEFAULT_PROVIDER, HeuristicNode, TYPESAFE_PROVIDER,
+};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, FilingSourceArgs, ProviderConfigArgs};
 use crate::configure::{
-    ConfigureOptions, execute_configure, load_host_config_file, model_provider,
+    ConfigureOptions, ConfigureScope, StoredConfig, can_fast_forward_existing_config,
+    check_retired_env_vars, execute_configure, load_host_config_file, model_provider,
     resolve_default_config_path,
 };
 use crate::discover::{DiscoverError, DiscoverOptions, execute_discover_on_disk};
@@ -165,52 +168,77 @@ pub fn run_branch_a_validate(
     }
 }
 
+/// Loads and validates `~/.config/canon-clerk/config.json` when present in `env` (`XDG_CONFIG_HOME` / `HOME`).
+pub(crate) fn load_optional_host_stored_config(
+    env: &BTreeMap<String, String>,
+) -> Result<Option<StoredConfig>, CliError> {
+    let cwd = env::current_dir().ok();
+    match resolve_default_config_path(env) {
+        Some(cfg_path) => {
+            let loaded = load_host_config_file(&cfg_path, cwd.as_deref())
+                .map_err(|err| CliError::usage(err.to_string()))?;
+            if let Some(ref stored) = loaded {
+                let display = cfg_path.display().to_string();
+                stored
+                    .validate_schema(Some(&display))
+                    .map_err(|err| CliError::usage(err.to_string()))?;
+            }
+            Ok(loaded)
+        }
+        None => Ok(None),
+    }
+}
+
 /// Resolves host config file, environment variables, and CLI overrides into Branch B [`ConfigureOptions`].
 pub fn resolve_branch_b_options(
     provider: &ProviderConfigArgs,
+    node_models: BTreeMap<HeuristicNode, String>,
+    env: &BTreeMap<String, String>,
+) -> Result<ConfigureOptions, CliError> {
+    let stored_config = load_optional_host_stored_config(env)?;
+    resolve_closure_branch_b_options(
+        provider,
+        node_models,
+        ConfigureScope::AllProvisioned,
+        stored_config,
+        env,
+    )
+}
+
+/// Resolves Branch B [`ConfigureOptions`] for a specific [`ConfigureScope`] using an already-loaded [`StoredConfig`].
+pub(crate) fn resolve_closure_branch_b_options(
+    provider: &ProviderConfigArgs,
+    node_models: BTreeMap<HeuristicNode, String>,
+    scope: ConfigureScope,
+    stored_config: Option<StoredConfig>,
     env: &BTreeMap<String, String>,
 ) -> Result<ConfigureOptions, CliError> {
     let thinking_level = provider.validate_thinking_flags()?;
-    let cwd = env::current_dir().ok();
-    let stored_config = match resolve_default_config_path(env) {
-        Some(cfg_path) => load_host_config_file(&cfg_path, cwd.as_deref())
-            .map_err(|err| CliError::usage(err.to_string()))?,
-        None => None,
-    };
+    check_retired_env_vars(env).map_err(|err| CliError::usage(err.to_string()))?;
 
     Ok(ConfigureOptions {
-        screener_model: provider.screener_model.clone(),
-        auditor_model: provider.auditor_model.clone(),
+        provider: provider.provider.clone(),
+        node_models,
         thinking_level,
         reasoning_budget: provider.reasoning_budget,
         gemini_api_key: provider.gemini_api_key.clone(),
         typesafe_api_key: provider.typesafe_api_key.clone(),
-        screener_only_closure: false,
+        scope,
         env: env.clone(),
         stored_config,
     })
 }
 
-/// Resolves Branch B [`ConfigureOptions`] for screener-only closures (`apprise`, `docket`, `admit`, `vet`)
-/// so active provider credential checks apply strictly to `screener_model` unless `--auditor-model` was overridden.
-pub(crate) fn resolve_screener_branch_b_options(
-    provider: &ProviderConfigArgs,
-    env: &BTreeMap<String, String>,
-) -> Result<ConfigureOptions, CliError> {
-    let mut opts = resolve_branch_b_options(provider, env)?;
-    opts.screener_only_closure = true;
-    Ok(opts)
-}
-
-/// Executes Branch B `configure` stage, fast-forwarding if `.config` is present and no overrides are specified.
+/// Executes Branch B `configure` stage, fast-forwarding if `.config` already satisfies `options.scope`
+/// and no explicit CLI overrides are specified.
 pub fn run_branch_b_configure(
     options: &ConfigureOptions,
     incoming: Option<Caseload>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
+    check_retired_env_vars(&options.env).map_err(|err| CliError::usage(err.to_string()))?;
     if let Some(existing) = incoming.as_ref()
-        && existing.config.is_some()
-        && !options.has_explicit_overrides()
+        && can_fast_forward_existing_config(options, existing.config.as_ref())
     {
         Ok(existing.clone())
     } else {
@@ -232,17 +260,28 @@ pub(crate) fn resolve_typesafe_api_key(options: &ConfigureOptions) -> Result<Str
         .map_err(|err| CliError::usage(err.to_string()))
 }
 
-/// Builds a live [`MultiModelProvider`] resolving only the credentials required by `config` and `options`
-/// and sharing a single pooled requester governed by `retry_policy`.
+/// Builds a live [`MultiModelProvider`] resolving only the credentials required by the executed nodes
+/// in `options.scope` and sharing a single pooled requester governed by `retry_policy`.
 pub(crate) fn build_live_model_provider(
     options: &ConfigureOptions,
     config: &CaseloadConfig,
     retry_policy: RetryPolicy,
 ) -> Result<MultiModelProvider, CliError> {
-    let check_auditor_creds = !options.screener_only_closure || options.auditor_model.is_some();
-    let needs_google = model_provider(&config.screener_model) == DEFAULT_PROVIDER
-        || (check_auditor_creds && model_provider(&config.auditor_model) == DEFAULT_PROVIDER);
-    let needs_typesafe = model_provider(&config.screener_model) == TYPESAFE_PROVIDER;
+    let active_models: Vec<&str> = match &options.scope {
+        ConfigureScope::AllProvisioned => config.nodes.values().map(|n| n.model.as_str()).collect(),
+        ConfigureScope::Closure(required) => config
+            .nodes
+            .iter()
+            .filter(|(node, _)| required.contains(node) || options.node_models.contains_key(node))
+            .map(|(_, n)| n.model.as_str())
+            .collect(),
+    };
+    let needs_google = active_models
+        .iter()
+        .any(|m| model_provider(m) == DEFAULT_PROVIDER);
+    let needs_typesafe = active_models
+        .iter()
+        .any(|m| model_provider(m) == TYPESAFE_PROVIDER);
 
     let gemini_key = if needs_google {
         Some(resolve_gemini_api_key(options)?)
@@ -314,12 +353,11 @@ mod tests {
             let clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
             let session = TelemetrySession::new(&sink, &clock);
 
-            let existing = Caseload::new().with_config(CaseloadConfig {
-                screener_model: "google:gemini-2.5-flash-lite".to_string(),
-                auditor_model: "google:gemini-2.5-pro".to_string(),
-                thinking_level: None,
-                reasoning_budget: Some(1024),
-            });
+            let existing = Caseload::new().with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Docket, "google:gemini-2.5-flash-lite")
+                    .with_node_model(HeuristicNode::Audit, "google:gemini-2.5-pro"),
+            );
             let options = ConfigureOptions::default();
             let result = run_branch_b_configure(&options, Some(existing.clone()), &session)
                 .expect("fast-forward skip on config");

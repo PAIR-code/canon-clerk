@@ -323,7 +323,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             fs::write(&patch_path, patch).expect("write patch file");
             fs::write(
                 &upstream_caseload_path,
-                r#"{"version":"1.0","config":{"screener_model":"gemini-flash-lite-latest"}}"#,
+                r#"{"version":"1.0","config":{"provider":"google","nodes":{"docket":{"model":"google:gemini-decision-1"}}}}"#,
             )
             .expect("write upstream caseload");
 

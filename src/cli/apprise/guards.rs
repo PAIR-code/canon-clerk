@@ -12,30 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Dual-input guard, stage-prefixed threshold validation, and fast-forward predicates for `canon-clerk apprise`.
+//! Dual-input guard, stage-prefixed flag validation, and fast-forward predicates for `canon-clerk apprise`.
 
 use super::AppriseArgs;
 use crate::apprise::{
     DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
     ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD,
 };
-use crate::caseload::{Caseload, IntakeScope, normalize_unit_score};
+use crate::caseload::{Caseload, HeuristicNode, IntakeScope, normalize_unit_score};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::has_provider_overrides;
+use crate::cli::node_args::check_retired_tuning_env_vars;
 use crate::configure::StoredConfig;
-use crate::docket::{ENV_MAX_CANONS_PER_CALL, ENV_MAX_CONCURRENT_CALLS};
 use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AppriseArgs) -> Result<(), CliError> {
-    if args.rejected_threshold.is_some() {
-        return Err(CliError::usage(
-            "Ambiguous unqualified flag `--threshold` is disallowed.\n  \
-             Hint: Pass stage-prefixed `--apprise-threshold <FLOAT>` \
-             (or set `CANON_CLERK_APPRISE_THRESHOLD`) for `canon-clerk apprise`.",
-        ));
-    }
+    args.rejected_unqualified.validate(
+        "apprise",
+        "`--apprise-threshold <FLOAT>` (or set `CANON_CLERK_APPRISE_THRESHOLD`)",
+        "`--apprise-model <PROVIDER:MODEL>`",
+        Some("`--apprise-batch-size <COUNT>`"),
+        "`--apprise-concurrency <COUNT>`",
+    )?;
+    let _ = args.models.resolve_node_models()?;
     if args.rejected_docket_threshold.is_some() {
         return Err(CliError::usage(
             "Out-of-closure flag `--docket-threshold` is not valid for `canon-clerk apprise` (`docket` is pruned from the apprisal closure).\n  \
@@ -51,13 +52,13 @@ pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AppriseArgs) -> Resul
     if args.rejected_docket_batch_size.is_some() {
         return Err(CliError::usage(
             "Out-of-closure flag `--docket-batch-size` is not valid for `canon-clerk apprise` (`docket` is pruned from the apprisal closure).\n  \
-             Hint: Pass `--apprise-batch-size <COUNT>` (or `--max-canons-per-call <COUNT>`) for prospective statutory apprisal.",
+             Hint: Pass `--apprise-batch-size <COUNT>` for prospective statutory apprisal.",
         ));
     }
     if args.rejected_docket_concurrency.is_some() {
         return Err(CliError::usage(
             "Out-of-closure flag `--docket-concurrency` is not valid for `canon-clerk apprise` (`docket` is pruned from the apprisal closure).\n  \
-             Hint: Pass `--apprise-concurrency <COUNT>` (or `--max-concurrent-calls <COUNT>`) for prospective statutory apprisal.",
+             Hint: Pass `--apprise-concurrency <COUNT>` for prospective statutory apprisal.",
         ));
     }
     Ok(())
@@ -66,6 +67,7 @@ pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AppriseArgs) -> Resul
 pub(super) fn resolve_apprise_threshold(
     flag_threshold: Option<f64>,
     env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
 ) -> Result<f64, CliError> {
     if let Some(val) = flag_threshold {
         return normalize_unit_score(val).map_err(|detail| {
@@ -95,6 +97,15 @@ pub(super) fn resolve_apprise_threshold(
         });
     }
 
+    if let Some(stored_val) = stored.and_then(|s| s.node_threshold(HeuristicNode::Apprise)) {
+        return normalize_unit_score(stored_val).map_err(|detail| {
+            CliError::usage(format!(
+                "Invalid `nodes.apprise.threshold` value `{stored_val}` in user configuration: {detail}.\n  \
+                 Hint: Configure a finite float in `[0.0, 1.0]` for `nodes.apprise.threshold` or override with `--apprise-threshold <FLOAT>`."
+            ))
+        });
+    }
+
     Ok(DEFAULT_APPRISE_THRESHOLD)
 }
 
@@ -103,6 +114,7 @@ pub(super) fn resolve_apprise_batch_size(
     env: &BTreeMap<String, String>,
     stored: Option<&StoredConfig>,
 ) -> Result<Option<usize>, CliError> {
+    check_retired_tuning_env_vars(env)?;
     if let Some(val) = flag_batch_size {
         if val == 0 {
             return Err(CliError::usage(format!(
@@ -113,23 +125,25 @@ pub(super) fn resolve_apprise_batch_size(
         return Ok(Some(val));
     }
 
-    for env_key in [ENV_APPRISE_BATCH_SIZE, ENV_MAX_CANONS_PER_CALL] {
-        if let Some(raw_env) = env.get(env_key).map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
-                CliError::usage(format!(
-                    "Invalid batch size `{raw_env}` in `{env_key}`: expected a positive integer (`>= 1`).\n  \
-                     Hint: Pass `--apprise-batch-size <COUNT>` or set `{ENV_APPRISE_BATCH_SIZE}={DEFAULT_APPRISE_BATCH_SIZE}`."
-                ))
-            })?;
-            return Ok(Some(parsed));
-        }
+    if let Some(raw_env) = env
+        .get(ENV_APPRISE_BATCH_SIZE)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
+            CliError::usage(format!(
+                "Invalid batch size `{raw_env}` in `{ENV_APPRISE_BATCH_SIZE}`: expected a positive integer (`>= 1`).\n  \
+                 Hint: Pass `--apprise-batch-size <COUNT>` or set `{ENV_APPRISE_BATCH_SIZE}={DEFAULT_APPRISE_BATCH_SIZE}`."
+            ))
+        })?;
+        return Ok(Some(parsed));
     }
 
-    if let Some(stored_val) = stored.and_then(|s| s.apprise_batch_size) {
+    if let Some(stored_val) = stored.and_then(|s| s.node_batch_size(HeuristicNode::Apprise)) {
         if stored_val == 0 {
             return Err(CliError::usage(format!(
-                "Invalid `appriseBatchSize` value `0` in user configuration: batch size must be at least 1.\n  \
-                 Hint: Configure a positive integer (`>= 1`) for `appriseBatchSize` or override with `--apprise-batch-size <COUNT>` / `{ENV_APPRISE_BATCH_SIZE}` (default: `{DEFAULT_APPRISE_BATCH_SIZE}`)."
+                "Invalid `nodes.apprise.batchSize` value `0` in user configuration: batch size must be at least 1.\n  \
+                 Hint: Configure a positive integer (`>= 1`) for `nodes.apprise.batchSize` or override with `--apprise-batch-size <COUNT>` / `{ENV_APPRISE_BATCH_SIZE}` (default: `{DEFAULT_APPRISE_BATCH_SIZE}`)."
             )));
         }
         return Ok(Some(stored_val));
@@ -143,6 +157,7 @@ pub(super) fn resolve_apprise_concurrency(
     env: &BTreeMap<String, String>,
     stored: Option<&StoredConfig>,
 ) -> Result<Option<usize>, CliError> {
+    check_retired_tuning_env_vars(env)?;
     if let Some(val) = flag_concurrency {
         if val == 0 {
             return Err(CliError::usage(format!(
@@ -153,23 +168,25 @@ pub(super) fn resolve_apprise_concurrency(
         return Ok(Some(val));
     }
 
-    for env_key in [ENV_APPRISE_CONCURRENCY, ENV_MAX_CONCURRENT_CALLS] {
-        if let Some(raw_env) = env.get(env_key).map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
-                CliError::usage(format!(
-                    "Invalid concurrency limit `{raw_env}` in `{env_key}`: expected a positive integer (`>= 1`).\n  \
-                     Hint: Pass `--apprise-concurrency <COUNT>` or set `{ENV_APPRISE_CONCURRENCY}={DEFAULT_APPRISE_MAX_CONCURRENT_CALLS}`."
-                ))
-            })?;
-            return Ok(Some(parsed));
-        }
+    if let Some(raw_env) = env
+        .get(ENV_APPRISE_CONCURRENCY)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
+            CliError::usage(format!(
+                "Invalid concurrency limit `{raw_env}` in `{ENV_APPRISE_CONCURRENCY}`: expected a positive integer (`>= 1`).\n  \
+                 Hint: Pass `--apprise-concurrency <COUNT>` or set `{ENV_APPRISE_CONCURRENCY}={DEFAULT_APPRISE_MAX_CONCURRENT_CALLS}`."
+            ))
+        })?;
+        return Ok(Some(parsed));
     }
 
-    if let Some(stored_val) = stored.and_then(|s| s.apprise_concurrency) {
+    if let Some(stored_val) = stored.and_then(|s| s.node_concurrency(HeuristicNode::Apprise)) {
         if stored_val == 0 {
             return Err(CliError::usage(format!(
-                "Invalid `appriseConcurrency` value `0` in user configuration: concurrency limit must be at least 1.\n  \
-                 Hint: Configure a positive integer (`>= 1`) for `appriseConcurrency` or override with `--apprise-concurrency <COUNT>` / `{ENV_APPRISE_CONCURRENCY}`."
+                "Invalid `nodes.apprise.concurrency` value `0` in user configuration: concurrency limit must be at least 1.\n  \
+                 Hint: Configure a positive integer (`>= 1`) for `nodes.apprise.concurrency` or override with `--apprise-concurrency <COUNT>` / `{ENV_APPRISE_CONCURRENCY}`."
             )));
         }
         return Ok(Some(stored_val));
@@ -189,6 +206,7 @@ pub(super) fn can_fast_forward_completed_apprisal(
         && args.apprise_threshold.is_none()
         && args.apprise_batch_size.is_none()
         && args.apprise_concurrency.is_none()
+        && !args.models.has_overrides()
         && !has_provider_overrides(&args.provider)
 }
 

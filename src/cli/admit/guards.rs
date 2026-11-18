@@ -12,31 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Case-or-Controversy guard, stage-prefixed threshold validation, and fast-forward predicates for `canon-clerk admit`.
+//! Case-or-Controversy guard, stage-prefixed flag validation, and fast-forward predicates for `canon-clerk admit`.
 
 use super::AdmitArgs;
 use crate::admit::{
     DEFAULT_ADMIT_MAX_CONCURRENT_CALLS, DEFAULT_ADMIT_THRESHOLD, ENV_ADMIT_CONCURRENCY,
     ENV_ADMIT_THRESHOLD,
 };
-use crate::caseload::{Caseload, normalize_admissibility_score};
+use crate::caseload::{Caseload, HeuristicNode, normalize_admissibility_score};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::has_provider_overrides;
 use crate::cli::docket::guards::has_concrete_cli_filing;
+use crate::cli::node_args::check_retired_tuning_env_vars;
 use crate::configure::StoredConfig;
-use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AdmitArgs) -> Result<(), CliError> {
-    if args.rejected_threshold.is_some() {
-        return Err(CliError::usage(
-            "Ambiguous unqualified flag `--threshold` is disallowed.\n  \
-             Hint: Pass stage-prefixed `--admit-threshold <FLOAT>` (or `--docket-threshold <FLOAT>` \
-             for upstream macro triage) on `canon-clerk admit`.",
-        ));
-    }
+    args.rejected_unqualified.validate(
+        "admit",
+        "`--admit-threshold <FLOAT>` (or `--docket-threshold <FLOAT>` for upstream macro triage)",
+        "`--admit-model <PROVIDER:MODEL>` or `--docket-model <PROVIDER:MODEL>`",
+        Some("`--docket-batch-size <COUNT>`"),
+        "`--admit-concurrency <COUNT>` or `--docket-concurrency <COUNT>`",
+    )?;
+    let _ = args.models.resolve_node_models()?;
     if args.rejected_apprise_threshold.is_some() {
         return Err(CliError::usage(
             "Out-of-closure flag `--apprise-threshold` is not valid for `canon-clerk admit` (`apprise` is pruned from the admit closure).\n  \
@@ -61,6 +62,7 @@ pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AdmitArgs) -> Result<
 pub(crate) fn resolve_admit_threshold(
     flag_threshold: Option<f64>,
     env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
 ) -> Result<f64, CliError> {
     if let Some(val) = flag_threshold {
         return normalize_admissibility_score(val).map_err(|detail| {
@@ -90,6 +92,15 @@ pub(crate) fn resolve_admit_threshold(
         });
     }
 
+    if let Some(stored_val) = stored.and_then(|s| s.node_threshold(HeuristicNode::Admit)) {
+        return normalize_admissibility_score(stored_val).map_err(|detail| {
+            CliError::usage(format!(
+                "Invalid `nodes.admit.threshold` value `{stored_val}` in user configuration: {detail}.\n  \
+                 Hint: Configure a finite float in `[0.0, 1.0]` for `nodes.admit.threshold` or override with `--admit-threshold <FLOAT>`."
+            ))
+        });
+    }
+
     Ok(DEFAULT_ADMIT_THRESHOLD)
 }
 
@@ -98,6 +109,7 @@ pub(crate) fn resolve_admit_concurrency(
     env: &BTreeMap<String, String>,
     stored: Option<&StoredConfig>,
 ) -> Result<Option<usize>, CliError> {
+    check_retired_tuning_env_vars(env)?;
     if let Some(val) = flag_concurrency {
         if val == 0 {
             return Err(CliError::usage(format!(
@@ -108,23 +120,25 @@ pub(crate) fn resolve_admit_concurrency(
         return Ok(Some(val));
     }
 
-    for env_key in [ENV_ADMIT_CONCURRENCY, ENV_MAX_CONCURRENT_CALLS] {
-        if let Some(raw_env) = env.get(env_key).map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
-                CliError::usage(format!(
-                    "Invalid concurrency limit `{raw_env}` in `{env_key}`: expected a positive integer (`>= 1`).\n  \
-                     Hint: Pass `--admit-concurrency <COUNT>` or set `{ENV_ADMIT_CONCURRENCY}={DEFAULT_ADMIT_MAX_CONCURRENT_CALLS}`."
-                ))
-            })?;
-            return Ok(Some(parsed));
-        }
+    if let Some(raw_env) = env
+        .get(ENV_ADMIT_CONCURRENCY)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
+            CliError::usage(format!(
+                "Invalid concurrency limit `{raw_env}` in `{ENV_ADMIT_CONCURRENCY}`: expected a positive integer (`>= 1`).\n  \
+                 Hint: Pass `--admit-concurrency <COUNT>` or set `{ENV_ADMIT_CONCURRENCY}={DEFAULT_ADMIT_MAX_CONCURRENT_CALLS}`."
+            ))
+        })?;
+        return Ok(Some(parsed));
     }
 
-    if let Some(stored_val) = stored.and_then(|s| s.admit_concurrency) {
+    if let Some(stored_val) = stored.and_then(|s| s.node_concurrency(HeuristicNode::Admit)) {
         if stored_val == 0 {
             return Err(CliError::usage(format!(
-                "Invalid `admitConcurrency` value `0` in user configuration: concurrency limit must be at least 1.\n  \
-                 Hint: Configure a positive integer (`>= 1`) for `admitConcurrency` or override with `--admit-concurrency <COUNT>` / `{ENV_ADMIT_CONCURRENCY}`."
+                "Invalid `nodes.admit.concurrency` value `0` in user configuration: concurrency limit must be at least 1.\n  \
+                 Hint: Configure a positive integer (`>= 1`) for `nodes.admit.concurrency` or override with `--admit-concurrency <COUNT>` / `{ENV_ADMIT_CONCURRENCY}`."
             )));
         }
         return Ok(Some(stored_val));
@@ -137,6 +151,7 @@ pub(super) fn has_docket_cli_overrides(args: &AdmitArgs) -> bool {
     args.docket_threshold.is_some()
         || args.docket_batch_size.is_some()
         || args.docket_concurrency.is_some()
+        || args.models.docket_model.is_some()
 }
 
 pub(super) fn can_fast_forward_completed_admit(
@@ -149,6 +164,7 @@ pub(super) fn can_fast_forward_completed_admit(
         && args.canons.is_empty()
         && args.admit_threshold.is_none()
         && args.admit_concurrency.is_none()
+        && !args.models.has_overrides()
         && !has_docket_cli_overrides(args)
         && !has_provider_overrides(&args.provider)
 }

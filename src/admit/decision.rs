@@ -20,7 +20,7 @@ use super::{AdmitError, AdmitOptions, DEFAULT_ADMIT_MAX_CONCURRENT_CALLS};
 use crate::canon::Canon;
 use crate::caseload::{
     AdmissibilityStatus, Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake,
-    ExhibitAssessment, normalize_admissibility_score,
+    ExhibitAssessment, HeuristicNode, normalize_admissibility_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
@@ -53,7 +53,12 @@ pub(super) fn execute_admit_decisions(
         .discovery
         .as_ref()
         .ok_or(AdmitError::MissingDiscovery)?;
-    let config = caseload.config.as_ref().ok_or(AdmitError::MissingConfig)?;
+    let admit_model = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.model_for(HeuristicNode::Admit))
+        .ok_or(AdmitError::MissingConfig)?
+        .to_string();
 
     let mut unique_exhibits = BTreeSet::new();
     let mut all_pairs = Vec::new();
@@ -78,7 +83,7 @@ pub(super) fn execute_admit_decisions(
         intake,
         discovery,
         workspace,
-        &config.screener_model,
+        &admit_model,
         options.timeout_ms,
     );
 
@@ -89,7 +94,7 @@ pub(super) fn execute_admit_decisions(
         &prepared,
         concurrency_limit,
         threshold,
-        &config.screener_model,
+        &admit_model,
         provider,
     )?;
 
@@ -110,14 +115,14 @@ fn pack_exhibit_grouped_batches(
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
-    screener_model: &str,
+    admit_model: &str,
     timeout_ms: u64,
 ) -> Vec<(Vec<PairSubject>, DecisionRequest)> {
     if sorted_pairs.is_empty() {
         return Vec::new();
     }
 
-    let budget = DecisionBudgetProfile::for_model(screener_model);
+    let budget = DecisionBudgetProfile::for_model(admit_model);
     let mut filing_overview = String::with_capacity(1024);
     append_filing_overview(&mut filing_overview, intake, discovery);
     if filing_overview.len() > budget.max_batch_chars / 4
@@ -160,7 +165,7 @@ fn pack_exhibit_grouped_batches(
                 &cur_exhibits,
                 &filing_overview,
                 &rendered_exhibits,
-                screener_model,
+                admit_model,
                 timeout_ms,
             ));
             cur_pairs = Vec::new();
@@ -182,7 +187,7 @@ fn pack_exhibit_grouped_batches(
             &cur_exhibits,
             &filing_overview,
             &rendered_exhibits,
-            screener_model,
+            admit_model,
             timeout_ms,
         ));
     }
@@ -194,7 +199,7 @@ fn finalize_admit_batch(
     batch_exhibits: &BTreeSet<String>,
     filing_overview: &str,
     rendered_exhibits: &BTreeMap<String, String>,
-    screener_model: &str,
+    admit_model: &str,
     timeout_ms: u64,
 ) -> (Vec<PairSubject>, DecisionRequest) {
     let mut state = String::with_capacity(filing_overview.len() + batch_exhibits.len() * 512);
@@ -212,7 +217,7 @@ fn finalize_admit_batch(
     (
         batch_pairs,
         DecisionRequest {
-            model_specifier: screener_model.to_string(),
+            model_specifier: admit_model.to_string(),
             state,
             questions,
             timeout_ms,
@@ -335,21 +340,21 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         CanonDocketAssessment, CaseloadConfig, CaseloadDocket, CaseloadValidation,
-        ColorabilityStatus, DiscoveryMode,
+        ColorabilityStatus, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
     };
-    use crate::configure::DEFAULT_JEV_MODEL;
     use crate::provider::{GenerationRequest, GenerationResponse, TokenUsage};
 
-    struct StubAdmitScreener;
+    struct StubAdmitDecisions;
 
-    impl StructuredModelProvider for StubAdmitScreener {
+    impl StructuredModelProvider for StubAdmitDecisions {
         fn generate_structured(
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
             Err(ProviderError::UnsupportedProvider {
                 provider: "typesafe".to_string(),
-                model_specifier: DEFAULT_JEV_MODEL.to_string(),
+                model_specifier: DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL.to_string(),
             })
         }
 
@@ -400,10 +405,10 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: DEFAULT_JEV_MODEL.to_string(),
-                ..CaseloadConfig::default()
-            })
+            .with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Admit, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+            )
             .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
                 canon_ref.to_string(),
                 CanonDocketAssessment {
@@ -413,7 +418,7 @@ mod tests {
                 },
             )])));
 
-        let out = execute_admit(&AdmitOptions::default(), caseload, &ws, &StubAdmitScreener)
+        let out = execute_admit(&AdmitOptions::default(), caseload, &ws, &StubAdmitDecisions)
             .expect("admit decision screening");
         let evidence = out.evidence.expect("evidence populated");
         assert_eq!(evidence.active_cases, vec![canon_ref.to_string()]);
@@ -427,13 +432,12 @@ mod tests {
 
     #[test]
     fn test_gemini_decision_expanded_budget_packs_over_48_pairs_in_single_batch_vs_jev() {
-        use crate::caseload::DEFAULT_SCREENER_MODEL;
         use std::sync::Mutex;
 
-        struct BatchCountingDecisionScreener {
+        struct BatchCountingDecisions {
             batch_sizes: Mutex<Vec<usize>>,
         }
-        impl StructuredModelProvider for BatchCountingDecisionScreener {
+        impl StructuredModelProvider for BatchCountingDecisions {
             fn generate_structured(
                 &self,
                 _request: &crate::provider::GenerationRequest,
@@ -487,10 +491,7 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: model.to_string(),
-                    ..CaseloadConfig::default()
-                })
+                .with_config(CaseloadConfig::default().with_node_model(HeuristicNode::Admit, model))
                 .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
                     canon_ref.to_string(),
                     CanonDocketAssessment {
@@ -501,24 +502,24 @@ mod tests {
                 )])))
         };
 
-        let gemini_probe = BatchCountingDecisionScreener {
+        let gemini_probe = BatchCountingDecisions {
             batch_sizes: Mutex::new(Vec::new()),
         };
         execute_admit(
             &AdmitOptions::default(),
-            make_caseload(DEFAULT_SCREENER_MODEL),
+            make_caseload(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
             &ws,
             &gemini_probe,
         )
         .expect("gemini-decision-1 admit");
         assert_eq!(*gemini_probe.batch_sizes.lock().unwrap(), vec![60]);
 
-        let jev_probe = BatchCountingDecisionScreener {
+        let jev_probe = BatchCountingDecisions {
             batch_sizes: Mutex::new(Vec::new()),
         };
         execute_admit(
             &AdmitOptions::default(),
-            make_caseload(DEFAULT_JEV_MODEL),
+            make_caseload(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
             &ws,
             &jev_probe,
         )

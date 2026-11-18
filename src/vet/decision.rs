@@ -38,14 +38,14 @@ Question: Do the Admitted Exhibits in `state` comply with the Governing Canon St
 - Answer YES if the Admitted Exhibits comply, satisfy a declared `Exception`, OR if the canon's governed construct is absent/untouched in these exhibits (zero violation annotations required).\n\
 - Answer NO ONLY if an unexcused statute violation or missing required companion update is actually present in the exhibits.";
 
-pub(super) fn max_discriminative_state_chars(screener_model: &str) -> usize {
-    DecisionBudgetProfile::for_model(screener_model)
+pub(super) fn max_discriminative_state_chars(vet_model: &str) -> usize {
+    DecisionBudgetProfile::for_model(vet_model)
         .max_batch_chars
         .saturating_sub(VET_NOUL_INSTRUCTION.len() + 128)
 }
 
 pub(super) struct DiscriminativeVetParams<'a> {
-    pub(super) screener_model: &'a str,
+    pub(super) vet_model: &'a str,
     pub(super) threshold: f64,
     pub(super) concurrency_limit: usize,
     pub(super) timeout_ms: u64,
@@ -98,7 +98,7 @@ fn evaluate_single_decision_case(
     }
 
     let mut min_score = 1.0_f64;
-    let mut resolved_model = params.screener_model.to_string();
+    let mut resolved_model = params.vet_model.to_string();
     let mut cleared_slices = 0usize;
     let mut contested_slices = 0usize;
     let mut failed_slice_paths = Vec::new();
@@ -176,7 +176,7 @@ fn evaluate_slice(
         VET_NOUL_INSTRUCTION.to_string(),
     );
     let decision_req = DecisionRequest {
-        model_specifier: params.screener_model.to_string(),
+        model_specifier: params.vet_model.to_string(),
         state: slice_state.to_string(),
         questions,
         timeout_ms: params.timeout_ms,
@@ -201,13 +201,13 @@ fn evaluate_slice(
         .copied()
         .ok_or_else(|| {
             VetError::Provider(ProviderError::SchemaDecode {
-                model_specifier: params.screener_model.to_string(),
+                model_specifier: params.vet_model.to_string(),
                 message: format!("missing compliance `noul` score for active case `{canon_ref}`"),
             })
         })?;
     let score = normalize_vetting_score(raw_score).map_err(|detail| {
         VetError::Provider(ProviderError::SchemaDecode {
-            model_specifier: params.screener_model.to_string(),
+            model_specifier: params.vet_model.to_string(),
             message: format!("invalid compliance `noul` score for `{canon_ref}`: {detail}"),
         })
     })?;

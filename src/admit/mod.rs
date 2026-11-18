@@ -23,15 +23,13 @@ mod slices;
 use crate::canon::Canon;
 use crate::caseload::{
     Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake, ExhibitAssessment,
-    normalize_admissibility_score,
+    HeuristicNode, ResolvedNodeConfig, normalize_admissibility_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::ENV_MAX_CONCURRENT_CALLS;
 use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
-    ProviderError, StructuredModelProvider,
+    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
 };
 use decode::decode_case_exhibits;
 use exhibits::resolve_case_candidate_exhibits;
@@ -44,7 +42,7 @@ use std::fmt;
 /// Default evidentiary admissibility threshold for `admit` (`docs/architecture/nodes/admit.md` §4.5).
 pub const DEFAULT_ADMIT_THRESHOLD: f64 = 0.5;
 
-/// Default maximum concurrent in-flight per-case screener calls during `admit`.
+/// Default maximum concurrent in-flight per-case `admit` calls.
 pub const DEFAULT_ADMIT_MAX_CONCURRENT_CALLS: usize = 4;
 
 /// Environment variable name for overriding `--admit-threshold` (`docs/architecture/nodes/admit.md` §5).
@@ -60,7 +58,7 @@ pub struct AdmitOptions {
     pub threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
-    /// Optional maximum concurrent in-flight per-case screener calls (`>= 1`; defaults to [`DEFAULT_ADMIT_MAX_CONCURRENT_CALLS`]).
+    /// Optional maximum concurrent in-flight per-case `admit` calls (`>= 1`; defaults to [`DEFAULT_ADMIT_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
 }
 
@@ -223,7 +221,7 @@ pub fn execute_admit(
     if options.max_concurrent_calls == Some(0) {
         return Err(AdmitError::InvalidConcurrency {
             detail: format!(
-                "max_concurrent_calls must be at least 1, got 0 (see `{ENV_ADMIT_CONCURRENCY}` / `{ENV_MAX_CONCURRENT_CALLS}`)"
+                "max_concurrent_calls must be at least 1, got 0 (see `{ENV_ADMIT_CONCURRENCY}`)"
             ),
         });
     }
@@ -274,8 +272,12 @@ pub fn execute_admit(
         return Ok(caseload.with_evidence(CaseloadEvidence::from_exhibits(empty_cases)));
     }
 
-    let config = caseload.config.as_ref().ok_or(AdmitError::MissingConfig)?;
-    if is_discriminative_model(&config.screener_model) {
+    let node_cfg = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.node(HeuristicNode::Admit))
+        .ok_or(AdmitError::MissingConfig)?;
+    if is_discriminative_model(&node_cfg.model) {
         return decision::execute_admit_decisions(
             options,
             caseload,
@@ -286,9 +288,10 @@ pub fn execute_admit(
             provider,
         );
     }
+    let admit_model = node_cfg.model.clone();
     let prepared_calls = prepare_generative_case_calls(
         non_empty_cases,
-        &config.screener_model,
+        node_cfg,
         options.timeout_ms,
         intake,
         discovery,
@@ -302,7 +305,7 @@ pub fn execute_admit(
         &prepared_calls,
         concurrency_limit,
         threshold,
-        &config.screener_model,
+        &admit_model,
         provider,
     )?;
     all_exhibits.extend(empty_cases);
@@ -312,13 +315,14 @@ pub fn execute_admit(
 
 fn prepare_generative_case_calls(
     non_empty_cases: Vec<(String, &Canon, Vec<String>)>,
-    screener_model: &str,
+    node_cfg: &ResolvedNodeConfig,
     timeout_ms: u64,
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
 ) -> Vec<PreparedCaseCall> {
     let response_schema = build_admit_schema();
+    let (thinking_level, reasoning_budget) = node_cfg.effective_screening_thinking();
     let mut planner = ExhibitSlicePlanner::new(
         intake,
         discovery,
@@ -339,12 +343,12 @@ fn prepare_generative_case_calls(
                 canon_ref.clone()
             };
             let request = GenerationRequest {
-                model_specifier: screener_model.to_string(),
+                model_specifier: node_cfg.model.clone(),
                 system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
                 user_prompt: slice.user_prompt,
                 response_schema: response_schema.clone(),
-                thinking_level: None,
-                reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
+                thinking_level,
+                reasoning_budget,
                 timeout_ms,
                 call_label: Some(call_label.clone()),
             };
@@ -578,10 +582,10 @@ mod tests {
                 triggers_join,
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig {
-                screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                ..CaseloadConfig::default()
-            })
+            .with_config(CaseloadConfig::default().with_node_model(
+                HeuristicNode::Admit,
+                crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+            ))
             .with_docket(CaseloadDocket::from_cases(cases))
     }
 
@@ -895,10 +899,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                    ..CaseloadConfig::default()
-                })
+                .with_config(CaseloadConfig::default().with_node_model(
+                    HeuristicNode::Admit,
+                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+                ))
                 .with_docket(CaseloadDocket::from_cases(cases));
 
             let enriched = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
@@ -910,7 +914,10 @@ mod tests {
 
             let reqs = provider.captured_requests();
             assert_eq!(reqs.len(), 1);
-            assert_eq!(reqs[0].reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
+            assert_eq!(
+                reqs[0].reasoning_budget,
+                crate::provider::DEFAULT_SCREENING_REASONING_BUDGET
+            );
             let overview_pos = reqs[0]
                 .user_prompt
                 .find("## Filing Overview")
@@ -1113,7 +1120,7 @@ mod tests {
                     linked_issues: Some(vec![LinkedIssueContext {
                         number: 313,
                         title: Some("Slice admit exhibits".to_string()),
-                        body: Some("Prevent 60s screener timeouts.".to_string()),
+                        body: Some("Prevent 60s request timeouts.".to_string()),
                         url: None,
                     }]),
                     ..CaseloadIntake::default()
@@ -1132,10 +1139,10 @@ mod tests {
                     triggers_join,
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                    ..CaseloadConfig::default()
-                })
+                .with_config(CaseloadConfig::default().with_node_model(
+                    HeuristicNode::Admit,
+                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+                ))
                 .with_docket(CaseloadDocket::from_cases(cases));
 
             (ws, caseload)

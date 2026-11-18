@@ -27,8 +27,8 @@ mod typesafe;
 pub(crate) use runtime::build_pooled_http_client;
 
 pub use crate::caseload::{
-    DEFAULT_AUDITOR_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL,
-    DEFAULT_SCREENER_REASONING_BUDGET, ThinkingLevel,
+    DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_SCREENING_REASONING_BUDGET,
+    ThinkingLevel,
 };
 pub(crate) use decision::partition_decision_items;
 pub use decision::{
@@ -59,10 +59,11 @@ pub(crate) use typesafe::{
     strip_typesafe_prefix,
 };
 
-use crate::caseload::{DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, TYPESAFE_PROVIDER};
-use crate::configure::{
-    DEFAULT_JEV_MODEL, ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider,
+use crate::caseload::{
+    DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, TYPESAFE_PROVIDER,
 };
+use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -209,8 +210,8 @@ impl fmt::Display for ProviderError {
             } => write!(
                 f,
                 "Unsupported model provider `{provider}` in specifier `{model_specifier}`.\n  \
-                 Hint: Canon Clerk supports `google` (`{DEFAULT_SCREENER_MODEL}`, `{DEFAULT_AUDITOR_MODEL}`) \
-                 and `typesafe` (`{DEFAULT_JEV_MODEL}`)."
+                 Hint: Canon Clerk supports `google` (`{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, `{DEFAULT_GOOGLE_GENERATOR_MODEL}`) \
+                 and `typesafe` (`{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`)."
             ),
             Self::InvalidModelSpecifier {
                 model_specifier,
@@ -218,8 +219,8 @@ impl fmt::Display for ProviderError {
             } => write!(
                 f,
                 "Invalid model specifier `{model_specifier}`: {reason}\n  \
-                 Hint: Specify a canonical model such as `{DEFAULT_SCREENER_MODEL}`, \
-                 `{DEFAULT_AUDITOR_MODEL}`, or `{DEFAULT_JEV_MODEL}`."
+                 Hint: Specify a canonical `<provider>:<model>` identifier such as `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, \
+                 `{DEFAULT_GOOGLE_GENERATOR_MODEL}`, or `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`."
             ),
             Self::InvalidTimeout { timeout_ms } => write!(
                 f,
@@ -374,7 +375,7 @@ mod tests {
             });
 
             let request = GenerationRequest {
-                model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                 system_instruction: "Evaluate statutory jurisdiction.".to_string(),
                 user_prompt: "Intent: add auth cache".to_string(),
                 response_schema: json!({"type": "object"}),
@@ -412,37 +413,37 @@ mod tests {
                 },
                 ProviderError::InvalidTimeout { timeout_ms: 0 },
                 ProviderError::Timeout {
-                    model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                     timeout_ms: 5000,
                 },
                 ProviderError::Transport {
-                    model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                     message: "connection refused".to_string(),
                 },
                 ProviderError::Transport {
-                    model_specifier: DEFAULT_JEV_MODEL.to_string(),
+                    model_specifier: DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL.to_string(),
                     message: "dns lookup failed".to_string(),
                 },
                 ProviderError::HttpStatus {
                     status_code: 429,
-                    model_specifier: DEFAULT_AUDITOR_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                     detail: "quota exceeded".to_string(),
                     diagnostic: classify_gemini_http_error(
                         429,
-                        DEFAULT_AUDITOR_MODEL,
+                        DEFAULT_GOOGLE_GENERATOR_MODEL,
                         "quota exceeded",
                     ),
                 },
                 ProviderError::BlockedResponse {
-                    model_specifier: DEFAULT_AUDITOR_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
                     reason: "SAFETY".to_string(),
                 },
                 ProviderError::MalformedResponse {
-                    model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                     reason: "invalid envelope".to_string(),
                 },
                 ProviderError::SchemaDecode {
-                    model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                    model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                     message: "expected JSON object".to_string(),
                 },
             ];

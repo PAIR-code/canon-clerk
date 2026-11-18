@@ -12,124 +12,140 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Host user-level configuration file (`~/.config/canon-clerk/config.json`) loader and security validators.
+//! Host user-level configuration file (`~/.config/canon-clerk/config.json`) loader, `{ providers, defaults, nodes }`
+//! schema validators, and workspace/permission security guards (`docs/architecture/nodes/configure.md` §3–4).
 
-use crate::caseload::{DEFAULT_PROVIDER, TYPESAFE_PROVIDER};
+use crate::caseload::{DEFAULT_PROVIDER, HeuristicNode, TYPESAFE_PROVIDER};
 use crate::configure::ConfigureError;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Provider-specific authentication and transport configuration entry under `providers.<provider>`.
+/// Provider-specific authentication entry under `providers.<provider>`.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct StoredProviderConfig {
     /// Provider API key (`apiKey` or `api_key`).
-    #[serde(alias = "apiKey", alias = "api_key")]
+    #[serde(
+        default,
+        rename = "apiKey",
+        alias = "api_key",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub api_key: Option<String>,
 }
 
-/// Model tier configuration entry supporting either a specifier string (`"google:gemini-pro-latest"`)
-/// or a structured object (`{ "provider": "google", "model": "gemini-pro-latest" }`).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum StoredTierModel {
-    /// Direct model specifier or alias string.
-    Specifier(String),
-    /// Structured provider + model object.
-    Object {
-        /// Optional provider slug (defaults to `"google"`).
-        provider: Option<String>,
-        /// Model name or alias.
-        model: String,
-    },
+/// Global default operational knobs under `defaults` in `~/.config/canon-clerk/config.json`.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct StoredDefaultsConfig {
+    /// Active default provider slug (`"google"` or `"typesafe"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    /// Default qualitative thinking level (`"minimal"`, `"low"`, `"medium"`, `"high"`).
+    #[serde(
+        default,
+        rename = "thinkingLevel",
+        alias = "thinking_level",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub thinking_level: Option<String>,
+
+    /// Default reasoning budget ceiling in tokens.
+    #[serde(
+        default,
+        rename = "reasoningBudget",
+        alias = "reasoning_budget",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reasoning_budget: Option<u32>,
+
+    /// Default maximum retry attempts per heuristic provider call (`>= 0`).
+    #[serde(
+        default,
+        rename = "maxRetries",
+        alias = "max_retries",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_retries: Option<u32>,
+
+    /// Default maximum per-wait cooldown or retry backoff in milliseconds (`>= 0`).
+    #[serde(
+        default,
+        rename = "maxBackoffMs",
+        alias = "max_backoff_ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_backoff_ms: Option<u64>,
 }
 
-impl StoredTierModel {
-    /// Converts the stored tier entry into a raw model specifier string.
-    pub fn to_specifier_string(&self) -> String {
-        match self {
-            Self::Specifier(s) => s.clone(),
-            Self::Object {
-                provider: Some(prov),
-                model,
-            } if !prov.trim().is_empty() => format!("{}:{}", prov.trim(), model.trim()),
-            Self::Object { provider: _, model } => model.trim().to_string(),
-        }
-    }
+/// Per-node model and operational tuning overrides under `nodes.<node>` in `~/.config/canon-clerk/config.json`.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StoredNodeConfig {
+    /// Canonical `<provider>:<model>` specifier pinned for this node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    /// Stage classification score threshold in `[0.0, 1.0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f64>,
+
+    /// Maximum candidate canons per call (`apprise` and `docket` only).
+    #[serde(
+        default,
+        rename = "batchSize",
+        alias = "batch_size",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub batch_size: Option<usize>,
+
+    /// Maximum concurrent in-flight model calls for this stage (`>= 1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<usize>,
+
+    /// Per-node qualitative thinking level (`"minimal"`, `"low"`, `"medium"`, `"high"`).
+    #[serde(
+        default,
+        rename = "thinkingLevel",
+        alias = "thinking_level",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub thinking_level: Option<String>,
+
+    /// Per-node reasoning budget ceiling in tokens.
+    #[serde(
+        default,
+        rename = "reasoningBudget",
+        alias = "reasoning_budget",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reasoning_budget: Option<u32>,
 }
+
+impl Eq for StoredNodeConfig {}
 
 /// Orthogonal user-level configuration file schema (`~/.config/canon-clerk/config.json`).
 ///
-/// Separates `providers` authentication namespaces from consumer execution tier settings
-/// per `.canons/configuration/configuration-file-formats-must-conform-to-industry-standards.md`.
+/// Restricted strictly to `providers`, `defaults`, and `nodes` namespaces per
+/// `.canons/configuration/configuration-file-formats-must-conform-to-industry-standards.md`.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct StoredConfig {
     /// Provider-keyed authentication settings (e.g. `providers.google.apiKey`).
     #[serde(default)]
     pub providers: BTreeMap<String, StoredProviderConfig>,
 
-    /// Default screener model tier configuration (`screenerModel` or `screener_model`).
-    #[serde(alias = "screenerModel", alias = "screener_model")]
-    pub screener_model: Option<StoredTierModel>,
+    /// Global provider, thinking, and retry defaults.
+    #[serde(default)]
+    pub defaults: StoredDefaultsConfig,
 
-    /// Default auditor model tier configuration (`auditorModel` or `auditor_model`).
-    #[serde(alias = "auditorModel", alias = "auditor_model")]
-    pub auditor_model: Option<StoredTierModel>,
-
-    /// Default qualitative thinking level (`thinkingLevel` or `thinking_level`: `minimal`, `low`, `medium`, `high`).
-    #[serde(alias = "thinkingLevel", alias = "thinking_level")]
-    pub thinking_level: Option<String>,
-
-    /// Default reasoning budget in tokens (`reasoningBudget` or `reasoning_budget`).
-    #[serde(alias = "reasoningBudget", alias = "reasoning_budget")]
-    pub reasoning_budget: Option<u32>,
-
-    /// Optional default maximum candidate canons per `apprise` screener call (`appriseBatchSize` or `apprise_batch_size`).
-    #[serde(alias = "appriseBatchSize", alias = "apprise_batch_size")]
-    pub apprise_batch_size: Option<usize>,
-
-    /// Optional default maximum concurrent in-flight `apprise` screener calls (`appriseConcurrency` or `apprise_concurrency`).
-    #[serde(alias = "appriseConcurrency", alias = "apprise_concurrency")]
-    pub apprise_concurrency: Option<usize>,
-
-    /// Optional default maximum candidate canons per `docket` screener call (`docketBatchSize` or `docket_batch_size`).
-    #[serde(
-        alias = "docketBatchSize",
-        alias = "docket_batch_size",
-        alias = "maxCanonsPerCall",
-        alias = "max_canons_per_call"
-    )]
-    pub docket_batch_size: Option<usize>,
-
-    /// Optional default maximum concurrent in-flight `docket` screener calls (`docketConcurrency` or `docket_concurrency`).
-    #[serde(
-        alias = "docketConcurrency",
-        alias = "docket_concurrency",
-        alias = "maxConcurrentCalls",
-        alias = "max_concurrent_calls"
-    )]
-    pub docket_concurrency: Option<usize>,
-
-    /// Optional default maximum concurrent in-flight `admit` screener calls (`admitConcurrency` or `admit_concurrency`).
-    #[serde(alias = "admitConcurrency", alias = "admit_concurrency")]
-    pub admit_concurrency: Option<usize>,
-
-    /// Optional default maximum concurrent in-flight `vet` screener calls (`vetConcurrency` or `vet_concurrency`).
-    #[serde(alias = "vetConcurrency", alias = "vet_concurrency")]
-    pub vet_concurrency: Option<usize>,
-
-    /// Optional default maximum concurrent in-flight `audit` trial calls (`auditConcurrency` or `audit_concurrency`).
-    #[serde(alias = "auditConcurrency", alias = "audit_concurrency")]
-    pub audit_concurrency: Option<usize>,
-
-    /// Optional default maximum retry attempts per heuristic provider call (`maxRetries` or `max_retries`).
-    #[serde(alias = "maxRetries", alias = "max_retries")]
-    pub max_retries: Option<u32>,
-
-    /// Optional default maximum per-wait rate-limit cooldown or retry backoff in milliseconds (`maxBackoffMs` or `max_backoff_ms`).
-    #[serde(alias = "maxBackoffMs", alias = "max_backoff_ms")]
-    pub max_backoff_ms: Option<u64>,
+    /// Heuristic node overrides keyed by canonical node name (`apprise`, `docket`, `admit`, `vet`, `audit`).
+    #[serde(default)]
+    pub nodes: BTreeMap<HeuristicNode, StoredNodeConfig>,
 }
 
 impl StoredConfig {
@@ -152,18 +168,58 @@ impl StoredConfig {
         self.provider_api_key(TYPESAFE_PROVIDER)
     }
 
-    /// Returns the stored screener model specifier if present.
-    pub fn screener_specifier(&self) -> Option<String> {
-        self.screener_model
-            .as_ref()
-            .map(StoredTierModel::to_specifier_string)
+    /// Returns the non-empty default provider slug under `defaults.provider`.
+    pub fn default_provider(&self) -> Option<&str> {
+        self.defaults
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
 
-    /// Returns the stored auditor model specifier if present.
-    pub fn auditor_specifier(&self) -> Option<String> {
-        self.auditor_model
-            .as_ref()
-            .map(StoredTierModel::to_specifier_string)
+    /// Returns the [`StoredNodeConfig`] entry for `node`, if present.
+    pub fn node(&self, node: HeuristicNode) -> Option<&StoredNodeConfig> {
+        self.nodes.get(&node)
+    }
+
+    /// Returns the non-empty `nodes.<node>.model` specifier, if present.
+    pub fn node_model(&self, node: HeuristicNode) -> Option<&str> {
+        self.nodes
+            .get(&node)
+            .and_then(|n| n.model.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Returns `nodes.<node>.threshold`, if present.
+    pub fn node_threshold(&self, node: HeuristicNode) -> Option<f64> {
+        self.nodes.get(&node).and_then(|n| n.threshold)
+    }
+
+    /// Returns `nodes.<node>.batchSize`, if present.
+    pub fn node_batch_size(&self, node: HeuristicNode) -> Option<usize> {
+        self.nodes.get(&node).and_then(|n| n.batch_size)
+    }
+
+    /// Returns `nodes.<node>.concurrency`, if present.
+    pub fn node_concurrency(&self, node: HeuristicNode) -> Option<usize> {
+        self.nodes.get(&node).and_then(|n| n.concurrency)
+    }
+
+    /// Validates semantic constraints on parsed [`StoredConfig`] fields (such as `batchSize` stage scoping).
+    pub(crate) fn validate_schema(&self, source_path: Option<&str>) -> Result<(), ConfigureError> {
+        let path = source_path.unwrap_or("~/.config/canon-clerk/config.json");
+        for (node, cfg) in &self.nodes {
+            if cfg.batch_size.is_some() && !node.supports_batch_size() {
+                return Err(ConfigureError::MalformedConfigFile {
+                    path: path.to_string(),
+                    message: format!(
+                        "`nodes.{node}.batchSize` is not supported on `{node}` (`batchSize` applies only to `nodes.apprise` and `nodes.docket`)."
+                    ),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -206,11 +262,8 @@ pub fn resolve_default_config_path(env: &BTreeMap<String, String>) -> Option<Pat
 
 /// Loads and validates a user-level configuration file from `config_path`.
 ///
-/// Enforces two security invariants:
-/// 1. **Workspace Boundary Guard (`credentials-must-reside-outside-workspace`):** Rejects any
-///    configuration file located inside `workspace_root`.
-/// 2. **POSIX Permission Guard (`credential-readers-must-reject-insecure-permissions`):** Rejects
-///    any configuration file whose POSIX permissions grant group or world access (`(mode & 0o077) != 0`).
+/// Enforces workspace isolation, POSIX owner-only permissions (`0600`/`0400`), and strict
+/// `{ providers, defaults, nodes }` schema validation (`configure.md` §3).
 pub fn load_host_config_file(
     config_path: &Path,
     workspace_root: Option<&Path>,
@@ -229,19 +282,120 @@ pub fn load_host_config_file(
 
     verify_posix_permissions(config_path)?;
 
+    let path_str = config_path.display().to_string();
     let raw =
         fs::read_to_string(config_path).map_err(|err| ConfigureError::MalformedConfigFile {
-            path: config_path.display().to_string(),
+            path: path_str.clone(),
             message: err.to_string(),
         })?;
+
+    let parsed = parse_stored_config_str(&raw, &path_str)?;
+    Ok(Some(parsed))
+}
+
+fn retired_root_key_migration_hint(key: &str) -> Option<&'static str> {
+    match key {
+        "screenerModel" | "screener_model" => Some(
+            "Move screening model pins under `nodes.<node>.model` (e.g. `\"nodes\": { \"docket\": { \"model\": \"typesafe:jev-latest\" } }`) or set `\"defaults\": { \"provider\": \"typesafe\" }`.",
+        ),
+        "auditorModel" | "auditor_model" => Some(
+            "Move the judicial model pin to `nodes.audit.model` (e.g. `\"nodes\": { \"audit\": { \"model\": \"google:gemini-4-carbon\" } }`).",
+        ),
+        "thinkingLevel" | "thinking_level" | "reasoningBudget" | "reasoning_budget" => Some(
+            "Move extended-thinking defaults under `defaults.thinkingLevel` / `defaults.reasoningBudget` (or per-node `nodes.<node>.thinkingLevel` / `nodes.<node>.reasoningBudget`).",
+        ),
+        "maxRetries" | "max_retries" | "maxBackoffMs" | "max_backoff_ms" => Some(
+            "Move transport retry bounds under `defaults.maxRetries` and `defaults.maxBackoffMs`.",
+        ),
+        "appriseBatchSize"
+        | "apprise_batch_size"
+        | "appriseConcurrency"
+        | "apprise_concurrency"
+        | "docketBatchSize"
+        | "docket_batch_size"
+        | "docketConcurrency"
+        | "docket_concurrency"
+        | "admitConcurrency"
+        | "admit_concurrency"
+        | "vetConcurrency"
+        | "vet_concurrency"
+        | "auditConcurrency"
+        | "audit_concurrency"
+        | "maxCanonsPerCall"
+        | "max_canons_per_call"
+        | "maxConcurrentCalls"
+        | "max_concurrent_calls" => Some(
+            "Move stage batching and concurrency settings under `nodes.<node>.batchSize` (`apprise`, `docket`) and `nodes.<node>.concurrency`.",
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_stored_config_str(
+    raw: &str,
+    path_str: &str,
+) -> Result<StoredConfig, ConfigureError> {
+    let val: Value =
+        serde_json::from_str(raw).map_err(|err| ConfigureError::MalformedConfigFile {
+            path: path_str.to_string(),
+            message: err.to_string(),
+        })?;
+
+    let Some(root_obj) = val.as_object() else {
+        return Err(ConfigureError::MalformedConfigFile {
+            path: path_str.to_string(),
+            message: "top-level configuration JSON value must be an object (`{ \"providers\": ..., \"defaults\": ..., \"nodes\": ... }`).".to_string(),
+        });
+    };
+
+    for key in root_obj.keys() {
+        if let Some(hint) = retired_root_key_migration_hint(key) {
+            return Err(ConfigureError::RetiredConfigKey {
+                path: path_str.to_string(),
+                key: key.clone(),
+                hint: hint.to_string(),
+            });
+        }
+        if !matches!(key.as_str(), "providers" | "defaults" | "nodes") {
+            return Err(ConfigureError::MalformedConfigFile {
+                path: path_str.to_string(),
+                message: format!(
+                    "unknown top-level key `{key}` (expected only `providers`, `defaults`, and `nodes`)."
+                ),
+            });
+        }
+    }
+
+    if let Some(nodes_obj) = root_obj.get("nodes").and_then(Value::as_object) {
+        for (node_key, node_val) in nodes_obj {
+            if node_key.parse::<HeuristicNode>().is_err() {
+                return Err(ConfigureError::MalformedConfigFile {
+                    path: path_str.to_string(),
+                    message: format!(
+                        "unknown heuristic node `{node_key}` under `nodes` (expected `apprise`, `docket`, `admit`, `vet`, or `audit`)."
+                    ),
+                });
+            }
+            if let Some(model_val) = node_val.as_object().and_then(|o| o.get("model"))
+                && !model_val.is_null()
+                && !model_val.is_string()
+            {
+                return Err(ConfigureError::RetiredConfigKey {
+                    path: path_str.to_string(),
+                    key: format!("nodes.{node_key}.model"),
+                    hint: "Specify a canonical `<provider>:<model>` string (for example, `\"google:gemini-decision-1\"` or `\"google:gemini-4-carbon\"`) rather than an object.".to_string(),
+                });
+            }
+        }
+    }
 
     let parsed: StoredConfig =
-        serde_json::from_str(&raw).map_err(|err| ConfigureError::MalformedConfigFile {
-            path: config_path.display().to_string(),
+        serde_json::from_value(val).map_err(|err| ConfigureError::MalformedConfigFile {
+            path: path_str.to_string(),
             message: err.to_string(),
         })?;
-
-    Ok(Some(parsed))
+    parsed.validate_schema(Some(path_str))?;
+    Ok(parsed)
 }
 
 fn is_path_inside_workspace(config_path: &Path, workspace_root: &Path) -> bool {
@@ -330,29 +484,27 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        fn test_loads_valid_0600_config_file_with_orthogonal_namespaces() {
+        fn test_loads_valid_0600_config_file_with_providers_defaults_and_nodes() {
             let dir = unique_temp_dir("valid0600");
             let cfg_path = dir.join("config.json");
             let json = r#"{
                 "providers": {
-                    "google": {
-                        "apiKey": "synthetic-stored-key-from-config-json"
-                    },
-                    "typesafe": {
-                        "apiKey": "synthetic-stored-typesafe-key"
-                    }
+                    "google": { "apiKey": "synthetic-stored-key-from-config-json" },
+                    "typesafe": { "apiKey": "synthetic-stored-typesafe-key" }
                 },
-                "screenerModel": "gemini-2.5-flash-lite",
-                "auditorModel": {
+                "defaults": {
                     "provider": "google",
-                    "model": "gemini-2.5-pro"
+                    "thinkingLevel": "low",
+                    "maxRetries": 6,
+                    "maxBackoffMs": 60000
                 },
-                "reasoningBudget": 4096,
-                "appriseBatchSize": 15,
-                "appriseConcurrency": 3,
-                "admitConcurrency": 6,
-                "vetConcurrency": 7,
-                "auditConcurrency": 5
+                "nodes": {
+                    "apprise": { "batchSize": 15, "concurrency": 3 },
+                    "docket": { "model": "typesafe:jev-latest", "batchSize": 48, "concurrency": 4 },
+                    "admit": { "model": "typesafe:jev-latest", "concurrency": 6 },
+                    "vet": { "model": "google:gemini-decision-1", "threshold": 0.85, "concurrency": 7 },
+                    "audit": { "model": "google:gemini-4-carbon", "reasoningBudget": 4096, "concurrency": 5 }
+                }
             }"#;
             write_config_with_mode(&cfg_path, json, 0o600);
 
@@ -367,22 +519,58 @@ mod tests {
                 loaded.typesafe_api_key(),
                 Some("synthetic-stored-typesafe-key")
             );
+            assert_eq!(loaded.default_provider(), Some("google"));
+            assert_eq!(loaded.defaults.max_retries, Some(6));
+            assert_eq!(loaded.defaults.max_backoff_ms, Some(60_000));
             assert_eq!(
-                loaded.screener_specifier().as_deref(),
-                Some("gemini-2.5-flash-lite")
+                loaded.node_model(HeuristicNode::Docket),
+                Some("typesafe:jev-latest")
             );
+            assert_eq!(loaded.node_batch_size(HeuristicNode::Apprise), Some(15));
+            assert_eq!(loaded.node_concurrency(HeuristicNode::Admit), Some(6));
+            assert_eq!(loaded.node_threshold(HeuristicNode::Vet), Some(0.85));
             assert_eq!(
-                loaded.auditor_specifier().as_deref(),
-                Some("google:gemini-2.5-pro")
+                loaded
+                    .node(HeuristicNode::Audit)
+                    .and_then(|n| n.reasoning_budget),
+                Some(4096)
             );
-            assert_eq!(loaded.reasoning_budget, Some(4096));
-            assert_eq!(loaded.apprise_batch_size, Some(15));
-            assert_eq!(loaded.apprise_concurrency, Some(3));
-            assert_eq!(loaded.admit_concurrency, Some(6));
-            assert_eq!(loaded.vet_concurrency, Some(7));
-            assert_eq!(loaded.audit_concurrency, Some(5));
 
             let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn test_rejects_retired_flat_root_keys_and_unknown_keys_with_hint() {
+            for retired_json in [
+                r#"{"screenerModel":"google:gemini-decision-1"}"#,
+                r#"{"auditorModel":"google:gemini-4-carbon"}"#,
+                r#"{"thinkingLevel":"low"}"#,
+                r#"{"reasoningBudget":2048}"#,
+                r#"{"docketBatchSize":25}"#,
+                r#"{"admitConcurrency":4}"#,
+                r#"{"maxCanonsPerCall":20}"#,
+                r#"{"maxConcurrentCalls":4}"#,
+                r#"{"maxRetries":3}"#,
+                r#"{"maxBackoffMs":45000}"#,
+                r#"{"nodes":{"docket":{"model":{"provider":"google","model":"gemini-decision-1"}}}}"#,
+            ] {
+                let err = parse_stored_config_str(retired_json, "/tmp/config.json")
+                    .expect_err(&format!("must reject `{retired_json}`"));
+                assert!(matches!(err, ConfigureError::RetiredConfigKey { .. }));
+                assert!(err.to_string().contains("Hint:"));
+            }
+
+            for bad_json in [
+                r#"{"typoRoot":true}"#,
+                r#"{"nodes":{"screener":{"model":"google:gemini-decision-1"}}}"#,
+                r#"{"nodes":{"audit":{"batchSize":10}}}"#,
+                r#"{"defaults":{"unknownField":1}}"#,
+            ] {
+                let err = parse_stored_config_str(bad_json, "/tmp/config.json")
+                    .expect_err(&format!("must reject `{bad_json}`"));
+                assert!(matches!(err, ConfigureError::MalformedConfigFile { .. }));
+                assert!(err.to_string().contains("Hint:"));
+            }
         }
     }
 

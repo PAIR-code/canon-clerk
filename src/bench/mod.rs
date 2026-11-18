@@ -28,8 +28,8 @@ pub use cli::{
 };
 pub use error::{
     BenchmarkStage, ConsistencyBenchError, DEFAULT_BENCHMARK_TRIALS, ENV_BENCH_BATCH_SIZE,
-    ENV_BENCH_CONCURRENCY, ENV_BENCH_FORMAT, ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_OUTPUT_JSON,
-    ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS,
+    ENV_BENCH_CONCURRENCY, ENV_BENCH_FORMAT, ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_MODEL,
+    ENV_BENCH_OUTPUT_JSON, ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS,
 };
 pub use extract::{ExtractedAssessment, SubjectKey, extract_stage_assessments};
 pub use prepare::{
@@ -47,10 +47,11 @@ use crate::admit::{AdmitOptions, execute_admit};
 use crate::apprise::{AppriseOptions, execute_apprise};
 use crate::audit::{AuditOptions, execute_audit};
 use crate::caseload::{
-    Caseload, DEFAULT_AUDITOR_MODEL, DEFAULT_SCREENER_MODEL, normalize_unit_score,
+    Caseload, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL, HeuristicNode,
+    normalize_unit_score,
 };
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{DocketOptions, execute_docket};
+use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
 use crate::provider::{StructuredModelProvider, TokenUsage};
 use crate::telemetry::{
     PipelineStage, RecordingTelemetrySink, SystemTelemetryClock, TelemetryClock, TelemetryEvent,
@@ -103,13 +104,18 @@ pub fn execute_consistency_bench_observed(
     ) && base_caseload.docket.is_none()
         && !(needs_upstream_evidence && base_caseload.evidence.is_some())
     {
-        base_caseload = execute_docket(
-            &DocketOptions::default(),
-            base_caseload,
-            workspace,
-            provider,
-        )
-        .map_err(ConsistencyBenchError::Docket)?;
+        let docket_model = base_caseload
+            .config
+            .as_ref()
+            .and_then(|c| c.model_for(HeuristicNode::Docket))
+            .unwrap_or_default()
+            .to_string();
+        let docket_opts = DocketOptions {
+            max_canons_per_call: effective_docket_batch_size(None, &docket_model),
+            ..DocketOptions::default()
+        };
+        base_caseload = execute_docket(&docket_opts, base_caseload, workspace, provider)
+            .map_err(ConsistencyBenchError::Docket)?;
     }
     if needs_upstream_evidence && base_caseload.evidence.is_none() {
         base_caseload = execute_admit(&AdmitOptions::default(), base_caseload, workspace, provider)
@@ -185,19 +191,19 @@ fn validate_bench_options(options: &ConsistencyBenchOptions) -> Result<(), Consi
 }
 
 fn resolved_model_for_stage(stage: BenchmarkStage, caseload: &Caseload) -> String {
-    match stage {
-        BenchmarkStage::Apprise
-        | BenchmarkStage::Docket
-        | BenchmarkStage::Admit
-        | BenchmarkStage::Vet => caseload.config.as_ref().map_or_else(
-            || DEFAULT_SCREENER_MODEL.to_string(),
-            |c| c.screener_model.clone(),
-        ),
-        BenchmarkStage::Audit => caseload.config.as_ref().map_or_else(
-            || DEFAULT_AUDITOR_MODEL.to_string(),
-            |c| c.auditor_model.clone(),
-        ),
-    }
+    let node = stage.heuristic_node();
+    caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.model_for(node))
+        .map(ToString::to_string)
+        .unwrap_or_else(|| match node {
+            HeuristicNode::Audit => DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
+            HeuristicNode::Apprise
+            | HeuristicNode::Docket
+            | HeuristicNode::Admit
+            | HeuristicNode::Vet => DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
+        })
 }
 
 #[allow(
@@ -394,10 +400,17 @@ mod tests {
             ..IntakeOptions::default()
         };
         let cfg_opts = ConfigureOptions {
-            screener_model: Some(crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string()),
             gemini_api_key: Some("test-key".to_string()),
             ..ConfigureOptions::default()
-        };
+        }
+        .with_node_model(
+            HeuristicNode::Docket,
+            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+        )
+        .with_node_model(
+            HeuristicNode::Admit,
+            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+        );
         let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
             stage: BenchmarkStage::Docket,
             intake_opts: &intake_opts,

@@ -15,8 +15,8 @@
 //! Shared Pipeline Funnel Provenance watermarks and receipt line writers (`docs/architecture/scheduling.md` §6).
 
 use crate::caseload::{
-    Caseload, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
-    CaseloadValidation, CaseloadVerdict, CaseloadVetting, IntakeScope,
+    Caseload, CaseloadConfig, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
+    CaseloadValidation, CaseloadVerdict, CaseloadVetting, HeuristicNode, IntakeScope,
 };
 use std::io::Write;
 
@@ -39,8 +39,8 @@ pub enum StageDisposition {
     SkippedEmptyDocket,
     /// Downstream stage skipped because upstream `admit` admitted zero exhibits (`active_cases` empty).
     SkippedZeroEvidence,
-    /// `vet` deterministically skipped in `audit` because `screener_model` is generative.
-    SkippedGenerativeScreener,
+    /// `vet` deterministically skipped in `audit` because the `vet` node resolved to a `Generator` model.
+    SkippedGeneratorVet,
     /// Downstream `audit` skipped because upstream `vet` cleared all active cases (`contested_cases` empty).
     SkippedAllVetted,
 }
@@ -54,7 +54,7 @@ pub(crate) fn glyph_for(disp: StageDisposition) -> &'static str {
         | StageDisposition::SkippedValidationFailed
         | StageDisposition::SkippedEmptyDocket
         | StageDisposition::SkippedZeroEvidence
-        | StageDisposition::SkippedGenerativeScreener
+        | StageDisposition::SkippedGeneratorVet
         | StageDisposition::SkippedAllVetted => "⊘",
         StageDisposition::ValidationFailed => "✗",
     }
@@ -186,67 +186,50 @@ pub(crate) fn write_validate_provenance(
     )
 }
 
-/// Writes the `configure` provenance line across converged closures.
-pub(crate) fn write_configure_provenance(
-    caseload: &Caseload,
-    disp: StageDisposition,
-    stdout: &mut dyn Write,
-) -> std::io::Result<()> {
-    match disp {
-        StageDisposition::SkippedZeroCandidates => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: zero candidate canons)"
-            )
-        }
-        StageDisposition::SkippedValidationFailed => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: canon validation failed)"
-            )
-        }
-        _ => {
-            let glyph = glyph_for(disp);
-            let suffix = fast_forward_suffix(disp);
-            let model = caseload
-                .config
-                .as_ref()
-                .map_or("<unresolved>", |c| c.screener_model.as_str());
-            writeln!(
-                stdout,
-                "  {glyph} configure : screener model '{model}'{suffix}"
-            )
+/// Formats closure node bindings grouped by shared resolved `<provider>:<model>` in canonical order
+/// (e.g. `docket, admit, vet 'google:gemini-decision-1'; audit 'google:gemini-4-carbon'`).
+pub(crate) fn format_closure_node_bindings(
+    config: Option<&CaseloadConfig>,
+    closure_nodes: &[HeuristicNode],
+) -> String {
+    let Some(cfg) = config else {
+        return "<unresolved>".to_string();
+    };
+    let mut groups: Vec<(String, Vec<&'static str>)> = Vec::new();
+    for &node in closure_nodes {
+        let Some(model) = cfg.model_for(node) else {
+            continue;
+        };
+        if let Some((_, names)) = groups.iter_mut().find(|(m, _)| m == model) {
+            names.push(node.as_str());
+        } else {
+            groups.push((model.to_string(), vec![node.as_str()]));
         }
     }
+    if groups.is_empty() {
+        return "<unresolved>".to_string();
+    }
+    groups
+        .into_iter()
+        .map(|(model, names)| format!("{} '{model}'", names.join(", ")))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
-/// Writes the `configure` provenance line when `configure` was not needed because `.docket` or `.evidence` was pre-populated empty.
-pub(crate) fn write_admit_configure_provenance(
+/// Writes the `configure` provenance line across converged closures (`scheduling.md` §6).
+pub(crate) fn write_closure_configure_provenance(
     caseload: &Caseload,
+    closure_nodes: &[HeuristicNode],
     disp: StageDisposition,
     stdout: &mut dyn Write,
 ) -> std::io::Result<()> {
-    match disp {
-        StageDisposition::SkippedEmptyDocket => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: empty active docket)"
-            )
-        }
-        StageDisposition::SkippedZeroEvidence => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: no admissible exhibits)"
-            )
-        }
-        StageDisposition::SkippedAllVetted => {
-            writeln!(
-                stdout,
-                "  ⊘ configure : (fast-forward: all active cases vetted)"
-            )
-        }
-        _ => write_configure_provenance(caseload, disp, stdout),
+    if let Some(reason) = skipped_fast_forward_reason(disp) {
+        return writeln!(stdout, "  ⊘ configure : (fast-forward: {reason})");
     }
+    let glyph = glyph_for(disp);
+    let suffix = fast_forward_suffix(disp);
+    let bindings = format_closure_node_bindings(caseload.config.as_ref(), closure_nodes);
+    writeln!(stdout, "  {glyph} configure : {bindings}{suffix}")
 }
 
 /// Writes the `docket` provenance line across contentious cascade closures (`docket`, `admit`, `audit`).
@@ -345,29 +328,6 @@ fn skipped_fast_forward_reason(disp: StageDisposition) -> Option<&'static str> {
     }
 }
 
-/// Writes the `configure` provenance line across the 8-stage `audit` closure, displaying both screener and auditor models.
-pub(crate) fn write_audit_configure_provenance(
-    caseload: &Caseload,
-    disp: StageDisposition,
-    stdout: &mut dyn Write,
-) -> std::io::Result<()> {
-    if let Some(reason) = skipped_fast_forward_reason(disp) {
-        return writeln!(stdout, "  ⊘ configure : (fast-forward: {reason})");
-    }
-    let glyph = glyph_for(disp);
-    let suffix = fast_forward_suffix(disp);
-    let (screener, auditor) = caseload
-        .config
-        .as_ref()
-        .map_or(("<unresolved>", "<unresolved>"), |c| {
-            (c.screener_model.as_str(), c.auditor_model.as_str())
-        });
-    writeln!(
-        stdout,
-        "  {glyph} configure : screener '{screener}', auditor '{auditor}'{suffix}"
-    )
-}
-
 /// Writes the `vet` provenance line across `vet` and `audit` cascade closures.
 pub(crate) fn write_vet_provenance(
     vetting: Option<&CaseloadVetting>,
@@ -379,7 +339,7 @@ pub(crate) fn write_vet_provenance(
     if let Some(reason) = skipped_fast_forward_reason(disp) {
         return writeln!(stdout, "  ⊘ vet       : (fast-forward: {reason})");
     }
-    if disp == StageDisposition::SkippedGenerativeScreener {
+    if disp == StageDisposition::SkippedGeneratorVet {
         let active = evidence.map_or(0, |ev| ev.active_cases.len());
         return writeln!(
             stdout,

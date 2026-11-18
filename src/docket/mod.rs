@@ -21,14 +21,13 @@ mod prompt;
 pub(crate) use decode::resolve_canon_path;
 
 use crate::caseload::{
-    CanonDocketAssessment, Caseload, CaseloadDocket, normalize_colorability_score,
+    CanonDocketAssessment, Caseload, CaseloadDocket, HeuristicNode, normalize_colorability_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_SCREENER_REASONING_BUDGET, GenerationRequest,
-    ProviderError, StructuredModelProvider,
+    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
 };
 use decode::decode_docket_cases;
 use prompt::{
@@ -41,13 +40,13 @@ use std::fmt;
 /// Default subject-matter jurisdiction threshold for `docket` (`docs/architecture/nodes/docket.md` §4.4).
 pub const DEFAULT_DOCKET_THRESHOLD: f64 = 0.5;
 
-/// Default maximum candidate canons evaluated per generative `docket` screener call (`docs/architecture/nodes/docket.md` §4.2).
+/// Default maximum candidate canons evaluated per generative `docket` model call (`docs/architecture/nodes/docket.md` §4.2).
 pub const DEFAULT_DOCKET_BATCH_SIZE: usize = 25;
 
 /// Default total character ceiling for the shared generative `docket` filing prefix (`~16k` tokens).
 pub const MAX_DOCKET_FILING_PREFIX_CHARS: usize = 64_000;
 
-/// Default maximum concurrent in-flight screener model calls when `docket` executes multiple batches.
+/// Default maximum concurrent in-flight `docket` model calls when executing multiple batches.
 pub const DEFAULT_DOCKET_MAX_CONCURRENT_CALLS: usize = 4;
 
 /// Environment variable name for overriding `--docket-threshold` (`docs/architecture/nodes/docket.md` §5).
@@ -56,14 +55,8 @@ pub const ENV_DOCKET_THRESHOLD: &str = "CANON_CLERK_DOCKET_THRESHOLD";
 /// Environment variable name for overriding `--docket-batch-size` (`docs/architecture/nodes/docket.md` §5).
 pub const ENV_DOCKET_BATCH_SIZE: &str = "CANON_CLERK_DOCKET_BATCH_SIZE";
 
-/// Alias environment variable name for overriding `--max-canons-per-call`.
-pub const ENV_MAX_CANONS_PER_CALL: &str = "CANON_CLERK_MAX_CANONS_PER_CALL";
-
 /// Environment variable name for overriding `--docket-concurrency` (`docs/architecture/nodes/docket.md` §5).
 pub const ENV_DOCKET_CONCURRENCY: &str = "CANON_CLERK_DOCKET_CONCURRENCY";
-
-/// Alias environment variable name for overriding `--max-concurrent-calls`.
-pub const ENV_MAX_CONCURRENT_CALLS: &str = "CANON_CLERK_MAX_CONCURRENT_CALLS";
 
 /// Domain input parameters for executing the `docket` pipeline stage.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,9 +65,9 @@ pub struct DocketOptions {
     pub threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
-    /// Optional maximum candidate canons evaluated per screener model call (`>= 1`; defaults to `Some(DEFAULT_DOCKET_BATCH_SIZE)`, while `None` evaluates all in a single unbounded turn).
+    /// Optional maximum candidate canons evaluated per `docket` model call (`>= 1`; defaults to `Some(DEFAULT_DOCKET_BATCH_SIZE)`, while `None` evaluates all in a single unbounded turn).
     pub max_canons_per_call: Option<usize>,
-    /// Optional maximum concurrent in-flight screener model calls when batched (`>= 1`; defaults to [`DEFAULT_DOCKET_MAX_CONCURRENT_CALLS`]).
+    /// Optional maximum concurrent in-flight `docket` model calls when batched (`>= 1`; defaults to [`DEFAULT_DOCKET_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
 }
 
@@ -90,15 +83,15 @@ impl Default for DocketOptions {
 }
 
 /// Resolves the effective `max_canons_per_call` for `docket` given an optional explicit override
-/// and the configured `screener_model` (`None` on discriminative models so their `DecisionBudgetProfile`
+/// and the configured `docket_model` (`None` on discriminative models so their `DecisionBudgetProfile`
 /// governs batching, `Some(DEFAULT_DOCKET_BATCH_SIZE)` on generative models).
 pub(crate) fn effective_docket_batch_size(
     explicit: Option<usize>,
-    screener_model: &str,
+    docket_model: &str,
 ) -> Option<usize> {
     if explicit.is_some() {
         explicit
-    } else if is_discriminative_model(screener_model) {
+    } else if is_discriminative_model(docket_model) {
         None
     } else {
         Some(DEFAULT_DOCKET_BATCH_SIZE)
@@ -298,13 +291,19 @@ pub fn execute_docket(
         return Err(DocketError::ValidationFailed);
     }
 
-    let config = caseload.config.as_ref().ok_or(DocketError::MissingConfig)?;
-    if is_discriminative_model(&config.screener_model) {
+    let node_cfg = caseload
+        .config
+        .as_ref()
+        .and_then(|c| c.node(HeuristicNode::Docket))
+        .ok_or(DocketError::MissingConfig)?;
+    if is_discriminative_model(&node_cfg.model) {
         return decision::execute_docket_decisions(
             options, caseload, threshold, workspace, provider,
         );
     }
 
+    let docket_model = node_cfg.model.clone();
+    let (thinking_level, reasoning_budget) = node_cfg.effective_screening_thinking();
     let filing_prefix =
         build_bounded_docket_filing_prefix(intake, discovery, MAX_DOCKET_FILING_PREFIX_CHARS);
     let response_schema = build_docket_schema();
@@ -319,12 +318,12 @@ pub fn execute_docket(
                 .map_err(|canon_ref| DocketError::MissingCandidateCanon { canon_ref })?;
         let call_label = (total_batches > 1).then(|| format!("batch {}/{total_batches}", idx + 1));
         let request = GenerationRequest {
-            model_specifier: config.screener_model.clone(),
+            model_specifier: docket_model.clone(),
             system_instruction: DOCKET_SYSTEM_INSTRUCTION.to_string(),
             user_prompt,
             response_schema: response_schema.clone(),
-            thinking_level: None,
-            reasoning_budget: DEFAULT_SCREENER_REASONING_BUDGET,
+            thinking_level,
+            reasoning_budget,
             timeout_ms: options.timeout_ms,
             call_label,
         };
@@ -338,7 +337,7 @@ pub fn execute_docket(
         &prepared_batches,
         concurrency_limit,
         threshold,
-        &config.screener_model,
+        &docket_model,
         provider,
     )?;
 
@@ -396,9 +395,10 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         ActiveExhibits, CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
-        DEFAULT_SCREENER_MODEL, FileArtifact, FileChangeStatus, LinkedIssueContext,
+        DEFAULT_GENERATIVE_SCREENING_MODEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, FileArtifact,
+        FileChangeStatus, LinkedIssueContext,
     };
-    use crate::provider::{GenerationResponse, TokenUsage};
+    use crate::provider::{DEFAULT_SCREENING_REASONING_BUDGET, GenerationResponse, TokenUsage};
     use serde_json::{Value, json};
     use std::sync::Mutex;
 
@@ -519,10 +519,10 @@ mod tests {
                 has_errors: false,
                 results: BTreeMap::new(),
             })
-            .with_config(CaseloadConfig {
-                screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                ..CaseloadConfig::default()
-            })
+            .with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Docket, DEFAULT_GENERATIVE_SCREENING_MODEL),
+            )
     }
 
     mod zero_candidate_and_prerequisite_guards {
@@ -704,11 +704,8 @@ mod tests {
             let requests = provider.captured_requests();
             assert_eq!(requests.len(), 1, "docket must execute in a single turn");
             let req = &requests[0];
-            assert_eq!(
-                req.model_specifier,
-                crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL
-            );
-            assert_eq!(req.reasoning_budget, DEFAULT_SCREENER_REASONING_BUDGET);
+            assert_eq!(req.model_specifier, DEFAULT_GENERATIVE_SCREENING_MODEL);
+            assert_eq!(req.reasoning_budget, DEFAULT_SCREENING_REASONING_BUDGET);
             assert!(req.user_prompt.contains("feat(cli): add docket subcommand"));
             assert!(req.user_prompt.contains("#260: Implement docket stage"));
             assert!(req.user_prompt.contains("src/cli/docket.rs"));
@@ -902,10 +899,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig {
-                    screener_model: crate::caseload::DEFAULT_GENERATIVE_SCREENER_MODEL.to_string(),
-                    ..CaseloadConfig::default()
-                });
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Docket, DEFAULT_GENERATIVE_SCREENING_MODEL),
+                );
             (ws, caseload, target_files)
         }
 
@@ -1127,7 +1124,7 @@ mod tests {
             }
 
             let transport_provider = RecordingMockProvider::with_error(ProviderError::Timeout {
-                model_specifier: DEFAULT_SCREENER_MODEL.to_string(),
+                model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
                 timeout_ms: 5_000,
             });
             let err = execute_docket(

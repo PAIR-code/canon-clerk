@@ -41,13 +41,24 @@ fn test_cli_vet_guards_and_zero_candidate_short_circuit() {
         .expect("execute canon-clerk vet --audit-threshold 0.5");
     assert_eq!(vet_out_of_closure.status.code(), Some(2));
 
-    // 3. Discriminative model on --auditor-model exits 2 on configure
-    let bad_auditor = Command::new(bin_path())
-        .args(["configure", "--auditor-model", "jev-latest"])
+    // 3. Discriminative model on --audit-model exits 2 on configure; retired --auditor-model also exits 2 with Hint:
+    let bad_audit = Command::new(bin_path())
+        .args(["configure", "--audit-model", "typesafe:jev-latest"])
         .env("TYPESAFE_API_KEY", "test-typesafe-key")
+        .env("GEMINI_API_KEY", "test-gemini-key")
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
         .output()
-        .expect("execute canon-clerk configure --auditor-model jev-latest");
-    assert_eq!(bad_auditor.status.code(), Some(2));
+        .expect("execute canon-clerk configure --audit-model typesafe:jev-latest");
+    assert_eq!(bad_audit.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad_audit.stderr).contains("Hint:"));
+
+    let retired_flag = Command::new(bin_path())
+        .args(["configure", "--auditor-model", "google:gemini-4-carbon"])
+        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
+        .output()
+        .expect("execute canon-clerk configure --auditor-model");
+    assert_eq!(retired_flag.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&retired_flag.stderr).contains("Hint:"));
 
     // 4. Zero-candidate short-circuit exits 0 without API keys and attaches empty .vetting
     let vet_zero_cand = Command::new(bin_path())

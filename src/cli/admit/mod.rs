@@ -28,7 +28,9 @@ use crate::cli::docket::guards::{
     resolve_docket_batch_size, resolve_docket_concurrency, resolve_docket_threshold,
 };
 use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::node_args::{AdmitNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::cli::provenance::StageDisposition;
+use crate::cli::runners::load_optional_host_stored_config;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
@@ -97,13 +99,12 @@ pub struct AdmitArgs {
     )]
     pub admit_threshold: Option<f64>,
 
-    /// Optional maximum concurrent in-flight per-case screener calls (default: `4`; env: `CANON_CLERK_ADMIT_CONCURRENCY`).
+    /// Optional maximum concurrent in-flight per-case `admit` calls (default: `4`; env: `CANON_CLERK_ADMIT_CONCURRENCY`).
     #[arg(
         long = "admit-concurrency",
-        visible_alias = "max-concurrent-calls",
         value_name = "COUNT",
         help_heading = "Admit Options",
-        help = "Maximum concurrent in-flight per-case screener calls (default: 4; fallback env: CANON_CLERK_ADMIT_CONCURRENCY)"
+        help = "Maximum concurrent in-flight per-case admit calls (default: 4; fallback env: CANON_CLERK_ADMIT_CONCURRENCY)"
     )]
     pub admit_concurrency: Option<usize>,
 
@@ -117,13 +118,12 @@ pub struct AdmitArgs {
     )]
     pub docket_threshold: Option<f64>,
 
-    /// Upstream maximum candidate canons per `docket` screener call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
+    /// Upstream maximum candidate canons per `docket` call (default: `25`; env: `CANON_CLERK_DOCKET_BATCH_SIZE`).
     #[arg(
         long = "docket-batch-size",
-        visible_alias = "max-canons-per-call",
         value_name = "COUNT",
         help_heading = "Docket Options",
-        help = "Maximum candidate canons per upstream docket screener call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
+        help = "Maximum candidate canons per upstream docket call (default: 25; fallback env: CANON_CLERK_DOCKET_BATCH_SIZE)"
     )]
     pub docket_batch_size: Option<usize>,
 
@@ -136,9 +136,8 @@ pub struct AdmitArgs {
     )]
     pub docket_concurrency: Option<usize>,
 
-    /// Hidden capture rejecting ambiguous unqualified `--threshold` (`scheduling.md` §4 Pattern C).
-    #[arg(long = "threshold", hide = true, allow_hyphen_values = true)]
-    pub rejected_threshold: Option<String>,
+    #[command(flatten)]
+    pub rejected_unqualified: RejectedUnqualifiedTuningArgs,
 
     /// Hidden capture rejecting out-of-closure `--apprise-threshold` (`scheduling.md` §4 Pattern C).
     #[arg(long = "apprise-threshold", hide = true, allow_hyphen_values = true)]
@@ -151,6 +150,9 @@ pub struct AdmitArgs {
     /// Hidden capture rejecting out-of-closure `--apprise-concurrency`.
     #[arg(long = "apprise-concurrency", hide = true, allow_hyphen_values = true)]
     pub rejected_apprise_concurrency: Option<String>,
+
+    #[command(flatten)]
+    pub models: AdmitNodeModelArgs,
 
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
@@ -253,6 +255,23 @@ pub fn run_admit(
     run_admit_live_with_telemetry(args, stdin, stdout, &TelemetrySession::noop())
 }
 
+fn resolve_admit_cli_params(
+    args: &AdmitArgs,
+    env: &BTreeMap<String, String>,
+) -> Result<(CascadeThresholds, Option<crate::configure::StoredConfig>), CliError> {
+    let stored = load_optional_host_stored_config(env)?;
+    let stored_ref = stored.as_ref();
+    let thresholds = CascadeThresholds {
+        docket_threshold: resolve_docket_threshold(args.docket_threshold, env, stored_ref)?,
+        admit_threshold: resolve_admit_threshold(args.admit_threshold, env, stored_ref)?,
+    };
+    let _ = resolve_docket_batch_size(args.docket_batch_size, env, stored_ref)?;
+    let _ = args.transport.resolve_retry_policy(env, stored_ref)?;
+    let _ = resolve_docket_concurrency(args.docket_concurrency, env, stored_ref)?;
+    let _ = resolve_admit_concurrency(args.admit_concurrency, env, stored_ref)?;
+    Ok((thresholds, stored))
+}
+
 fn run_admit_core(
     args: &AdmitArgs,
     stdin: &mut dyn Read,
@@ -264,13 +283,9 @@ fn run_admit_core(
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
-
-    let docket_threshold = resolve_docket_threshold(args.docket_threshold, env)?;
-    let admit_threshold = resolve_admit_threshold(args.admit_threshold, env)?;
-    let _validated_docket_batch = resolve_docket_batch_size(args.docket_batch_size, env, None)?;
-    let _validated_retry = args.transport.resolve_retry_policy(env, None)?;
-    let _validated_docket_conc = resolve_docket_concurrency(args.docket_concurrency, env, None)?;
-    let _validated_admit_conc = resolve_admit_concurrency(args.admit_concurrency, env, None)?;
+    let (thresholds, stored_config) = resolve_admit_cli_params(args, env)?;
+    let docket_threshold = thresholds.docket_threshold;
+    let admit_threshold = thresholds.admit_threshold;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -343,6 +358,7 @@ fn run_admit_core(
     let outcome = execute_jit_configure_docket_and_admit(
         args,
         env,
+        stored_config,
         CascadeThresholds {
             docket_threshold,
             admit_threshold,
@@ -712,8 +728,10 @@ mod tests {
             let args = parse_admit(&[
                 "canon-clerk",
                 "admit",
-                "--screener-model",
-                "gemini-4-hydrogen",
+                "--docket-model",
+                "google:gemini-4-hydrogen",
+                "--admit-model",
+                "google:gemini-4-hydrogen",
                 "--pr-title",
                 "feat(cli): add admit",
                 "src/cli/admit.rs",
@@ -770,8 +788,10 @@ mod tests {
             let args = parse_admit(&[
                 "canon-clerk",
                 "admit",
-                "--screener-model",
-                "gemini-4-hydrogen",
+                "--docket-model",
+                "google:gemini-4-hydrogen",
+                "--admit-model",
+                "google:gemini-4-hydrogen",
                 "--pr-title",
                 "feat(cli): add admit",
                 "src/cli/admit.rs",
