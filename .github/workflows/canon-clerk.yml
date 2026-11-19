@@ -31,4 +31,4 @@ jobs:
         run: cargo build --locked
 
       - name: Validate repository canons
-        run: ./target/debug/canon-clerk validate --all-canons --max-warnings 0
+        run: ./target/debug/canon-clerk -v validate --all-canons --max-warnings 0
