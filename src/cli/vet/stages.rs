@@ -17,8 +17,10 @@
 use super::VetArgs;
 use super::guards::{has_admit_cli_overrides, has_docket_cli_overrides, resolve_vet_concurrency};
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::audit::resolve_canon_reference_paths;
-use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVetting, HeuristicNode};
+use crate::audit::{
+    apply_base_diff_to_references, collect_base_reference_disk_paths, resolve_canon_reference_paths,
+};
+use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVetting, HeuristicNode, WorkspaceState};
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
 use crate::cli::closure::ClosureBackend;
@@ -134,6 +136,8 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
     {
         return Ok(short_circuit);
     }
+
+    materialize_base_workspace_references(&caseload, snapshot, backend)?;
 
     let mut required_nodes = Vec::new();
     if !docket_pre_populated && !evidence_pre_populated {
@@ -295,7 +299,7 @@ fn execute_configured_vet_spine(
         });
     }
 
-    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend);
+    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend)?;
     let after_vet = telemetry
         .run_stage(PipelineStage::Vet, |scope| {
             let instrumented = scope.instrument_provider(provider);
@@ -340,17 +344,59 @@ pub(crate) fn populate_live_target_snapshots(
     }
 }
 
+/// Hydrates base-branch reference files from disk (when live) and applies `.intake.diffs` in
+/// memory for all candidate/active canons whenever `.intake.workspace_state == WorkspaceState::Base`.
+pub(crate) fn materialize_base_workspace_references(
+    caseload: &Caseload,
+    snapshot: &mut WorkspaceSnapshot,
+    backend: &ClosureBackend<'_>,
+) -> Result<(), CliError> {
+    let Some(intake) = caseload.intake.as_ref() else {
+        return Ok(());
+    };
+    if intake.workspace_state != WorkspaceState::Base || intake.diffs.is_empty() {
+        return Ok(());
+    }
+
+    let mut canon_refs = BTreeSet::new();
+    if let Some(disc) = caseload.discovery.as_ref() {
+        for canon_ref in &disc.candidate_canons {
+            canon_refs.insert(canon_ref.clone());
+        }
+    }
+    if let Some(evidence) = caseload.evidence.as_ref() {
+        for canon_ref in &evidence.active_cases {
+            canon_refs.insert(canon_ref.clone());
+        }
+    }
+    let canon_list: Vec<String> = canon_refs.into_iter().collect();
+    if canon_list.is_empty() {
+        return Ok(());
+    }
+
+    if let ClosureBackend::LiveDisk { workspace_root } = backend {
+        let base_paths = collect_base_reference_disk_paths(&canon_list, intake, snapshot);
+        if !base_paths.is_empty() {
+            snapshot.populate_file_contents_from_disk(workspace_root, &base_paths);
+        }
+    }
+
+    apply_base_diff_to_references(&canon_list, intake, snapshot)
+        .map_err(|err| CliError::usage(err.to_string()))
+}
+
 pub(crate) fn populate_live_case_and_reference_snapshots(
     caseload: &Caseload,
     snapshot: &mut WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
-) {
+) -> Result<(), CliError> {
+    materialize_base_workspace_references(caseload, snapshot, backend)?;
     populate_live_target_snapshots(caseload, snapshot, backend);
     let ClosureBackend::LiveDisk { workspace_root } = backend else {
-        return;
+        return Ok(());
     };
     let Some(evidence) = &caseload.evidence else {
-        return;
+        return Ok(());
     };
     let mut paths_to_load = BTreeSet::new();
     for canon_ref in &evidence.active_cases {
@@ -367,4 +413,5 @@ pub(crate) fn populate_live_case_and_reference_snapshots(
     if !collected.is_empty() {
         snapshot.populate_file_contents_from_disk(workspace_root, &collected);
     }
+    Ok(())
 }

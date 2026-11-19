@@ -19,12 +19,16 @@ mod error;
 mod exhibits;
 mod fold;
 mod prompt;
+mod reference_overlay;
 mod slices;
 
 pub use error::AuditError;
 pub(crate) use exhibits::is_metadata_plane_id;
 pub use exhibits::resolve_canon_reference_paths;
 pub(crate) use prompt::build_audit_case_user_prompt;
+pub(crate) use reference_overlay::{
+    apply_base_diff_to_references, collect_base_reference_disk_paths,
+};
 pub(crate) use slices::{
     RenderedFileExhibit, build_shared_case_header, format_pinned_reference_exhibits,
     pack_rendered_exhibit_slices, partition_and_render_file_exhibits,

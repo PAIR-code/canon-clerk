@@ -65,7 +65,7 @@ fi
 CANON_CLERK_BIN="${CANON_CLERK_BIN:-./target/debug/canon-clerk}"
 CASELOAD_OUT="${CANON_CLERK_CASELOAD_OUT:-caseload.json}"
 
-set -- audit --diff - --output-caseload "$CASELOAD_OUT" "$@"
+set -- audit --diff - --workspace-state base --output-caseload "$CASELOAD_OUT" "$@"
 
 if [ -n "$PR_TITLE" ]; then
     set -- "$@" --pr-title "$PR_TITLE"

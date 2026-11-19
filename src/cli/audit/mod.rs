@@ -1773,4 +1773,212 @@ mod tests {
             let _ = fs::remove_dir_all(&xdg_dir);
         }
     }
+
+    mod base_workspace_reference_overlay {
+        use super::*;
+        use crate::provider::{DecisionRequest, DecisionResponse};
+
+        struct PromptCapturingProvider {
+            decision_states: Mutex<Vec<String>>,
+            audit_prompts: Mutex<Vec<String>>,
+        }
+
+        impl StructuredModelProvider for PromptCapturingProvider {
+            fn generate_structured(
+                &self,
+                request: &GenerationRequest,
+            ) -> Result<GenerationResponse, ProviderError> {
+                self.audit_prompts
+                    .lock()
+                    .expect("lock")
+                    .push(request.user_prompt.clone());
+                Ok(GenerationResponse {
+                    payload: json!({
+                        "compliance_summary": "Settings match README.",
+                        "compliance_score": 0.95,
+                        "annotations": []
+                    }),
+                    thoughts: Vec::new(),
+                    usage: TokenUsage::default(),
+                    latency_ms: 10,
+                    resolved_model: crate::caseload::DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
+                })
+            }
+
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                self.decision_states
+                    .lock()
+                    .expect("lock")
+                    .push(request.state.clone());
+                // Force `vet` to contest (0.30) while `docket` & `admit` admit (0.95) so both `vet` and `audit` prompts are exercised.
+                let score = if request.state.contains("Statutory Grounding References") {
+                    0.30
+                } else {
+                    0.95
+                };
+                let scores = request
+                    .questions
+                    .keys()
+                    .map(|id| (id.clone(), score))
+                    .collect();
+                Ok(DecisionResponse {
+                    scores,
+                    usage: TokenUsage::default(),
+                    latency_ms: 10,
+                    resolved_model: request.model_specifier.clone(),
+                })
+            }
+        }
+
+        #[test]
+        fn test_base_workspace_resolves_post_patch_reference_in_vet_and_audit_prompts() {
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"README.md\"\nreferences:\n  - \".github/settings.yml\"\n---\nREADME description changes MUST update `.github/settings.yml`.\n",
+                    &ParseCanonOptions::with_source_ref(".canons/settings-sync.md"),
+                )
+                .with_file_content("README.md", "# Canon Clerk\nOld tagline.\n")
+                .with_file_content(
+                    ".github/settings.yml",
+                    "repository:\n  description: Old tagline\n",
+                );
+
+            let pr_diff = "\
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,2 @@
+ # Canon Clerk
+-Old tagline.
++New tagline.
+diff --git a/.github/settings.yml b/.github/settings.yml
+--- a/.github/settings.yml
++++ b/.github/settings.yml
+@@ -1,2 +1,2 @@
+ repository:
+-  description: Old tagline
++  description: New tagline
+";
+            let provider = PromptCapturingProvider {
+                decision_states: Mutex::new(Vec::new()),
+                audit_prompts: Mutex::new(Vec::new()),
+            };
+            let env = BTreeMap::from([("GEMINI_API_KEY".to_string(), "test-key".to_string())]);
+            let mut stdout = Vec::new();
+            let caseload = run_audit_with_snapshot_and_provider(
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--diff",
+                    "-",
+                    "--workspace-state",
+                    "base",
+                ]),
+                &mut Cursor::new(pr_diff.as_bytes()),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect("base-workspace audit succeeds");
+
+            assert_eq!(
+                caseload.intake.as_ref().map(|i| i.workspace_state),
+                Some(crate::caseload::WorkspaceState::Base)
+            );
+            let vet_states = provider.decision_states.lock().expect("lock");
+            let vet_prompt = vet_states
+                .iter()
+                .find(|s| s.contains("Statutory Grounding References"))
+                .expect("vet prompt includes references section");
+            assert!(
+                vet_prompt.contains("description: New tagline"),
+                "vet prompt must see post-patch reference content"
+            );
+            assert!(
+                !vet_prompt.contains("description: Old tagline"),
+                "vet prompt must not see stale base-branch reference content"
+            );
+
+            let audit_prompts = provider.audit_prompts.lock().expect("lock");
+            assert_eq!(audit_prompts.len(), 1);
+            assert!(
+                audit_prompts[0].contains("description: New tagline"),
+                "audit prompt must see post-patch reference content"
+            );
+            assert!(
+                !audit_prompts[0].contains("description: Old tagline"),
+                "audit prompt must not see stale base-branch reference content"
+            );
+        }
+
+        #[test]
+        fn test_base_workspace_conflict_fails_fast_post_validate_with_zero_model_calls() {
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"README.md\"\nreferences:\n  - \".github/settings.yml\"\n---\nREADME description changes MUST update `.github/settings.yml`.\n",
+                    &ParseCanonOptions::with_source_ref(".canons/settings-sync.md"),
+                )
+                .with_file_content("README.md", "# Canon Clerk\nOld tagline.\n")
+                .with_file_content(
+                    ".github/settings.yml",
+                    "repository:\n  description: Diverged main description\n",
+                );
+
+            let conflicting_diff = "\
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,2 @@
+ # Canon Clerk
+-Old tagline.
++New tagline.
+diff --git a/.github/settings.yml b/.github/settings.yml
+--- a/.github/settings.yml
++++ b/.github/settings.yml
+@@ -1,2 +1,2 @@
+ repository:
+-  description: Old tagline
++  description: New tagline
+";
+            let provider = PromptCapturingProvider {
+                decision_states: Mutex::new(Vec::new()),
+                audit_prompts: Mutex::new(Vec::new()),
+            };
+            let env = BTreeMap::from([("GEMINI_API_KEY".to_string(), "test-key".to_string())]);
+            let mut stdout = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &parse_audit(&[
+                    "canon-clerk",
+                    "audit",
+                    "--diff",
+                    "-",
+                    "--workspace-state",
+                    "base",
+                ]),
+                &mut Cursor::new(conflicting_diff.as_bytes()),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect_err("conflicting reference diff must pull the andon cord");
+
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.message.contains(".github/settings.yml"));
+            assert_eq!(
+                provider.decision_states.lock().expect("lock").len(),
+                0,
+                "andon cord must fire post-validate with zero decision model calls"
+            );
+            assert_eq!(
+                provider.audit_prompts.lock().expect("lock").len(),
+                0,
+                "andon cord must fire post-validate with zero audit model calls"
+            );
+        }
+    }
 }
