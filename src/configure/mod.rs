@@ -24,12 +24,11 @@ mod thinking;
 pub use error::ConfigureError;
 pub(crate) use error::check_retired_env_vars;
 pub use protocol::{
-    AuthPolicy, DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, MissingCredentialSpec,
-    ProtocolDriver, ProviderAuth, ProviderConnection, is_valid_provider_slug,
-    slug_to_upper_env_stem, validate_http_base_url,
+    AuthPolicy, DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, ProtocolDriver, ProviderAuth,
+    ProviderConnection,
 };
 pub(crate) use protocol::{
-    credential_verification_hint_for_slug, is_gemini_decision_model_name,
+    MissingCredentialSpec, credential_verification_hint_for_slug, is_gemini_decision_model_name,
     is_valid_gemini_model_name,
 };
 pub use providers::{
@@ -47,6 +46,7 @@ use crate::caseload::{
     Caseload, CaseloadConfig, DEFAULT_PROVIDER, HeuristicNode, ResolvedNodeConfig,
     TYPESAFE_PROVIDER, ThinkingLevel,
 };
+use protocol::validate_http_base_url;
 use std::collections::{BTreeMap, BTreeSet};
 use thinking::{resolve_global_thinking_layers, resolve_node_thinking_options};
 

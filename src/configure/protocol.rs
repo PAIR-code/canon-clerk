@@ -55,7 +55,7 @@ impl ProtocolDriver {
     }
 
     /// Returns the default [`AuthPolicy`] applied to custom `providers.<slug>` profiles using this protocol.
-    pub const fn default_custom_auth_policy(self) -> AuthPolicy {
+    pub(crate) const fn default_custom_auth_policy(self) -> AuthPolicy {
         match self {
             Self::Gemini => AuthPolicy::RequiredApiKey,
             Self::SystemOne => AuthPolicy::OptionalApiKey,
@@ -63,7 +63,7 @@ impl ProtocolDriver {
     }
 
     /// Classifies an unprefixed `<model>` identifier into its [`ModelCapability`] under this protocol.
-    pub fn classify_model_id(self, model_id: &str) -> ModelCapability {
+    pub(crate) fn classify_model_id(self, model_id: &str) -> ModelCapability {
         match self {
             Self::Gemini if is_gemini_decision_model_name(model_id) => {
                 ModelCapability::Discriminator
@@ -74,7 +74,11 @@ impl ProtocolDriver {
     }
 
     /// Validates an unprefixed `<model>` segment for `slug` under this protocol, returning `(reason, example)` on error.
-    pub fn validate_model_id(self, slug: &str, model_id: &str) -> Result<(), (String, String)> {
+    pub(crate) fn validate_model_id(
+        self,
+        slug: &str,
+        model_id: &str,
+    ) -> Result<(), (String, String)> {
         match self {
             Self::Gemini => {
                 if is_valid_gemini_model_name(model_id) {
@@ -203,27 +207,24 @@ pub struct ProviderConnection {
 
 /// Table-driven diagnostic metadata for missing-credential errors across `configure`, `provider`, and `probe`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingCredentialSpec {
-    /// Canonical provider profile slug.
-    pub slug: String,
+pub(crate) struct MissingCredentialSpec {
     /// Human-readable provider label (`"Google Gemini"`, `"TypeSafe AI"`, or `"provider `<slug>`"`).
-    pub display_name: String,
+    pub(crate) display_name: String,
     /// Primary environment variable name (`"GEMINI_API_KEY"`, `"TYPESAFE_API_KEY"`, `"<UPPER_SLUG>_API_KEY"`).
-    pub primary_env: String,
+    pub(crate) primary_env: String,
     /// Optional higher-precedence `CANON_CLERK_<UPPER_SLUG>_API_KEY` alias for custom profiles.
-    pub prefixed_env: Option<String>,
+    pub(crate) prefixed_env: Option<String>,
     /// Canonical `config.json` key path (`"providers.<slug>.apiKey"`).
-    pub config_key_path: String,
+    pub(crate) config_key_path: String,
     /// Optional built-in CLI flag (`"--gemini-api-key"`, `"--typesafe-api-key"`).
-    pub cli_flag: Option<&'static str>,
+    pub(crate) cli_flag: Option<&'static str>,
 }
 
 impl MissingCredentialSpec {
     /// Constructs a [`MissingCredentialSpec`] for any built-in or custom provider slug.
-    pub fn for_slug(slug: &str) -> Self {
+    pub(crate) fn for_slug(slug: &str) -> Self {
         match slug {
             DEFAULT_PROVIDER => Self {
-                slug: DEFAULT_PROVIDER.to_string(),
                 display_name: "Google Gemini".to_string(),
                 primary_env: ENV_GEMINI_API_KEY.to_string(),
                 prefixed_env: None,
@@ -231,7 +232,6 @@ impl MissingCredentialSpec {
                 cli_flag: Some("--gemini-api-key"),
             },
             TYPESAFE_PROVIDER => Self {
-                slug: TYPESAFE_PROVIDER.to_string(),
                 display_name: "TypeSafe AI".to_string(),
                 primary_env: ENV_TYPESAFE_API_KEY.to_string(),
                 prefixed_env: None,
@@ -241,7 +241,6 @@ impl MissingCredentialSpec {
             custom => {
                 let stem = slug_to_upper_env_stem(custom);
                 Self {
-                    slug: custom.to_string(),
                     display_name: format!("provider `{custom}`"),
                     primary_env: format!("{stem}_API_KEY"),
                     prefixed_env: Some(format!("CANON_CLERK_{stem}_API_KEY")),
@@ -253,7 +252,7 @@ impl MissingCredentialSpec {
     }
 
     /// Formats a standardized missing-credential error message with an actionable `Hint:`.
-    pub fn format_diagnostic(&self, context_suffix: Option<&str>) -> String {
+    pub(crate) fn format_diagnostic(&self, context_suffix: Option<&str>) -> String {
         let suffix = context_suffix.map_or(String::new(), |ctx| format!(" for {ctx}"));
         let export_hint = match &self.prefixed_env {
             Some(prefixed) => {
@@ -296,7 +295,7 @@ pub(crate) fn credential_verification_hint_for_slug(slug: &str) -> String {
 }
 
 /// Converts a kebab-case provider `<slug>` into its `UPPER_SNAKE_CASE` environment variable stem (`local-dev` -> `LOCAL_DEV`).
-pub fn slug_to_upper_env_stem(slug: &str) -> String {
+pub(super) fn slug_to_upper_env_stem(slug: &str) -> String {
     slug.trim()
         .chars()
         .map(|c| {
@@ -310,7 +309,7 @@ pub fn slug_to_upper_env_stem(slug: &str) -> String {
 }
 
 /// Returns `true` when `slug` is a valid lowercase kebab-case provider identifier (`[a-z0-9]+(-[a-z0-9]+)*`).
-pub fn is_valid_provider_slug(slug: &str) -> bool {
+pub(super) fn is_valid_provider_slug(slug: &str) -> bool {
     if slug.is_empty() || slug.starts_with('-') || slug.ends_with('-') || slug.contains("--") {
         return false;
     }
@@ -319,7 +318,7 @@ pub fn is_valid_provider_slug(slug: &str) -> bool {
 }
 
 /// Validates and normalizes an `http://` or `https://` endpoint base URL (`configure.md` §4.1).
-pub fn validate_http_base_url(raw: &str) -> Result<String, String> {
+pub(super) fn validate_http_base_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("base URL cannot be empty.".to_string());
