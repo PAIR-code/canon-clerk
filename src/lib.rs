@@ -164,6 +164,11 @@ pub use vet::{
     ENV_VET_THRESHOLD, VetError, VetOptions, execute_vet,
 };
 
+#[allow(dead_code, clippy::all)]
+fn _audit_spike_unused_helper() -> usize {
+    42
+}
+
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
