@@ -477,7 +477,9 @@ mod tests {
                     candidate_canons: Vec::new(),
                     ..CaseloadDiscovery::default()
                 });
-            let provider = RecordingMockProvider::with_error(ProviderError::MissingApiKey);
+            let provider = RecordingMockProvider::with_error(
+                ProviderError::missing_api_key_for_slug("google"),
+            );
 
             let enriched = execute_apprise(
                 &AppriseOptions::default(),

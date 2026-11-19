@@ -15,17 +15,21 @@
 //! Live Google Gemini `:generateContent` endpoint prober and multi-provider composite router.
 
 use super::{
-    DEFAULT_GEMINI_BASE_URL, EndpointProber, GeminiDecisionsEndpointProber, ProbeEndpointResult,
-    TypesafeEndpointProber, strip_provider_prefix,
+    DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, EndpointProber,
+    GeminiDecisionsEndpointProber, ProbeEndpointResult, TypesafeEndpointProber,
+    strip_provider_prefix,
 };
-use crate::caseload::{ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel};
-use crate::configure::{is_discriminative_model, model_provider};
+use crate::caseload::{DEFAULT_PROVIDER, ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel};
+use crate::configure::{
+    ProtocolDriver, ProviderAuth, ProviderConnection, is_discriminative_model, model_provider,
+};
 use crate::provider::gemini::post_gemini_json;
 use crate::provider::{
     GeminiThinkingConfig, build_pooled_http_client, build_probe_thinking_config,
     classify_gemini_http_error, extract_gemini_error_detail,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Serialize)]
 struct GeminiGenerateContentRequest<'a> {
@@ -173,14 +177,20 @@ impl EndpointProber for GeminiEndpointProber {
     }
 }
 
-/// Composite live [`EndpointProber`] routing generative `google:*` specifiers to [`GeminiEndpointProber`],
-/// `google:gemini-decision-*` specifiers to [`GeminiDecisionsEndpointProber`],
-/// and `typesafe:*` specifiers to [`TypesafeEndpointProber`].
+#[derive(Debug, Clone)]
+enum ProtocolProberEntry {
+    Gemini {
+        generator: GeminiEndpointProber,
+        decisions: GeminiDecisionsEndpointProber,
+    },
+    SystemOne(TypesafeEndpointProber),
+}
+
+/// Table-driven composite [`EndpointProber`] constructed from resolved [`ProviderConnection`]s so
+/// `canon-clerk probe` and heuristic execution stages share identical protocol and `baseUrl` routing.
 #[derive(Debug, Clone)]
 pub struct MultiProviderEndpointProber {
-    gemini: GeminiEndpointProber,
-    gemini_decisions: GeminiDecisionsEndpointProber,
-    typesafe: TypesafeEndpointProber,
+    entries: BTreeMap<String, ProtocolProberEntry>,
 }
 
 impl Default for MultiProviderEndpointProber {
@@ -190,40 +200,61 @@ impl Default for MultiProviderEndpointProber {
 }
 
 impl MultiProviderEndpointProber {
-    /// Constructs a new [`MultiProviderEndpointProber`] targeting default Gemini and TypeSafe endpoints.
+    /// Constructs a [`MultiProviderEndpointProber`] targeting default built-in `google` and `typesafe` endpoints.
     pub fn new() -> Self {
-        let client = build_pooled_http_client();
-        Self {
-            gemini: GeminiEndpointProber::with_client_and_base_url(
-                client.clone(),
-                DEFAULT_GEMINI_BASE_URL,
-            ),
-            gemini_decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
-                client,
-                DEFAULT_GEMINI_BASE_URL,
-            ),
-            typesafe: TypesafeEndpointProber::new(),
-        }
+        Self::with_base_urls(DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL)
     }
 
-    /// Constructs a [`MultiProviderEndpointProber`] targeting custom base URLs (for hermetic loopback tests).
+    /// Constructs a [`MultiProviderEndpointProber`] from the exact resolved [`ProviderConnection`] map.
+    pub fn from_connections(connections: BTreeMap<String, ProviderConnection>) -> Self {
+        let client = build_pooled_http_client();
+        let mut entries = BTreeMap::new();
+        for (slug, conn) in connections {
+            let entry = match conn.protocol {
+                ProtocolDriver::Gemini => ProtocolProberEntry::Gemini {
+                    generator: GeminiEndpointProber::with_client_and_base_url(
+                        client.clone(),
+                        conn.base_url.clone(),
+                    ),
+                    decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
+                        client.clone(),
+                        conn.base_url,
+                    ),
+                },
+                ProtocolDriver::SystemOne => ProtocolProberEntry::SystemOne(
+                    TypesafeEndpointProber::with_client_and_base_url(client.clone(), conn.base_url),
+                ),
+            };
+            entries.insert(slug, entry);
+        }
+        Self { entries }
+    }
+
+    /// Constructs a [`MultiProviderEndpointProber`] targeting custom built-in base URLs (for hermetic loopback tests).
     pub fn with_base_urls(
         gemini_base_url: impl Into<String>,
         typesafe_base_url: impl Into<String>,
     ) -> Self {
-        let gemini_base = gemini_base_url.into();
-        let client = build_pooled_http_client();
-        Self {
-            gemini: GeminiEndpointProber::with_client_and_base_url(
-                client.clone(),
-                gemini_base.clone(),
-            ),
-            gemini_decisions: GeminiDecisionsEndpointProber::with_client_and_base_url(
-                client,
-                gemini_base,
-            ),
-            typesafe: TypesafeEndpointProber::with_base_url(typesafe_base_url),
-        }
+        let mut connections = BTreeMap::new();
+        connections.insert(
+            DEFAULT_PROVIDER.to_string(),
+            ProviderConnection {
+                slug: DEFAULT_PROVIDER.to_string(),
+                protocol: ProtocolDriver::Gemini,
+                base_url: gemini_base_url.into(),
+                auth: ProviderAuth::None,
+            },
+        );
+        connections.insert(
+            TYPESAFE_PROVIDER.to_string(),
+            ProviderConnection {
+                slug: TYPESAFE_PROVIDER.to_string(),
+                protocol: ProtocolDriver::SystemOne,
+                base_url: typesafe_base_url.into(),
+                auth: ProviderAuth::None,
+            },
+        );
+        Self::from_connections(connections)
     }
 }
 
@@ -236,30 +267,46 @@ impl EndpointProber for MultiProviderEndpointProber {
         thinking_level: Option<ThinkingLevel>,
         reasoning_budget: Option<u32>,
     ) -> ProbeEndpointResult {
-        if model_provider(model_specifier) == TYPESAFE_PROVIDER {
-            self.typesafe.probe_endpoint(
+        let slug = model_provider(model_specifier);
+        match self.entries.get(slug) {
+            Some(ProtocolProberEntry::Gemini {
+                generator,
+                decisions,
+            }) => {
+                if is_discriminative_model(model_specifier) {
+                    decisions.probe_endpoint(
+                        model_specifier,
+                        api_key,
+                        timeout_ms,
+                        thinking_level,
+                        reasoning_budget,
+                    )
+                } else {
+                    generator.probe_endpoint(
+                        model_specifier,
+                        api_key,
+                        timeout_ms,
+                        thinking_level,
+                        reasoning_budget,
+                    )
+                }
+            }
+            Some(ProtocolProberEntry::SystemOne(sys)) => sys.probe_endpoint(
                 model_specifier,
                 api_key,
                 timeout_ms,
                 thinking_level,
                 reasoning_budget,
-            )
-        } else if is_discriminative_model(model_specifier) {
-            self.gemini_decisions.probe_endpoint(
-                model_specifier,
-                api_key,
-                timeout_ms,
-                thinking_level,
-                reasoning_budget,
-            )
-        } else {
-            self.gemini.probe_endpoint(
-                model_specifier,
-                api_key,
-                timeout_ms,
-                thinking_level,
-                reasoning_budget,
-            )
+            ),
+            None => ProbeEndpointResult {
+                status: ProbeStatus::Error,
+                latency_ms: 0,
+                resolved_model: None,
+                error: Some(format!(
+                    "Unsupported or unconfigured provider `{slug}` for probe target `{model_specifier}`. \
+                     Hint: Declare `providers.{slug}` in `~/.config/canon-clerk/config.json`."
+                )),
+            },
         }
     }
 }

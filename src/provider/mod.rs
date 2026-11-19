@@ -24,7 +24,7 @@ mod retry_delay;
 mod runtime;
 mod typesafe;
 
-pub(crate) use runtime::build_pooled_http_client;
+pub(crate) use runtime::{HttpAuth, build_pooled_http_client};
 
 pub use crate::caseload::{
     DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_SCREENING_REASONING_BUDGET,
@@ -52,18 +52,17 @@ pub use retry::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
     ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryNotification, RetryPolicy,
 };
-pub use typesafe::DEFAULT_TYPESAFE_BASE_URL;
+pub use typesafe::{DEFAULT_TYPESAFE_BASE_URL, build_systemone_url};
 pub(crate) use typesafe::{
     TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
     classify_typesafe_http_error, extract_typesafe_error_detail, post_typesafe_json,
-    strip_typesafe_prefix,
 };
 
 use crate::caseload::{
     DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
     DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, TYPESAFE_PROVIDER,
 };
-use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
+use crate::configure::{MissingCredentialSpec, model_provider};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -137,11 +136,9 @@ pub struct GenerationResponse {
 /// Actionable errors emitted by [`StructuredModelProvider`] and [`DecisionModelProvider`] implementations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderError {
-    /// Required Google Gemini API key is missing or blank.
-    MissingApiKey,
-    /// Required TypeSafe AI API key is missing or blank.
-    MissingTypesafeApiKey,
-    /// Model specifier targets a provider prefix not supported by the adapter.
+    /// Required provider API key is missing or blank.
+    MissingProviderApiKey { slug: String },
+    /// Model specifier targets a provider prefix not registered on the adapter.
     UnsupportedProvider {
         provider: String,
         model_specifier: String,
@@ -161,6 +158,7 @@ pub enum ProviderError {
     /// Network, DNS, TLS, or local async runtime failure before receiving an HTTP response.
     Transport {
         model_specifier: String,
+        endpoint_host: Option<String>,
         message: String,
     },
     /// Upstream endpoint returned a non-2xx HTTP status (`401`/`403`, `404`, `429`, `5xx`, etc.).
@@ -187,22 +185,20 @@ pub enum ProviderError {
     },
 }
 
+impl ProviderError {
+    /// Constructs a table-driven [`Self::MissingProviderApiKey`] error for `slug`.
+    pub fn missing_api_key_for_slug(slug: &str) -> Self {
+        Self::MissingProviderApiKey {
+            slug: slug.to_string(),
+        }
+    }
+}
+
 impl fmt::Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingApiKey => write!(
-                f,
-                "Missing required Google Gemini API key (`{ENV_GEMINI_API_KEY}`) for model generation.\n  \
-                 Hint: Export `{ENV_GEMINI_API_KEY}=\"<your-api-key>\"`, configure \
-                 `providers.google.apiKey` in `~/.config/canon-clerk/config.json` (mode `0600`), \
-                 or pass `--gemini-api-key <KEY>`."
-            ),
-            Self::MissingTypesafeApiKey => write!(
-                f,
-                "Missing required TypeSafe AI API key (`{ENV_TYPESAFE_API_KEY}`) for decision evaluation.\n  \
-                 Hint: Export `{ENV_TYPESAFE_API_KEY}=\"<your-api-key>\"`, configure \
-                 `providers.typesafe.apiKey` in `~/.config/canon-clerk/config.json` (mode `0600`), \
-                 or pass `--typesafe-api-key <KEY>`."
+            Self::MissingProviderApiKey { slug } => f.write_str(
+                &MissingCredentialSpec::for_slug(slug).format_diagnostic(Some("model evaluation")),
             ),
             Self::UnsupportedProvider {
                 provider,
@@ -210,8 +206,8 @@ impl fmt::Display for ProviderError {
             } => write!(
                 f,
                 "Unsupported model provider `{provider}` in specifier `{model_specifier}`.\n  \
-                 Hint: Canon Clerk supports `google` (`{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, `{DEFAULT_GOOGLE_GENERATOR_MODEL}`) \
-                 and `typesafe` (`{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`)."
+                 Hint: Built-in providers are `google` (`{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, `{DEFAULT_GOOGLE_GENERATOR_MODEL}`) \
+                 and `typesafe` (`{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`), or declare `providers.{provider}` in `~/.config/canon-clerk/config.json`."
             ),
             Self::InvalidModelSpecifier {
                 model_specifier,
@@ -237,17 +233,20 @@ impl fmt::Display for ProviderError {
             ),
             Self::Transport {
                 model_specifier,
+                endpoint_host,
                 message,
             } => {
-                let host = if model_provider(model_specifier) == TYPESAFE_PROVIDER {
-                    "api.typesafe.ai"
-                } else {
-                    "generativelanguage.googleapis.com"
-                };
+                let host = endpoint_host.as_deref().unwrap_or_else(|| {
+                    if model_provider(model_specifier) == TYPESAFE_PROVIDER {
+                        "api.typesafe.ai"
+                    } else {
+                        "generativelanguage.googleapis.com"
+                    }
+                });
                 write!(
                     f,
                     "Network connection failed for `{model_specifier}`: {message}\n  \
-                     Hint: Verify internet connectivity and DNS/TLS access to `{host}`."
+                     Hint: Verify connectivity and DNS/TLS access to `{host}`."
                 )
             }
             Self::HttpStatus { diagnostic, .. } => f.write_str(diagnostic),
@@ -401,8 +400,9 @@ mod tests {
         #[test]
         fn test_all_provider_error_variants_include_actionable_remediation_hints() {
             let errors = [
-                ProviderError::MissingApiKey,
-                ProviderError::MissingTypesafeApiKey,
+                ProviderError::missing_api_key_for_slug("google"),
+                ProviderError::missing_api_key_for_slug("typesafe"),
+                ProviderError::missing_api_key_for_slug("google-corp"),
                 ProviderError::UnsupportedProvider {
                     provider: "openai".to_string(),
                     model_specifier: "openai:gpt-4o".to_string(),
@@ -418,11 +418,13 @@ mod tests {
                 },
                 ProviderError::Transport {
                     model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
+                    endpoint_host: None,
                     message: "connection refused".to_string(),
                 },
                 ProviderError::Transport {
-                    model_specifier: DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL.to_string(),
-                    message: "dns lookup failed".to_string(),
+                    model_specifier: "local-dev:kev-0.8b".to_string(),
+                    endpoint_host: Some("127.0.0.1:8080".to_string()),
+                    message: "connection refused".to_string(),
                 },
                 ProviderError::HttpStatus {
                     status_code: 429,

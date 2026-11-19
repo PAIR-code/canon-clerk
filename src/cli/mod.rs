@@ -69,7 +69,8 @@ pub use node_args::{
     DocketNodeModelArgs, RejectedUnqualifiedTuningArgs, VetNodeModelArgs,
 };
 pub use probe::{
-    ProbeArgs, ProbeFormat, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,
+    ProbeArgs, ProbeFormat, run_probe, run_probe_live_with_telemetry,
+    run_probe_with_env_and_prober, run_probe_with_telemetry,
 };
 pub use provenance::StageDisposition;
 pub(crate) use runners::build_live_model_provider;
@@ -91,7 +92,6 @@ pub use vet::{
     run_vet_with_telemetry,
 };
 
-use crate::probe::MultiProviderEndpointProber;
 use crate::telemetry::{SystemTelemetryClock, TelemetrySession};
 use clap::{CommandFactory, Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -374,8 +374,7 @@ fn dispatch_subcommand(
             run_configure_with_telemetry(args, stdin, stdout, env_map, session)?;
         }
         Commands::Probe(args) => {
-            let prober = MultiProviderEndpointProber::new();
-            run_probe_with_telemetry(args, stdin, stdout, env_map, &prober, session)?;
+            run_probe_live_with_telemetry(args, stdin, stdout, env_map, session)?;
         }
         Commands::Apprise(args) => {
             run_apprise_live_with_telemetry(args, stdin, stdout, session)?;

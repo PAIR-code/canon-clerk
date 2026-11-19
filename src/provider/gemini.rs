@@ -19,21 +19,24 @@ use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester}
 use super::retry::RetryPolicy;
 use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
 use crate::caseload::DEFAULT_PROVIDER;
-use crate::configure::{ENV_GEMINI_API_KEY, is_gemini_decision_model_name};
+pub use crate::configure::DEFAULT_GEMINI_BASE_URL;
+use crate::configure::{
+    ProviderConnection, credential_verification_hint_for_slug, is_gemini_decision_model_name,
+    model_provider,
+};
 use crate::provider::{
     GenerationRequest, GenerationResponse, ProviderError, StructuredModelProvider,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Default Google Generative Language API v1beta base URL.
-pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-
-/// Strips the canonical `"google:"` provider prefix from a normalized model specifier.
+/// Strips any canonical `<provider>:` prefix from a normalized model specifier (`<provider>:<model>` -> `<model>`).
 pub fn strip_provider_prefix(model_specifier: &str) -> &str {
-    model_specifier
-        .strip_prefix("google:")
-        .unwrap_or(model_specifier)
+    let trimmed = model_specifier.trim();
+    match trimmed.split_once(':') {
+        Some((prov, model_id)) if !prov.is_empty() && !model_id.is_empty() => model_id,
+        _ => trimmed,
+    }
 }
 
 /// Constructs the Google Generative Language `POST :generateContent` URL for a model specifier.
@@ -64,10 +67,13 @@ pub fn extract_gemini_error_detail(body: &str) -> String {
 /// Formats an HTTP error status code from the Google Gemini API into an actionable diagnostic with remediation hints.
 pub fn classify_gemini_http_error(status_code: u16, model_specifier: &str, detail: &str) -> String {
     match status_code {
-        401 | 403 => format!(
-            "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
-             Hint: Verify `{ENV_GEMINI_API_KEY}` or `providers.google.apiKey` in `~/.config/canon-clerk/config.json`."
-        ),
+        401 | 403 => {
+            let key_hint = credential_verification_hint_for_slug(model_provider(model_specifier));
+            format!(
+                "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
+                 Hint: {key_hint}"
+            )
+        }
         404 => format!(
             "HTTP 404: Model endpoint `{model_specifier}` was not found ({detail}). \
              Hint: Specify a valid `<provider>:<model>` Gemini identifier via `--<node>-model` (e.g. `google:gemini-4-carbon`)."
@@ -87,7 +93,10 @@ pub fn classify_gemini_http_error(status_code: u16, model_specifier: &str, detai
     }
 }
 
-fn validate_gemini_model_specifier(raw: &str) -> Result<&str, ProviderError> {
+fn validate_gemini_model_specifier<'a>(
+    raw: &'a str,
+    expected_slug: &str,
+) -> Result<&'a str, ProviderError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(ProviderError::InvalidModelSpecifier {
@@ -109,7 +118,7 @@ fn validate_gemini_model_specifier(raw: &str) -> Result<&str, ProviderError> {
                 reason: "expected `<provider>:<model>` with non-empty segments".to_string(),
             });
         }
-        if provider != DEFAULT_PROVIDER {
+        if provider != expected_slug {
             return Err(ProviderError::UnsupportedProvider {
                 provider: provider.to_string(),
                 model_specifier: trimmed.to_string(),
@@ -173,6 +182,7 @@ fn build_gemini_http_status_error(
 /// Google Gemini v1beta HTTPS adapter implementing [`StructuredModelProvider`].
 #[derive(Clone)]
 pub struct GeminiModelProvider {
+    slug: String,
     api_key: String,
     base_url: String,
     requester: SharedHttpRequester,
@@ -186,6 +196,7 @@ impl fmt::Debug for GeminiModelProvider {
             "<redacted>"
         };
         f.debug_struct("GeminiModelProvider")
+            .field("slug", &self.slug)
             .field("api_key", &key_repr)
             .field("base_url", &self.base_url)
             .finish()
@@ -233,10 +244,26 @@ impl GeminiModelProvider {
         base_url: impl Into<String>,
     ) -> Self {
         Self {
+            slug: DEFAULT_PROVIDER.to_string(),
             api_key: api_key.into(),
             base_url: base_url.into(),
             requester,
         }
+    }
+
+    /// Constructs a [`GeminiModelProvider`] from a resolved [`ProviderConnection`] and shared [`SharedHttpRequester`].
+    pub fn from_connection(conn: &ProviderConnection, requester: SharedHttpRequester) -> Self {
+        Self {
+            slug: conn.slug.clone(),
+            api_key: conn.auth.secret().unwrap_or_default().to_string(),
+            base_url: conn.base_url.clone(),
+            requester,
+        }
+    }
+
+    /// Returns the canonical profile slug bound to this adapter.
+    pub fn slug(&self) -> &str {
+        &self.slug
     }
 
     /// Returns the configured Google Generative Language API base URL.
@@ -270,7 +297,7 @@ impl StructuredModelProvider for GeminiModelProvider {
     ) -> Result<GenerationResponse, ProviderError> {
         let api_key = self.api_key.trim();
         if api_key.is_empty() {
-            return Err(ProviderError::MissingApiKey);
+            return Err(ProviderError::missing_api_key_for_slug(&self.slug));
         }
         if request.timeout_ms == 0 {
             return Err(ProviderError::InvalidTimeout {
@@ -278,7 +305,7 @@ impl StructuredModelProvider for GeminiModelProvider {
             });
         }
 
-        let specifier = validate_gemini_model_specifier(&request.model_specifier)?;
+        let specifier = validate_gemini_model_specifier(&request.model_specifier, &self.slug)?;
         let payload = build_request_payload(request);
         let url = build_generate_content_url(&self.base_url, specifier);
         let outcome = self.requester.execute_json_post(
@@ -574,6 +601,7 @@ mod tests {
 
     mod error_classification {
         use super::*;
+        use crate::configure::ENV_GEMINI_API_KEY;
 
         #[test]
         fn test_classifies_http_401_403_404_429_and_5xx_errors_with_remediation_hints() {
@@ -742,7 +770,7 @@ mod tests {
             let blank_provider = GeminiModelProvider::new("   ");
             assert_eq!(
                 blank_provider.generate_structured(&sample_request(None)),
-                Err(ProviderError::MissingApiKey)
+                Err(ProviderError::missing_api_key_for_slug(DEFAULT_PROVIDER))
             );
 
             let provider =

@@ -14,15 +14,13 @@
 
 //! Shared upstream stage runners for Branch A (Filing) and Branch B (Environment) pipelines.
 
-use crate::caseload::{
-    Caseload, CaseloadConfig, DEFAULT_PROVIDER, HeuristicNode, TYPESAFE_PROVIDER,
-};
+use crate::caseload::{Caseload, CaseloadConfig, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, FilingSourceArgs, ProviderConfigArgs};
 use crate::configure::{
     ConfigureOptions, ConfigureScope, StoredConfig, can_fast_forward_existing_config,
-    check_retired_env_vars, execute_configure, load_host_config_file, model_provider,
-    resolve_default_config_path,
+    check_retired_env_vars, execute_configure, load_host_config_file, resolve_default_config_path,
+    resolve_provider_connections,
 };
 use crate::discover::{DiscoverError, DiscoverOptions, execute_discover_on_disk};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
@@ -223,6 +221,8 @@ pub(crate) fn resolve_closure_branch_b_options(
         reasoning_budget: provider.reasoning_budget,
         gemini_api_key: provider.gemini_api_key.clone(),
         typesafe_api_key: provider.typesafe_api_key.clone(),
+        gemini_base_url: provider.gemini_base_url.clone(),
+        typesafe_base_url: provider.typesafe_base_url.clone(),
         scope,
         env: env.clone(),
         stored_config,
@@ -254,49 +254,17 @@ pub fn resolve_gemini_api_key(options: &ConfigureOptions) -> Result<String, CliE
         .map_err(|err| CliError::usage(err.to_string()))
 }
 
-/// Extracts and validates the active TypeSafe AI API key from resolved [`ConfigureOptions`].
-pub(crate) fn resolve_typesafe_api_key(options: &ConfigureOptions) -> Result<String, CliError> {
-    crate::configure::resolve_typesafe_api_key(options)
-        .map_err(|err| CliError::usage(err.to_string()))
-}
-
-/// Builds a live [`MultiModelProvider`] resolving only the credentials required by the executed nodes
-/// in `options.scope` and sharing a single pooled requester governed by `retry_policy`.
+/// Builds a live [`MultiModelProvider`] from the unified [`crate::configure::ProviderConnection`] map
+/// resolved strictly for the executed nodes in `options.scope`.
 pub(crate) fn build_live_model_provider(
     options: &ConfigureOptions,
     config: &CaseloadConfig,
     retry_policy: RetryPolicy,
 ) -> Result<MultiModelProvider, CliError> {
-    let active_models: Vec<&str> = match &options.scope {
-        ConfigureScope::AllProvisioned => config.nodes.values().map(|n| n.model.as_str()).collect(),
-        ConfigureScope::Closure(required) => config
-            .nodes
-            .iter()
-            .filter(|(node, _)| required.contains(node) || options.node_models.contains_key(node))
-            .map(|(_, n)| n.model.as_str())
-            .collect(),
-    };
-    let needs_google = active_models
-        .iter()
-        .any(|m| model_provider(m) == DEFAULT_PROVIDER);
-    let needs_typesafe = active_models
-        .iter()
-        .any(|m| model_provider(m) == TYPESAFE_PROVIDER);
-
-    let gemini_key = if needs_google {
-        Some(resolve_gemini_api_key(options)?)
-    } else {
-        resolve_gemini_api_key(options).ok()
-    };
-    let typesafe_key = if needs_typesafe {
-        Some(resolve_typesafe_api_key(options)?)
-    } else {
-        resolve_typesafe_api_key(options).ok()
-    };
-
-    Ok(MultiModelProvider::with_retry_policy(
-        gemini_key,
-        typesafe_key,
+    let connections = resolve_provider_connections(options, config)
+        .map_err(|err| CliError::usage(err.to_string()))?;
+    Ok(MultiModelProvider::from_connections(
+        connections,
         retry_policy,
     ))
 }

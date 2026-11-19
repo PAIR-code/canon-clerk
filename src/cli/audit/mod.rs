@@ -1688,5 +1688,89 @@ mod tests {
                 "unexpected provenance receipt:\n{receipt}"
             );
         }
+
+        #[test]
+        fn test_zero_code_custom_keyless_systemone_and_google_audit_cascade_executes_without_stage_edits()
+         {
+            use crate::caseload::{DEFAULT_GOOGLE_GENERATOR_MODEL, HeuristicNode};
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let xdg_dir = std::env::temp_dir().join(format!("canon-clerk-audit-custom-{unique}"));
+            let cfg_dir = xdg_dir.join("canon-clerk");
+            fs::create_dir_all(&cfg_dir).expect("create xdg dir");
+            let cfg_file = cfg_dir.join("config.json");
+            fs::write(
+                &cfg_file,
+                r#"{
+                    "providers": {
+                        "local-dev": {
+                            "protocol": "systemone",
+                            "baseUrl": "http://127.0.0.1:8080/v1",
+                            "defaultDiscriminator": "local-dev:kev-0.8b"
+                        },
+                        "google": {
+                            "apiKey": "cfg-google-audit-secret"
+                        }
+                    },
+                    "defaults": {
+                        "provider": "local-dev"
+                    },
+                    "nodes": {
+                        "audit": { "model": "google:gemini-4-carbon" }
+                    }
+                }"#,
+            )
+            .expect("write custom hybrid config");
+            fs::set_permissions(&cfg_file, fs::Permissions::from_mode(0o600)).expect("chmod 0600");
+
+            let ws = sample_workspace();
+            let diff = "--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1,3 +1,4 @@\n pub struct AuditArgs {\n+    // comment\n     #[arg(long = \"audit-threshold\")]\n     pub threshold: f64,\n";
+            let env =
+                BTreeMap::from([("XDG_CONFIG_HOME".to_string(), xdg_dir.display().to_string())]);
+            let hybrid_provider = HybridCascadeProvider {
+                decision_calls: Mutex::new(0),
+                audit_calls: Mutex::new(0),
+                vet_score: 0.35,
+            };
+            let mut stdout = Vec::new();
+            let caseload = run_audit_with_snapshot_and_provider(
+                &parse_audit(&["canon-clerk", "audit", "--diff", "-"]),
+                &mut Cursor::new(diff.as_bytes()),
+                &mut stdout,
+                &ws,
+                &env,
+                &hybrid_provider,
+            )
+            .expect("hybrid custom local-dev screening + google audit succeeds");
+
+            let cfg = caseload.config.expect("config");
+            assert_eq!(cfg.provider, "local-dev");
+            assert_eq!(
+                cfg.model_for(HeuristicNode::Docket),
+                Some("local-dev:kev-0.8b")
+            );
+            assert_eq!(
+                cfg.model_for(HeuristicNode::Admit),
+                Some("local-dev:kev-0.8b")
+            );
+            assert_eq!(
+                cfg.model_for(HeuristicNode::Vet),
+                Some("local-dev:kev-0.8b")
+            );
+            assert_eq!(
+                cfg.model_for(HeuristicNode::Audit),
+                Some(DEFAULT_GOOGLE_GENERATOR_MODEL)
+            );
+            assert_eq!(*hybrid_provider.decision_calls.lock().expect("lock"), 3);
+            assert_eq!(*hybrid_provider.audit_calls.lock().expect("lock"), 1);
+
+            let _ = fs::remove_dir_all(&xdg_dir);
+        }
     }
 }

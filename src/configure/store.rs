@@ -16,17 +16,30 @@
 //! schema validators, and workspace/permission security guards (`docs/architecture/nodes/configure.md` §3–4).
 
 use crate::caseload::{DEFAULT_PROVIDER, HeuristicNode, TYPESAFE_PROVIDER};
-use crate::configure::ConfigureError;
+use crate::configure::{ConfigureError, ProviderRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Provider-specific authentication entry under `providers.<provider>`.
+/// Provider profile entry under `providers.<slug>` in `~/.config/canon-clerk/config.json`.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct StoredProviderConfig {
+    /// Wire protocol driver (`"gemini"` or `"systemone"`). Optional on built-in slugs; required on custom profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+
+    /// Endpoint base URL (`http://` or `https://`). Optional on built-in slugs; required on custom profiles.
+    #[serde(
+        default,
+        rename = "baseUrl",
+        alias = "base_url",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub base_url: Option<String>,
+
     /// Provider API key (`apiKey` or `api_key`).
     #[serde(
         default,
@@ -35,6 +48,24 @@ pub struct StoredProviderConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub api_key: Option<String>,
+
+    /// Default canonical `<slug>:<model>` `Discriminator` specifier for this profile.
+    #[serde(
+        default,
+        rename = "defaultDiscriminator",
+        alias = "default_discriminator",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_discriminator: Option<String>,
+
+    /// Default canonical `<slug>:<model>` `Generator` specifier for this profile (`gemini` protocol only).
+    #[serde(
+        default,
+        rename = "defaultGenerator",
+        alias = "default_generator",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_generator: Option<String>,
 }
 
 /// Global default operational knobs under `defaults` in `~/.config/canon-clerk/config.json`.
@@ -206,9 +237,10 @@ impl StoredConfig {
         self.nodes.get(&node).and_then(|n| n.concurrency)
     }
 
-    /// Validates semantic constraints on parsed [`StoredConfig`] fields (such as `batchSize` stage scoping).
+    /// Validates semantic constraints on parsed [`StoredConfig`] fields (custom `providers.<slug>` profiles and `batchSize` stage scoping).
     pub(crate) fn validate_schema(&self, source_path: Option<&str>) -> Result<(), ConfigureError> {
         let path = source_path.unwrap_or("~/.config/canon-clerk/config.json");
+        ProviderRegistry::from_stored_with_path(Some(self), Some(path))?;
         for (node, cfg) in &self.nodes {
             if cfg.batch_size.is_some() && !node.supports_batch_size() {
                 return Err(ConfigureError::MalformedConfigFile {
@@ -565,6 +597,15 @@ mod tests {
                 r#"{"nodes":{"screener":{"model":"google:gemini-decision-1"}}}"#,
                 r#"{"nodes":{"audit":{"batchSize":10}}}"#,
                 r#"{"defaults":{"unknownField":1}}"#,
+                r#"{"providers":{"local-dev":{"baseUrl":"http://127.0.0.1:8080/v1"}}}"#,
+                r#"{"providers":{"local-dev":{"protocol":"systemone"}}}"#,
+                r#"{"providers":{"local-dev":{"protocol":"openai","baseUrl":"http://127.0.0.1:8080/v1"}}}"#,
+                r#"{"providers":{"local-dev":{"protocol":"systemone","baseUrl":"ftp://127.0.0.1:8080"}}}"#,
+                r#"{"providers":{"google":{"protocol":"systemone"}}}"#,
+                r#"{"providers":{"local-dev":{"protocol":"systemone","baseUrl":"http://127.0.0.1:8080/v1","defaultGenerator":"local-dev:kev-0.8b"}}}"#,
+                r#"{"providers":{"local-dev":{"protocol":"systemone","baseUrl":"http://127.0.0.1:8080/v1","defaultDiscriminator":"typesafe:jev-latest"}}}"#,
+                r#"{"providers":{"google-corp":{"protocol":"gemini","baseUrl":"https://gw.example.com/v1beta","defaultGenerator":"google-corp:gemini-decision-1"}}}"#,
+                r#"{"providers":{"Bad_Slug":{"protocol":"systemone","baseUrl":"http://127.0.0.1:8080/v1"}}}"#,
             ] {
                 let err = parse_stored_config_str(bad_json, "/tmp/config.json")
                     .expect_err(&format!("must reject `{bad_json}`"));
