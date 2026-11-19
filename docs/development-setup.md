@@ -163,13 +163,23 @@ To verify changes locally before pushing or opening a pull request, run the unif
 ./scripts/check.sh
 ```
 
-This executes the identical quality verification pipeline enforced by GitHub Actions CI:
+This executes the identical offline, hermetic quality verification pipeline enforced by GitHub Actions CI:
 1. License header validation (`./scripts/check-license.sh`)
 2. File size ceiling validation (`./scripts/check-file-size.sh`)
 3. Code formatting verification (`cargo fmt --check`)
 4. Strict compiler lints (`cargo clippy --all-targets --all-features -- -D warnings`)
 5. Full unit and integration test suites (`cargo test`)
 6. Repository canon corpus validation (`cargo run --locked -- validate --all-canons --max-warnings 0`)
+
+### Shift-Left Canon Auditing (WIP)
+
+`./scripts/check.sh` stays strictly offline and hermetic. To run live LLM-backed `canon-clerk audit` adjudication locally against your work-in-progress diff before pushing (requires `GEMINI_API_KEY` or configured provider credentials), run:
+
+```bash
+./scripts/audit-wip.sh
+```
+
+The script diffs tracked changes in your current worktree against the `upstream/main` (or `origin/main`) merge-base and pipes them to `canon-clerk audit --diff -`. Any additional CLI arguments are forwarded directly (for example, `./scripts/audit-wip.sh --pr-title "ci: add audit workflow"` or `./scripts/audit-wip.sh --provider typesafe`).
 
 ---
 
