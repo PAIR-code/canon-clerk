@@ -341,7 +341,6 @@ fn finalize_metadata(
 mod tests {
     use super::*;
     use crate::caseload::{ActiveExhibits, CaseloadDiscovery, DiscoveryMode};
-    use std::path::PathBuf;
 
     mod frontmatter_linting {
         use super::*;
@@ -539,7 +538,7 @@ Rationale: Two rules in one canon.";
         }
     }
 
-    mod caseload_stage_and_repository_corpus {
+    mod caseload_stage {
         use super::*;
 
         #[test]
@@ -617,49 +616,6 @@ Rationale: Two rules in one canon.";
                 val.results.get(".canons/rule-must-hold.md").unwrap().result,
                 ValidationOutcome::Fail
             );
-        }
-
-        #[test]
-        fn test_all_repository_canons_pass_validation_with_zero_errors() {
-            let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let snapshot = WorkspaceSnapshot::from_disk(&repo_root, &[]).expect("load repo canons");
-            let candidate_canons: Vec<String> = snapshot.canons.keys().cloned().collect();
-            assert!(
-                !candidate_canons.is_empty(),
-                "repository must contain canons"
-            );
-
-            let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
-                mode: DiscoveryMode::AllCanons,
-                target_files: Vec::new(),
-                candidate_canons,
-                active_exhibits: ActiveExhibits::default(),
-                triggers_join: BTreeMap::new(),
-            });
-
-            let enriched = execute_validate(
-                &ValidateOptions {
-                    max_warnings: Some(0),
-                },
-                caseload,
-                &snapshot,
-            )
-            .expect("validate repository corpus");
-            let val = enriched.validation.expect("validation populated");
-
-            for (path, meta) in &val.results {
-                assert_eq!(
-                    meta.error_count, 0,
-                    "Canon {path} had unexpected errors: {:?}",
-                    meta.diagnostics
-                );
-                assert_eq!(
-                    meta.warning_count, 0,
-                    "Canon {path} had unexpected warnings: {:?}",
-                    meta.diagnostics
-                );
-            }
-            assert!(!val.has_errors);
         }
     }
 }

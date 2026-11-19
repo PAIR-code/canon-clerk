@@ -25,20 +25,23 @@ if [ -d "$HOME/.cargo/bin" ]; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-echo "=== 1/5: Checking License Headers ==="
+echo "=== 1/6: Checking License Headers ==="
 ./scripts/check-license.sh
 
-echo "=== 2/5: Checking File Size Bounds ==="
+echo "=== 2/6: Checking File Size Bounds ==="
 ./scripts/check-file-size.sh
 
-echo "=== 3/5: Checking Code Formatting ==="
+echo "=== 3/6: Checking Code Formatting ==="
 cargo fmt --check
 
-echo "=== 4/5: Running Clippy Lints ==="
+echo "=== 4/6: Running Clippy Lints ==="
 cargo clippy --all-targets --all-features -- -D warnings
 
-echo "=== 5/5: Running Test Suite ==="
+echo "=== 5/6: Running Test Suite ==="
 cargo test
+
+echo "=== 6/6: Validating Repository Canons ==="
+cargo run --locked -- validate --all-canons --max-warnings 0
 
 echo ""
 echo "=== All Checks Passed Successfully ==="

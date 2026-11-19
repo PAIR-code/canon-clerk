@@ -836,47 +836,4 @@ Normative invariant MUST hold.";
             assert_eq!(canon.frontmatter_key_spans.len(), 7);
         }
     }
-
-    mod repository_corpus_smoke {
-        use super::*;
-        use std::fs;
-        use std::path::Path;
-
-        fn collect_canon_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-            if let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        collect_canon_files(&path, out);
-                    } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                        out.push(path);
-                    }
-                }
-            }
-        }
-
-        #[test]
-        fn test_all_repository_canons_parse_cleanly() {
-            let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-            let canons_dir = manifest_dir.join(".canons");
-            let mut files = Vec::new();
-            collect_canon_files(&canons_dir, &mut files);
-            assert!(!files.is_empty(), "repository must contain dogfood canons");
-
-            for path in files {
-                let rel = path
-                    .strip_prefix(manifest_dir)
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let raw = fs::read_to_string(&path).expect("read canon file");
-                let canon = parse_canon(&raw, &ParseCanonOptions::with_source_ref(&rel))
-                    .unwrap_or_else(|e| panic!("failed to parse {rel}: {e}"));
-                assert!(!canon.id.is_empty());
-                assert!(!canon.title.is_empty());
-                assert!(!canon.invariant.is_empty());
-                assert!(canon.diagnostic_path.is_some());
-            }
-        }
-    }
 }
