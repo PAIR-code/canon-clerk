@@ -421,9 +421,60 @@ mod tests {
 
     mod execution_and_formats {
         use super::*;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct TempDir {
+            path: PathBuf,
+        }
+
+        impl TempDir {
+            fn new(label: &str) -> Self {
+                let unique = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos();
+                let path = env::temp_dir().join(format!(
+                    "canon-clerk-validate-cli-{label}-{unique}-{}",
+                    std::process::id()
+                ));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(&path).expect("create temp dir");
+                Self { path }
+            }
+
+            fn path(&self) -> &Path {
+                &self.path
+            }
+
+            fn write_file(&self, rel_path: &str, content: &str) {
+                let full_path = self.path.join(rel_path);
+                if let Some(parent) = full_path.parent() {
+                    fs::create_dir_all(parent).expect("create parent dir");
+                }
+                fs::write(full_path, content).expect("write fixture file");
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.path);
+            }
+        }
 
         #[test]
         fn test_all_canons_validates_repository_corpus_and_exits_0() {
+            let fixture = TempDir::new("all-canons");
+            fixture.write_file(
+                ".canons/cli/flags-must-use-positive-polarity.md",
+                "---\ntriggers:\n  - \"src/cli/**/*.rs\"\ntags:\n  - cli\n---\nCLI flags MUST use positive polarity.\n",
+            );
+            fixture.write_file(
+                ".canons/rust/modules-must-document-public-items.md",
+                "---\ntriggers:\n  - \"src/**/*.rs\"\ntags:\n  - rust\n---\nPublic items MUST include rustdoc comments.\n",
+            );
+
             let args = ValidateArgs {
                 canons: CanonSelectionArgs {
                     all_canons: true,
@@ -439,10 +490,61 @@ mod tests {
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
             let caseload =
-                run_validate(&args, &mut stdin, &mut stdout).expect("validate --all-canons");
+                run_validate_in_workspace(&args, &mut stdin, &mut stdout, fixture.path())
+                    .expect("validate --all-canons");
             let val = caseload.validation.expect("validation populated");
             assert!(!val.has_errors);
-            assert!(!val.results.is_empty());
+            assert_eq!(val.results.len(), 2);
+        }
+
+        #[test]
+        fn test_github_actions_env_emits_annotations_and_populates_step_summary() {
+            let fixture = TempDir::new("github-actions");
+            fixture.write_file(
+                ".canons/security/tokens-must-expire.md",
+                "---\ntriggers:\n  - \"src/**/*.rs\"\ntags:\n  - security\n---\nTokens must expire within one hour.\n",
+            );
+            let summary_path = fixture.path().join("step-summary.md");
+            let env_map = BTreeMap::from([
+                ("GITHUB_ACTIONS".to_string(), "true".to_string()),
+                (
+                    "GITHUB_STEP_SUMMARY".to_string(),
+                    summary_path.to_string_lossy().into_owned(),
+                ),
+            ]);
+            let args = ValidateArgs {
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    ..CanonSelectionArgs::default()
+                },
+                max_warnings: Some(0),
+                ..ValidateArgs::default()
+            };
+
+            let mut stdin = Cursor::new(b"");
+            let mut stdout = Vec::new();
+            let err = run_validate_with_env_and_telemetry(
+                &args,
+                &mut stdin,
+                &mut stdout,
+                fixture.path(),
+                &env_map,
+                &TelemetrySession::noop(),
+            )
+            .expect_err("RFC 2119 error must exit 1");
+            assert_eq!(err.exit_code(), 1);
+
+            let rendered = String::from_utf8(stdout).expect("utf8");
+            assert!(
+                rendered.contains(
+                    "::error file=.canons/security/tokens-must-expire.md,line=7,col=8,title=RFC 2119 Violation::"
+                ),
+                "expected GitHub Actions workflow annotation, got: {rendered}"
+            );
+            let summary = fs::read_to_string(&summary_path).expect("read step summary");
+            assert!(summary.contains("### Canon Clerk Validation Summary: Failed"));
+            assert!(summary.contains("- **Candidate Canons Evaluated:** 1"));
+            assert!(summary.contains("- **Errors:** 1"));
         }
 
         #[test]

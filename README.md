@@ -115,8 +115,8 @@ Canon Clerk includes a production-grade corpus of **modular, domain-scoped canon
 | :--- | :--- | :--- | :--- |
 | 🛠️ **CLI Ergonomics** | [`.canons/cli/`](.canons/cli/) | 24 | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
 | 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | 14 | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
+| 🧪 **Testing** | [`.canons/testing/`](.canons/testing/) | 10 | Single-purpose test inputs, behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
 | 🤖 **Agent Scripts** | [`.canons/agent-scripts/`](.canons/agent-scripts/) | 9 | Runtime script standards for AI agent helpers: POSIX shell portability, command echo traces, passthrough fidelity, and `>8KB` output shunting. |
-| 🧪 **Testing** | [`.canons/testing/`](.canons/testing/) | 9 | Behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
 | 🏛️ **Internal Dogfooding** | [`.canons/internal/`](.canons/internal/) | 8 | Repository-specific dogfood policies: conceptual architecture docs, curated `llms.txt` indexing, domain-scoped tagging, and portable standards. |
 | 🔌 **API Design** | [`.canons/api-design/`](.canons/api-design/) | 7 | Single-source defaults, additive exclusions, co-located option/result types, streaming multi-resource APIs, and domain encapsulation. |
 | 📐 **OpenSpec** | [`.canons/openspec/`](.canons/openspec/) | 5 | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |

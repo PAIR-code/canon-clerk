@@ -169,6 +169,7 @@ This executes the identical quality verification pipeline enforced by GitHub Act
 3. Code formatting verification (`cargo fmt --check`)
 4. Strict compiler lints (`cargo clippy --all-targets --all-features -- -D warnings`)
 5. Full unit and integration test suites (`cargo test`)
+6. Repository canon corpus validation (`cargo run --locked -- validate --all-canons --max-warnings 0`)
 
 ---
 

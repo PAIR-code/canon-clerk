@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod common;
+
 use canon_clerk::{Caseload, PipelineStage, TelemetryEvent};
 use std::fs;
 use std::process::Command;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 fn bin_path() -> &'static str {
     env!("CARGO_BIN_EXE_canon-clerk")
@@ -191,14 +193,16 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .expect("failed to execute canon-clerk discover --all-canons --json");
     assert_eq!(disc_all.status.code(), Some(0));
 
-    // Verify validate naked invocation exits 2 and --all-canons exits 0
+    // Verify validate naked invocation exits 2 and --all-canons exits 0 against hermetic fixture
     let val_naked = Command::new(bin_path())
         .arg("validate")
         .output()
         .expect("failed to execute canon-clerk validate");
     assert_eq!(val_naked.status.code(), Some(2));
 
+    let val_ws = common::TempCanonWorkspace::new("dispatch");
     let val_all = Command::new(bin_path())
+        .current_dir(val_ws.path())
         .args(["validate", "--all-canons", "--max-warnings", "0", "--json"])
         .output()
         .expect("failed to execute canon-clerk validate --all-canons --json");
@@ -408,16 +412,13 @@ fn test_cli_cold_start_latency() {
 
 #[test]
 fn test_cli_log_file_and_env_fallback_emit_jsonl_without_polluting_stdout() {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("canon-clerk-telemetry-it-{unique}"));
-    let flag_log = dir.join("nested").join("flag-events.jsonl");
-    let env_log = dir.join("env-events.jsonl");
+    let ws = common::TempCanonWorkspace::new("telemetry");
+    let flag_log = ws.path().join("nested").join("flag-events.jsonl");
+    let env_log = ws.path().join("env-events.jsonl");
 
     // Baseline stdout without --log-file
     let baseline = Command::new(bin_path())
+        .current_dir(ws.path())
         .args(["validate", "src/lib.rs", "--json"])
         .output()
         .expect("baseline validate");
@@ -425,6 +426,7 @@ fn test_cli_log_file_and_env_fallback_emit_jsonl_without_polluting_stdout() {
 
     // 1. Explicit --log-file overrides CANON_CLERK_LOG_FILE and creates parent dirs
     let instrumented = Command::new(bin_path())
+        .current_dir(ws.path())
         .args(["validate", "src/lib.rs", "--json", "--log-file"])
         .arg(&flag_log)
         .env("CANON_CLERK_LOG_FILE", &env_log)
@@ -480,6 +482,7 @@ fn test_cli_log_file_and_env_fallback_emit_jsonl_without_polluting_stdout() {
 
     // 2. CANON_CLERK_LOG_FILE fallback combined with -q quiet mode suppresses stderr
     let env_run = Command::new(bin_path())
+        .current_dir(ws.path())
         .args(["discover", "-q", "--all-canons"])
         .env("CANON_CLERK_LOG_FILE", &env_log)
         .arg("-v")
@@ -494,6 +497,4 @@ fn test_cli_log_file_and_env_fallback_emit_jsonl_without_polluting_stdout() {
     );
     let env_jsonl = fs::read_to_string(&env_log).expect("read env jsonl");
     assert!(env_jsonl.lines().count() >= 3);
-
-    let _ = fs::remove_dir_all(&dir);
 }
