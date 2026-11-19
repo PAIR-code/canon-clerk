@@ -14,14 +14,14 @@
 
 //! CLI driving adapter for the `canon-clerk probe` subcommand (`docs/architecture/nodes/probe.md` §5).
 
-use crate::caseload::{Caseload, CaseloadProbe, HeuristicNode, ProbeStatus, ProbeTargetResult};
+use crate::caseload::{
+    Caseload, CaseloadConfig, CaseloadProbe, HeuristicNode, ProbeStatus, ProbeTargetResult,
+};
 use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
 use crate::cli::node_args::AllNodeModelArgs;
-use crate::cli::runners::{
-    resolve_branch_b_options, resolve_gemini_api_key, resolve_typesafe_api_key,
-    run_branch_b_configure,
-};
+use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
+use crate::configure::resolve_provider_connections;
 use crate::probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, MultiProviderEndpointProber,
     ProbeOptions, execute_probe,
@@ -111,6 +111,29 @@ pub fn run_probe_with_telemetry(
     prober: &dyn EndpointProber,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
+    run_probe_impl(args, stdin, stdout, env, Some(prober), telemetry)
+}
+
+/// Executes the live `probe` CLI subcommand constructing [`MultiProviderEndpointProber`] from the
+/// unified [`crate::configure::ProviderConnection`] map resolved by `configure`.
+pub fn run_probe_live_with_telemetry(
+    args: &ProbeArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    env: &BTreeMap<String, String>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, CliError> {
+    run_probe_impl(args, stdin, stdout, env, None, telemetry)
+}
+
+fn run_probe_impl(
+    args: &ProbeArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    env: &BTreeMap<String, String>,
+    injected_prober: Option<&dyn EndpointProber>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, CliError> {
     if args.rejected_model.is_some() {
         return Err(CliError::usage(
             "Ambiguous unqualified flag `--model` is disallowed on `canon-clerk probe`.\n  \
@@ -129,16 +152,21 @@ pub fn run_probe_with_telemetry(
         existing.clone()
     } else {
         let configured = run_branch_b_configure(&configure_options, incoming_caseload, telemetry)?;
-        let api_key = resolve_gemini_api_key(&configure_options).unwrap_or_default();
-        let typesafe_api_key = resolve_typesafe_api_key(&configure_options).ok();
-        let probe_options = ProbeOptions {
-            api_key,
-            typesafe_api_key,
-            timeout_ms,
-        };
-        telemetry.run_stage(PipelineStage::Probe, |_scope| {
-            execute_probe(&probe_options, prober, configured)
-                .map_err(|err| CliError::usage(err.to_string()))
+        let cfg_ref = configured
+            .config
+            .clone()
+            .unwrap_or_else(CaseloadConfig::default);
+        let connections = resolve_provider_connections(&configure_options, &cfg_ref)
+            .map_err(|err| CliError::usage(err.to_string()))?;
+        let probe_options = ProbeOptions::from_connections(connections.clone(), timeout_ms);
+        telemetry.run_stage(PipelineStage::Probe, |_scope| match injected_prober {
+            Some(prober) => execute_probe(&probe_options, prober, configured)
+                .map_err(|err| CliError::usage(err.to_string())),
+            None => {
+                let live_prober = MultiProviderEndpointProber::from_connections(connections);
+                execute_probe(&probe_options, &live_prober, configured)
+                    .map_err(|err| CliError::usage(err.to_string()))
+            }
         })?
     };
     telemetry.finish_pipeline();
@@ -173,8 +201,7 @@ pub fn run_probe(
     stdout: &mut dyn Write,
 ) -> Result<Caseload, CliError> {
     let env: BTreeMap<String, String> = env::vars().collect();
-    let prober = MultiProviderEndpointProber::new();
-    run_probe_with_env_and_prober(args, stdin, stdout, &env, &prober)
+    run_probe_live_with_telemetry(args, stdin, stdout, &env, &TelemetrySession::noop())
 }
 
 fn resolve_timeout_ms(
@@ -866,6 +893,112 @@ mod tests {
                     .expect_err("probe must reject retry flags");
                 assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
             }
+        }
+    }
+
+    mod custom_profile_and_baseurl_parity {
+        use super::*;
+        use crate::telemetry::TelemetrySession;
+        use std::fs;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::os::unix::fs::PermissionsExt;
+        use std::thread;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        fn spawn_probe_ok_server(
+            body: &'static str,
+        ) -> (std::net::SocketAddr, thread::JoinHandle<String>) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind probe server");
+            let addr = listener.local_addr().expect("addr");
+            let handle = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept probe");
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let mut buf = [0_u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req_text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                req_text
+            });
+            (addr, handle)
+        }
+
+        #[test]
+        fn test_live_probe_hits_custom_keyless_systemone_and_cli_overridden_gemini_base_url() {
+            let (local_addr, local_srv) = spawn_probe_ok_server(
+                r#"{"model":"kev-0.8b-q8_0","answers":{"ping":{"type":"noul","noul":0.99}}}"#,
+            );
+            let (gemini_addr, gemini_srv) =
+                spawn_probe_ok_server(r#"{"modelVersion":"gemini-4-carbon-001"}"#);
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let xdg_dir = std::env::temp_dir().join(format!("canon-clerk-probe-custom-{unique}"));
+            let cfg_dir = xdg_dir.join("canon-clerk");
+            fs::create_dir_all(&cfg_dir).expect("create xdg dir");
+            let cfg_file = cfg_dir.join("config.json");
+            let cfg_json = format!(
+                r#"{{"providers":{{"local-dev":{{"protocol":"systemone","baseUrl":"http://{local_addr}","defaultDiscriminator":"local-dev:kev-0.8b"}},"google":{{"apiKey":"cfg-google-probe-secret"}}}},"defaults":{{"provider":"local-dev"}},"nodes":{{"audit":{{"model":"google:gemini-4-carbon"}}}}}}"#
+            );
+            fs::write(&cfg_file, cfg_json).expect("write config");
+            fs::set_permissions(&cfg_file, fs::Permissions::from_mode(0o600)).expect("chmod 0600");
+
+            let env =
+                BTreeMap::from([("XDG_CONFIG_HOME".to_string(), xdg_dir.display().to_string())]);
+            let args = ProbeArgs {
+                provider: ProviderConfigArgs {
+                    gemini_base_url: Some(format!("http://{gemini_addr}/v1beta")),
+                    ..ProviderConfigArgs::default()
+                },
+                format: ProbeFormat::Compact,
+                ..ProbeArgs::default()
+            };
+            let caseload = run_probe_live_with_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &env,
+                &TelemetrySession::noop(),
+            )
+            .expect("hybrid custom local-dev + google probe succeeds");
+
+            let local_req = local_srv.join().expect("local joined");
+            let gemini_req = gemini_srv.join().expect("gemini joined");
+            assert!(local_req.starts_with("POST /v1/systemone HTTP/1.1"));
+            assert!(!local_req.to_ascii_lowercase().contains("authorization:"));
+            assert!(
+                gemini_req
+                    .starts_with("POST /v1beta/models/gemini-4-carbon:generateContent HTTP/1.1")
+            );
+            assert!(
+                gemini_req
+                    .to_ascii_lowercase()
+                    .contains("x-goog-api-key: cfg-google-probe-secret")
+            );
+
+            let probe = caseload.probe.expect("probe populated");
+            assert!(probe.is_healthy());
+            assert_eq!(probe.targets.len(), 2);
+            assert_eq!(probe.targets[0].model, "local-dev:kev-0.8b");
+            assert_eq!(
+                probe.targets[0].resolved_model.as_deref(),
+                Some("kev-0.8b-q8_0")
+            );
+            assert_eq!(probe.targets[1].model, "google:gemini-4-carbon");
+            assert_eq!(
+                probe.targets[1].resolved_model.as_deref(),
+                Some("gemini-4-carbon-001")
+            );
+
+            let _ = fs::remove_dir_all(&xdg_dir);
         }
     }
 }

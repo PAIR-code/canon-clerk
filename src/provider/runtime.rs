@@ -15,6 +15,8 @@
 //! Persistent background Tokio reactor and hardened pooled HTTP transport helpers.
 
 use super::gemini_wire::JSON_MIME_TYPE;
+use super::retry::extract_origin_key_and_host;
+use crate::configure::ProviderAuth;
 use crate::provider::ProviderError;
 use serde::Serialize;
 use std::sync::{OnceLock, mpsc};
@@ -48,6 +50,8 @@ pub(crate) struct RawHttpOutcome {
 /// Outbound authentication header scheme for a provider HTTP request.
 #[derive(Clone, Copy)]
 pub(crate) enum HttpAuth<'a> {
+    /// Unauthenticated HTTP request (e.g. keyless local `/v1/systemone` daemon).
+    None,
     /// Google Generative Language API `x-goog-api-key` header.
     GoogApiKey(&'a str),
     /// Standard `Authorization: Bearer <token>` header.
@@ -57,15 +61,26 @@ pub(crate) enum HttpAuth<'a> {
 /// Owned authentication header scheme carried across async reactor boundaries.
 #[derive(Clone)]
 pub(crate) enum OwnedHttpAuth {
+    /// Unauthenticated HTTP request.
+    None,
     /// Google Generative Language API `x-goog-api-key` header.
     GoogApiKey(String),
     /// Standard `Authorization: Bearer <token>` header.
     Bearer(String),
 }
 
-impl HttpAuth<'_> {
+impl<'a> HttpAuth<'a> {
+    pub(crate) fn from_provider_auth(auth: &'a ProviderAuth) -> Self {
+        match auth {
+            ProviderAuth::None => Self::None,
+            ProviderAuth::GoogApiKey(k) => Self::GoogApiKey(k.as_str()),
+            ProviderAuth::Bearer(t) => Self::Bearer(t.as_str()),
+        }
+    }
+
     pub(crate) fn into_owned(self) -> OwnedHttpAuth {
         match self {
+            Self::None => OwnedHttpAuth::None,
             Self::GoogApiKey(key) => OwnedHttpAuth::GoogApiKey(key.to_string()),
             Self::Bearer(token) => OwnedHttpAuth::Bearer(token.to_string()),
         }
@@ -137,6 +152,7 @@ pub(crate) fn http_reactor_handle(
         Err(err) => Err((
             ProviderError::Transport {
                 model_specifier: model_specifier.to_string(),
+                endpoint_host: None,
                 message: format!("failed to initialize persistent async HTTP runtime ({err})"),
             },
             0,
@@ -163,21 +179,19 @@ fn format_reqwest_error_chain(err: &reqwest::Error) -> String {
 pub(crate) fn classify_reqwest_error(
     err: &reqwest::Error,
     model_specifier: &str,
+    url: &str,
     timeout_ms: u64,
 ) -> ProviderError {
-    if err.is_connect() {
-        ProviderError::Transport {
-            model_specifier: model_specifier.to_string(),
-            message: format_reqwest_error_chain(err),
-        }
-    } else if err.is_timeout() {
+    if err.is_timeout() && !err.is_connect() {
         ProviderError::Timeout {
             model_specifier: model_specifier.to_string(),
             timeout_ms,
         }
     } else {
+        let (_, host) = extract_origin_key_and_host(url);
         ProviderError::Transport {
             model_specifier: model_specifier.to_string(),
+            endpoint_host: (!host.is_empty()).then_some(host),
             message: format_reqwest_error_chain(err),
         }
     }
@@ -193,6 +207,7 @@ pub(crate) fn serialize_json_payload<T: Serialize>(
         (
             ProviderError::Transport {
                 model_specifier: model_specifier.to_string(),
+                endpoint_host: None,
                 message: format!("failed to serialize JSON request payload ({err})"),
             },
             latency_ms,
@@ -212,13 +227,14 @@ pub(crate) async fn execute_wire_attempt(
         .timeout(Duration::from_millis(req.timeout_ms))
         .header("Content-Type", JSON_MIME_TYPE);
     let builder = match &req.auth {
+        OwnedHttpAuth::None => builder,
         OwnedHttpAuth::GoogApiKey(key) => builder.header("x-goog-api-key", key),
         OwnedHttpAuth::Bearer(token) => builder.bearer_auth(token),
     };
     let http_request = builder.body(body_bytes).build().map_err(|err| {
         let latency_ms = wire_start.elapsed().as_millis() as u64;
         (
-            classify_reqwest_error(&err, &req.model_specifier, req.timeout_ms),
+            classify_reqwest_error(&err, &req.model_specifier, &req.url, req.timeout_ms),
             latency_ms,
         )
     })?;
@@ -226,7 +242,7 @@ pub(crate) async fn execute_wire_attempt(
     let response = client.execute(http_request).await.map_err(|err| {
         let latency_ms = wire_start.elapsed().as_millis() as u64;
         (
-            classify_reqwest_error(&err, &req.model_specifier, req.timeout_ms),
+            classify_reqwest_error(&err, &req.model_specifier, &req.url, req.timeout_ms),
             latency_ms,
         )
     })?;
@@ -242,7 +258,7 @@ pub(crate) async fn execute_wire_attempt(
     let body = response.text().await.map_err(|err| {
         let latency_ms = wire_start.elapsed().as_millis() as u64;
         (
-            classify_reqwest_error(&err, &req.model_specifier, req.timeout_ms),
+            classify_reqwest_error(&err, &req.model_specifier, &req.url, req.timeout_ms),
             latency_ms,
         )
     })?;
@@ -283,9 +299,11 @@ pub(crate) fn execute_json_post<T: Serialize>(
 
     done_rx.recv().map_err(|_| {
         let latency_ms = start.elapsed().as_millis() as u64;
+        let (_, host) = extract_origin_key_and_host(req.url);
         (
             ProviderError::Transport {
                 model_specifier: req.model_specifier.to_string(),
+                endpoint_host: (!host.is_empty()).then_some(host),
                 message: "background HTTP request task terminated unexpectedly".to_string(),
             },
             latency_ms,

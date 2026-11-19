@@ -828,7 +828,7 @@ mod tests {
                 broken_docs_canon,
                 &ParseCanonOptions::with_source_ref(".canons/docs/broken-canon.md"),
             );
-            let provider = StubProvider::failing(ProviderError::MissingApiKey);
+            let provider = StubProvider::failing(ProviderError::missing_api_key_for_slug("google"));
 
             let args = AppriseArgs {
                 filing: FilingSourceArgs {
@@ -876,7 +876,7 @@ mod tests {
                     malformed_canon,
                     &ParseCanonOptions::with_source_ref(".canons/auth/bad-canon.md"),
                 );
-            let provider = StubProvider::failing(ProviderError::MissingApiKey);
+            let provider = StubProvider::failing(ProviderError::missing_api_key_for_slug("google"));
 
             let args = AppriseArgs {
                 filing: FilingSourceArgs {
@@ -1062,7 +1062,8 @@ mod tests {
             let raw_completed =
                 serde_json::to_vec(&completed_upstream).expect("serialize upstream");
 
-            let ff_provider = StubProvider::failing(ProviderError::MissingApiKey);
+            let ff_provider =
+                StubProvider::failing(ProviderError::missing_api_key_for_slug("google"));
             let ff_args = AppriseArgs {
                 io: CaseloadIoArgs {
                     caseload: Some("-".to_string()),
@@ -1392,7 +1393,7 @@ mod tests {
         #[test]
         fn test_zero_candidate_short_circuit_omits_downstream_stages_from_telemetry() {
             let snapshot = valid_snapshot();
-            let provider = StubProvider::failing(ProviderError::MissingApiKey);
+            let provider = StubProvider::failing(ProviderError::missing_api_key_for_slug("google"));
             let sc_sink = RecordingTelemetrySink::new();
             let sc_clock = SteppingTelemetryClock::new(1_767_225_600_000, 5);
             let sc_session = TelemetrySession::new(&sc_sink, &sc_clock);

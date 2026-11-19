@@ -16,8 +16,8 @@
 
 use crate::caseload::{HeuristicNode, ResolvedNodeConfig, ThinkingLevel};
 use crate::configure::{
-    ConfigureError, ConfigureOptions, ENV_REASONING_BUDGET, ENV_THINKING_LEVEL, StoredConfig,
-    is_discriminative_model,
+    ConfigureError, ConfigureOptions, ENV_REASONING_BUDGET, ENV_THINKING_LEVEL, ModelCapability,
+    StoredConfig,
 };
 
 pub(super) type ThinkingPair = (Option<ThinkingLevel>, Option<u32>);
@@ -123,6 +123,7 @@ pub(super) fn resolve_global_thinking_layers(
 pub(super) fn resolve_node_thinking_options(
     node: HeuristicNode,
     model: &str,
+    capability: ModelCapability,
     global: GlobalThinkingLayers,
     stored: Option<&StoredConfig>,
     existing_node: Option<&ResolvedNodeConfig>,
@@ -138,7 +139,7 @@ pub(super) fn resolve_node_thinking_options(
         None => None,
     };
 
-    if is_discriminative_model(model) {
+    if capability == ModelCapability::Discriminator {
         if node_stored.is_some() {
             return Err(ConfigureError::DiscriminativeNodeThinkingUnsupported {
                 node,

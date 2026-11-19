@@ -12,34 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! TypeSafe AI System One (`POST /v1/systemone`) wire transport, Jev `Noul` helpers, and [`TypesafeDecisionProvider`].
+//! System One (`POST /v1/systemone`) wire transport, `Noul` helpers, and [`TypesafeDecisionProvider`].
 
 use super::decision::{DecisionModelProvider, DecisionRequest, DecisionResponse};
+use super::gemini::strip_provider_prefix;
 use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester};
 use super::retry::RetryPolicy;
 use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
 use crate::caseload::TYPESAFE_PROVIDER;
-use crate::configure::ENV_TYPESAFE_API_KEY;
+pub use crate::configure::DEFAULT_TYPESAFE_BASE_URL;
+use crate::configure::{
+    AuthPolicy, ProviderAuth, ProviderConnection, credential_verification_hint_for_slug,
+    model_provider,
+};
 use crate::provider::{ProviderError, TokenUsage};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// Default TypeSafe AI v1 REST API base URL.
-pub const DEFAULT_TYPESAFE_BASE_URL: &str = "https://api.typesafe.ai/v1";
-
-/// Strips the canonical `"typesafe:"` provider prefix from a normalized model specifier.
-pub(crate) fn strip_typesafe_prefix(model_specifier: &str) -> &str {
-    match model_specifier.strip_prefix(TYPESAFE_PROVIDER) {
-        Some(rest) => rest.strip_prefix(':').unwrap_or(model_specifier),
-        None => model_specifier,
+/// Constructs and normalizes a System One `POST .../systemone` URL from a base URL (`transport.md` §2.3):
+/// - Bare origins (`http://127.0.0.1:8080` or `http://127.0.0.1:8080/`) normalize to `{origin}/v1/systemone`.
+/// - Explicit paths (`https://api.typesafe.ai/v1` or `http://127.0.0.1:8080/v1`) normalize to `{base}/systemone`.
+/// - URLs already ending in `/systemone` are preserved as-is.
+pub fn build_systemone_url(base_url: &str) -> String {
+    let base = base_url.trim().trim_end_matches('/');
+    let is_bare_origin = match base.split_once("://") {
+        Some((_, rest)) => !rest.contains('/'),
+        None => false,
+    };
+    if is_bare_origin {
+        format!("{base}/v1/systemone")
+    } else if base.ends_with("/systemone") {
+        base.to_string()
+    } else {
+        format!("{base}/systemone")
     }
-}
-
-/// Constructs the TypeSafe AI `POST /v1/systemone` URL from a base URL.
-pub(crate) fn build_systemone_url(base_url: &str) -> String {
-    let base = base_url.trim_end_matches('/');
-    format!("{base}/systemone")
 }
 
 /// Typed `noul` binary decision question in a TypeSafe AI `/v1/systemone` request.
@@ -159,10 +166,13 @@ pub(crate) fn classify_typesafe_http_error(
             "HTTP 400: Input context exceeded TypeSafe Jev token limit for `{model_specifier}` ({detail}). \
              Hint: Pair `--provider typesafe` with `--audit-model google:gemini-4-carbon` or narrow target scope."
         ),
-        401 | 403 => format!(
-            "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
-             Hint: Verify `{ENV_TYPESAFE_API_KEY}`, `providers.typesafe.apiKey` in `~/.config/canon-clerk/config.json`, or `--typesafe-api-key`."
-        ),
+        401 | 403 => {
+            let key_hint = credential_verification_hint_for_slug(model_provider(model_specifier));
+            format!(
+                "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
+                 Hint: {key_hint}"
+            )
+        }
         404 => format!(
             "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
              Hint: Specify a valid TypeSafe Jev model via `--provider typesafe` or `--<node>-model` (e.g. `typesafe:jev-latest`)."
@@ -201,7 +211,7 @@ pub(crate) fn post_typesafe_json<T: Serialize>(
     client: &reqwest::Client,
     base_url: &str,
     model_specifier: &str,
-    api_key: &str,
+    auth: HttpAuth<'_>,
     timeout_ms: u64,
     payload: &T,
 ) -> Result<RawHttpOutcome, (ProviderError, u64)> {
@@ -209,28 +219,31 @@ pub(crate) fn post_typesafe_json<T: Serialize>(
     let req = JsonPostRequest {
         url: &url,
         model_specifier,
-        auth: HttpAuth::Bearer(api_key),
+        auth,
         timeout_ms,
     };
     execute_json_post(client, &req, payload)
 }
 
-/// Live TypeSafe AI HTTPS adapter implementing [`DecisionModelProvider`] (`POST /v1/systemone`).
+/// Live System One HTTP/HTTPS adapter implementing [`DecisionModelProvider`] (`POST {baseUrl}/systemone`).
 #[derive(Clone)]
 pub struct TypesafeDecisionProvider {
-    api_key: String,
+    slug: String,
+    auth: ProviderAuth,
+    auth_policy: AuthPolicy,
     base_url: String,
     requester: SharedHttpRequester,
 }
 
 impl fmt::Debug for TypesafeDecisionProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let key_repr = if self.api_key.trim().is_empty() {
-            "<empty>"
-        } else {
+        let key_repr = if self.auth.has_secret() {
             "<redacted>"
+        } else {
+            "<empty>"
         };
         f.debug_struct("TypesafeDecisionProvider")
+            .field("slug", &self.slug)
             .field("api_key", &key_repr)
             .field("base_url", &self.base_url)
             .finish()
@@ -277,14 +290,44 @@ impl TypesafeDecisionProvider {
         requester: SharedHttpRequester,
         base_url: impl Into<String>,
     ) -> Self {
+        let raw_key = api_key.into();
+        let trimmed = raw_key.trim();
+        let auth = if trimmed.is_empty() {
+            ProviderAuth::None
+        } else {
+            ProviderAuth::Bearer(trimmed.to_string())
+        };
         Self {
-            api_key: api_key.into(),
+            slug: TYPESAFE_PROVIDER.to_string(),
+            auth,
+            auth_policy: AuthPolicy::RequiredApiKey,
             base_url: base_url.into(),
             requester,
         }
     }
 
-    /// Returns the configured TypeSafe AI v1 base URL.
+    /// Constructs a [`TypesafeDecisionProvider`] from a resolved [`ProviderConnection`] (supporting keyless `ProviderAuth::None`).
+    pub fn from_connection(conn: &ProviderConnection, requester: SharedHttpRequester) -> Self {
+        let auth_policy = if conn.auth == ProviderAuth::None {
+            AuthPolicy::OptionalApiKey
+        } else {
+            AuthPolicy::RequiredApiKey
+        };
+        Self {
+            slug: conn.slug.clone(),
+            auth: conn.auth.clone(),
+            auth_policy,
+            base_url: conn.base_url.clone(),
+            requester,
+        }
+    }
+
+    /// Returns the canonical profile slug bound to this adapter.
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+
+    /// Returns the configured System One base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -317,12 +360,11 @@ impl DecisionModelProvider for TypesafeDecisionProvider {
             return Err(ProviderError::InvalidTimeout { timeout_ms: 0 });
         }
 
-        let api_key = self.api_key.trim();
-        if api_key.is_empty() {
-            return Err(ProviderError::MissingTypesafeApiKey);
+        if self.auth_policy == AuthPolicy::RequiredApiKey && !self.auth.has_secret() {
+            return Err(ProviderError::missing_api_key_for_slug(&self.slug));
         }
 
-        validate_typesafe_specifier(&request.model_specifier)?;
+        validate_systemone_specifier(&request.model_specifier, &self.slug)?;
         if request.questions.is_empty() {
             return Ok(DecisionResponse {
                 scores: BTreeMap::new(),
@@ -341,7 +383,7 @@ impl DecisionModelProvider for TypesafeDecisionProvider {
         }
 
         let payload = TypesafeSystemOneRequest {
-            model: strip_typesafe_prefix(request.model_specifier.trim()).to_string(),
+            model: strip_provider_prefix(request.model_specifier.trim()).to_string(),
             state: request.state.clone(),
             questions: wire_questions,
         };
@@ -350,7 +392,7 @@ impl DecisionModelProvider for TypesafeDecisionProvider {
             &RetryablePostRequest {
                 url: &url,
                 model_specifier: &request.model_specifier,
-                auth: HttpAuth::Bearer(api_key),
+                auth: HttpAuth::from_provider_auth(&self.auth),
                 timeout_ms: request.timeout_ms,
                 call_label: request.call_label.as_deref(),
                 format_http_error: build_typesafe_http_status_error,
@@ -368,7 +410,7 @@ impl DecisionModelProvider for TypesafeDecisionProvider {
     }
 }
 
-fn validate_typesafe_specifier(raw: &str) -> Result<(), ProviderError> {
+fn validate_systemone_specifier(raw: &str, expected_slug: &str) -> Result<(), ProviderError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
         return Err(ProviderError::InvalidModelSpecifier {
@@ -380,10 +422,10 @@ fn validate_typesafe_specifier(raw: &str) -> Result<(), ProviderError> {
         if prov.is_empty() || model_id.is_empty() || model_id.contains(':') {
             return Err(ProviderError::InvalidModelSpecifier {
                 model_specifier: raw.to_string(),
-                reason: "expected `typesafe:<model>` with non-empty segments".to_string(),
+                reason: "expected `<provider>:<model>` with non-empty segments".to_string(),
             });
         }
-        if prov != TYPESAFE_PROVIDER {
+        if prov != expected_slug {
             return Err(ProviderError::UnsupportedProvider {
                 provider: prov.to_string(),
                 model_specifier: trimmed.to_string(),
@@ -458,11 +500,24 @@ mod tests {
 
     #[test]
     fn test_url_prefix_and_error_classification_helpers() {
-        assert_eq!(strip_typesafe_prefix("typesafe:jev-latest"), "jev-latest");
-        assert_eq!(strip_typesafe_prefix("jev-1.14.0"), "jev-1.14.0");
+        assert_eq!(strip_provider_prefix("typesafe:jev-latest"), "jev-latest");
+        assert_eq!(strip_provider_prefix("local-dev:kev-0.8b"), "kev-0.8b");
+        assert_eq!(strip_provider_prefix("jev-1.14.0"), "jev-1.14.0");
         assert_eq!(
             build_systemone_url("https://api.typesafe.ai/v1/"),
             "https://api.typesafe.ai/v1/systemone"
+        );
+        assert_eq!(
+            build_systemone_url("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080/v1/systemone"
+        );
+        assert_eq!(
+            build_systemone_url("http://127.0.0.1:8080/"),
+            "http://127.0.0.1:8080/v1/systemone"
+        );
+        assert_eq!(
+            build_systemone_url("http://127.0.0.1:8080/v1/systemone"),
+            "http://127.0.0.1:8080/v1/systemone"
         );
 
         assert_eq!(
@@ -550,7 +605,7 @@ mod tests {
         };
         assert_eq!(
             empty_provider.evaluate_decisions(&req),
-            Err(ProviderError::MissingTypesafeApiKey)
+            Err(ProviderError::missing_api_key_for_slug(TYPESAFE_PROVIDER))
         );
     }
 

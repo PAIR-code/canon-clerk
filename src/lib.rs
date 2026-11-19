@@ -104,18 +104,21 @@ pub use cli::{
     run_configure_with_env, run_configure_with_telemetry, run_discover, run_discover_in_workspace,
     run_discover_with_telemetry, run_docket, run_docket_live_with_telemetry,
     run_docket_with_snapshot_and_provider, run_docket_with_telemetry, run_intake,
-    run_intake_with_telemetry, run_probe, run_probe_with_env_and_prober, run_probe_with_telemetry,
-    run_validate, run_validate_in_workspace, run_validate_with_telemetry, run_vet,
-    run_vet_live_with_telemetry, run_vet_with_snapshot_and_provider, run_vet_with_telemetry,
+    run_intake_with_telemetry, run_probe, run_probe_live_with_telemetry,
+    run_probe_with_env_and_prober, run_probe_with_telemetry, run_validate,
+    run_validate_in_workspace, run_validate_with_telemetry, run_vet, run_vet_live_with_telemetry,
+    run_vet_with_snapshot_and_provider, run_vet_with_telemetry,
 };
 pub use configure::{
-    ConfigureError, ConfigureOptions, ConfigureScope, ENV_ADMIT_MODEL, ENV_APPRISE_MODEL,
-    ENV_AUDIT_MODEL, ENV_DOCKET_MODEL, ENV_GEMINI_API_KEY, ENV_PROVIDER, ENV_REASONING_BUDGET,
-    ENV_THINKING_LEVEL, ENV_TYPESAFE_API_KEY, ENV_VET_MODEL, ModelCapability,
-    PROVIDER_CAPABILITIES, ProviderCapability, StoredConfig, StoredDefaultsConfig,
-    StoredNodeConfig, StoredProviderConfig, execute_configure, is_discriminative_model,
-    load_host_config_file, model_capability, normalize_model_specifier, parse_thinking_level,
-    provider_capability, resolve_default_config_path, resolve_gemini_api_key,
+    AuthPolicy, ConfigureError, ConfigureOptions, ConfigureScope, ENV_ADMIT_MODEL,
+    ENV_APPRISE_MODEL, ENV_AUDIT_MODEL, ENV_DOCKET_MODEL, ENV_GEMINI_API_KEY, ENV_GEMINI_BASE_URL,
+    ENV_PROVIDER, ENV_REASONING_BUDGET, ENV_THINKING_LEVEL, ENV_TYPESAFE_API_KEY,
+    ENV_TYPESAFE_BASE_URL, ENV_VET_MODEL, ModelCapability, PROVIDER_CAPABILITIES, ProtocolDriver,
+    ProviderAuth, ProviderCapability, ProviderConnection, ProviderProfile, ProviderRegistry,
+    StoredConfig, StoredDefaultsConfig, StoredNodeConfig, StoredProviderConfig, execute_configure,
+    is_discriminative_model, load_host_config_file, model_capability, normalize_model_specifier,
+    parse_thinking_level, provider_capability, resolve_default_config_path, resolve_gemini_api_key,
+    resolve_provider_connections,
 };
 pub use discover::{
     DEFAULT_CANON_GLOB, DEFAULT_IGNORES, DiscoverError, DiscoverOptions, GlobPattern,
@@ -144,8 +147,8 @@ pub use provider::{
     GeminiModelProvider, GenerationRequest, GenerationResponse, MultiModelProvider, ProviderError,
     RetryNotification, RetryObserver, RetryPolicy, SharedHttpRequester, StructuredModelProvider,
     TokenUsage, TypesafeDecisionProvider, build_decisions_url, build_generate_content_url,
-    classify_gemini_decisions_http_error, classify_gemini_http_error, extract_gemini_error_detail,
-    strip_provider_prefix,
+    build_systemone_url, classify_gemini_decisions_http_error, classify_gemini_http_error,
+    extract_gemini_error_detail, strip_provider_prefix,
 };
 pub use telemetry::{
     CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,

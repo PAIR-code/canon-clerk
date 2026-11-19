@@ -234,6 +234,7 @@ impl SharedHttpRequester {
 
         Err(ProviderError::Transport {
             model_specifier: req.model_specifier.to_string(),
+            endpoint_host: None,
             message: "background HTTP request task terminated unexpectedly".to_string(),
         })
     }
@@ -286,6 +287,7 @@ async fn sleep_until_cancellable(
 fn aborted_error(model_specifier: &str) -> ProviderError {
     ProviderError::Transport {
         model_specifier: model_specifier.to_string(),
+        endpoint_host: None,
         message: "stage aborted while waiting on provider retry cooldown".to_string(),
     }
 }

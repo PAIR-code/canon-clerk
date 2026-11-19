@@ -201,6 +201,24 @@ pub struct ProviderConfigArgs {
     )]
     pub typesafe_api_key: Option<String>,
 
+    /// Google Generative Language API base URL override (fallback env: `CANON_CLERK_GOOGLE_BASE_URL`, `GEMINI_BASE_URL`).
+    #[arg(
+        long = "gemini-base-url",
+        value_name = "URL",
+        help_heading = "Provider Endpoints",
+        help = "Google Generative Language API base URL (fallback env: GEMINI_BASE_URL)"
+    )]
+    pub gemini_base_url: Option<String>,
+
+    /// TypeSafe AI System One API base URL override (fallback env: `CANON_CLERK_TYPESAFE_BASE_URL`, `TYPESAFE_BASE_URL`).
+    #[arg(
+        long = "typesafe-base-url",
+        value_name = "URL",
+        help_heading = "Provider Endpoints",
+        help = "TypeSafe AI System One API base URL (fallback env: TYPESAFE_BASE_URL)"
+    )]
+    pub typesafe_base_url: Option<String>,
+
     /// Hidden capture rejecting retired `--screener-model` flag (`configure.md` §5).
     #[arg(long = "screener-model", hide = true, allow_hyphen_values = true)]
     pub rejected_screener_model: Option<String>,

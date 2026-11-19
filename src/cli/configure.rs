@@ -21,7 +21,7 @@ use crate::cli::CliError;
 use crate::cli::args::{CaseloadIoArgs, ProviderConfigArgs};
 use crate::cli::node_args::AllNodeModelArgs;
 use crate::cli::runners::{resolve_branch_b_options, run_branch_b_configure};
-use crate::configure::{is_discriminative_model, verified_credential_env_vars};
+use crate::configure::{ConfigureOptions, is_discriminative_model, verified_credential_labels};
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
@@ -117,7 +117,7 @@ pub fn run_configure_with_telemetry(
     args.io.write_output_caseload(&caseload)?;
 
     let config = caseload.config.clone().unwrap_or_default();
-    render_configure_output(args, &caseload, &config, stdout)?;
+    render_configure_output(args, &caseload, &config, &options, stdout)?;
 
     Ok(caseload)
 }
@@ -146,6 +146,7 @@ fn render_configure_output(
     args: &ConfigureArgs,
     caseload: &Caseload,
     config: &CaseloadConfig,
+    options: &ConfigureOptions,
     stdout: &mut dyn Write,
 ) -> Result<(), CliError> {
     let effective_format = if args.io.json {
@@ -163,11 +164,11 @@ fn render_configure_output(
                 .map_err(|err| CliError::runtime(format!("Failed to write to stdout: {err}")))?;
         }
         ConfigureFormat::Compact => {
-            render_compact_output(config, stdout)
+            render_compact_output(config, options, stdout)
                 .map_err(|err| CliError::runtime(format!("Failed to write to stdout: {err}")))?;
         }
         ConfigureFormat::Stylish => {
-            render_stylish_output(config, stdout)
+            render_stylish_output(config, options, stdout)
                 .map_err(|err| CliError::runtime(format!("Failed to write to stdout: {err}")))?;
         }
     }
@@ -175,12 +176,20 @@ fn render_configure_output(
     Ok(())
 }
 
-fn verified_credentials_label(config: &CaseloadConfig) -> String {
-    let keys = verified_credential_env_vars(config);
-    format!("{} (verified)", keys.join(", "))
+fn verified_credentials_label(config: &CaseloadConfig, options: &ConfigureOptions) -> String {
+    let keys = verified_credential_labels(config, options);
+    if keys.is_empty() {
+        "none (optional — unauthenticated)".to_string()
+    } else {
+        format!("{} (verified)", keys.join(", "))
+    }
 }
 
-fn render_compact_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std::io::Result<()> {
+fn render_compact_output(
+    config: &CaseloadConfig,
+    options: &ConfigureOptions,
+    stdout: &mut dyn Write,
+) -> std::io::Result<()> {
     writeln!(stdout, "provider\t{}", config.provider)?;
     for (node, node_cfg) in &config.nodes {
         writeln!(stdout, "{}_model\t{}", node.as_str(), node_cfg.model)?;
@@ -191,11 +200,13 @@ fn render_compact_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std
             writeln!(stdout, "{}_reasoning_budget\t{budget}", node.as_str())?;
         }
     }
-    writeln!(
-        stdout,
-        "credentials\t{}",
-        verified_credential_env_vars(config).join(",")
-    )?;
+    let keys = verified_credential_labels(config, options);
+    let creds = if keys.is_empty() {
+        "none".to_string()
+    } else {
+        keys.join(",")
+    };
+    writeln!(stdout, "credentials\t{creds}")?;
     Ok(())
 }
 
@@ -213,7 +224,11 @@ fn format_stylish_thinking_suffix(node: HeuristicNode, node_cfg: &ResolvedNodeCo
     }
 }
 
-fn render_stylish_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std::io::Result<()> {
+fn render_stylish_output(
+    config: &CaseloadConfig,
+    options: &ConfigureOptions,
+    stdout: &mut dyn Write,
+) -> std::io::Result<()> {
     writeln!(stdout, "Configuration Summary (READY):")?;
     writeln!(stdout, "  Provider         : {}", config.provider)?;
     for node in HeuristicNode::ALL {
@@ -234,7 +249,7 @@ fn render_stylish_output(config: &CaseloadConfig, stdout: &mut dyn Write) -> std
     writeln!(
         stdout,
         "  Credentials      : {}",
-        verified_credentials_label(config)
+        verified_credentials_label(config, options)
     )?;
     Ok(())
 }
@@ -715,6 +730,112 @@ mod tests {
                     .and_then(|n| n.thinking_level),
                 Some(ThinkingLevel::High)
             );
+
+            let _ = fs::remove_dir_all(&xdg_dir);
+        }
+    }
+
+    mod custom_profiles_and_base_url_overrides {
+        use super::*;
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        #[test]
+        fn test_keyless_custom_systemone_profile_and_malformed_base_url_validation() {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let xdg_dir = std::env::temp_dir().join(format!("canon-clerk-cfg-custom-{unique}"));
+            let cfg_dir = xdg_dir.join("canon-clerk");
+            fs::create_dir_all(&cfg_dir).expect("create xdg dir");
+            let cfg_file = cfg_dir.join("config.json");
+            fs::write(
+                &cfg_file,
+                r#"{
+                    "providers": {
+                        "local-dev": {
+                            "protocol": "systemone",
+                            "baseUrl": "http://127.0.0.1:8080/v1",
+                            "defaultDiscriminator": "local-dev:kev-0.8b"
+                        }
+                    },
+                    "defaults": {
+                        "provider": "local-dev"
+                    }
+                }"#,
+            )
+            .expect("write keyless custom config");
+            fs::set_permissions(&cfg_file, fs::Permissions::from_mode(0o600)).expect("chmod 0600");
+
+            let xdg_env =
+                BTreeMap::from([("XDG_CONFIG_HOME".to_string(), xdg_dir.display().to_string())]);
+
+            let mut stylish_out = Vec::new();
+            run_configure_with_env(
+                &ConfigureArgs {
+                    format: ConfigureFormat::Stylish,
+                    ..ConfigureArgs::default()
+                },
+                &mut Cursor::new(b""),
+                &mut stylish_out,
+                &xdg_env,
+            )
+            .expect("stylish keyless configure");
+            let stylish_str = String::from_utf8(stylish_out).expect("utf8");
+            assert!(stylish_str.contains("Provider         : local-dev"));
+            assert!(stylish_str.contains("docket model     : local-dev:kev-0.8b"));
+            assert!(stylish_str.contains("Credentials      : none (optional — unauthenticated)"));
+            assert!(!stylish_str.contains("127.0.0.1"));
+
+            let mut compact_out = Vec::new();
+            run_configure_with_env(
+                &ConfigureArgs {
+                    format: ConfigureFormat::Compact,
+                    ..ConfigureArgs::default()
+                },
+                &mut Cursor::new(b""),
+                &mut compact_out,
+                &xdg_env,
+            )
+            .expect("compact keyless configure");
+            let compact_str = String::from_utf8(compact_out).expect("utf8");
+            assert!(compact_str.contains("provider\tlocal-dev"));
+            assert!(compact_str.contains("credentials\tnone"));
+
+            // Malformed CLI `--gemini-base-url` and env `CANON_CLERK_LOCAL_DEV_BASE_URL` exit 2 with Hint:
+            let bad_cli = ConfigureArgs {
+                provider: ProviderConfigArgs {
+                    gemini_base_url: Some("ftp://bad.example.com".to_string()),
+                    ..ProviderConfigArgs::default()
+                },
+                ..ConfigureArgs::default()
+            };
+            let cli_err = run_configure_with_env(
+                &bad_cli,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &test_env(),
+            )
+            .expect_err("malformed --gemini-base-url must exit 2");
+            assert_eq!(cli_err.exit_code(), 2);
+            assert!(cli_err.to_string().contains("Hint:"));
+
+            let mut bad_env = xdg_env;
+            bad_env.insert(
+                "CANON_CLERK_LOCAL_DEV_BASE_URL".to_string(),
+                "not-a-valid-url".to_string(),
+            );
+            let env_err = run_configure_with_env(
+                &ConfigureArgs::default(),
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &bad_env,
+            )
+            .expect_err("malformed CANON_CLERK_LOCAL_DEV_BASE_URL must exit 2");
+            assert_eq!(env_err.exit_code(), 2);
+            assert!(env_err.to_string().contains("Hint:"));
 
             let _ = fs::remove_dir_all(&xdg_dir);
         }

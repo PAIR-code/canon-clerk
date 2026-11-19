@@ -20,7 +20,10 @@ use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester}
 use super::retry::RetryPolicy;
 use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
 use crate::caseload::DEFAULT_PROVIDER;
-use crate::configure::{ENV_GEMINI_API_KEY, is_gemini_decision_model_name};
+use crate::configure::{
+    ProviderConnection, credential_verification_hint_for_slug, is_gemini_decision_model_name,
+    model_provider,
+};
 use crate::provider::{ProviderError, TokenUsage};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -123,10 +126,13 @@ pub fn classify_gemini_decisions_http_error(
             "HTTP 400: Input context or question batch exceeded Gemini Decisions limit for `{model_specifier}` ({detail}). \
              Hint: Narrow target scope or reduce batch size via `--docket-batch-size` / `--apprise-batch-size`."
         ),
-        401 | 403 => format!(
-            "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
-             Hint: Verify `{ENV_GEMINI_API_KEY}`, `providers.google.apiKey` in `~/.config/canon-clerk/config.json`, or `--gemini-api-key`."
-        ),
+        401 | 403 => {
+            let key_hint = credential_verification_hint_for_slug(model_provider(model_specifier));
+            format!(
+                "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
+                 Hint: {key_hint}"
+            )
+        }
         404 => format!(
             "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
              Hint: Specify a valid Gemini Decisions model via `--<node>-model` (e.g. `google:gemini-decision-1`)."
@@ -182,6 +188,7 @@ fn build_gemini_decisions_http_status_error(
 /// Live Google Gemini Decisions HTTPS adapter implementing [`DecisionModelProvider`] (`POST /v1beta/decisions`).
 #[derive(Clone)]
 pub struct GeminiDecisionProvider {
+    slug: String,
     api_key: String,
     base_url: String,
     requester: SharedHttpRequester,
@@ -195,6 +202,7 @@ impl fmt::Debug for GeminiDecisionProvider {
             "<redacted>"
         };
         f.debug_struct("GeminiDecisionProvider")
+            .field("slug", &self.slug)
             .field("api_key", &key_repr)
             .field("base_url", &self.base_url)
             .finish()
@@ -242,10 +250,26 @@ impl GeminiDecisionProvider {
         base_url: impl Into<String>,
     ) -> Self {
         Self {
+            slug: DEFAULT_PROVIDER.to_string(),
             api_key: api_key.into(),
             base_url: base_url.into(),
             requester,
         }
+    }
+
+    /// Constructs a [`GeminiDecisionProvider`] from a resolved [`ProviderConnection`] and shared [`SharedHttpRequester`].
+    pub fn from_connection(conn: &ProviderConnection, requester: SharedHttpRequester) -> Self {
+        Self {
+            slug: conn.slug.clone(),
+            api_key: conn.auth.secret().unwrap_or_default().to_string(),
+            base_url: conn.base_url.clone(),
+            requester,
+        }
+    }
+
+    /// Returns the canonical profile slug bound to this adapter.
+    pub fn slug(&self) -> &str {
+        &self.slug
     }
 
     /// Returns the configured Google Generative Language v1beta base URL.
@@ -283,10 +307,10 @@ impl DecisionModelProvider for GeminiDecisionProvider {
 
         let api_key = self.api_key.trim();
         if api_key.is_empty() {
-            return Err(ProviderError::MissingApiKey);
+            return Err(ProviderError::missing_api_key_for_slug(&self.slug));
         }
 
-        let model_id = validate_gemini_decision_specifier(&request.model_specifier)?;
+        let model_id = validate_gemini_decision_specifier(&request.model_specifier, &self.slug)?;
         if request.questions.is_empty() {
             return Ok(DecisionResponse {
                 scores: BTreeMap::new(),
@@ -333,7 +357,10 @@ impl DecisionModelProvider for GeminiDecisionProvider {
     }
 }
 
-fn validate_gemini_decision_specifier(raw: &str) -> Result<&str, ProviderError> {
+fn validate_gemini_decision_specifier<'a>(
+    raw: &'a str,
+    expected_slug: &str,
+) -> Result<&'a str, ProviderError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
         return Err(ProviderError::InvalidModelSpecifier {
@@ -345,10 +372,10 @@ fn validate_gemini_decision_specifier(raw: &str) -> Result<&str, ProviderError> 
         if prov.is_empty() || model_id.is_empty() || model_id.contains(':') {
             return Err(ProviderError::InvalidModelSpecifier {
                 model_specifier: raw.to_string(),
-                reason: "expected `google:<model>` with non-empty segments".to_string(),
+                reason: "expected `<provider>:<model>` with non-empty segments".to_string(),
             });
         }
-        if prov != DEFAULT_PROVIDER {
+        if prov != expected_slug {
             return Err(ProviderError::UnsupportedProvider {
                 provider: prov.to_string(),
                 model_specifier: trimmed.to_string(),
@@ -535,7 +562,7 @@ mod tests {
             };
             assert_eq!(
                 empty_provider.evaluate_decisions(&req),
-                Err(ProviderError::MissingApiKey)
+                Err(ProviderError::missing_api_key_for_slug(DEFAULT_PROVIDER))
             );
 
             // Rejects generative Gemini model on GeminiDecisionProvider

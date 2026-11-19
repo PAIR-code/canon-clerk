@@ -24,10 +24,10 @@ pub use gemini_decisions::{GeminiDecisionsEndpointProber, decode_gemini_decision
 pub use typesafe::TypesafeEndpointProber;
 
 use crate::caseload::{
-    Caseload, CaseloadProbe, HeuristicNode, ProbeStatus, ProbeTargetResult, TYPESAFE_PROVIDER,
-    ThinkingLevel,
+    Caseload, CaseloadProbe, DEFAULT_PROVIDER, HeuristicNode, ProbeStatus, ProbeTargetResult,
+    TYPESAFE_PROVIDER, ThinkingLevel,
 };
-use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, model_provider};
+use crate::configure::{MissingCredentialSpec, ProviderConnection, model_provider};
 pub use crate::provider::{
     DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, build_generate_content_url,
     strip_provider_prefix,
@@ -45,10 +45,12 @@ pub const ENV_PROBE_TIMEOUT_MS: &str = "CANON_CLERK_PROBE_TIMEOUT_MS";
 /// Domain input parameters for executing the `probe` Caseload DAG stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeOptions {
-    /// Google Gemini API key used to authenticate `google:*` probe requests.
+    /// Google Gemini API key fallback used to authenticate `google:*` probe requests when `connections` is empty.
     pub api_key: String,
-    /// Optional TypeSafe AI API key used to authenticate `typesafe:*` probe requests.
+    /// Optional TypeSafe AI API key fallback used to authenticate `typesafe:*` probe requests when `connections` is empty.
     pub typesafe_api_key: Option<String>,
+    /// Resolved provider transport connections (`protocol`, `base_url`, `auth`) keyed by profile `<slug>`.
+    pub connections: BTreeMap<String, ProviderConnection>,
     /// Per-target request timeout in milliseconds (defaults to [`DEFAULT_PROBE_TIMEOUT_MS`]).
     pub timeout_ms: u64,
 }
@@ -58,7 +60,23 @@ impl Default for ProbeOptions {
         Self {
             api_key: String::new(),
             typesafe_api_key: None,
+            connections: BTreeMap::new(),
             timeout_ms: DEFAULT_PROBE_TIMEOUT_MS,
+        }
+    }
+}
+
+impl ProbeOptions {
+    /// Constructs [`ProbeOptions`] directly from resolved [`ProviderConnection`]s and a per-target `timeout_ms`.
+    pub fn from_connections(
+        connections: BTreeMap<String, ProviderConnection>,
+        timeout_ms: u64,
+    ) -> Self {
+        Self {
+            api_key: String::new(),
+            typesafe_api_key: None,
+            connections,
+            timeout_ms,
         }
     }
 }
@@ -83,12 +101,24 @@ pub struct ProbeEndpointResult {
 pub enum ProbeError {
     /// Incoming `Caseload` is missing the `.config` prerequisite namespace (or has zero provisioned nodes).
     MissingConfig,
-    /// Required Google Gemini API key in `ProbeOptions` is empty or whitespace.
-    MissingApiKey,
-    /// Required TypeSafe AI API key in `ProbeOptions` is missing, empty, or whitespace.
-    MissingTypesafeApiKey,
+    /// Required provider API key is missing, empty, or whitespace.
+    MissingProviderApiKey { slug: String },
+    /// Probe target references a provider slug not present in built-in profiles or `ProbeOptions::connections`.
+    UnsupportedProvider {
+        provider: String,
+        model_specifier: String,
+    },
     /// Timeout budget in `ProbeOptions` is zero (`0ms`).
     InvalidTimeout { timeout_ms: u64 },
+}
+
+impl ProbeError {
+    /// Constructs a table-driven [`Self::MissingProviderApiKey`] error for `slug`.
+    pub fn missing_api_key_for_slug(slug: &str) -> Self {
+        Self::MissingProviderApiKey {
+            slug: slug.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for ProbeError {
@@ -99,19 +129,16 @@ impl fmt::Display for ProbeError {
                 "Cannot execute `probe` without resolved node bindings in `.config` on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk probe` directly to telescope `[configure, probe]`."
             ),
-            Self::MissingApiKey => write!(
-                f,
-                "Missing required Google Gemini API key (`{ENV_GEMINI_API_KEY}`) for endpoint probing.\n  \
-                 Hint: Export `{ENV_GEMINI_API_KEY}=\"<your-api-key>\"`, configure \
-                 `providers.google.apiKey` in `~/.config/canon-clerk/config.json` (mode `0600`), \
-                 or pass `--gemini-api-key <KEY>`."
+            Self::MissingProviderApiKey { slug } => f.write_str(
+                &MissingCredentialSpec::for_slug(slug).format_diagnostic(Some("endpoint probing")),
             ),
-            Self::MissingTypesafeApiKey => write!(
+            Self::UnsupportedProvider {
+                provider,
+                model_specifier,
+            } => write!(
                 f,
-                "Missing required TypeSafe AI API key (`{ENV_TYPESAFE_API_KEY}`) for endpoint probing.\n  \
-                 Hint: Export `{ENV_TYPESAFE_API_KEY}=\"<your-api-key>\"`, configure \
-                 `providers.typesafe.apiKey` in `~/.config/canon-clerk/config.json` (mode `0600`), \
-                 or pass `--typesafe-api-key <KEY>`."
+                "Unsupported or unconfigured provider `{provider}` in probe target `{model_specifier}`.\n  \
+                 Hint: Declare `providers.{provider}` (`{{ \"protocol\": \"systemone\" | \"gemini\", \"baseUrl\": \"...\" }}`) in `~/.config/canon-clerk/config.json`."
             ),
             Self::InvalidTimeout { timeout_ms } => write!(
                 f,
@@ -251,20 +278,29 @@ fn resolve_endpoint_probe_key<'a>(
     model_specifier: &str,
     options: &'a ProbeOptions,
 ) -> Result<&'a str, ProbeError> {
-    if model_provider(model_specifier) == TYPESAFE_PROVIDER {
-        options
+    let slug = model_provider(model_specifier);
+    if let Some(conn) = options.connections.get(slug) {
+        return Ok(conn.auth.secret().unwrap_or(""));
+    }
+    match slug {
+        DEFAULT_PROVIDER => {
+            let key = options.api_key.trim();
+            if key.is_empty() {
+                Err(ProbeError::missing_api_key_for_slug(DEFAULT_PROVIDER))
+            } else {
+                Ok(key)
+            }
+        }
+        TYPESAFE_PROVIDER => options
             .typesafe_api_key
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .ok_or(ProbeError::MissingTypesafeApiKey)
-    } else {
-        let key = options.api_key.trim();
-        if key.is_empty() {
-            Err(ProbeError::MissingApiKey)
-        } else {
-            Ok(key)
-        }
+            .ok_or_else(|| ProbeError::missing_api_key_for_slug(TYPESAFE_PROVIDER)),
+        other => Err(ProbeError::UnsupportedProvider {
+            provider: other.to_string(),
+            model_specifier: model_specifier.to_string(),
+        }),
     }
 }
 
@@ -378,8 +414,7 @@ mod tests {
             let caseload = Caseload::new().with_config(CaseloadConfig::default());
             let opts = ProbeOptions {
                 api_key: "synthetic-test-key".to_string(),
-                typesafe_api_key: None,
-                timeout_ms: DEFAULT_PROBE_TIMEOUT_MS,
+                ..ProbeOptions::default()
             };
 
             let result = execute_probe(&opts, &prober, caseload).expect("execute_probe");
@@ -422,9 +457,9 @@ mod tests {
             };
             let result = execute_probe(
                 &ProbeOptions {
-                    api_key: String::new(),
                     typesafe_api_key: Some("ts-key".to_string()),
                     timeout_ms: 2000,
+                    ..ProbeOptions::default()
                 },
                 &prober,
                 Caseload::new().with_config(cfg),
@@ -457,8 +492,7 @@ mod tests {
             let enriched = execute_probe(
                 &ProbeOptions {
                     api_key: "key".to_string(),
-                    typesafe_api_key: None,
-                    timeout_ms: DEFAULT_PROBE_TIMEOUT_MS,
+                    ..ProbeOptions::default()
                 },
                 &prober,
                 Caseload::new()
@@ -549,8 +583,8 @@ mod tests {
             let out = execute_probe(
                 &ProbeOptions {
                     api_key: "synthetic-gemini-key".to_string(),
-                    typesafe_api_key: None,
                     timeout_ms: 2000,
+                    ..ProbeOptions::default()
                 },
                 &prober,
                 Caseload::new().with_config(CaseloadConfig::default()),

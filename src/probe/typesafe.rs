@@ -17,13 +17,13 @@
 use crate::caseload::{ProbeStatus, ThinkingLevel};
 use crate::probe::{EndpointProber, ProbeEndpointResult};
 use crate::provider::{
-    DEFAULT_TYPESAFE_BASE_URL, TypesafeNoulQuestion, TypesafeSystemOneRequest,
+    DEFAULT_TYPESAFE_BASE_URL, HttpAuth, TypesafeNoulQuestion, TypesafeSystemOneRequest,
     TypesafeSystemOneResponse, build_pooled_http_client, classify_typesafe_http_error,
-    extract_typesafe_error_detail, post_typesafe_json, strip_typesafe_prefix,
+    extract_typesafe_error_detail, post_typesafe_json, strip_provider_prefix,
 };
 use std::collections::BTreeMap;
 
-/// Decodes and classifies an HTTP status code and response payload from a TypeSafe AI `/v1/systemone` probe.
+/// Decodes and classifies an HTTP status code and response payload from a System One `/v1/systemone` probe.
 pub(super) fn decode_typesafe_probe_response(
     status_code: u16,
     body: &str,
@@ -36,7 +36,7 @@ pub(super) fn decode_typesafe_probe_response(
             .and_then(|resp| resp.model)
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| strip_typesafe_prefix(model_specifier).to_string());
+            .unwrap_or_else(|| strip_provider_prefix(model_specifier).to_string());
 
         return ProbeEndpointResult {
             status: ProbeStatus::Ok,
@@ -104,16 +104,22 @@ impl EndpointProber for TypesafeEndpointProber {
             TypesafeNoulQuestion::new("Is the input non-empty?"),
         );
         let payload = TypesafeSystemOneRequest {
-            model: strip_typesafe_prefix(model_specifier).to_string(),
+            model: strip_provider_prefix(model_specifier).to_string(),
             state: "ping".to_string(),
             questions,
+        };
+        let trimmed_key = api_key.trim();
+        let auth = if trimmed_key.is_empty() {
+            HttpAuth::None
+        } else {
+            HttpAuth::Bearer(trimmed_key)
         };
 
         match post_typesafe_json(
             &self.client,
             &self.base_url,
             model_specifier,
-            api_key,
+            auth,
             timeout_ms,
             &payload,
         ) {

@@ -22,7 +22,7 @@
 flowchart LR
     subgraph Inputs["Inputs"]
         Config["configure (or --caseload)<br/><code>.config</code>"]
-        Params["Stage Flags<br/><i>(--timeout, --provider, --*-model)</i>"]
+        Params["Stage & Endpoint Flags<br/><i>(--timeout, --provider, --*-model, --*-base-url)</i>"]
     end
 
     Config --> Probe["probe<br/><b>(Current Node)</b><br/><code>.probe</code>"]
@@ -65,8 +65,8 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`configuration`)
 
-1. **Target Deduplication & Credential Resolution:** Reads provisioned node bindings from `caseload.config.nodes` in canonical DAG order, groups identical `(model, thinking_level, reasoning_budget)` tuples while preserving each target's ordered `nodes` list, and resolves credentials by provider namespace (`google:*` $\to$ `GEMINI_API_KEY`, `typesafe:*` $\to$ `TYPESAFE_API_KEY`).
-2. **Capability-Specific Ping Assembly:** Constructs minimal probe requests matched to each target's wire protocol—a single-question `/v1beta/decisions` `noul` decision ping for `google:gemini-decision-*`, a single-question `/v1/systemone` `noul` decision ping for `typesafe:jev-*`, and a lightweight `:generateContent` ping for generative `google:*` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring the target's explicit `thinking_level` / `reasoning_budget`)—verifying authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
+1. **Target Deduplication & Unified Connection Parity:** Reads provisioned node bindings from `caseload.config.nodes` in canonical DAG order, groups identical `(model, thinking_level, reasoning_budget)` tuples while preserving each target's ordered `nodes` list, and resolves each referenced `<provider>` profile against the exact same resolved provider connection map (`protocol`, normalized `baseUrl`, and authentication policy—including `--gemini-base-url` / `--typesafe-base-url`, `CANON_CLERK_<UPPER_SLUG>_*` / `<UPPER_SLUG>_*` overrides, and custom keyless or authenticated `providers.<slug>` profiles) used by heuristic execution stages so `canon-clerk probe` and evaluation runs never drift.
+2. **Protocol-Driven Ping Assembly:** Constructs minimal probe requests matched to each target profile's wire protocol and capability—a single-question `POST {baseUrl}/decisions` `noul` decision ping for `gemini` `Discriminator` models (`<slug>:gemini-decision-*`), a single-question `POST {normalizedBaseUrl}/systemone` `noul` decision ping for `systemone` `Discriminator` models (`typesafe:jev-*` and custom `<slug>:<model>` profiles, sending `Authorization: Bearer <key>` when configured or omitting `Authorization` on keyless custom `systemone` profiles), and a lightweight `POST {baseUrl}/models/{model}:generateContent` ping for `gemini` `Generator` endpoints (defaulting to `thinkingLevel: "LOW"` with `includeThoughts: false` on Gemini 4 models when unspecified, or honoring the target's explicit `thinking_level` / `reasoning_budget`)—verifying authentication, model resolution, and network reachability within the `5000ms` default probe ceiling.
 3. **Concurrent Multi-Target Probe:** Dispatches all deduplicated probe targets concurrently in parallel, measuring roundtrip latency (`latency_ms`) and capturing each provider's concrete `resolved_model` identifier while preserving deterministic target ordering in `.probe.targets`.
 4. **Diagnostic Record:** Attaches `.probe` to the `Caseload` envelope; the run is healthy if and only if every target in `.probe.targets` reports `status: "ok"`.
 
@@ -80,10 +80,11 @@ The CLI exposes `probe` as an imperative subcommand:
 # 1. Probe default Google discriminator + generator targets concurrently:
 canon-clerk probe
 
-# 2. Probe TypeSafe Jev as sole discriminative provider (single deduplicated target):
+# 2. Probe TypeSafe Jev or a custom local-dev systemone profile from config.json:
 canon-clerk probe --provider typesafe
+canon-clerk probe --provider local-dev
 
-# 3. Probe hybrid TypeSafe Jev screening alongside Gemini 4 Carbon audit:
+# 3. Probe hybrid screening alongside Gemini 4 Carbon audit:
 canon-clerk probe --provider typesafe --audit-model google:gemini-4-carbon
 
 # 4. Emit structured Caseload JSON probe record:
@@ -92,11 +93,12 @@ canon-clerk probe --json
 
 ### CLI Flags & Options
 - `--timeout <MS>` (fallback env: `CANON_CLERK_PROBE_TIMEOUT_MS`): Per-target request timeout in milliseconds (default: `5000ms`; `0` is rejected with exit code `2`).
-- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider selector (`google`, `typesafe`; default: `google`).
+- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider profile slug (`google`, `typesafe`, or any custom `providers.<slug>` profile in `config.json`; default: `google`).
 - `--apprise-model <PROVIDER:MODEL>` (`CANON_CLERK_APPRISE_MODEL`), `--docket-model <PROVIDER:MODEL>` (`CANON_CLERK_DOCKET_MODEL`), `--admit-model <PROVIDER:MODEL>` (`CANON_CLERK_ADMIT_MODEL`), `--vet-model <PROVIDER:MODEL>` (`CANON_CLERK_VET_MODEL`), `--audit-model <PROVIDER:MODEL>` (`CANON_CLERK_AUDIT_MODEL`): Per-node canonical `<provider>:<model>` overrides.
 - `--thinking-level <minimal|low|medium|high>` (`CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier for `Generator` targets (mutually exclusive with `--reasoning-budget`).
 - `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens for `Generator` targets (mutually exclusive with `--thinking-level`).
-- `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Provider API key overrides.
+- `--gemini-api-key <KEY>` (`CANON_CLERK_GOOGLE_API_KEY`, `GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`CANON_CLERK_TYPESAFE_API_KEY`, `TYPESAFE_API_KEY`): Provider API key overrides.
+- `--gemini-base-url <URL>` (`CANON_CLERK_GOOGLE_BASE_URL`, `GEMINI_BASE_URL`), `--typesafe-base-url <URL>` (`CANON_CLERK_TYPESAFE_BASE_URL`, `TYPESAFE_BASE_URL`): Provider endpoint base URL overrides.
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload`.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of `stdout`.

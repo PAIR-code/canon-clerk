@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary & Architectural Role
 
-On medium-to-large filings, heuristic Caseload stages (`apprise`, `docket`, `admit`, `vet`, `audit`) fan out 30–50+ bounded concurrent model requests (`scheduling.md` §3) against shared upstream provider origins (`generativelanguage.googleapis.com` and `api.typesafe.ai`). Uncoordinated, single-shot HTTP execution exhibits two structural failure modes under realistic pull-request workloads:
+On medium-to-large filings, heuristic Caseload stages (`apprise`, `docket`, `admit`, `vet`, `audit`) fan out 30–50+ bounded concurrent model requests (`scheduling.md` §3) against shared upstream or self-hosted provider origins (`generativelanguage.googleapis.com`, `api.typesafe.ai`, corporate gateways, and local `/v1/systemone` daemons). Uncoordinated, single-shot HTTP execution exhibits two structural failure modes under realistic pull-request workloads:
 
 1. **Rolling Minute-Window Rate-Limit Exhaustion (`HTTP 429`):** High-throughput discriminative and generative stages can consume a provider's rolling 60-second input-token or request-per-minute quota mid-stage. Naive per-call millisecond retries exhaust all attempts while tens of seconds remain in the rolling window, while uncoordinated sibling workers continue firing doomed Attempt-1 calls into the throttled origin and wake up in a simultaneous thundering herd.
 2. **Bimodal Tail-Latency Spikes & Transient Transport Faults:** A single transient socket reset, upstream `5xx` overload, or reasoning tail-latency timeout on one slice out of dozens otherwise aborts the entire pipeline and discards all completed sibling work units.
@@ -30,8 +30,8 @@ flowchart LR
         Pool["Persistent Background Reactor<br/>& Hardened HTTPS Connection Pool"]
     end
 
-    subgraph Upstream ["Upstream Provider Origins"]
-        Endpoints["https://generativelanguage.googleapis.com<br/>https://api.typesafe.ai"]
+    subgraph Upstream ["Upstream & Custom Provider Origins"]
+        Endpoints["Built-in origins, baseUrl gateways,<br/>& local /v1/systemone daemons"]
     end
 
     Workers --> Gate --> Retry --> Pool --> Endpoints
@@ -44,7 +44,9 @@ flowchart LR
 
 1. **Lazy Background Reactor Initialization (`0ms` Offline Overhead):** Persistent HTTPS connection pools and asynchronous timers execute on a dedicated, continuously driven background reactor initialized lazily on the first live network request. Purely local closures (`intake`, `discover`, `validate`, `configure`) and guarded zero-candidate short-circuits (`scheduling.md` §3) spawn zero background reactor threads and initialize zero TLS pools.
 2. **Thread-Identity Invariant Socket Reuse:** Because stage work units run on scoped OS worker threads that exit at each DAG node seam (`scheduling.md` §3), driving all socket I/O and idle keep-alive tasks on the persistent background reactor ensures pooled HTTP/1.1 and HTTP/2 connections remain live across worker thread exits and stage transitions (`docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`).
-3. **Unified Multi-Adapter Sharing:** Within a composite multi-provider session, generative adapters (`google:gemini-*` via `:generateContent`) and discriminative decision adapters (`google:gemini-decision-*` via `/v1beta/decisions` and `typesafe:jev-*` via `/v1/systemone`) share the same underlying connection pool and origin cooldown registry.
+3. **Unified Protocol-Driven Multi-Profile Sharing:** Runtime execution and diagnostic probing construct adapters from a single resolved map of provider connections keyed by profile `<slug>`. Each connection binds a reusable wire-protocol driver, normalized `baseUrl`, and authentication scheme while sharing one underlying connection pool and origin cooldown registry:
+   - **`gemini` Wire Protocol:** Routes `Generator` models to `POST {baseUrl}/models/{model}:generateContent` and `Discriminator` (`gemini-decision-*`) models to `POST {baseUrl}/decisions`, authenticating with the `x-goog-api-key` header.
+   - **`systemone` Wire Protocol:** Normalizes bare origin URLs (`http://127.0.0.1:8080` or `http://127.0.0.1:8080/`) to `POST {origin}/v1/systemone` and explicit path prefixes (`https://api.typesafe.ai/v1` or `http://127.0.0.1:8080/v1`) to `POST {baseUrl}/systemone` (preserving URLs already ending in `/systemone`), sending `Authorization: Bearer <key>` when an API key is configured and omitting authentication headers on keyless custom `systemone` profiles.
 4. **Socket Liveness & Full-Body Timeout Classification:** Pooled connections enforce a fast-fail TCP/TLS connection establishment timeout (`10s`, distinct from the per-attempt generation timeout), a conservative idle pool retention window (`30s`, below common `60s` upstream NAT/load-balancer silent eviction thresholds), proactive OS-level TCP keep-alive probes, and full response-body streaming timeout classification so mid-stream stalls surface accurately as request timeouts rather than malformed payload errors.
 
 ---
