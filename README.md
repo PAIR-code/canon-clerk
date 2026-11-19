@@ -145,6 +145,14 @@ Beyond automated `canon-clerk audit` gates in CI, teams and AI coding assistants
 
 ---
 
+## Roadmap
+
+- **Q1 2027:** Interactive web dashboard for canon management
+- **Q2 2027:** Native IDE extensions for VS Code and JetBrains
+- **Q3 2027:** Hosted cloud SaaS with team analytics
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](docs/contributing.md) and [Development Workflow](docs/development-workflow.md) for details on how to get started.

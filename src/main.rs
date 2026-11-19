@@ -15,6 +15,11 @@
 use canon_clerk::cli::{Cli, run};
 use clap::Parser;
 
+#[allow(dead_code, reason = "called by the Windows GUI entrypoint")]
+fn format_banner() -> &'static str {
+    "Canon Clerk"
+}
+
 fn main() {
     match Cli::try_parse() {
         Ok(cli) => {
