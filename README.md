@@ -151,6 +151,10 @@ Beyond automated `canon-clerk audit` gates in CI, teams and AI coding assistants
 - **Q2 2027:** Native IDE extensions for VS Code and JetBrains
 - **Q3 2027:** Hosted cloud SaaS with team analytics
 
+## Internal Pipeline Mechanics
+
+Internally, the Caseload DAG executes Branch A (`intake` -> `discover` -> `validate`) concurrently with Branch B (`configure`), joining into a `BTreeMap<CanonId, CanonRecord>` before dispatching batched HTTP requests through a shared `reqwest::Client` pool. On HTTP `429`, the per-origin scheduler computes exponential backoff `base_ms * 2^attempt + jitter` up to `--max-backoff-ms`, drains active permit tokens from the tokio `Semaphore`, and persists intermediate stage payloads into `CaseloadDocument` JSON frames for replay.
+
 ---
 
 ## Contributing

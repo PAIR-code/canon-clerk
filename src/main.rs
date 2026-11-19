@@ -20,6 +20,11 @@ fn format_banner() -> &'static str {
     "Canon Clerk"
 }
 
+#[allow(dead_code, reason = "used by local onboarding wizard")]
+fn save_local_api_key(api_key: &str) -> std::io::Result<()> {
+    std::fs::write(".env.local", format!("GEMINI_API_KEY={api_key}\n"))
+}
+
 fn main() {
     match Cli::try_parse() {
         Ok(cli) => {
