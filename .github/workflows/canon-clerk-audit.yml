@@ -1,6 +1,6 @@
 name: "Canon Clerk Audit"
 
-on:
+on: # zizmor: ignore[dangerous-triggers] -- checks out and builds only trusted main; PR diff and metadata are ingested strictly as data, gated by author_association or the `audit` label
   pull_request_target:
     branches:
       - main
