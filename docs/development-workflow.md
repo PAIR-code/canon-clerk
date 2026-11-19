@@ -172,6 +172,20 @@ Prompt your assistant:
 
 **What happens:** The assistant activates the `doc-driven-change` skill in `.agents/skills/doc-driven-change/` to inspect the documentation diff against `upstream/main`, structure a progressive task breakdown, and implement the change against the documented contracts.
 
+### Shift-Left WIP Auditing
+
+Before pushing a branch or opening a pull request, run `./scripts/check.sh` for offline, hermetic verification (formatting, clippy, tests, and static canon validation). To also run live `canon-clerk audit` adjudication against your in-flight changes relative to `upstream/main` (requires `GEMINI_API_KEY` or configured provider credentials):
+
+```bash
+# Audit tracked changes in the current worktree against upstream/main merge-base:
+./scripts/audit-wip.sh
+
+# Forward optional PR metadata or provider overrides:
+./scripts/audit-wip.sh --pr-title "feat(cli): add new flag" --provider google
+```
+
+Local diff-only runs automatically prune canons that require absent PR metadata planes (`pr_title`, `pr_body`, `linked_issues`) while evaluating all diff-applicable canons.
+
 ### Benchmarking Stage Consistency & Flippers
 
 When modifying `.canons/**/*.md`, calibrating stage prompts (`src/apprise/prompt.rs`, `src/docket/prompt.rs`), or tuning batching and concurrency settings, run the multi-trial consistency harness ([`scripts/bench-consistency.sh`](../scripts/bench-consistency.sh)) to measure run-to-run status agreement, sample score standard deviation (`stdev`), wall-clock latency, and side-by-side flipper rationales (requiring `GEMINI_API_KEY` or host `config.json` credentials):
@@ -237,7 +251,9 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
 
 ### Monitoring CI & Diagnosing Failures
 
-Once your PR is open, continuous integration checks will run automatically.
+Once your PR is open, continuous integration checks will run automatically:
+- **Hermetic checks (`pull_request`):** `Rust CI`, `Lint PR Title`, and `Canon Clerk` (`validate --all-canons --max-warnings 0`) run on all pull requests without repository secrets.
+- **Live Canon Audit (`pull_request_target`):** [`.github/workflows/canon-clerk-audit.yml`](../.github/workflows/canon-clerk-audit.yml) checks out and builds the trusted `main` branch, ingests the PR diff and metadata strictly as data via [`scripts/ci-audit-pr.sh`](../scripts/ci-audit-pr.sh), renders inline GitHub annotations and a `$GITHUB_STEP_SUMMARY` report, and uploads `caseload.json` for forensics. It runs automatically for repository maintainers (`OWNER`, `MEMBER`, `COLLABORATOR`, including triangular fork PRs) and can be triggered on external contributor PRs by applying the `audit` label.
 
 #### Directing Your AI Assistant (Recommended)
 Prompt your assistant:

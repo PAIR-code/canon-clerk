@@ -1,0 +1,57 @@
+name: "Canon Clerk Audit"
+
+on: # zizmor: ignore[dangerous-triggers] -- checks out and builds only trusted main; PR diff and metadata are ingested strictly as data, gated by author_association or the `audit` label
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - labeled
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: "Audit Pull Request"
+    runs-on: ubuntu-latest
+    # Auto-run for trusted maintainers (including triangular fork PRs);
+    # require explicit maintainer opt-in via the `audit` label for external PRs.
+    if: >-
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
+      contains(github.event.pull_request.labels.*.name, 'audit')
+    steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        run: rustup show active-toolchain --verbose
+
+      - name: Build Canon Clerk from trusted base
+        run: cargo build --locked
+
+      - name: Audit pull request against repository canons
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CANON_CLERK_CASELOAD_OUT: caseload.json
+        run: ./scripts/ci-audit-pr.sh
+
+      - name: Upload Caseload forensics artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canon-clerk-audit-caseload
+          path: caseload.json
+          if-no-files-found: ignore
