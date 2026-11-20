@@ -10,7 +10,6 @@ inspect:
   - diff
 tags:
   - testing
-  - ergonomics
 ---
 When live service integration tests fail due to missing ambient credentials or unreachable endpoints, failure diagnostics MUST output actionable remediation instructions.
 

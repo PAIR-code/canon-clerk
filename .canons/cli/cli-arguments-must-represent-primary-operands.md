@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands MUST accept their primary operational targets (such as file paths, canon directories, or commit references) as positional arguments rather than requiring named flags.
 

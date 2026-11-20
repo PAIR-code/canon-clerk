@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - security
-  - filesystem
 ---
 Source code routines that read or load file-based credentials from the host filesystem MUST inspect file mode permissions and refuse to read credentials (failing fast or ignoring insecure files) if permissions allow group or world read access on POSIX platforms.
 

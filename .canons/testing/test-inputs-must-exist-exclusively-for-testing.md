@@ -10,7 +10,6 @@ inspect:
   - diff
 tags:
   - testing
-  - test-design
   - code-quality
 ---
 Data and file inputs supplied to unit and integration tests MUST exist solely to exercise the system under test, serving no other build, runtime, documentation, or governance role in the repository.

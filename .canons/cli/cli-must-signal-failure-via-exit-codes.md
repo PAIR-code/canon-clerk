@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands MUST signal execution outcomes via deterministic exit codes (`0` for success, non-zero for failure), and MUST NOT terminate with exit code `0` when an unhandled error or validation failure occurs.
 

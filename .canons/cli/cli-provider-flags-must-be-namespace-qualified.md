@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI flags configuring provider- or service-specific operational options (such as credentials, endpoints, or vendor settings) MUST be namespace-qualified with the provider name (e.g. `--<provider>-<option>`) rather than adopting generic root names.
 

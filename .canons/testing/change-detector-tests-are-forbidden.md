@@ -8,7 +8,6 @@ inspect:
   - diff
 tags:
   - testing
-  - test-design
   - code-quality
 ---
 Unit tests MUST NOT make change-detector assertions against incidental release metadata, hardcoded version literals, build hashes, or generated timestamps.

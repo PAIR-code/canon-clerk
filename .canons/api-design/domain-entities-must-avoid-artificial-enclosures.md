@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - api-design
-  - data-contracts
 ---
 Domain entities (DDD) representing a singular system resource MUST expose primary attributes directly at the top level rather than partitioning them into artificial nested wrapper objects.
 

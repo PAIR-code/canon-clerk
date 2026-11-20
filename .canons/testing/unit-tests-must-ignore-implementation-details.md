@@ -8,7 +8,6 @@ inspect:
   - diff
 tags:
   - testing
-  - test-design
   - code-quality
 ---
 Unit tests MUST interact with and assert against public interfaces, and MUST NOT couple to private properties, internal helper functions, or execution sequences.

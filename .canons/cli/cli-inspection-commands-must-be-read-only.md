@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI query, inspection, and diagnostic commands MUST remain strictly read-only, preserving the working tree without mutating files, touching timestamps, or creating untracked cache directories.
 

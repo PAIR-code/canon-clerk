@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 Boolean CLI flags MUST be declared with positive polarity (e.g. `--color`, `--cache`, `--validate`), providing a `--no-<flag>` prefix for negation rather than introducing inherently negative flag names.
 

@@ -7,7 +7,6 @@ inspect:
 tags:
   - build-systems
   - monorepo
-  - performance
 ---
 Monorepo root build scripts MUST NOT chain serial workspace invocations (such as sequential `npm run build -w` commands). Root builds MUST consolidate compilation through a unified multi-entry bundler configuration or orchestrate package builds concurrently along the dependency graph.
 

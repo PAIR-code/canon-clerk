@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands that report inspection results, audit verdicts, status summaries, or diagnostic lists MUST support a `--json` flag that outputs valid, unadorned JSON to `stdout`.
 

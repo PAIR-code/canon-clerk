@@ -8,7 +8,6 @@ inspect:
   - diff
 tags:
   - testing
-  - test-design
   - code-quality
 ---
 Unit tests MUST assert against observable return values, state mutations, or contractually thrown errors of the system under test.

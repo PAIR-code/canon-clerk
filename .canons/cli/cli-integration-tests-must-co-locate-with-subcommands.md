@@ -3,7 +3,7 @@ inspect:
   - diff
 tags:
   - testing
-  - cli-ergonomics
+  - cli
 ---
 CLI applications supporting multiple subcommands MUST co-locate subcommand-specific integration tests directly alongside their respective subcommand definition modules, reserving the root CLI integration test suite exclusively for global entrypoint dispatch, top-level flag routing, and process termination signals.
 

@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 When introducing or modifying a CLI file-input operand that reads an input file from disk, the operand MUST accept `-` to read from standard input (`stdin`) in place of a filesystem path.
 

@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - security
-  - filesystem
 ---
 Source code routines that create or persist file-based credentials to the host filesystem MUST explicitly specify POSIX `0o600` mode (`-rw-------`, readable and writable solely by the owner).
 

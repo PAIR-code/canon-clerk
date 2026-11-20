@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI command help screens (`--help`) MUST include at least one realistic, copy-pasteable runnable usage example demonstrating common flag configurations alongside argument definitions.
 

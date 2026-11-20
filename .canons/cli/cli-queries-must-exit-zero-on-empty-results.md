@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI query and filtering commands MUST terminate with exit code `0` and emit an empty collection when zero matching items are found, reserving non-zero exit codes strictly for invalid syntax or execution failures.
 

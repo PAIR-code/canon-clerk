@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 When emitting plain text to non-interactive streams or pipelines, CLI list and query commands MUST default to unadorned, newline-separated records (one item per line).
 

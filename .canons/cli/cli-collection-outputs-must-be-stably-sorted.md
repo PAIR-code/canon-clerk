@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands that report lists or collections of items (such as canons, diagnostic findings, or files) MUST output them in a deterministic, stable sort order.
 

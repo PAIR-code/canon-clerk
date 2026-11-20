@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 Every single-character short flag supported by a CLI command MUST serve as an alias for a self-descriptive long-form flag; standalone short flags lacking long equivalents are forbidden.
 
