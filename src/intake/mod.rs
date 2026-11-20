@@ -21,7 +21,7 @@ pub use diff::{
     parse_unified_diff, tokenize_diff, unquote_git_path,
 };
 
-use crate::caseload::{Caseload, CaseloadIntake, IntakeScope, LinkedIssueContext};
+use crate::caseload::{Caseload, CaseloadIntake, IntakeScope, LinkedIssueContext, WorkspaceState};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -45,6 +45,9 @@ pub struct IntakeOptions {
 
     /// Whether to evaluate the entire repository codebase as target artifacts (`--all-targets`).
     pub all_targets: bool,
+
+    /// Explicit workspace state on disk relative to `patch_content` (`None` preserves existing or defaults to `Head`).
+    pub workspace_state: Option<WorkspaceState>,
 
     /// Optional linked issues context.
     pub linked_issues: Option<Vec<LinkedIssueContext>>,
@@ -189,6 +192,7 @@ pub fn execute_intake(
         pr_body: normalize_optional_text(&options.pr_body),
         intent: normalize_optional_text(&options.intent),
         scope,
+        workspace_state: options.workspace_state.unwrap_or_default(),
         target_paths,
         diffs,
         linked_issues,

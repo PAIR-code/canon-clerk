@@ -44,7 +44,7 @@ pub use evidence::{
 };
 pub use intake::{
     CaseloadIntake, ContentOmissionReason, FileArtifact, FileChangeStatus, IntakeScope,
-    LinkedIssueContext, PatchOmissionReason,
+    LinkedIssueContext, PatchOmissionReason, WorkspaceState,
 };
 pub use probe::{CaseloadProbe, ProbeStatus, ProbeTargetResult};
 pub use validation::{

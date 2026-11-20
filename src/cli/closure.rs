@@ -79,6 +79,9 @@ pub(crate) fn merge_metadata_onto_intake(
     {
         base.pr_body = Some(body.to_string());
     }
+    if let Some(ws_state) = opts.workspace_state {
+        base.workspace_state = ws_state;
+    }
     base
 }
 
@@ -120,11 +123,16 @@ pub(crate) fn resolve_cascade_intake(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<(Caseload, StageDisposition, bool), CliError> {
     if !intake_opts.has_designated_source() {
-        let existing = incoming.ok_or_else(|| {
+        let mut existing = incoming.ok_or_else(|| {
             CliError::usage(format!(
                 "Missing upstream caseload or filing inputs for `{stage_name}`."
             ))
         })?;
+        if let Some(ws_state) = intake_opts.workspace_state
+            && let Some(intake) = existing.intake.as_mut()
+        {
+            intake.workspace_state = ws_state;
+        }
         return Ok((existing, StageDisposition::PrePopulated, false));
     }
 

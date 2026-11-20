@@ -14,7 +14,7 @@
 
 //! Composable Clap argument groups for Caseload DAG stage subcommands.
 
-use crate::caseload::{Caseload, ThinkingLevel};
+use crate::caseload::{Caseload, ThinkingLevel, WorkspaceState};
 use crate::cli::CliError;
 use crate::cli::io::{
     read_caseload_operand, read_operand_source, resolve_target_operands, write_caseload_file,
@@ -24,10 +24,28 @@ use crate::intake::IntakeOptions;
 use crate::provider::{
     DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES, ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryPolicy,
 };
-use clap::Args;
+use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
+
+/// CLI value enum for `--workspace-state <head|base>`.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceStateArg {
+    /// Workspace files on disk already contain the filing's post-patch state (default).
+    Head,
+    /// Workspace files on disk reflect the pre-patch base branch (e.g., `pull_request_target` CI).
+    Base,
+}
+
+impl From<WorkspaceStateArg> for WorkspaceState {
+    fn from(value: WorkspaceStateArg) -> Self {
+        match value {
+            WorkspaceStateArg::Head => Self::Head,
+            WorkspaceStateArg::Base => Self::Base,
+        }
+    }
+}
 
 /// Composable CLI argument group for filing sources and pull request metadata (Branch A).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
@@ -47,6 +65,16 @@ pub struct FilingSourceArgs {
         help = "Ingest unified diff patch from file or '-' for stdin"
     )]
     pub diff: Option<String>,
+
+    /// Workspace state on disk relative to `--diff` (`head` default, or `base` for pre-patch base checkouts).
+    #[arg(
+        long = "workspace-state",
+        value_name = "head|base",
+        value_enum,
+        help_heading = "Filing Sources",
+        help = "Workspace state on disk relative to --diff ('head' = post-patch default, 'base' = pre-patch base branch)"
+    )]
+    pub workspace_state: Option<WorkspaceStateArg>,
 
     /// Prospective architectural design intent or plan description.
     #[arg(
@@ -120,6 +148,7 @@ impl FilingSourceArgs {
             target_paths,
             patch_content,
             all_targets: self.all_targets,
+            workspace_state: self.workspace_state.map(WorkspaceState::from),
             linked_issues: None,
         })
     }

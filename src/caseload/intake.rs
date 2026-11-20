@@ -129,6 +129,33 @@ impl IntakeScope {
     }
 }
 
+/// Declares whether the checked-out workspace on disk is already post-patch (`"head"`)
+/// or represents the pre-patch base branch (`"base"`, e.g. `pull_request_target` CI).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceState {
+    /// Workspace files on disk already contain the filing's post-patch state (default).
+    #[default]
+    Head,
+    /// Workspace files on disk reflect the pre-patch base branch; `references:` diffs are applied in memory.
+    Base,
+}
+
+impl WorkspaceState {
+    /// Returns `true` when this state is [`WorkspaceState::Head`] (omitted during JSON serialization).
+    pub fn is_head(&self) -> bool {
+        matches!(self, Self::Head)
+    }
+
+    /// Returns the canonical wire representation (`"head"` or `"base"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Head => "head",
+            Self::Base => "base",
+        }
+    }
+}
+
 /// Ingested filing exhibits and discovery directives captured during the `intake` stage.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct CaseloadIntake {
@@ -144,6 +171,9 @@ pub struct CaseloadIntake {
     /// Scope of intake target evaluation (`"targeted"` or `"all-targets"`).
     #[serde(default)]
     pub scope: IntakeScope,
+    /// Workspace state on disk relative to `diffs` (`"head"` default, omitted when `"head"`).
+    #[serde(default, skip_serializing_if = "WorkspaceState::is_head")]
+    pub workspace_state: WorkspaceState,
     /// Stably sorted target file paths, directory pointers, or glob directives for `discover`.
     #[serde(default)]
     pub target_paths: Vec<String>,
@@ -197,6 +227,7 @@ mod tests {
             pr_body: Some("Implements #222".to_string()),
             intent: Some("Establish deterministic filing intake".to_string()),
             scope: IntakeScope::Targeted,
+            workspace_state: WorkspaceState::Head,
             target_paths: vec!["src/main.rs".to_string()],
             diffs,
             linked_issues: Some(vec![LinkedIssueContext {
@@ -242,5 +273,27 @@ mod tests {
         assert_eq!(FileChangeStatus::Renamed.as_str(), "renamed");
         assert_eq!(FileChangeStatus::Copied.as_str(), "copied");
         assert_eq!(FileChangeStatus::Unchanged.as_str(), "unchanged");
+    }
+
+    #[test]
+    fn test_workspace_state_wire_serialization() {
+        let default_intake = CaseloadIntake::default();
+        let default_json = serde_json::to_string(&default_intake).expect("serialize default");
+        assert_eq!(WorkspaceState::Head.as_str(), "head");
+        assert_eq!(WorkspaceState::Base.as_str(), "base");
+        assert!(
+            !default_json.contains("workspace_state"),
+            "default head workspace_state must be omitted from JSON"
+        );
+
+        let base_intake = CaseloadIntake {
+            workspace_state: WorkspaceState::Base,
+            ..CaseloadIntake::default()
+        };
+        let base_json = serde_json::to_string(&base_intake).expect("serialize base intake");
+        assert!(base_json.contains(r#""workspace_state":"base""#));
+        let decoded_base: CaseloadIntake =
+            serde_json::from_str(&base_json).expect("deserialize base intake");
+        assert_eq!(decoded_base.workspace_state, WorkspaceState::Base);
     }
 }

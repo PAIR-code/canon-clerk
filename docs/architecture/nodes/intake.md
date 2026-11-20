@@ -50,7 +50,7 @@ flowchart LR
 `intake` populates the `.intake` namespace on the cumulative `Caseload` envelope with three categories of filing records:
 
 - **Tendered Metadata Exhibits:** Literal pull request or commit context (`pr_title`, `pr_body`), prospective architectural design `intent`, and optional `linked_issues` context (issue number, title, body, and canonical URL).
-- **Target Scope & Discovery Directives:** Normalized target scope (`"targeted"` vs. `"all-targets"`) and explicit target path, directory, or glob pattern directives (`target_paths`) queued for downstream materialization in `discover`.
+- **Target Scope & Discovery Directives:** Normalized target scope (`"targeted"` vs. `"all-targets"`), explicit target path, directory, or glob pattern directives (`target_paths`) queued for downstream materialization in `discover`, and optional `workspace_state` (`"head"` vs. `"base"`, defaulting to `"head"` and omitted when `"head"`) declaring whether the checked-out workspace on disk already contains the diff's post-patch files (`"head"`) or represents the pre-patch base branch (`"base"`, as under GitHub Actions `pull_request_target`).
 - **Parsed File Exhibits (`diffs`):** In-flight code modifications parsed from unified diff streams into immutable `FileArtifact` records keyed by repository-relative POSIX path. Each artifact captures file change `status` (`"added"`, `"modified"`, `"deleted"`, `"renamed"`, `"copied"`, `"unchanged"`), `previous_path` (when renamed or copied), insertion and deletion counts (`lines_added`, `lines_deleted`), unified hunk `patch` text, and explicit omission rationales.
 
 ### Data Plane Invariants
@@ -101,6 +101,7 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 ### CLI Flags & Environment
 - `-` (Positional): Reads newline-delimited paths from stdin.
 - `--diff <path|->`: Ingests unified diff patch from file or stdin.
+- `--workspace-state <head|base>`: Declares whether the workspace on disk is already post-patch (`head`, default) or pre-patch (`base`, e.g., `pull_request_target` CI checkouts), instructing downstream stages to materialize `references:` files by applying `.intake.diffs` in memory onto base-branch files.
 - `--intent <text>`: Ingests prospective design intent or plan description.
 - `--all-targets`: Ingests all repository files as target artifacts (used for full-repo sweeps).
 - `--pr-title <text>`: Ingests PR title text.

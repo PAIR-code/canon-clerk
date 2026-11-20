@@ -37,6 +37,8 @@ pub struct WorkspaceSnapshot {
     pub canons: BTreeMap<String, Canon>,
     /// Optional materialized UTF-8 file contents keyed by workspace-relative POSIX path (populated JIT for target-path sweeps).
     pub file_contents: BTreeMap<String, String>,
+    /// Workspace-relative POSIX paths whose `--workspace-state base` diff overlay has already been applied (ensuring idempotency).
+    pub applied_base_diffs: BTreeSet<String>,
 }
 
 impl WorkspaceSnapshot {
@@ -77,7 +79,10 @@ impl WorkspaceSnapshot {
             let Ok(normalized) = normalize_workspace_path(raw_path) else {
                 continue;
             };
-            if normalized == "." || self.file_contents.contains_key(&normalized) {
+            if normalized == "."
+                || self.file_contents.contains_key(&normalized)
+                || self.applied_base_diffs.contains(&normalized)
+            {
                 continue;
             }
             let full_path = workspace_root.join(&normalized);
@@ -149,6 +154,7 @@ impl WorkspaceSnapshot {
             existing_files,
             canons,
             file_contents: BTreeMap::new(),
+            applied_base_diffs: BTreeSet::new(),
         })
     }
 }

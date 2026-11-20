@@ -35,7 +35,8 @@ use crate::cli::runners::{
 };
 use crate::cli::vet::guards::resolve_vet_concurrency;
 use crate::cli::vet::stages::{
-    populate_live_case_and_reference_snapshots, populate_live_target_snapshots,
+    materialize_base_workspace_references, populate_live_case_and_reference_snapshots,
+    populate_live_target_snapshots,
 };
 use crate::configure::{
     ConfigureScope, StoredConfig, can_fast_forward_existing_config, is_discriminative_model,
@@ -216,6 +217,8 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         return Ok(short_circuit);
     }
 
+    materialize_base_workspace_references(&caseload, snapshot, backend)?;
+
     let mut required_nodes = Vec::new();
     if !docket_pre_populated && !evidence_pre_populated {
         required_nodes.push(HeuristicNode::Docket);
@@ -377,7 +380,7 @@ fn execute_configured_spine(
         });
     }
 
-    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend);
+    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend)?;
     let (after_vet, vet_disp) = execute_vet_step(
         after_admit,
         pre.vetting,
