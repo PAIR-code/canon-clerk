@@ -187,6 +187,8 @@ pub fn parse_pr_context_from_event_path(
 }
 
 /// Resolves GitHub credentials, repository, PR metadata, and unified diff for `--github-pr [<NUMBER>]`.
+///
+/// Runs strictly at the CLI driving adapter boundary so `src/intake/` remains pure in-memory.
 pub fn resolve_github_pr_filing(
     pr_number_override: Option<u64>,
     repo_flag: Option<&str>,
