@@ -2111,6 +2111,18 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                 "--github-check-name",
                 "Custom Audit Check",
             ]);
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let summary_path =
+                std::env::temp_dir().join(format!("cc-check-step-summary-{unique}.md"));
+            let mut env = mock_github_env(addr);
+            env.insert(
+                "GITHUB_STEP_SUMMARY".to_string(),
+                summary_path.display().to_string(),
+            );
+
             let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
             let mut stdout = Vec::new();
             let err = run_audit_with_snapshot_and_provider(
@@ -2118,7 +2130,7 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                 &mut Cursor::new(failing_caseload_with_findings(65)),
                 &mut stdout,
                 &WorkspaceSnapshot::new(),
-                &mock_github_env(addr),
+                &env,
                 &provider,
             )
             .expect_err("failing verdict must exit 1");
@@ -2131,6 +2143,8 @@ diff --git a/.github/settings.yml b/.github/settings.yml
             assert!(out_str.contains("Pipeline Provenance:"));
             assert!(out_str.contains("Verdict: FAIL"));
             assert!(!out_str.contains("::error "));
+
+            assert_step_summary_contains_fail_report(&summary_path);
 
             let reqs = captured.lock().expect("lock");
             assert_eq!(reqs.len(), 2);
@@ -2164,6 +2178,14 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                     .len(),
                 15
             );
+        }
+
+        fn assert_step_summary_contains_fail_report(path: &std::path::Path) {
+            let step_summary =
+                fs::read_to_string(path).expect("step summary written alongside check");
+            assert!(step_summary.contains("### Canon Clerk Audit Gate: FAIL"));
+            assert!(step_summary.contains("Pipeline Provenance:"));
+            let _ = fs::remove_file(path);
         }
 
         #[test]
