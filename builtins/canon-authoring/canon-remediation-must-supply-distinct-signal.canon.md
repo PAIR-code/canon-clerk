@@ -1,6 +1,6 @@
 ---
 triggers:
-  - "**/.canons/**/*.md"
+  - "**/*.canon.md"
 inspect:
   - diff
 tags:

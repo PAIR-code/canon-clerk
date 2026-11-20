@@ -118,7 +118,7 @@ impl WorkspaceSnapshot {
         let key = options
             .source_ref
             .clone()
-            .unwrap_or_else(|| ".canons/unnamed.md".to_string());
+            .unwrap_or_else(|| ".canons/unnamed.canon.md".to_string());
         let canon = parse_canon_or_fallback(raw_markdown, options);
         if is_workspace_source_ref(&key) {
             self.existing_files.insert(key.clone());
@@ -188,7 +188,7 @@ impl WorkspaceSnapshot {
 
         let mut canons = BTreeMap::new();
         for rel_path in &existing_files {
-            if !rel_path.ends_with(".md") {
+            if !rel_path.ends_with(".canon.md") {
                 continue;
             }
             let matches_canon_domain = if explicit_matchers.is_empty() {
@@ -261,11 +261,12 @@ pub(crate) fn compile_canon_filter_globs(
             {
                 return Err(DiscoverError::PathEscapesWorkspace { path: raw.clone() });
             }
+            const CANON_EXT: &str = ".canon.md";
             let normalized_rest = if !is_wildcard_pattern(clean_rest)
-                && clean_rest.len() >= 3
-                && clean_rest[clean_rest.len() - 3..].eq_ignore_ascii_case(".md")
+                && clean_rest.len() >= CANON_EXT.len()
+                && clean_rest[clean_rest.len() - CANON_EXT.len()..].eq_ignore_ascii_case(CANON_EXT)
             {
-                &clean_rest[..clean_rest.len() - 3]
+                &clean_rest[..clean_rest.len() - CANON_EXT.len()]
             } else {
                 clean_rest
             };
@@ -280,11 +281,11 @@ pub(crate) fn compile_canon_filter_globs(
         let normalized = normalize_workspace_path(trimmed)
             .map_err(|_| DiscoverError::PathEscapesWorkspace { path: raw.clone() })?;
         compiled.push(GlobPattern::parse(&normalized)?);
-        if !normalized.ends_with(".md") && !is_wildcard_pattern(&normalized) {
+        if !normalized.ends_with(".canon.md") && !is_wildcard_pattern(&normalized) {
             let dir_glob = if normalized == "." {
                 DEFAULT_CANON_GLOB.to_string()
             } else {
-                format!("{normalized}/**/*.md")
+                format!("{normalized}/**/*.canon.md")
             };
             compiled.push(GlobPattern::parse(&dir_glob)?);
         }

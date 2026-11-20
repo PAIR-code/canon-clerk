@@ -50,7 +50,7 @@ fn test_cli_vet_guards_and_zero_candidate_short_circuit() {
         .args([
             "vet",
             "--canon",
-            ".canons/docs/readme-must-be-concise.md",
+            ".canons/docs/readme-must-be-concise.canon.md",
             "src/lib.rs",
             "--json",
         ])

@@ -150,21 +150,21 @@ for entry in "$BUILTINS_DIR"/* "$BUILTINS_DIR"/.*; do
     fi
 done
 
-# 2. Verify every allowlisted domain exists under builtins/ and contains at least one .md canon
+# 2. Verify every allowlisted domain exists under builtins/ and contains at least one .canon.md canon
 for dir in $ALLOWED_DOMAINS; do
     if [ ! -d "$BUILTINS_DIR/$dir" ]; then
         echo "FAIL: Allowlisted directory builtins/$dir/ is missing" >&2
         FAILED=1
         continue
     fi
-    md_count="$(find "$BUILTINS_DIR/$dir" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')"
-    if [ "$md_count" -eq 0 ]; then
-        echo "FAIL: Directory builtins/$dir/ contains no .md canon files" >&2
+    canon_count="$(find "$BUILTINS_DIR/$dir" -maxdepth 1 -type f -name '*.canon.md' | wc -l | tr -d ' ')"
+    if [ "$canon_count" -eq 0 ]; then
+        echo "FAIL: Directory builtins/$dir/ contains no .canon.md canon files" >&2
         FAILED=1
     fi
 done
 
-# 3. Verify no nested subdirectories and no non-.md files under builtins/<domain>/, and validate tags
+# 3. Verify no nested subdirectories and only *.canon.md (or optional README.md) under builtins/<domain>/, and validate tags
 for dir_path in "$BUILTINS_DIR"/*; do
     if [ ! -d "$dir_path" ]; then
         continue
@@ -184,9 +184,10 @@ for dir_path in "$BUILTINS_DIR"/*; do
             continue
         fi
         case "$base" in
-            *.md) ;;
+            *.canon.md) ;;
+            README.md) continue ;;
             *)
-                echo "FAIL: Non-Markdown file builtins/$dir/$base is forbidden under builtins/" >&2
+                echo "FAIL: Non-canon file builtins/$dir/$base is forbidden under builtins/ (expected *.canon.md or README.md)" >&2
                 FAILED=1
                 continue
                 ;;
@@ -228,8 +229,8 @@ for dir_path in "$BUILTINS_DIR"/*; do
     done
 done
 
-# 4. Verify .canons/ is flat (repo-local dogfood canons only) and every canon carries 'internal'
-local_md_count=0
+# 4. Verify .canons/ is flat (repo-local dogfood canons + optional README.md) and every canon carries 'internal'
+local_canon_count=0
 for entry in "$CANONS_DIR"/* "$CANONS_DIR"/.*; do
     base="$(basename "$entry")"
     case "$base" in
@@ -244,15 +245,16 @@ for entry in "$CANONS_DIR"/* "$CANONS_DIR"/.*; do
         continue
     fi
     case "$base" in
-        *.md) ;;
+        *.canon.md) ;;
+        README.md) continue ;;
         *)
-            echo "FAIL: Non-Markdown file .canons/$base is forbidden under .canons/" >&2
+            echo "FAIL: Non-canon file .canons/$base is forbidden under .canons/ (expected *.canon.md or README.md)" >&2
             FAILED=1
             continue
             ;;
     esac
 
-    local_md_count=$((local_md_count + 1))
+    local_canon_count=$((local_canon_count + 1))
     CHECKED=$((CHECKED + 1))
     rel=".canons/$base"
     tags="$(extract_tags "$entry")"
@@ -280,8 +282,8 @@ for entry in "$CANONS_DIR"/* "$CANONS_DIR"/.*; do
     fi
 done
 
-if [ "$local_md_count" -eq 0 ]; then
-    echo "FAIL: Directory .canons/ contains no .md canon files" >&2
+if [ "$local_canon_count" -eq 0 ]; then
+    echo "FAIL: Directory .canons/ contains no .canon.md canon files" >&2
     FAILED=1
 fi
 

@@ -21,7 +21,7 @@ use std::fmt;
 pub const DEFAULT_IGNORES: &[&str] = &["node_modules", "dist", ".bare", ".git", ".turbo", "target"];
 
 /// Default glob pattern used to discover repository Canon rule files.
-pub const DEFAULT_CANON_GLOB: &str = "**/.canons/**/*.md";
+pub const DEFAULT_CANON_GLOB: &str = "**/.canons/**/*.canon.md";
 
 /// Syntax error encountered while compiling a glob pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]

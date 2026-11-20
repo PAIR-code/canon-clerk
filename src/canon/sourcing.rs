@@ -50,18 +50,22 @@ pub struct CanonSourceInfo {
     /// Workspace-relative POSIX file path when `source_kind` is [`CanonSourceKind::Workspace`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
-    /// Path relative to the nearest enclosing `.canons/` directory or pack root (without `.md`).
+    /// Path relative to the nearest enclosing `.canons/` directory or pack root (without `.canon.md`).
     pub diagnostic_path: String,
-    /// File stem excluding directory components and `.md` extension.
+    /// File stem excluding directory components and `.canon.md` extension.
     pub file_stem: String,
     /// Monorepo package scope when the canon resides under `<scope>/.canons/`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<CanonScope>,
 }
 
-fn strip_md_ext(path: &str) -> &str {
-    if path.len() >= 3 && path[path.len() - 3..].eq_ignore_ascii_case(".md") {
-        &path[..path.len() - 3]
+const CANON_FILE_EXT: &str = ".canon.md";
+
+fn strip_canon_ext(path: &str) -> &str {
+    if path.len() >= CANON_FILE_EXT.len()
+        && path[path.len() - CANON_FILE_EXT.len()..].eq_ignore_ascii_case(CANON_FILE_EXT)
+    {
+        &path[..path.len() - CANON_FILE_EXT.len()]
     } else {
         path
     }
@@ -138,9 +142,9 @@ pub fn resolve_source_info(raw_ref: &str) -> Option<CanonSourceInfo> {
         CanonSourceKind::Builtin | CanonSourceKind::Pack(_) => None,
     };
 
-    let diagnostic_path = strip_md_ext(&rel_path).trim_matches('/').to_string();
+    let diagnostic_path = strip_canon_ext(&rel_path).trim_matches('/').to_string();
     let file_name = rel_path.rsplit('/').next().unwrap_or(&rel_path);
-    let file_stem = strip_md_ext(file_name).to_string();
+    let file_stem = strip_canon_ext(file_name).to_string();
 
     Some(CanonSourceInfo {
         source_ref,

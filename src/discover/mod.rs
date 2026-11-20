@@ -785,8 +785,26 @@ mod tests {
                 vec!["builtin:cli/cli-flags-must-use-positive-polarity".to_string()]
             );
 
-            // 2. Exact ref with optional .md suffix
-            let exact_md = execute_discover(
+            // 2. Exact ref with optional .canon.md suffix
+            let exact_canon_md = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec![
+                        "builtin:cli/cli-flags-must-use-positive-polarity.canon.md".to_string(),
+                    ],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("exact builtin ref with .canon.md");
+            assert_eq!(
+                exact_canon_md.discovery.expect("disc").candidate_canons,
+                vec!["builtin:cli/cli-flags-must-use-positive-polarity".to_string()]
+            );
+
+            // 2b. Plain .md suffix is strictly NOT stripped for builtin refs
+            let plain_md = execute_discover(
                 &DiscoverOptions {
                     all_canons: true,
                     canon_patterns: vec![
@@ -797,10 +815,13 @@ mod tests {
                 Caseload::new(),
                 &ws,
             )
-            .expect("exact builtin ref with .md");
-            assert_eq!(
-                exact_md.discovery.expect("disc").candidate_canons,
-                vec!["builtin:cli/cli-flags-must-use-positive-polarity".to_string()]
+            .expect("plain .md builtin ref");
+            assert!(
+                plain_md
+                    .discovery
+                    .expect("disc")
+                    .candidate_canons
+                    .is_empty()
             );
 
             // 3. Domain prefix (`builtin:cli`)
@@ -852,6 +873,80 @@ mod tests {
                 all_b.discovery.expect("disc").candidate_canons.len(),
                 crate::builtin::builtin_canons().len()
             );
+        }
+
+        #[test]
+        fn test_canon_authoring_triggers_match_builtins_and_local_canons_but_not_readme() {
+            let ws = WorkspaceSnapshot::new()
+                .with_file(".canons/README.md")
+                .with_file(".canons/local-rule.canon.md")
+                .with_file("builtins/cli/example-rule.canon.md")
+                .with_builtins();
+
+            // 1. Modifying builtins/**/*.canon.md triggers builtin:canon-authoring/*
+            let builtin_edit = Caseload::new().with_intake(CaseloadIntake {
+                target_paths: vec!["builtins/cli/example-rule.canon.md".to_string()],
+                ..CaseloadIntake::default()
+            });
+            let disc_builtin = execute_discover(
+                &DiscoverOptions {
+                    canon_patterns: vec!["builtin:canon-authoring".to_string()],
+                    include_builtins: true,
+                    ..DiscoverOptions::default()
+                },
+                builtin_edit,
+                &ws,
+            )
+            .expect("discover builtins canon edit")
+            .discovery
+            .expect("discovery");
+            assert!(
+                disc_builtin
+                    .candidate_canons
+                    .contains(&"builtin:canon-authoring/canons-must-be-atomic".to_string())
+            );
+
+            // 2. Modifying .canons/*.canon.md triggers builtin:canon-authoring/*
+            let local_edit = Caseload::new().with_intake(CaseloadIntake {
+                target_paths: vec![".canons/local-rule.canon.md".to_string()],
+                ..CaseloadIntake::default()
+            });
+            let disc_local = execute_discover(
+                &DiscoverOptions {
+                    canon_patterns: vec!["builtin:canon-authoring".to_string()],
+                    include_builtins: true,
+                    ..DiscoverOptions::default()
+                },
+                local_edit,
+                &ws,
+            )
+            .expect("discover local canon edit")
+            .discovery
+            .expect("discovery");
+            assert!(
+                disc_local
+                    .candidate_canons
+                    .contains(&"builtin:canon-authoring/canons-must-be-atomic".to_string())
+            );
+
+            // 3. Modifying non-canon .canons/README.md does NOT trigger builtin:canon-authoring/*
+            let readme_edit = Caseload::new().with_intake(CaseloadIntake {
+                target_paths: vec![".canons/README.md".to_string()],
+                ..CaseloadIntake::default()
+            });
+            let disc_readme = execute_discover(
+                &DiscoverOptions {
+                    canon_patterns: vec!["builtin:canon-authoring".to_string()],
+                    include_builtins: true,
+                    ..DiscoverOptions::default()
+                },
+                readme_edit,
+                &ws,
+            )
+            .expect("discover .canons/README.md edit")
+            .discovery
+            .expect("discovery");
+            assert!(disc_readme.candidate_canons.is_empty());
         }
     }
 }

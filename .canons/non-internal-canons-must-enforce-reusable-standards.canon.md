@@ -1,6 +1,6 @@
 ---
 triggers:
-  - "builtins/**/*.md"
+  - "builtins/**/*.canon.md"
 inspect:
   - diff
 tags:

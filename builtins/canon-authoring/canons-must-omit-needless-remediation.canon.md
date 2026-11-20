@@ -1,6 +1,6 @@
 ---
 triggers:
-  - "**/.canons/**/*.md"
+  - "**/*.canon.md"
 tags:
   - canon-authoring
 ---

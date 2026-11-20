@@ -467,12 +467,16 @@ mod tests {
         fn test_all_canons_validates_repository_corpus_and_exits_0() {
             let fixture = TempDir::new("all-canons");
             fixture.write_file(
-                ".canons/cli/flags-must-use-positive-polarity.md",
+                ".canons/cli/flags-must-use-positive-polarity.canon.md",
                 "---\ntriggers:\n  - \"src/cli/**/*.rs\"\ntags:\n  - cli\n---\nCLI flags MUST use positive polarity.\n",
             );
             fixture.write_file(
-                ".canons/rust/modules-must-document-public-items.md",
+                ".canons/rust/modules-must-document-public-items.canon.md",
                 "---\ntriggers:\n  - \"src/**/*.rs\"\ntags:\n  - rust\n---\nPublic items MUST include rustdoc comments.\n",
+            );
+            fixture.write_file(
+                ".canons/README.md",
+                "# Local Canons\n\nNon-canon docs must be ignored by validate.\n",
             );
 
             let args = ValidateArgs {
@@ -524,7 +528,7 @@ mod tests {
         fn test_github_actions_env_emits_annotations_and_populates_step_summary() {
             let fixture = TempDir::new("github-actions");
             fixture.write_file(
-                ".canons/security/tokens-must-expire.md",
+                ".canons/security/tokens-must-expire.canon.md",
                 "---\ntriggers:\n  - \"src/**/*.rs\"\ntags:\n  - security\n---\nTokens must expire within one hour.\n",
             );
             let summary_path = fixture.path().join("step-summary.md");
@@ -560,7 +564,7 @@ mod tests {
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(
                 rendered.contains(
-                    "::error file=.canons/security/tokens-must-expire.md,line=7,col=8,title=RFC 2119 Violation::"
+                    "::error file=.canons/security/tokens-must-expire.canon.md,line=7,col=8,title=RFC 2119 Violation::"
                 ),
                 "expected GitHub Actions workflow annotation, got: {rendered}"
             );

@@ -17,11 +17,11 @@
 /// A single curated standard canon embedded into the binary at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinCanon {
-    /// Canonical source-qualified reference (`builtin:<domain>/<stem>`, without `.md`).
+    /// Canonical source-qualified reference (`builtin:<domain>/<stem>`, without `.canon.md`).
     pub source_ref: &'static str,
     /// Domain pack directory name (e.g. `"cli"`, `"canon-authoring"`).
     pub domain: &'static str,
-    /// Canon file stem without `.md` extension.
+    /// Canon file stem without `.canon.md` extension.
     pub stem: &'static str,
     /// Raw UTF-8 Markdown source embedded via `include_str!`.
     pub raw_markdown: &'static str,
@@ -72,6 +72,7 @@ mod tests {
                 entry.source_ref,
                 format!("builtin:{}/{}", entry.domain, entry.stem)
             );
+            assert!(!entry.source_ref.ends_with(".canon.md"));
             assert!(!entry.source_ref.ends_with(".md"));
             assert!(!entry.raw_markdown.trim().is_empty());
             assert_eq!(find_builtin_canon(entry.source_ref), Some(entry));
@@ -99,7 +100,7 @@ mod tests {
                     continue;
                 }
                 let name = file_entry.file_name().to_string_lossy().into_owned();
-                if let Some(stem) = name.strip_suffix(".md") {
+                if let Some(stem) = name.strip_suffix(".canon.md") {
                     disk_refs.insert(format!("builtin:{domain}/{stem}"));
                 }
             }

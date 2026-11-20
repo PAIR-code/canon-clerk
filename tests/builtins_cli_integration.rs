@@ -46,7 +46,11 @@ fn test_cli_builtins_toggle_filtering_and_caseload_roundtrip() {
     assert!(
         with_cands
             .iter()
-            .any(|c| c == ".canons/cli/flags-must-use-positive-polarity.md")
+            .any(|c| c == ".canons/cli/flags-must-use-positive-polarity.canon.md")
+    );
+    assert!(
+        !with_cands.iter().any(|c| c == ".canons/README.md"),
+        "non-canon .canons/README.md must not be discovered"
     );
 
     // 2. --no-builtins excludes all embedded builtin:* canons

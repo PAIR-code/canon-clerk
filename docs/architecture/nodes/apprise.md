@@ -84,12 +84,12 @@ flowchart LR
    {
      "assessments": [
        {
-         "canon_path": ".canons/auth/cacheing-layers-must-have-configurable-expiry.md",
+         "canon_path": ".canons/auth/cacheing-layers-must-have-configurable-expiry.canon.md",
          "apprisal_summary": "Proposed round-robin dispatch introduces a dynamically updated provider cache, which must define explicit expiration policies.",
          "apprisal_score": 0.92
        },
        {
-         "canon_path": ".canons/auth/database-migrations-must-include-rollback-instructions.md",
+         "canon_path": ".canons/auth/database-migrations-must-include-rollback-instructions.canon.md",
          "apprisal_summary": "The planned refactor only modifies in-memory provider dispatch and does not alter database schemas or migrations.",
          "apprisal_score": 0.05
        }
