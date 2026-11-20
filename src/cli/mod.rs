@@ -43,10 +43,10 @@ pub use apprise::{
 };
 pub use args::{
     CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
-    ProviderTransportArgs, WorkspaceStateArg,
+    ProviderTransportArgs, ResolvedFilingSource, WorkspaceStateArg,
 };
 pub use audit::{
-    AuditArgs, AuditFormat, run_audit, run_audit_live_with_telemetry,
+    AuditArgs, AuditFormat, OnMissingCredentials, run_audit, run_audit_live_with_telemetry,
     run_audit_with_snapshot_and_provider, run_audit_with_telemetry,
 };
 pub use configure::{

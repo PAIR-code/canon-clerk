@@ -62,7 +62,7 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`), or an incoming `--caseload`.
+1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), GitHub pull request (`--github-pr [<number>]`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`), or an incoming `--caseload`.
    - **Missing Source Guard (Naked Invocation):** Invoking `canon-clerk intake` with zero sources fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance. The CLI never silently hangs waiting for input on a TTY.
    - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `target_paths: []`) and exits `0`.
 2. **Tendered Exhibits Cataloging:** Captures raw literal exhibits directly from the invocation context:
@@ -91,6 +91,10 @@ git diff origin/main --name-only | canon-clerk intake -
 # Ingest via unified diff stream:
 git diff origin/main | canon-clerk intake --diff -
 
+# Ingest natively from a GitHub pull request (Actions runner or explicit PR number):
+canon-clerk intake --github-pr
+canon-clerk intake --github-pr 42 --github-repo PAIR-code/canon-clerk
+
 # Ingest all repository files as target artifacts:
 canon-clerk intake --all-targets
 
@@ -100,16 +104,18 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 
 ### CLI Flags & Environment
 - `-` (Positional): Reads newline-delimited paths from stdin.
-- `--diff <path|->`: Ingests unified diff patch from file or stdin.
-- `--workspace-state <head|base>`: Declares whether the workspace on disk is already post-patch (`head`, default) or pre-patch (`base`, e.g., `pull_request_target` CI checkouts), instructing downstream stages to materialize `references:` files by applying `.intake.diffs` in memory onto base-branch files.
+- `--diff <path|->`: Ingests unified diff patch from file or stdin (mutually exclusive with `--github-pr`).
+- `--github-pr [<number>]`: Opt-in native GitHub pull request filing source (mutually exclusive with `--diff`; see [`../github.md` §3](../github.md#3-pull-request-diff--metadata-ingestion---github-pr)). Bare `--github-pr` extracts `pull_request.number`, `title`, `body`, and `head.sha` from `$GITHUB_EVENT_PATH`; `--github-pr <number>` fetches PR metadata via `GET /repos/{owner}/{repo}/pulls/{number}`. Both modes fetch the unified diff via `Accept: application/vnd.github.v3.diff` using `GITHUB_TOKEN` / `GH_TOKEN` and `GITHUB_API_URL`. Explicit `--pr-title`, `--pr-body`, and `--pr-body-file` override fetched metadata (`CLI flag > event/API metadata`).
+- `--github-repo <owner/repo>`: Target GitHub repository slug (fallback env: `GITHUB_REPOSITORY`), shared across `--github-pr` ingestion and `--publish-github-check`.
+- `--workspace-state <head|base>`: Declares whether the workspace on disk is already post-patch (`head`, default) or pre-patch (`base`, e.g., `pull_request_target` CI checkouts), instructing downstream stages to materialize `references:` files by applying `.intake.diffs` in memory onto base-branch files. When `--github-pr` is active and `--workspace-state` is omitted, defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"` (otherwise `head`); explicit `--workspace-state` always overrides.
 - `--intent <text>`: Ingests prospective design intent or plan description.
 - `--all-targets`: Ingests all repository files as target artifacts (used for full-repo sweeps).
-- `--pr-title <text>`: Ingests PR title text.
-- `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description.
+- `--pr-title <text>`: Ingests PR title text (overrides title fetched by `--github-pr`).
+- `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description (overrides body fetched by `--github-pr`).
 - `--caseload <path|->`: Ingests existing Caseload JSON.
 - `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
 - `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Successful intake (including an empty filing from a clean diff stream).
-- **2:** Usage error, missing input source (naked invocation), conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--caseload`), or corrupted diff/JSON stream.
+- **2:** Usage error, missing input source (naked invocation), conflicting `--diff` and `--github-pr`, conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--caseload`), missing/invalid GitHub token, repository, PR number, or `$GITHUB_EVENT_PATH` payload, GitHub API fetch failure, or corrupted diff/JSON stream.

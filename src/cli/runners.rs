@@ -229,6 +229,25 @@ pub(crate) fn resolve_closure_branch_b_options(
     })
 }
 
+/// Executes Branch B `configure`, preserving [`crate::configure::ConfigureError`] so callers such as
+/// `audit --on-missing-credentials skip` can distinguish missing API keys from other usage errors.
+pub(crate) fn run_branch_b_configure_checked(
+    options: &ConfigureOptions,
+    incoming: Option<Caseload>,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, crate::configure::ConfigureError> {
+    check_retired_env_vars(&options.env)?;
+    if let Some(existing) = incoming.as_ref()
+        && can_fast_forward_existing_config(options, existing.config.as_ref())
+    {
+        Ok(existing.clone())
+    } else {
+        telemetry.run_stage(PipelineStage::Configure, |_scope| {
+            execute_configure(options, incoming)
+        })
+    }
+}
+
 /// Executes Branch B `configure` stage, fast-forwarding if `.config` already satisfies `options.scope`
 /// and no explicit CLI overrides are specified.
 pub fn run_branch_b_configure(
@@ -236,16 +255,8 @@ pub fn run_branch_b_configure(
     incoming: Option<Caseload>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
-    check_retired_env_vars(&options.env).map_err(|err| CliError::usage(err.to_string()))?;
-    if let Some(existing) = incoming.as_ref()
-        && can_fast_forward_existing_config(options, existing.config.as_ref())
-    {
-        Ok(existing.clone())
-    } else {
-        telemetry.run_stage(PipelineStage::Configure, |_scope| {
-            execute_configure(options, incoming).map_err(|err| CliError::usage(err.to_string()))
-        })
-    }
+    run_branch_b_configure_checked(options, incoming, telemetry)
+        .map_err(|err| CliError::usage(err.to_string()))
 }
 
 /// Extracts and validates the active Gemini API key from resolved [`ConfigureOptions`].

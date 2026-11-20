@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Stage-agnostic GitHub Checks REST API outbound adapter (`POST` / `PATCH /repos/{owner}/{repo}/check-runs`).
+//! Stage-agnostic GitHub REST API outbound adapter (Pull Request ingestion and Checks publication).
 
 mod client;
+mod pull_request;
 
 use crate::caseload::{AnnotationLevel, CodeAnnotation};
 use serde::Serialize;
@@ -24,6 +25,12 @@ use std::fs;
 use std::path::Path;
 
 pub use client::GithubChecksClient;
+pub use pull_request::{
+    ENV_GITHUB_EVENT_NAME, GithubPullRequestEventContext, GithubPullRequestFetcher,
+    GithubPullRequestMetadata, GithubPullRequestTarget, ResolvedGithubPullRequest,
+    is_pull_request_target_event, parse_pr_context_from_event_path, parse_pr_event_json,
+    resolve_github_pr_filing,
+};
 
 /// Default GitHub REST API base URL (overridable via `GITHUB_API_URL` for GHES or mock servers).
 pub const DEFAULT_GITHUB_API_URL: &str = "https://api.github.com";
@@ -278,7 +285,7 @@ pub(crate) fn truncate_github_output(text: &str, max_chars: usize) -> String {
 }
 
 /// Parses and validates a GitHub `<owner>/<repo>` repository slug.
-fn parse_github_repository(raw: &str) -> Result<(String, String), GithubChecksError> {
+pub(crate) fn parse_github_repository(raw: &str) -> Result<(String, String), GithubChecksError> {
     let trimmed = raw.trim();
     let mut parts = trimmed.split('/');
     let owner = parts.next().unwrap_or("");
@@ -324,6 +331,17 @@ pub fn resolve_github_check_target(
     head_sha_flag: Option<&str>,
     env: &BTreeMap<String, String>,
 ) -> Result<GithubCheckTarget, GithubChecksError> {
+    resolve_github_check_target_with_fallback_sha(repo_flag, head_sha_flag, None, env)
+}
+
+/// Resolves and validates the [`GithubCheckTarget`], optionally falling back to a PR API `head.sha`
+/// (between `GITHUB_EVENT_PATH` and `GITHUB_SHA`) when `--github-pr` was used.
+pub fn resolve_github_check_target_with_fallback_sha(
+    repo_flag: Option<&str>,
+    head_sha_flag: Option<&str>,
+    fallback_pr_head_sha: Option<&str>,
+    env: &BTreeMap<String, String>,
+) -> Result<GithubCheckTarget, GithubChecksError> {
     let token = env_non_empty(env, ENV_GITHUB_TOKEN)
         .or_else(|| env_non_empty(env, ENV_GH_TOKEN))
         .ok_or_else(|| {
@@ -347,7 +365,7 @@ pub fn resolve_github_check_target(
         })?;
     let (owner, repo) = parse_github_repository(raw_repo)?;
 
-    let head_sha = resolve_head_sha(head_sha_flag, env)?;
+    let head_sha = resolve_head_sha(head_sha_flag, fallback_pr_head_sha, env)?;
 
     let api_base_url = env_non_empty(env, ENV_GITHUB_API_URL)
         .unwrap_or(DEFAULT_GITHUB_API_URL)
@@ -365,6 +383,7 @@ pub fn resolve_github_check_target(
 
 fn resolve_head_sha(
     head_sha_flag: Option<&str>,
+    fallback_pr_head_sha: Option<&str>,
     env: &BTreeMap<String, String>,
 ) -> Result<String, GithubChecksError> {
     if let Some(sha) = head_sha_flag.map(str::trim).filter(|s| !s.is_empty()) {
@@ -378,6 +397,13 @@ fn resolve_head_sha(
         return Ok(pr_sha);
     }
 
+    if let Some(pr_sha) = fallback_pr_head_sha
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(pr_sha.to_string());
+    }
+
     if let Some(sha) = env_non_empty(env, ENV_GITHUB_SHA) {
         return Ok(sha.to_string());
     }
@@ -389,7 +415,7 @@ fn resolve_head_sha(
     ))
 }
 
-fn env_non_empty<'a>(env: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
+pub(crate) fn env_non_empty<'a>(env: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
     env.get(key).map(|v| v.trim()).filter(|v| !v.is_empty())
 }
 

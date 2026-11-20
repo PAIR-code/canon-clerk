@@ -261,7 +261,10 @@ fn run_docket_core(
         .resolve_retry_policy(env, stored_config.as_ref())?;
 
     let incoming = args.io.read_caseload(stdin)?;
-    let intake_opts = args.filing.resolve_intake_options(stdin)?;
+    let intake_opts = args
+        .filing
+        .resolve_intake_options_with_env(stdin, env)?
+        .intake;
 
     if can_fast_forward_completed_docket(args, &intake_opts, incoming.as_ref())
         && let Some(completed) = incoming

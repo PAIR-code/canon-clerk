@@ -122,15 +122,18 @@ git diff origin/main | canon-clerk audit --diff - --format github --output-casel
 # 5. Publish all findings via the GitHub Checks REST API (batched 50/request) with forensics archiving:
 git diff origin/main | canon-clerk audit --diff - --publish-github-check --output-caseload caseload.json
 
-# 6. Replay a recorded Caseload to publish a GitHub Check Run with zero LLM spend:
+# 6. Native GitHub Actions PR audit with Check Run publication and graceful credential-skip:
+canon-clerk audit --github-pr --publish-github-check --on-missing-credentials skip --output-caseload caseload.json
+
+# 7. Replay a recorded Caseload to publish a GitHub Check Run with zero LLM spend:
 canon-clerk audit --caseload caseload.json --publish-github-check
 
-# 7. Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini 4 Carbon:
+# 8. Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini 4 Carbon:
 git diff origin/main | canon-clerk audit --diff - --provider typesafe --audit-model google:gemini-4-carbon
 ```
 
 ### Missing Input Source & Case-or-Controversy Guard
-`canon-clerk audit` requires an underlying filing (positional `TARGETS`, newline-delimited target paths via `-`, `--diff <PATH|->`, `--all-targets`, pull request metadata flags, or an incoming `--caseload <PATH|->` with `.intake` populated). Naked invocations or canon-only invocations lacking a concrete filing fail fast with exit code `2` (Usage Error) and print actionable remediation guidance:
+`canon-clerk audit` requires an underlying filing (positional `TARGETS`, newline-delimited target paths via `-`, `--diff <PATH|->`, `--github-pr [<NUMBER>]`, `--all-targets`, pull request metadata flags, or an incoming `--caseload <PATH|->` with `.intake` populated). Naked invocations or canon-only invocations lacking a concrete filing fail fast with exit code `2` (Usage Error) and print actionable remediation guidance:
 ```text
 error: No filing source provided for `audit`.
   Hint: Pipe a diff via standard input ('--diff -'), specify target paths ('src/...', '-', '--all-targets'),
@@ -140,7 +143,7 @@ Conversely, if an explicitly designated stream yields zero changes, `discover` m
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
-- `--diff <PATH|->`, `--workspace-state <head|base>`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
+- `--diff <PATH|->`, `--github-pr [<NUMBER>]`, `--github-repo <OWNER/REPO>` (`GITHUB_REPOSITORY`), `--workspace-state <head|base>`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags (see [`intake.md` §5](intake.md#5-driving-adapter-cli) and [`../github.md` §3](../github.md#3-pull-request-diff--metadata-ingestion---github-pr)).
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags (evaluated against the underlying filing).
 - `--audit-threshold <FLOAT>` (fallback env: `CANON_CLERK_AUDIT_THRESHOLD`; config key: `nodes.audit.threshold`): Substantive compliance threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure `--apprise-*` flags are rejected with exit code `2` and guidance pointing to `--audit-*`, `--vet-*`, `--admit-*`, and `--docket-*`.
 - `--audit-concurrency <COUNT>` (fallback env: `CANON_CLERK_AUDIT_CONCURRENCY`; config key: `nodes.audit.concurrency`): Optional positive integer (`>= 1`) bounding maximum concurrent in-flight contested trial slice calls (default: `4`). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).
@@ -148,10 +151,15 @@ Conversely, if an explicitly designated stream yields zero changes, `discover` m
 - `--admit-threshold <FLOAT>` (`CANON_CLERK_ADMIT_THRESHOLD`), `--admit-concurrency <COUNT>` (`CANON_CLERK_ADMIT_CONCURRENCY`), `--admit-model <PROVIDER:MODEL>` (`CANON_CLERK_ADMIT_MODEL`): Upstream micro evidentiary admissibility options accepted transitively for telescoping runs.
 - `--docket-threshold <FLOAT>` (`CANON_CLERK_DOCKET_THRESHOLD`), `--docket-batch-size <COUNT>` (`CANON_CLERK_DOCKET_BATCH_SIZE`), `--docket-concurrency <COUNT>` (`CANON_CLERK_DOCKET_CONCURRENCY`), `--docket-model <PROVIDER:MODEL>` (`CANON_CLERK_DOCKET_MODEL`): Upstream macro jurisdiction triage options accepted transitively for telescoping runs.
 - `--provider <SLUG>` (`CANON_CLERK_PROVIDER`; config key: `defaults.provider`), `--audit-model <PROVIDER:MODEL>` (`CANON_CLERK_AUDIT_MODEL`; config key: `nodes.audit.model`), `--thinking-level <minimal|low|medium|high>` (`CANON_CLERK_THINKING_LEVEL`), `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`), `--gemini-api-key <KEY>` (`GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`TYPESAFE_API_KEY`): Provider, `audit` node model, extended thinking, and credential options (resolved JIT only when heuristic evaluation is required).
+- `--on-missing-credentials <fail|skip>`: Behavior when heuristic evaluation is required but configured provider API credentials are absent (default: `fail`, exiting `2`). Deterministic pre-credential stages (`intake` $\to$ `discover` $\to$ `validate`) always execute first so static canon validation errors continue to fail with exit code `1`. When set to `skip`:
+  1. Flushes `--output-caseload <PATH>` (if configured) with the deterministic partial `Caseload` (`.intake`, `.discovery`, `.validation`).
+  2. Appends a `SKIPPED` Markdown summary to `$GITHUB_STEP_SUMMARY` when set.
+  3. Publishes a `CheckRunConclusion::Skipped` Check Run via the GitHub adapter when `--publish-github-check` is active.
+  4. Exits `0`.
 - `--max-retries <COUNT>` (`CANON_CLERK_MAX_RETRIES`; config key: `defaults.maxRetries`, default: `2`), `--max-backoff-ms <MS>` (`CANON_CLERK_MAX_BACKOFF_MS`; config key: `defaults.maxBackoffMs`, default: `90000`): Shared pooled transport retry and per-origin rate-limit cooldown bounds across heuristic stages ([`../transport.md` §6](../transport.md#6-out-of-band-telemetry--cli-transport-controls)).
 - `-v` / `--verbose` (`CANON_CLERK_VERBOSE`), `--log-file <PATH>` (`CANON_CLERK_LOG_FILE`): Global diagnostic progress and structured JSONL telemetry stream options; in `--format stylish`, `-v` additionally expands passing (`[pass]`) per-case detail blocks on `stdout`.
 - `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true` unless `--publish-github-check` is active, otherwise `stylish`).
-- `--publish-github-check`, `--github-repo <OWNER/REPO>` (`GITHUB_REPOSITORY`), `--github-head-sha <SHA>` (`GITHUB_EVENT_PATH` $\to$ `GITHUB_SHA`), `--github-check-name <NAME>` (default: `"Canon Clerk Audit"`): Opt-in GitHub Checks REST API publication controls (auth via `GITHUB_TOKEN` / `GH_TOKEN`, endpoint via `GITHUB_API_URL`; see [`../github.md`](../github.md) for target resolution, batching, and pre-flight validation).
+- `--publish-github-check`, `--github-head-sha <SHA>` (`GITHUB_EVENT_PATH` $\to$ fetched PR API `head.sha` $\to$ `GITHUB_SHA`), `--github-check-name <NAME>` (default: `"Canon Clerk Audit"`): Opt-in GitHub Checks REST API publication controls (shares `--github-repo` / `GITHUB_REPOSITORY`, auth via `GITHUB_TOKEN` / `GH_TOKEN`, endpoint via `GITHUB_API_URL`; see [`../github.md`](../github.md) for target resolution, batching, and pre-flight validation).
 - `--caseload <PATH|->`: Ingests upstream `Caseload` JSON from file or `-` for standard input.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of terminal `stdout` on both passing and failing runs (ideal for CI workflow artifact archiving with `if: always()`); flushed prior to GitHub Checks publication when `--publish-github-check` is enabled.
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
@@ -163,10 +171,10 @@ Conversely, if an explicitly designated stream yields zero changes, `discover` m
   1. Emits native GitHub Actions workflow command annotations (`::error file=...,line=...,endLine=...,col=...,title=...::...`, `::warning ...`, `::notice ...`) for each `CodeAnnotation` on `stdout`.
   2. Appends the rendered Markdown Funnel Provenance Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY` when configured—displaying failing case decrees in the primary Markdown table while collapsing passing case decrees inside a `<details>` disclosure block.
   3. Persists the full cumulative `Caseload` JSON via `--output-caseload <PATH>` independently of exit status.
-- **GitHub Checks Publication (`--publish-github-check`):** Delegates Check Run delivery to the shared GitHub adapter ([`../github.md`](../github.md)), mapping `audit` outcomes as follows: `VerdictStatus::Pass` (including zero-candidate short-circuits) $\to$ `success`, `VerdictStatus::Fail` $\to$ `failure`, and candidate canon static validation failures (`validation.has_errors == true`) $\to$ `failure` (attaching validation diagnostics as inline annotations), with the Funnel Provenance receipt and Markdown decree table in `output.summary` and the complete per-finding list in `output.text`.
+- **GitHub Checks Publication (`--publish-github-check`):** Delegates Check Run delivery to the shared GitHub adapter ([`../github.md`](../github.md)), mapping `audit` outcomes as follows: `VerdictStatus::Pass` (including zero-candidate short-circuits) $\to$ `success`, `VerdictStatus::Fail` $\to$ `failure`, candidate canon static validation failures (`validation.has_errors == true`) $\to$ `failure` (attaching validation diagnostics as inline annotations), and missing provider credentials under `--on-missing-credentials skip` $\to$ `skipped`, with the Funnel Provenance receipt and Markdown decree table in `output.summary` and the complete per-finding list in `output.text`.
 - **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON envelope containing all structured `.verdict` adjudications (both passing and failing) and annotations.
 
 ### CLI Exit Codes
-- **0:** All active cases pass (`status: "pass"`, `compliance_score >= --audit-threshold`), or 0 contested trials required due to clean upstream short-circuits (0 changes, 0 candidate canons, empty docket, 0 admitted exhibits, or all active cases cleared by `vet`).
+- **0:** All active cases pass (`status: "pass"`, `compliance_score >= --audit-threshold`), 0 contested trials required due to clean upstream short-circuits (0 changes, 0 candidate canons, empty docket, 0 admitted exhibits, or all active cases cleared by `vet`), or live evaluation cleanly skipped via `--on-missing-credentials skip` after passing deterministic `validate`.
 - **1:** Substantive canon violation detected (`.verdict.status == "fail"`), candidate canon static validation failure (`validation.has_errors` is `true`, evaluated before checking API credentials), or local workspace I/O runtime error.
-- **2:** Usage error, missing filing source or Case-or-Controversy guard violation, invalid or out-of-range threshold/concurrency/batch flags, invalid `--max-retries` / `--max-backoff-ms`, invalid `<provider>:<model>` specifier, rejected unqualified or out-of-closure `--apprise-*` flag, conflicting `stdin` operands, unprovisioned or `Discriminator` `--audit-model`, missing API credentials, GitHub Checks target validation or API publication failure ([`../github.md`](../github.md)), or model provider error.
+- **2:** Usage error, missing filing source or Case-or-Controversy guard violation, invalid or out-of-range threshold/concurrency/batch flags, invalid `--max-retries` / `--max-backoff-ms`, invalid `<provider>:<model>` specifier, rejected unqualified or out-of-closure `--apprise-*` flag, conflicting `stdin` operands, unprovisioned or `Discriminator` `--audit-model`, missing API credentials (under default `--on-missing-credentials fail`), GitHub PR ingestion or Checks target validation/API failure ([`../github.md`](../github.md)), or model provider error.
