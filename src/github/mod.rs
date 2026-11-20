@@ -26,10 +26,10 @@ use std::path::Path;
 
 pub use client::GithubChecksClient;
 pub use pull_request::{
-    ENV_GITHUB_EVENT_NAME, GithubPullRequestEventContext, GithubPullRequestFetcher,
-    GithubPullRequestMetadata, GithubPullRequestTarget, ResolvedGithubPullRequest,
-    is_pull_request_target_event, parse_pr_context_from_event_path, parse_pr_event_json,
-    resolve_github_pr_filing,
+    ENV_GITHUB_ACTOR, ENV_GITHUB_EVENT_NAME, GithubBypassMatch, GithubPullRequestEventContext,
+    GithubPullRequestFetcher, GithubPullRequestMetadata, GithubPullRequestTarget,
+    ResolvedGithubPullRequest, detect_github_bypass_label, is_pull_request_target_event,
+    parse_pr_context_from_event_path, parse_pr_event_json, resolve_github_pr_filing,
 };
 
 /// Default GitHub REST API base URL (overridable via `GITHUB_API_URL` for GHES or mock servers).
@@ -37,6 +37,12 @@ pub const DEFAULT_GITHUB_API_URL: &str = "https://api.github.com";
 
 /// Default GitHub Check Run name published by `canon-clerk audit`.
 pub const DEFAULT_GITHUB_CHECK_NAME: &str = "Canon Clerk Audit";
+
+/// Default GitHub pull request label name used when `--github-bypass-label` is passed without a value.
+pub const DEFAULT_GITHUB_BYPASS_LABEL: &str = "skip-audit";
+
+/// Environment variable supplying a fallback GitHub PR bypass label name when `--github-bypass-label` is omitted.
+pub const ENV_CANON_CLERK_GITHUB_BYPASS_LABEL: &str = "CANON_CLERK_GITHUB_BYPASS_LABEL";
 
 /// Environment variable overriding the GitHub REST API base URL.
 pub const ENV_GITHUB_API_URL: &str = "GITHUB_API_URL";

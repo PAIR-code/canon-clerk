@@ -33,12 +33,13 @@ use crate::cli::closure::{
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::node_args::{AuditNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::discover::WorkspaceSnapshot;
+use crate::github::detect_github_bypass_label;
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use finalize::{
     AuditOutputContext, finalize_cascade_result, finalize_verdict_and_exit_code,
-    finish_zero_candidate_audit, handle_validation_failure,
+    finish_bypassed_github_label, finish_zero_candidate_audit, handle_validation_failure,
 };
 use guards::{
     can_fast_forward_completed_audit, enforce_filing_and_case_guard,
@@ -329,6 +330,49 @@ pub fn run_audit(
     run_audit_live_with_telemetry(args, stdin, stdout, &TelemetrySession::noop())
 }
 
+fn try_preflight_short_circuits(
+    args: &AuditArgs,
+    resolved_filing: &crate::cli::github_args::ResolvedFilingSource,
+    bypass_label: Option<&str>,
+    incoming: &mut Option<Caseload>,
+    thresholds: stages::AuditCascadeThresholds,
+    output_ctx: &mut AuditOutputContext<'_>,
+    telemetry: &TelemetrySession<'_>,
+) -> Option<Result<Caseload, CliError>> {
+    if can_fast_forward_completed_audit(args, &resolved_filing.intake, incoming.as_ref())
+        && let Some(completed) = incoming.take()
+    {
+        telemetry.finish_pipeline();
+        let wm = AuditWatermarks::pre_populated(
+            thresholds.docket_threshold,
+            thresholds.admit_threshold,
+            thresholds.vet_threshold,
+            thresholds.audit_threshold,
+            completed.vetting.is_some(),
+        );
+        return Some(finalize_verdict_and_exit_code(
+            args, completed, &wm, output_ctx,
+        ));
+    }
+
+    if let Some(bypass) = detect_github_bypass_label(
+        bypass_label,
+        resolved_filing.fetched_pr_labels.as_deref(),
+        resolved_filing.fetched_pr_actor.as_deref(),
+        output_ctx.env,
+    ) {
+        telemetry.finish_pipeline();
+        return Some(finish_bypassed_github_label(
+            args,
+            incoming.take().unwrap_or_default(),
+            &bypass,
+            output_ctx,
+        ));
+    }
+
+    None
+}
+
 fn run_audit_core(
     args: &AuditArgs,
     stdin: &mut dyn Read,
@@ -341,9 +385,9 @@ fn run_audit_core(
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let (thresholds, stored_config) = resolve_and_validate_audit_cli_params(args, env)?;
-    let incoming = args.io.read_caseload(stdin)?;
+    let bypass_label = args.github_check.resolve_bypass_label(env)?;
+    let mut incoming = args.io.read_caseload(stdin)?;
     let resolved_filing = args.filing.resolve_intake_options_with_env(stdin, env)?;
-    let intake_opts = resolved_filing.intake;
     let github_target = args.github_check.resolve_target(
         args.filing.github_repo.as_deref(),
         resolved_filing.fetched_pr_head_sha.as_deref(),
@@ -355,19 +399,19 @@ fn run_audit_core(
         github_target: github_target.as_ref(),
     };
 
-    if can_fast_forward_completed_audit(args, &intake_opts, incoming.as_ref())
-        && let Some(completed) = incoming
-    {
-        telemetry.finish_pipeline();
-        let wm = AuditWatermarks::pre_populated(
-            thresholds.docket_threshold,
-            thresholds.admit_threshold,
-            thresholds.vet_threshold,
-            thresholds.audit_threshold,
-            completed.vetting.is_some(),
-        );
-        return finalize_verdict_and_exit_code(args, completed, &wm, &mut output_ctx);
+    if let Some(res) = try_preflight_short_circuits(
+        args,
+        &resolved_filing,
+        bypass_label.as_deref(),
+        &mut incoming,
+        thresholds,
+        &mut output_ctx,
+        telemetry,
+    ) {
+        return res;
     }
+
+    let intake_opts = resolved_filing.intake;
 
     enforce_filing_and_case_guard(&intake_opts, &args.canons, incoming.as_ref())?;
 
@@ -2540,6 +2584,311 @@ diff --git a/.github/settings.yml b/.github/settings.yml
             )
             .expect_err("default fail-closed behavior must exit 2");
 
+            assert_eq!(err.exit_code(), 2);
+            assert_eq!(provider.call_count(), 0);
+        }
+    }
+
+    mod github_bypass_label {
+        use super::*;
+        use crate::github::{
+            DEFAULT_GITHUB_BYPASS_LABEL, ENV_GITHUB_ACTOR, ENV_GITHUB_API_URL,
+            ENV_GITHUB_EVENT_PATH, ENV_GITHUB_REPOSITORY, ENV_GITHUB_TOKEN,
+        };
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+
+        fn spawn_mock_github_server(
+            responses: Vec<(&'static str, &'static str, String)>,
+        ) -> (
+            std::net::SocketAddr,
+            Arc<Mutex<Vec<Value>>>,
+            thread::JoinHandle<()>,
+        ) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let captured_posts = Arc::new(Mutex::new(Vec::<Value>::new()));
+            let captured_server = Arc::clone(&captured_posts);
+
+            let server = thread::spawn(move || {
+                for (status, ctype, body) in responses {
+                    let (mut stream, _) = listener.accept().expect("accept request");
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    let mut header_end = None;
+                    let mut content_length = 0usize;
+                    while header_end.is_none() {
+                        let n = stream.read(&mut tmp).expect("read");
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            header_end = Some(pos + 4);
+                            let headers = String::from_utf8_lossy(&buf[..pos]);
+                            for line in headers.lines() {
+                                if let Some((k, v)) = line.split_once(':')
+                                    && k.eq_ignore_ascii_case("content-length")
+                                {
+                                    content_length = v.trim().parse().unwrap_or(0);
+                                }
+                            }
+                        }
+                    }
+                    let start = header_end.expect("headers");
+                    while buf.len() < start + content_length {
+                        let n = stream.read(&mut tmp).expect("read body");
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                    }
+                    if content_length > 0 {
+                        let parsed: Value =
+                            serde_json::from_slice(&buf[start..start + content_length])
+                                .expect("POST JSON body");
+                        captured_server.lock().unwrap().push(parsed);
+                    }
+                    let resp = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream.write_all(resp.as_bytes()).expect("write response");
+                }
+            });
+
+            (addr, captured_posts, server)
+        }
+
+        fn assert_bypass_check_run_post(
+            captured_posts: &Arc<Mutex<Vec<Value>>>,
+            expected_sha: &str,
+            expected_label: &str,
+            expected_actor: &str,
+        ) {
+            let posts = captured_posts.lock().unwrap();
+            assert_eq!(posts.len(), 1);
+            let check_body = &posts[0];
+            assert_eq!(check_body["conclusion"], "skipped");
+            assert_eq!(check_body["head_sha"], expected_sha);
+            assert!(
+                check_body["output"]["title"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains(expected_label)
+            );
+            assert!(
+                check_body["output"]["summary"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains(expected_actor)
+            );
+            assert_eq!(check_body["output"]["annotations"], json!([]));
+        }
+
+        #[test]
+        fn test_bypass_label_in_event_short_circuits_before_validate_and_llm_spend() {
+            // Bare --github-pr fetches diff (1 GET), then publishes Check Run (1 POST).
+            let (addr, captured_posts, server) = spawn_mock_github_server(vec![
+                (
+                    "200 OK",
+                    "text/plain",
+                    "diff --git a/src/cli/audit.rs b/src/cli/audit.rs\n--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1 +1 @@\n-old\n+new\n"
+                        .to_string(),
+                ),
+                ("201 Created", "application/json", r#"{"id":901}"#.to_string()),
+            ]);
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let event_path = std::env::temp_dir().join(format!("cc-bypass-e2e-{unique}.json"));
+            let summary_path = std::env::temp_dir().join(format!("cc-bypass-summary-{unique}.md"));
+            let out_path = std::env::temp_dir().join(format!("cc-bypass-caseload-{unique}.json"));
+            let out_str = out_path.display().to_string();
+
+            fs::write(
+                &event_path,
+                r#"{"sender":{"login":"maintainer-bob"},"pull_request":{"number":360,"title":"hotfix: bypass test","head":{"sha":"bypass-head-sha-360"},"labels":[{"name":"Skip-Audit"}]}}"#,
+            )
+            .expect("write event file");
+
+            // Workspace intentionally contains a broken canon AND no GEMINI_API_KEY:
+            // label bypass must still short-circuit cleanly with exit 0 and 0 model calls.
+            let broken_ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\nid: [unterminated\n---\n# Broken\nMust hold.\n",
+                    &ParseCanonOptions::with_source_ref(".canons/broken.md"),
+                )
+                .with_file("src/cli/audit.rs");
+
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_API_URL.to_string(), format!("http://{addr}"));
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "ghs_test".to_string());
+            env.insert(
+                ENV_GITHUB_REPOSITORY.to_string(),
+                "PAIR-code/canon-clerk".to_string(),
+            );
+            env.insert(
+                ENV_GITHUB_EVENT_PATH.to_string(),
+                event_path.display().to_string(),
+            );
+            env.insert(
+                "GITHUB_STEP_SUMMARY".to_string(),
+                summary_path.display().to_string(),
+            );
+
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "--github-pr",
+                "--publish-github-check",
+                "--github-bypass-label",
+                "--output-caseload",
+                &out_str,
+            ]);
+
+            let mut stdout = Vec::new();
+            let caseload = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &broken_ws,
+                &env,
+                &provider,
+            )
+            .expect("bypass label must short-circuit with exit 0");
+
+            server.join().expect("mock server joined");
+
+            assert_eq!(provider.call_count(), 0);
+            assert!(caseload.validation.is_none());
+            assert!(caseload.verdict.is_none());
+            assert!(out_path.exists());
+
+            let rendered = String::from_utf8(stdout).expect("utf8 stdout");
+            assert!(rendered.contains("SKIPPED") && rendered.contains("Skip-Audit"));
+            let step_md = fs::read_to_string(&summary_path).expect("step summary");
+            assert!(step_md.contains("Skip-Audit") && step_md.contains("@maintainer-bob"));
+            assert_bypass_check_run_post(
+                &captured_posts,
+                "bypass-head-sha-360",
+                "Skip-Audit",
+                "@maintainer-bob",
+            );
+
+            let _ = fs::remove_file(&event_path);
+            let _ = fs::remove_file(&summary_path);
+            let _ = fs::remove_file(&out_path);
+        }
+
+        #[test]
+        fn test_bypass_label_from_numbered_pr_api_and_non_matching_label_does_not_bypass() {
+            // Explicit --github-pr 360 fetches metadata (1 GET), diff (1 GET), then posts Check Run (1 POST).
+            let (addr, captured_posts, server) = spawn_mock_github_server(vec![
+                (
+                    "200 OK",
+                    "application/json",
+                    r#"{"title":"hotfix","body":"urgent","head":{"sha":"api-bypass-sha"},"labels":[{"name":"emergency-bypass"}]}"#
+                        .to_string(),
+                ),
+                (
+                    "200 OK",
+                    "text/plain",
+                    "diff --git a/src/cli/audit.rs b/src/cli/audit.rs\n--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1 +1 @@\n-old\n+new\n"
+                        .to_string(),
+                ),
+                ("201 Created", "application/json", r#"{"id":902}"#.to_string()),
+            ]);
+
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_API_URL.to_string(), format!("http://{addr}"));
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "ghs_test".to_string());
+            env.insert(ENV_GITHUB_ACTOR.to_string(), "release-bot".to_string());
+
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "--github-pr",
+                "360",
+                "--github-repo",
+                "PAIR-code/canon-clerk",
+                "--publish-github-check",
+                "--github-bypass-label",
+                "emergency-bypass",
+            ]);
+
+            let mut stdout = Vec::new();
+            run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect("custom bypass label via PR API must exit 0");
+            server.join().expect("mock server joined");
+
+            assert_eq!(provider.call_count(), 0);
+            let posts = captured_posts.lock().unwrap();
+            assert_eq!(posts.len(), 1);
+            assert_eq!(posts[0]["conclusion"], "skipped");
+            assert_eq!(posts[0]["head_sha"], "api-bypass-sha");
+            assert!(
+                posts[0]["output"]["summary"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("emergency-bypass")
+            );
+            assert!(
+                posts[0]["output"]["summary"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("@release-bot")
+            );
+
+            // When label is absent, audit does NOT bypass (proceeds to missing-credentials exit 2).
+            let mut no_match_env = BTreeMap::new();
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let no_label_event =
+                std::env::temp_dir().join(format!("cc-no-bypass-event-{unique}.json"));
+            fs::write(
+                &no_label_event,
+                r#"{"pull_request":{"number":360,"head":{"sha":"sha1"},"labels":[{"name":"type: feat"}]}}"#,
+            )
+            .expect("write event");
+            no_match_env.insert(
+                ENV_GITHUB_EVENT_PATH.to_string(),
+                no_label_event.display().to_string(),
+            );
+            let non_bypass_args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "src/cli/audit.rs",
+                "--github-bypass-label",
+                DEFAULT_GITHUB_BYPASS_LABEL,
+            ]);
+            let mut out2 = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &non_bypass_args,
+                &mut Cursor::new(b""),
+                &mut out2,
+                &ws,
+                &no_match_env,
+                &provider,
+            )
+            .expect_err("non-matching label must not bypass");
+            let _ = fs::remove_file(&no_label_event);
             assert_eq!(err.exit_code(), 2);
             assert_eq!(provider.call_count(), 0);
         }

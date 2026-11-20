@@ -20,22 +20,26 @@ use crate::cli::CliError;
 use crate::cli::args::FilingSourceArgs;
 use crate::cli::io::{read_operand_source, resolve_target_operands};
 use crate::github::{
-    DEFAULT_GITHUB_CHECK_NAME, GithubCheckTarget, GithubChecksClient, GithubPullRequestFetcher,
-    is_pull_request_target_event, resolve_github_check_target_with_fallback_sha,
-    resolve_github_pr_filing,
+    DEFAULT_GITHUB_BYPASS_LABEL, DEFAULT_GITHUB_CHECK_NAME, ENV_CANON_CLERK_GITHUB_BYPASS_LABEL,
+    GithubCheckTarget, GithubChecksClient, GithubPullRequestFetcher, is_pull_request_target_event,
+    resolve_github_check_target_with_fallback_sha, resolve_github_pr_filing,
 };
 use crate::intake::IntakeOptions;
 use clap::Args;
 use std::collections::BTreeMap;
 use std::io::Read;
 
-/// Resolved filing options alongside optional PR head commit SHA fetched via `--github-pr`.
+/// Resolved filing options alongside optional PR metadata fetched via `--github-pr`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedFilingSource {
     /// Pure in-memory domain [`IntakeOptions`] descriptor passed to `src/intake/`.
     pub intake: IntakeOptions,
     /// Optional pull request head commit SHA resolved from `$GITHUB_EVENT_PATH` or the GitHub PR API.
     pub fetched_pr_head_sha: Option<String>,
+    /// Optional pull request label names resolved from `$GITHUB_EVENT_PATH` or the GitHub PR API.
+    pub fetched_pr_labels: Option<Vec<String>>,
+    /// Optional event actor login resolved from `$GITHUB_EVENT_PATH` (`sender.login`).
+    pub fetched_pr_actor: Option<String>,
 }
 
 /// Resolves [`FilingSourceArgs`] into a pure [`IntakeOptions`] descriptor and optional fetched PR head SHA,
@@ -94,6 +98,8 @@ pub(crate) fn resolve_filing_source_with_fetcher(
                 linked_issues: None,
             },
             fetched_pr_head_sha: resolved.metadata.head_sha,
+            fetched_pr_labels: Some(resolved.metadata.labels),
+            fetched_pr_actor: resolved.metadata.actor,
         });
     }
 
@@ -114,6 +120,8 @@ pub(crate) fn resolve_filing_source_with_fetcher(
             linked_issues: None,
         },
         fetched_pr_head_sha: None,
+        fetched_pr_labels: None,
+        fetched_pr_actor: None,
     })
 }
 
@@ -157,6 +165,17 @@ pub struct GithubCheckArgs {
         help = "GitHub Check Run name (default: 'Canon Clerk Audit')"
     )]
     pub github_check_name: Option<String>,
+
+    /// Pull request label that bypasses audit evaluation and publishes a `skipped` Check Run (bare flag defaults to `"skip-audit"`; fallback env: `CANON_CLERK_GITHUB_BYPASS_LABEL`).
+    #[arg(
+        long = "github-bypass-label",
+        value_name = "LABEL",
+        num_args = 0..=1,
+        default_missing_value = DEFAULT_GITHUB_BYPASS_LABEL,
+        help_heading = "GitHub Checks Publication",
+        help = "PR label that bypasses audit and publishes a skipped Check Run (bare flag defaults to 'skip-audit'; fallback env: CANON_CLERK_GITHUB_BYPASS_LABEL)"
+    )]
+    pub github_bypass_label: Option<String>,
 }
 
 impl GithubCheckArgs {
@@ -188,6 +207,30 @@ impl GithubCheckArgs {
             .filter(|s| !s.is_empty())
             .unwrap_or(DEFAULT_GITHUB_CHECK_NAME)
             .to_string()
+    }
+
+    /// Resolves the optional PR bypass label (`--github-bypass-label` > `CANON_CLERK_GITHUB_BYPASS_LABEL`).
+    pub fn resolve_bypass_label(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<Option<String>, CliError> {
+        if let Some(raw) = &self.github_bypass_label {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Err(CliError::usage(format!(
+                    "Invalid empty value for `--github-bypass-label`.\n  \
+                     Hint: Pass a non-empty GitHub PR label name (e.g., `--github-bypass-label {DEFAULT_GITHUB_BYPASS_LABEL}`) or omit the flag."
+                )));
+            }
+            return Ok(Some(trimmed.to_string()));
+        }
+
+        let from_env = env
+            .get(ENV_CANON_CLERK_GITHUB_BYPASS_LABEL)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+        Ok(from_env)
     }
 }
 
@@ -286,6 +329,8 @@ mod tests {
                 title: Some("API title".to_string()),
                 body: Some("API body".to_string()),
                 head_sha: Some("pr-head-sha-123".to_string()),
+                labels: vec!["skip-audit".to_string()],
+                actor: None,
             },
             diff: "diff --git a/src/lib.rs b/src/lib.rs\n".to_string(),
         };
@@ -353,5 +398,88 @@ mod tests {
             .expect("resolve check target")
             .expect("some target");
         assert_eq!(target.head_sha, "pr-head-sha-123");
+    }
+
+    mod bypass_label_cli_args {
+        use super::*;
+
+        #[test]
+        fn test_bypass_label_flag_defaults_overrides_and_env_fallback() {
+            let bare = Cli::try_parse_from([
+                "canon-clerk",
+                "audit",
+                "--github-pr",
+                "--publish-github-check",
+                "--github-bypass-label",
+            ])
+            .expect("bare --github-bypass-label must parse");
+            let empty_env = BTreeMap::new();
+            match bare.command {
+                Some(Commands::Audit(args)) => {
+                    assert_eq!(
+                        args.github_check
+                            .resolve_bypass_label(&empty_env)
+                            .expect("resolve bare"),
+                        Some(DEFAULT_GITHUB_BYPASS_LABEL.to_string())
+                    );
+                }
+                _ => panic!("expected Audit"),
+            }
+
+            let explicit = Cli::try_parse_from([
+                "canon-clerk",
+                "audit",
+                "--github-pr",
+                "--github-bypass-label",
+                "emergency-bypass",
+            ])
+            .expect("explicit --github-bypass-label must parse");
+            let mut env_with_fallback = BTreeMap::new();
+            env_with_fallback.insert(
+                ENV_CANON_CLERK_GITHUB_BYPASS_LABEL.to_string(),
+                "env-bypass".to_string(),
+            );
+            match explicit.command {
+                Some(Commands::Audit(args)) => {
+                    assert_eq!(
+                        args.github_check
+                            .resolve_bypass_label(&env_with_fallback)
+                            .expect("flag overrides env"),
+                        Some("emergency-bypass".to_string())
+                    );
+                }
+                _ => panic!("expected Audit"),
+            }
+
+            let omitted = Cli::try_parse_from(["canon-clerk", "audit", "--github-pr"])
+                .expect("omitted flag must parse");
+            match omitted.command {
+                Some(Commands::Audit(args)) => {
+                    assert_eq!(
+                        args.github_check
+                            .resolve_bypass_label(&empty_env)
+                            .expect("disabled by default"),
+                        None
+                    );
+                    assert_eq!(
+                        args.github_check
+                            .resolve_bypass_label(&env_with_fallback)
+                            .expect("env fallback"),
+                        Some("env-bypass".to_string())
+                    );
+                }
+                _ => panic!("expected Audit"),
+            }
+
+            let empty_flag = GithubCheckArgs {
+                github_bypass_label: Some("   ".to_string()),
+                ..GithubCheckArgs::default()
+            };
+            let err = empty_flag
+                .resolve_bypass_label(&empty_env)
+                .expect_err("whitespace-only bypass label must fail fast");
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("Hint:"));
+        }
     }
 }

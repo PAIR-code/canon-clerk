@@ -15,7 +15,8 @@
 //! Terminal Caseload flushing, output rendering, GitHub Check publication, and exit-code finalization for `canon-clerk audit`.
 
 use super::github_check::{
-    format_missing_credentials_skip_markdown, publish_github_check_if_enabled,
+    format_bypass_label_skip_markdown, format_missing_credentials_skip_markdown,
+    publish_bypassed_github_check_if_enabled, publish_github_check_if_enabled,
     publish_skipped_github_check_if_enabled,
 };
 use super::render::{AuditWatermarks, render_audit_output, resolve_effective_format};
@@ -27,7 +28,7 @@ use crate::caseload::{
 };
 use crate::cli::CliError;
 use crate::cli::provenance::StageDisposition;
-use crate::github::GithubCheckTarget;
+use crate::github::{GithubBypassMatch, GithubCheckTarget};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -190,6 +191,55 @@ pub(super) fn finish_skipped_missing_credentials(
     }
 
     publish_skipped_github_check_if_enabled(args, missing_provider_slug, output_ctx.github_target)?;
+    Ok(caseload)
+}
+
+pub(super) fn finish_bypassed_github_label(
+    args: &AuditArgs,
+    caseload: Caseload,
+    bypass: &GithubBypassMatch,
+    output_ctx: &mut AuditOutputContext<'_>,
+) -> Result<Caseload, CliError> {
+    args.io.write_output_caseload(&caseload)?;
+
+    match resolve_effective_format(args, output_ctx.env) {
+        AuditFormat::Json => {
+            let serialized = serde_json::to_string_pretty(&caseload).map_err(|err| {
+                CliError::runtime(format!("Failed to serialize Caseload JSON: {err}"))
+            })?;
+            writeln!(output_ctx.stdout, "{serialized}")
+                .map_err(|err| CliError::runtime(format!("Failed to write to stdout: {err}")))?;
+        }
+        AuditFormat::Compact => {}
+        AuditFormat::Stylish | AuditFormat::Github => {
+            let actor_clause = bypass
+                .actor
+                .as_deref()
+                .map(|actor| format!(" by @{actor}"))
+                .unwrap_or_default();
+            writeln!(
+                output_ctx.stdout,
+                "Canon Clerk Audit: SKIPPED (bypassed via pull request label `{}`{actor_clause})",
+                bypass.label
+            )
+            .map_err(|err| CliError::runtime(format!("Failed to write to stdout: {err}")))?;
+        }
+    }
+
+    if let Some(summary_path) = output_ctx
+        .env
+        .get("GITHUB_STEP_SUMMARY")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        && let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(Path::new(summary_path))
+    {
+        let _ = file.write_all(format_bypass_label_skip_markdown(bypass).as_bytes());
+    }
+
+    publish_bypassed_github_check_if_enabled(args, bypass, output_ctx.github_target)?;
     Ok(caseload)
 }
 
