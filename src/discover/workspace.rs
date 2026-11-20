@@ -20,7 +20,7 @@ use super::glob_matcher::{
 };
 use crate::builtin::{builtin_canons, find_builtin_canon};
 use crate::canon::{
-    Canon, CanonSourceKind, DEFAULT_GLOBAL_TRIGGER_PATTERN, DEFAULT_INSPECT_PLANES,
+    CANON_FILE_EXT, Canon, CanonSourceKind, DEFAULT_GLOBAL_TRIGGER_PATTERN, DEFAULT_INSPECT_PLANES,
     ParseCanonOptions, derive_id, derive_triggers, id_to_title_case, parse_canon,
     resolve_source_info,
 };
@@ -118,7 +118,7 @@ impl WorkspaceSnapshot {
         let key = options
             .source_ref
             .clone()
-            .unwrap_or_else(|| ".canons/unnamed.canon.md".to_string());
+            .unwrap_or_else(|| format!(".canons/unnamed{CANON_FILE_EXT}"));
         let canon = parse_canon_or_fallback(raw_markdown, options);
         if is_workspace_source_ref(&key) {
             self.existing_files.insert(key.clone());
@@ -188,7 +188,7 @@ impl WorkspaceSnapshot {
 
         let mut canons = BTreeMap::new();
         for rel_path in &existing_files {
-            if !rel_path.ends_with(".canon.md") {
+            if !rel_path.ends_with(CANON_FILE_EXT) {
                 continue;
             }
             let matches_canon_domain = if explicit_matchers.is_empty() {
@@ -261,12 +261,12 @@ pub(crate) fn compile_canon_filter_globs(
             {
                 return Err(DiscoverError::PathEscapesWorkspace { path: raw.clone() });
             }
-            const CANON_EXT: &str = ".canon.md";
             let normalized_rest = if !is_wildcard_pattern(clean_rest)
-                && clean_rest.len() >= CANON_EXT.len()
-                && clean_rest[clean_rest.len() - CANON_EXT.len()..].eq_ignore_ascii_case(CANON_EXT)
+                && clean_rest.len() >= CANON_FILE_EXT.len()
+                && clean_rest[clean_rest.len() - CANON_FILE_EXT.len()..]
+                    .eq_ignore_ascii_case(CANON_FILE_EXT)
             {
-                &clean_rest[..clean_rest.len() - CANON_EXT.len()]
+                &clean_rest[..clean_rest.len() - CANON_FILE_EXT.len()]
             } else {
                 clean_rest
             };
@@ -281,11 +281,11 @@ pub(crate) fn compile_canon_filter_globs(
         let normalized = normalize_workspace_path(trimmed)
             .map_err(|_| DiscoverError::PathEscapesWorkspace { path: raw.clone() })?;
         compiled.push(GlobPattern::parse(&normalized)?);
-        if !normalized.ends_with(".canon.md") && !is_wildcard_pattern(&normalized) {
+        if !normalized.ends_with(CANON_FILE_EXT) && !is_wildcard_pattern(&normalized) {
             let dir_glob = if normalized == "." {
                 DEFAULT_CANON_GLOB.to_string()
             } else {
-                format!("{normalized}/**/*.canon.md")
+                format!("{normalized}/**/*{CANON_FILE_EXT}")
             };
             compiled.push(GlobPattern::parse(&dir_glob)?);
         }

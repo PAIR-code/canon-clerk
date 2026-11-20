@@ -36,8 +36,8 @@ pub use lexer::{
     normalize_canon_content, tokenize_canon,
 };
 pub use sourcing::{
-    CanonScope, CanonSourceInfo, CanonSourceKind, derive_diagnostic_path, derive_scope,
-    has_directory_traversal, resolve_source_info, scope_pattern,
+    CANON_FILE_EXT, CanonScope, CanonSourceInfo, CanonSourceKind, derive_diagnostic_path,
+    derive_scope, has_directory_traversal, resolve_source_info, scope_pattern,
 };
 
 use serde::{Deserialize, Serialize};

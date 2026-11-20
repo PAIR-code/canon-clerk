@@ -59,7 +59,8 @@ pub struct CanonSourceInfo {
     pub scope: Option<CanonScope>,
 }
 
-const CANON_FILE_EXT: &str = ".canon.md";
+/// Canonical file extension required for Canon Markdown files (`SPEC.md` §2.1).
+pub const CANON_FILE_EXT: &str = ".canon.md";
 
 fn strip_canon_ext(path: &str) -> &str {
     if path.len() >= CANON_FILE_EXT.len()
