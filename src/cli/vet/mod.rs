@@ -297,7 +297,10 @@ fn run_vet_core(
     let (thresholds, stored_config) = resolve_and_validate_vet_cli_params(args, env)?;
 
     let incoming = args.io.read_caseload(stdin)?;
-    let intake_opts = args.filing.resolve_intake_options(stdin)?;
+    let intake_opts = args
+        .filing
+        .resolve_intake_options_with_env(stdin, env)?
+        .intake;
 
     if can_fast_forward_completed_vet(args, &intake_opts, incoming.as_ref())
         && let Some(completed) = incoming

@@ -17,7 +17,8 @@
 use super::{
     CheckRunPublisher, CheckRunReport, DEFAULT_GITHUB_API_TIMEOUT_MS,
     GITHUB_CHECKS_MAX_ANNOTATIONS_PER_REQUEST, GITHUB_CHECKS_MAX_OUTPUT_CHARS,
-    GithubCheckAnnotation, GithubCheckTarget, GithubChecksError, PublishedCheckRun,
+    GithubCheckAnnotation, GithubCheckTarget, GithubChecksError, GithubPullRequestFetcher,
+    GithubPullRequestMetadata, GithubPullRequestTarget, PublishedCheckRun,
     sanitize_annotation_for_github, truncate_github_output,
 };
 use crate::provider::{build_pooled_http_client, http_reactor_handle};
@@ -27,6 +28,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
+const GITHUB_API_DIFF_ACCEPT: &str = "application/vnd.github.v3.diff";
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const GITHUB_USER_AGENT: &str = concat!("canon-clerk/", env!("CARGO_PKG_VERSION"));
 
@@ -64,6 +66,22 @@ struct CheckRunApiResponse {
 struct GithubErrorResponse {
     #[serde(default)]
     message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PullRequestApiResponse {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    head: Option<PullRequestHeadRef>,
+}
+
+#[derive(Deserialize)]
+struct PullRequestHeadRef {
+    #[serde(default)]
+    sha: Option<String>,
 }
 
 /// Live GitHub Checks REST API client executing on Canon Clerk's persistent background Tokio reactor.
@@ -136,6 +154,83 @@ impl GithubChecksClient {
             message: "background HTTP task terminated unexpectedly".to_string(),
         })?
     }
+
+    fn send_get(
+        &self,
+        url: &str,
+        token: &str,
+        accept: &str,
+    ) -> Result<(u16, String), GithubChecksError> {
+        let handle =
+            http_reactor_handle("github-pr").map_err(|(err, _)| GithubChecksError::Transport {
+                url: url.to_string(),
+                message: err.to_string(),
+            })?;
+
+        let client = self.client.clone();
+        let owned_url = url.to_string();
+        let owned_token = token.to_string();
+        let owned_accept = accept.to_string();
+        let timeout = Duration::from_millis(self.timeout_ms);
+        let (tx, rx) = mpsc::sync_channel(1);
+
+        handle.spawn(async move {
+            let result = execute_github_get_request(
+                &client,
+                &owned_url,
+                &owned_token,
+                &owned_accept,
+                timeout,
+            )
+            .await;
+            let _ = tx.send(result);
+        });
+
+        rx.recv().map_err(|_| GithubChecksError::Transport {
+            url: url.to_string(),
+            message: "background HTTP task terminated unexpectedly".to_string(),
+        })?
+    }
+}
+
+async fn execute_github_get_request(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    accept: &str,
+    timeout: Duration,
+) -> Result<(u16, String), GithubChecksError> {
+    let request = client
+        .request(Method::GET, url)
+        .timeout(timeout)
+        .header(reqwest::header::ACCEPT, accept)
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        .header(reqwest::header::USER_AGENT, GITHUB_USER_AGENT)
+        .bearer_auth(token)
+        .build()
+        .map_err(|err| GithubChecksError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
+        })?;
+
+    let response = client
+        .execute(request)
+        .await
+        .map_err(|err| GithubChecksError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
+        })?;
+
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| GithubChecksError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
+        })?;
+
+    Ok((status, body))
 }
 
 async fn execute_github_request(
@@ -286,6 +381,62 @@ impl CheckRunPublisher for GithubChecksClient {
     }
 }
 
+impl GithubPullRequestFetcher for GithubChecksClient {
+    fn fetch_pull_request_metadata(
+        &self,
+        target: &GithubPullRequestTarget,
+    ) -> Result<GithubPullRequestMetadata, GithubChecksError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            target.api_base_url, target.owner, target.repo, target.pull_number
+        );
+        let (status, body) = self.send_get(&url, &target.token, GITHUB_API_ACCEPT)?;
+        if !(200..300).contains(&status) {
+            return Err(GithubChecksError::Http {
+                status,
+                url,
+                message: extract_github_error_message(&body),
+            });
+        }
+        let parsed: PullRequestApiResponse = serde_json::from_str(&body).map_err(|err| {
+            GithubChecksError::Protocol(format!(
+                "failed to decode GitHub Pull Request metadata response: {err}"
+            ))
+        })?;
+        Ok(GithubPullRequestMetadata {
+            title: parsed
+                .title
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            body: parsed.body.filter(|s| !s.trim().is_empty()),
+            head_sha: parsed
+                .head
+                .and_then(|h| h.sha)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        })
+    }
+
+    fn fetch_pull_request_diff(
+        &self,
+        target: &GithubPullRequestTarget,
+    ) -> Result<String, GithubChecksError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            target.api_base_url, target.owner, target.repo, target.pull_number
+        );
+        let (status, body) = self.send_get(&url, &target.token, GITHUB_API_DIFF_ACCEPT)?;
+        if !(200..300).contains(&status) {
+            return Err(GithubChecksError::Http {
+                status,
+                url,
+                message: extract_github_error_message(&body),
+            });
+        }
+        Ok(body)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,7 +491,11 @@ mod tests {
         let headers_raw = String::from_utf8_lossy(&buf[..start]).to_string();
         let request_line = headers_raw.lines().next().unwrap_or("").to_string();
         let body_bytes = &buf[start..start + content_length];
-        let body: Value = serde_json::from_slice(body_bytes).expect("valid JSON request body");
+        let body: Value = if body_bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(body_bytes).expect("valid JSON request body")
+        };
 
         CapturedRequest {
             request_line,
@@ -531,5 +686,98 @@ mod tests {
             }
             other => panic!("expected Http error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_fetch_pull_request_metadata_and_diff_via_loopback_http() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let captured = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let captured_server = Arc::clone(&captured);
+
+        let server = thread::spawn(move || {
+            for idx in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept request");
+                let req = read_http_request(&mut stream);
+                captured_server
+                    .lock()
+                    .unwrap()
+                    .push((req.request_line, req.headers));
+                if idx == 0 {
+                    write_http_response(
+                        &mut stream,
+                        "200 OK",
+                        r#"{"title":"feat: native PR","body":"Detailed body","head":{"sha":"deadbeef1234"}}"#,
+                    );
+                } else {
+                    let diff_body = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        diff_body.len(),
+                        diff_body
+                    );
+                    stream.write_all(response.as_bytes()).expect("write diff");
+                }
+            }
+        });
+
+        let target = GithubPullRequestTarget {
+            api_base_url: format!("http://{addr}"),
+            owner: "PAIR-code".to_string(),
+            repo: "canon-clerk".to_string(),
+            pull_number: 358,
+            token: "ghs_test_pr_token".to_string(),
+        };
+
+        let client = GithubChecksClient::with_timeout_ms(5_000);
+        let meta = client
+            .fetch_pull_request_metadata(&target)
+            .expect("fetch PR metadata");
+        let diff = client
+            .fetch_pull_request_diff(&target)
+            .expect("fetch PR diff");
+
+        server.join().expect("server joined");
+
+        assert_eq!(meta.title.as_deref(), Some("feat: native PR"));
+        assert_eq!(meta.body.as_deref(), Some("Detailed body"));
+        assert_eq!(meta.head_sha.as_deref(), Some("deadbeef1234"));
+        assert!(diff.contains("diff --git a/src/lib.rs b/src/lib.rs"));
+
+        let reqs = captured.lock().unwrap();
+        assert_eq!(reqs.len(), 2);
+        assert_eq!(
+            reqs[0].0,
+            "GET /repos/PAIR-code/canon-clerk/pulls/358 HTTP/1.1"
+        );
+        assert!(
+            reqs[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("accept: application/vnd.github+json")
+        );
+        assert!(
+            reqs[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("authorization: bearer ghs_test_pr_token")
+        );
+        assert!(
+            reqs[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("x-github-api-version: 2022-11-28")
+        );
+
+        assert_eq!(
+            reqs[1].0,
+            "GET /repos/PAIR-code/canon-clerk/pulls/358 HTTP/1.1"
+        );
+        assert!(
+            reqs[1]
+                .1
+                .to_ascii_lowercase()
+                .contains("accept: application/vnd.github.v3.diff")
+        );
     }
 }

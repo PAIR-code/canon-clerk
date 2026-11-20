@@ -288,7 +288,10 @@ fn run_admit_core(
     let admit_threshold = thresholds.admit_threshold;
 
     let incoming = args.io.read_caseload(stdin)?;
-    let intake_opts = args.filing.resolve_intake_options(stdin)?;
+    let intake_opts = args
+        .filing
+        .resolve_intake_options_with_env(stdin, env)?
+        .intake;
 
     if can_fast_forward_completed_admit(args, &intake_opts, incoming.as_ref())
         && let Some(completed) = incoming

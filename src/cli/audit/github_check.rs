@@ -34,8 +34,43 @@ pub(super) fn publish_github_check_if_enabled(
     };
     let report =
         build_audit_check_run_report(args.github_check.resolved_check_name(), caseload, wm);
+    publish_check_run_report(args, target, &report)
+}
+
+pub(super) fn publish_skipped_github_check_if_enabled(
+    args: &AuditArgs,
+    missing_provider_slug: &str,
+    github_target: Option<&GithubCheckTarget>,
+) -> Result<(), CliError> {
+    let Some(target) = github_target else {
+        return Ok(());
+    };
+    let check_name = args.github_check.resolved_check_name();
+    let summary = format_missing_credentials_skip_markdown(missing_provider_slug);
+    let report = CheckRunReport {
+        name: check_name.clone(),
+        conclusion: CheckRunConclusion::Skipped,
+        title: format!("{check_name}: SKIPPED"),
+        summary,
+        text: None,
+        annotations: Vec::new(),
+    };
+    publish_check_run_report(args, target, &report)
+}
+
+pub(super) fn format_missing_credentials_skip_markdown(missing_provider_slug: &str) -> String {
+    format!(
+        "### Canon Clerk Audit Gate: SKIPPED\n\nLive audit skipped because provider API credentials for `{missing_provider_slug}` are unavailable in this execution context (`--on-missing-credentials skip`). Deterministic static canon validation passed prior to skip.\n"
+    )
+}
+
+fn publish_check_run_report(
+    args: &AuditArgs,
+    target: &GithubCheckTarget,
+    report: &CheckRunReport,
+) -> Result<(), CliError> {
     let client = GithubChecksClient::new();
-    client.publish_check_run(target, &report).map_err(|err| {
+    client.publish_check_run(target, report).map_err(|err| {
         let replay_path = args
             .io
             .output_caseload

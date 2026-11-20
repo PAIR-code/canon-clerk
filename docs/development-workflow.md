@@ -253,7 +253,7 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
 
 Once your PR is open, continuous integration checks will run automatically:
 - **Hermetic checks (`pull_request`):** `Rust CI`, `Lint PR Title`, and `Canon Clerk` (`validate --all-canons --max-warnings 0`) run on all pull requests without repository secrets.
-- **Live Canon Audit (`pull_request_target`):** [`.github/workflows/canon-clerk-audit.yml`](../.github/workflows/canon-clerk-audit.yml) checks out and builds the trusted `main` branch, ingests the PR diff and metadata strictly as data via [`scripts/ci-audit-pr.sh`](../scripts/ci-audit-pr.sh), renders inline GitHub annotations and a `$GITHUB_STEP_SUMMARY` report, and uploads `caseload.json` for forensics. It runs automatically for repository maintainers (`OWNER`, `MEMBER`, `COLLABORATOR`, including triangular fork PRs) and can be triggered on external contributor PRs by applying the `audit` label.
+- **Live Canon Audit (`pull_request_target`):** [`.github/workflows/canon-clerk-audit.yml`](../.github/workflows/canon-clerk-audit.yml) checks out and builds the trusted `main` branch, invokes `canon-clerk audit --github-pr --publish-github-check --on-missing-credentials skip --output-caseload caseload.json` directly (ingesting the PR diff and metadata strictly as data via the GitHub REST API), publishes inline Check Run annotations, and uploads `caseload.json` for forensics. It runs automatically for repository maintainers (`OWNER`, `MEMBER`, `COLLABORATOR`, including triangular fork PRs) and can be triggered on external contributor PRs by applying the `audit` label.
 
 #### Directing Your AI Assistant (Recommended)
 Prompt your assistant:

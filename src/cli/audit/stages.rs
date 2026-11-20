@@ -14,39 +14,44 @@
 
 //! Guarded Branch A, JIT Branch B, and `docket` → `admit` → `vet` → `audit` execution steps for `canon-clerk audit`.
 
-use super::AuditArgs;
+use super::finalize::{fold_vetted_to_verdict, try_pre_populated_short_circuit};
 use super::guards::{
     has_admit_cli_overrides, has_docket_cli_overrides, has_vet_cli_overrides,
     resolve_audit_concurrency,
 };
+use super::{AuditArgs, OnMissingCredentials};
 use crate::admit::{AdmitOptions, execute_admit};
 use crate::audit::{AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit};
-use crate::caseload::{
-    CanonAdjudication, Caseload, CaseloadEvidence, CaseloadVerdict, CaseloadVetting, HeuristicNode,
-    VerdictStatus,
-};
+use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
 use crate::cli::closure::ClosureBackend;
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
-use crate::cli::runners::{
-    build_live_model_provider, resolve_closure_branch_b_options, run_branch_b_configure,
-};
+use crate::cli::runners::{resolve_closure_branch_b_options, run_branch_b_configure_checked};
 use crate::cli::vet::guards::resolve_vet_concurrency;
 use crate::cli::vet::stages::{
     materialize_base_workspace_references, populate_live_case_and_reference_snapshots,
     populate_live_target_snapshots,
 };
 use crate::configure::{
-    ConfigureScope, StoredConfig, can_fast_forward_existing_config, is_discriminative_model,
+    ConfigureError, ConfigureScope, StoredConfig, can_fast_forward_existing_config,
+    is_discriminative_model, resolve_provider_connections,
 };
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
-use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
+use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, MultiModelProvider, StructuredModelProvider};
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::vet::{VetOptions, execute_vet};
 use std::collections::BTreeMap;
+
+pub(super) enum AuditCascadeResult {
+    Completed(AuditCascadeOutcome),
+    SkippedMissingCredentials {
+        caseload: Caseload,
+        missing_provider_slug: String,
+    },
+}
 
 pub(super) struct AuditCascadeOutcome {
     pub(super) caseload: Caseload,
@@ -63,118 +68,6 @@ pub(crate) struct AuditCascadeThresholds {
     pub(crate) admit_threshold: f64,
     pub(crate) vet_threshold: f64,
     pub(crate) audit_threshold: f64,
-}
-
-fn fold_vetted_to_verdict(vetting: &CaseloadVetting, audit_threshold: f64) -> CaseloadVerdict {
-    let adjudications: Vec<CanonAdjudication> = vetting
-        .vetted_cases
-        .iter()
-        .filter_map(|canon_ref| {
-            vetting
-                .cases
-                .get(canon_ref)
-                .map(|assessment| CanonAdjudication {
-                    canon_path: canon_ref.clone(),
-                    compliance_summary: assessment.vetting_summary.clone(),
-                    compliance_score: assessment.vetting_score,
-                    status: VerdictStatus::from_score(assessment.vetting_score, audit_threshold),
-                    annotations: Vec::new(),
-                })
-        })
-        .collect();
-    CaseloadVerdict::from_adjudications(adjudications)
-}
-
-fn try_pre_populated_short_circuit(
-    caseload: &Caseload,
-    docket_pre_populated: bool,
-    evidence_pre_populated: bool,
-    vetting_pre_populated: bool,
-    audit_threshold: f64,
-) -> Option<AuditCascadeOutcome> {
-    if vetting_pre_populated
-        && let Some(vetting) = caseload.vetting.as_ref()
-        && vetting.is_all_vetted()
-    {
-        let cfg_disp = if caseload.config.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedAllVetted
-        };
-        let doc_disp = if caseload.docket.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedAllVetted
-        };
-        let adm_disp = if caseload.evidence.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedAllVetted
-        };
-        return Some(AuditCascadeOutcome {
-            caseload: caseload
-                .clone()
-                .with_verdict(fold_vetted_to_verdict(vetting, audit_threshold)),
-            configure_disp: cfg_disp,
-            docket_disp: doc_disp,
-            admit_disp: adm_disp,
-            vet_disp: StageDisposition::PrePopulated,
-            audit_disp: StageDisposition::SkippedAllVetted,
-        });
-    }
-
-    if evidence_pre_populated
-        && caseload
-            .evidence
-            .as_ref()
-            .is_some_and(|ev| ev.active_cases.is_empty())
-    {
-        let cfg_disp = if caseload.config.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedZeroEvidence
-        };
-        let doc_disp = if caseload.docket.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedZeroEvidence
-        };
-        return Some(AuditCascadeOutcome {
-            caseload: caseload.clone().with_verdict(CaseloadVerdict::default()),
-            configure_disp: cfg_disp,
-            docket_disp: doc_disp,
-            admit_disp: StageDisposition::PrePopulated,
-            vet_disp: StageDisposition::SkippedZeroEvidence,
-            audit_disp: StageDisposition::SkippedZeroEvidence,
-        });
-    }
-
-    if !evidence_pre_populated
-        && docket_pre_populated
-        && caseload
-            .docket
-            .as_ref()
-            .is_some_and(|d| d.active_docket.is_empty())
-    {
-        let cfg_disp = if caseload.config.is_some() {
-            StageDisposition::PrePopulated
-        } else {
-            StageDisposition::SkippedEmptyDocket
-        };
-        return Some(AuditCascadeOutcome {
-            caseload: caseload
-                .clone()
-                .with_evidence(CaseloadEvidence::default())
-                .with_verdict(CaseloadVerdict::default()),
-            configure_disp: cfg_disp,
-            docket_disp: StageDisposition::PrePopulated,
-            admit_disp: StageDisposition::SkippedEmptyDocket,
-            vet_disp: StageDisposition::SkippedEmptyDocket,
-            audit_disp: StageDisposition::SkippedEmptyDocket,
-        });
-    }
-
-    None
 }
 
 struct PrePopulatedFlags {
@@ -196,7 +89,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     snapshot: &mut WorkspaceSnapshot,
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
-) -> Result<AuditCascadeOutcome, CliError> {
+) -> Result<AuditCascadeResult, CliError> {
     let provider_changed = args.provider.provider.is_some();
     let docket_pre_populated =
         caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_changed;
@@ -214,22 +107,16 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         vetting_pre_populated,
         thresholds.audit_threshold,
     ) {
-        return Ok(short_circuit);
+        return Ok(AuditCascadeResult::Completed(short_circuit));
     }
 
     materialize_base_workspace_references(&caseload, snapshot, backend)?;
 
-    let mut required_nodes = Vec::new();
-    if !docket_pre_populated && !evidence_pre_populated {
-        required_nodes.push(HeuristicNode::Docket);
-    }
-    if !evidence_pre_populated {
-        required_nodes.push(HeuristicNode::Admit);
-    }
-    if !vetting_pre_populated {
-        required_nodes.push(HeuristicNode::Vet);
-    }
-    required_nodes.push(HeuristicNode::Audit);
+    let required_nodes = compute_required_nodes(
+        docket_pre_populated,
+        evidence_pre_populated,
+        vetting_pre_populated,
+    );
 
     let configure_options = resolve_closure_branch_b_options(
         &args.provider,
@@ -239,50 +126,44 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         env,
     )?;
     let stored = configure_options.stored_config.as_ref();
-    let explicit_docket_batch_size =
-        resolve_docket_batch_size(args.docket_batch_size, env, stored)?;
-    let docket_concurrency = resolve_docket_concurrency(args.docket_concurrency, env, stored)?;
-    let admit_opts = AdmitOptions {
-        threshold: thresholds.admit_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_concurrent_calls: resolve_admit_concurrency(args.admit_concurrency, env, stored)?,
-    };
-    let vet_opts = VetOptions {
-        threshold: thresholds.vet_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
-    };
-    let audit_opts = AuditOptions {
-        threshold: thresholds.audit_threshold,
-        timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
-        max_concurrent_calls: resolve_audit_concurrency(args.audit_concurrency, env, stored)?,
-    };
-
+    let stage_opts = build_stage_options(args, env, stored, thresholds)?;
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
 
     let config_was_present =
         can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
     caseload.verdict = None;
 
-    let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
-    let cfg_snapshot = configured.config.clone().unwrap_or_default();
-    let docket_model = cfg_snapshot
-        .model_for(HeuristicNode::Docket)
-        .unwrap_or_default();
-    let docket_opts = DocketOptions {
-        threshold: thresholds.docket_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_canons_per_call: effective_docket_batch_size(explicit_docket_batch_size, docket_model),
-        max_concurrent_calls: docket_concurrency,
+    let configured = match run_configure_or_skip(
+        &configure_options,
+        caseload,
+        args.on_missing_credentials,
+        telemetry,
+    )? {
+        Ok(c) => c,
+        Err(skipped) => return Ok(skipped),
     };
+    let cfg_snapshot = configured.config.clone().unwrap_or_default();
+    let docket_opts = stage_opts.docket_opts(&cfg_snapshot, thresholds.docket_threshold);
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {
         ClosureBackend::Hermetic { provider, .. } => *provider,
-        ClosureBackend::LiveDisk { .. } => {
-            live_instance =
-                build_live_model_provider(&configure_options, &cfg_snapshot, retry_policy)?;
-            &live_instance
-        }
+        ClosureBackend::LiveDisk { .. } => match build_live_provider_or_skip(
+            &configure_options,
+            &cfg_snapshot,
+            retry_policy,
+            args.on_missing_credentials,
+        )? {
+            Ok(instance) => {
+                live_instance = instance;
+                &live_instance
+            }
+            Err(missing_provider_slug) => {
+                return Ok(AuditCascadeResult::SkippedMissingCredentials {
+                    caseload: configured,
+                    missing_provider_slug,
+                });
+            }
+        },
     };
     let configure_disp = if config_was_present {
         StageDisposition::PrePopulated
@@ -298,12 +179,133 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
             evidence: evidence_pre_populated,
             vetting: vetting_pre_populated,
         },
-        (&docket_opts, &admit_opts, &vet_opts, &audit_opts),
+        (
+            &docket_opts,
+            &stage_opts.admit_opts,
+            &stage_opts.vet_opts,
+            &stage_opts.audit_opts,
+        ),
         snapshot,
         backend,
         active_provider,
         telemetry,
     )
+    .map(AuditCascadeResult::Completed)
+}
+
+struct ResolvedStageOptions {
+    explicit_docket_batch_size: Option<usize>,
+    docket_concurrency: Option<usize>,
+    admit_opts: AdmitOptions,
+    vet_opts: VetOptions,
+    audit_opts: AuditOptions,
+}
+
+impl ResolvedStageOptions {
+    fn docket_opts(
+        &self,
+        cfg_snapshot: &crate::caseload::CaseloadConfig,
+        docket_threshold: f64,
+    ) -> DocketOptions {
+        let docket_model = cfg_snapshot
+            .model_for(HeuristicNode::Docket)
+            .unwrap_or_default();
+        DocketOptions {
+            threshold: docket_threshold,
+            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            max_canons_per_call: effective_docket_batch_size(
+                self.explicit_docket_batch_size,
+                docket_model,
+            ),
+            max_concurrent_calls: self.docket_concurrency,
+        }
+    }
+}
+
+fn compute_required_nodes(
+    docket_pre_populated: bool,
+    evidence_pre_populated: bool,
+    vetting_pre_populated: bool,
+) -> Vec<HeuristicNode> {
+    let mut nodes = Vec::new();
+    if !docket_pre_populated && !evidence_pre_populated {
+        nodes.push(HeuristicNode::Docket);
+    }
+    if !evidence_pre_populated {
+        nodes.push(HeuristicNode::Admit);
+    }
+    if !vetting_pre_populated {
+        nodes.push(HeuristicNode::Vet);
+    }
+    nodes.push(HeuristicNode::Audit);
+    nodes
+}
+
+fn run_configure_or_skip(
+    configure_options: &crate::configure::ConfigureOptions,
+    caseload: Caseload,
+    on_missing: OnMissingCredentials,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Result<Caseload, AuditCascadeResult>, CliError> {
+    match run_branch_b_configure_checked(configure_options, Some(caseload.clone()), telemetry) {
+        Ok(c) => Ok(Ok(c)),
+        Err(ConfigureError::MissingProviderApiKey { slug })
+            if on_missing == OnMissingCredentials::Skip =>
+        {
+            Ok(Err(AuditCascadeResult::SkippedMissingCredentials {
+                caseload,
+                missing_provider_slug: slug,
+            }))
+        }
+        Err(err) => Err(CliError::usage(err.to_string())),
+    }
+}
+
+fn build_live_provider_or_skip(
+    configure_options: &crate::configure::ConfigureOptions,
+    cfg_snapshot: &crate::caseload::CaseloadConfig,
+    retry_policy: crate::provider::RetryPolicy,
+    on_missing: OnMissingCredentials,
+) -> Result<Result<MultiModelProvider, String>, CliError> {
+    match resolve_provider_connections(configure_options, cfg_snapshot) {
+        Ok(connections) => Ok(Ok(MultiModelProvider::from_connections(
+            connections,
+            retry_policy,
+        ))),
+        Err(ConfigureError::MissingProviderApiKey { slug })
+            if on_missing == OnMissingCredentials::Skip =>
+        {
+            Ok(Err(slug))
+        }
+        Err(err) => Err(CliError::usage(err.to_string())),
+    }
+}
+
+fn build_stage_options(
+    args: &AuditArgs,
+    env: &BTreeMap<String, String>,
+    stored: Option<&StoredConfig>,
+    thresholds: AuditCascadeThresholds,
+) -> Result<ResolvedStageOptions, CliError> {
+    Ok(ResolvedStageOptions {
+        explicit_docket_batch_size: resolve_docket_batch_size(args.docket_batch_size, env, stored)?,
+        docket_concurrency: resolve_docket_concurrency(args.docket_concurrency, env, stored)?,
+        admit_opts: AdmitOptions {
+            threshold: thresholds.admit_threshold,
+            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            max_concurrent_calls: resolve_admit_concurrency(args.admit_concurrency, env, stored)?,
+        },
+        vet_opts: VetOptions {
+            threshold: thresholds.vet_threshold,
+            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
+        },
+        audit_opts: AuditOptions {
+            threshold: thresholds.audit_threshold,
+            timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
+            max_concurrent_calls: resolve_audit_concurrency(args.audit_concurrency, env, stored)?,
+        },
+    })
 }
 
 #[allow(

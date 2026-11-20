@@ -16,10 +16,10 @@
 
 use crate::caseload::{Caseload, ThinkingLevel, WorkspaceState};
 use crate::cli::CliError;
-use crate::cli::io::{
-    read_caseload_operand, read_operand_source, resolve_target_operands, write_caseload_file,
-};
+use crate::cli::github_args::{resolve_filing_source, resolve_filing_source_with_fetcher};
+use crate::cli::io::{read_caseload_operand, write_caseload_file};
 use crate::configure::{ConfigureError, StoredConfig, parse_thinking_level};
+use crate::github::GithubPullRequestFetcher;
 use crate::intake::IntakeOptions;
 use crate::provider::{
     DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES, ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryPolicy,
@@ -61,12 +61,33 @@ pub struct FilingSourceArgs {
     #[arg(
         long = "diff",
         value_name = "PATH|-",
+        conflicts_with = "github_pr",
         help_heading = "Filing Sources",
         help = "Ingest unified diff patch from file or '-' for stdin"
     )]
     pub diff: Option<String>,
 
-    /// Workspace state on disk relative to `--diff` (`head` default, or `base` for pre-patch base checkouts).
+    /// Ingest GitHub pull request diff and metadata natively (omit number to read `$GITHUB_EVENT_PATH`).
+    #[arg(
+        long = "github-pr",
+        value_name = "NUMBER",
+        num_args = 0..=1,
+        conflicts_with = "diff",
+        help_heading = "Filing Sources",
+        help = "Ingest GitHub PR diff and metadata natively (omit NUMBER to read from GITHUB_EVENT_PATH)"
+    )]
+    pub github_pr: Option<Option<u64>>,
+
+    /// Target GitHub repository in `<owner>/<repo>` format (fallback env: `GITHUB_REPOSITORY`).
+    #[arg(
+        long = "github-repo",
+        value_name = "OWNER/REPO",
+        help_heading = "GitHub Context",
+        help = "Target GitHub repository '<owner>/<repo>' (fallback env: GITHUB_REPOSITORY)"
+    )]
+    pub github_repo: Option<String>,
+
+    /// Workspace state on disk relative to `--diff` or `--github-pr` (`head` default, or `base` for pre-patch base checkouts).
     #[arg(
         long = "workspace-state",
         value_name = "head|base",
@@ -124,33 +145,30 @@ pub struct FilingSourceArgs {
 }
 
 impl FilingSourceArgs {
-    /// Resolves flags, file paths, and stdin streams into a domain [`IntakeOptions`] descriptor.
+    /// Resolves flags, file paths, stdin streams, and optional `--github-pr` inputs using process env.
     pub fn resolve_intake_options(&self, stdin: &mut dyn Read) -> Result<IntakeOptions, CliError> {
-        let patch_content = match &self.diff {
-            Some(source) => Some(read_operand_source(source, "--diff", stdin)?),
-            None => None,
-        };
+        let env: BTreeMap<String, String> = std::env::vars().collect();
+        self.resolve_intake_options_with_env(stdin, &env)
+            .map(|resolved| resolved.intake)
+    }
 
-        let pr_body = if let Some(body) = &self.pr_body {
-            Some(body.clone())
-        } else if let Some(path) = &self.pr_body_file {
-            Some(read_operand_source(path, "--pr-body-file", stdin)?)
-        } else {
-            None
-        };
+    /// Resolves flags and optional `--github-pr` inputs against an explicit environment map.
+    pub fn resolve_intake_options_with_env(
+        &self,
+        stdin: &mut dyn Read,
+        env: &BTreeMap<String, String>,
+    ) -> Result<ResolvedFilingSource, CliError> {
+        resolve_filing_source(self, stdin, env)
+    }
 
-        let target_paths = resolve_target_operands(&self.targets, stdin)?;
-
-        Ok(IntakeOptions {
-            pr_title: self.pr_title.clone(),
-            pr_body,
-            intent: self.intent.clone(),
-            target_paths,
-            patch_content,
-            all_targets: self.all_targets,
-            workspace_state: self.workspace_state.map(WorkspaceState::from),
-            linked_issues: None,
-        })
+    /// Resolves flags and optional `--github-pr` inputs against an explicit environment map and fetcher.
+    pub fn resolve_intake_options_with_env_and_fetcher(
+        &self,
+        stdin: &mut dyn Read,
+        env: &BTreeMap<String, String>,
+        fetcher: &dyn GithubPullRequestFetcher,
+    ) -> Result<ResolvedFilingSource, CliError> {
+        resolve_filing_source_with_fetcher(self, stdin, env, fetcher)
     }
 }
 
@@ -439,7 +457,7 @@ impl CaseloadIoArgs {
     }
 }
 
-pub use crate::cli::github_args::GithubCheckArgs;
+pub use crate::cli::github_args::{GithubCheckArgs, ResolvedFilingSource};
 
 #[cfg(test)]
 mod tests {

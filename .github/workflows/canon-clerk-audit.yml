@@ -47,10 +47,9 @@ jobs:
       - name: Audit pull request against repository canons
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CANON_CLERK_CASELOAD_OUT: caseload.json
-        run: ./scripts/ci-audit-pr.sh
+        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --on-missing-credentials skip --output-caseload caseload.json
 
       - name: Upload Caseload forensics artifact
         if: always()

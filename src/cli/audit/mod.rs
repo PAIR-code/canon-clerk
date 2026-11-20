@@ -37,8 +37,8 @@ use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use finalize::{
-    AuditOutputContext, finalize_verdict_and_exit_code, finish_zero_candidate_audit,
-    handle_validation_failure,
+    AuditOutputContext, finalize_cascade_result, finalize_verdict_and_exit_code,
+    finish_zero_candidate_audit, handle_validation_failure,
 };
 use guards::{
     can_fast_forward_completed_audit, enforce_filing_and_case_guard,
@@ -70,6 +70,16 @@ Examples:
 
   # Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini Carbon:
   git diff origin/main | canon-clerk audit --diff - --provider typesafe --audit-model google:gemini-4-carbon";
+
+/// Behavior when heuristic evaluation is required but configured provider API credentials are absent.
+#[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OnMissingCredentials {
+    /// Fail closed with exit code `2` and an actionable remediation hint (default).
+    #[default]
+    Fail,
+    /// After deterministic `validate` passes, record a `SKIPPED` summary / Check Run and exit `0`.
+    Skip,
+}
 
 /// Output presentation format for `canon-clerk audit`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,6 +214,17 @@ pub struct AuditArgs {
     #[command(flatten)]
     pub provider: ProviderConfigArgs,
 
+    /// Behavior when heuristic evaluation is required and configured provider credentials are absent (`fail` default, or `skip`).
+    #[arg(
+        long = "on-missing-credentials",
+        value_name = "fail|skip",
+        value_enum,
+        default_value_t = OnMissingCredentials::Fail,
+        help_heading = "Provider Credentials",
+        help = "Action when required provider credentials are absent ('fail' = exit 2 default, 'skip' = record SKIPPED and exit 0 after validate)"
+    )]
+    pub on_missing_credentials: OnMissingCredentials,
+
     #[command(flatten)]
     pub transport: ProviderTransportArgs,
 
@@ -320,15 +341,19 @@ fn run_audit_core(
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let (thresholds, stored_config) = resolve_and_validate_audit_cli_params(args, env)?;
-    let github_target = args.github_check.resolve_target(env)?;
+    let incoming = args.io.read_caseload(stdin)?;
+    let resolved_filing = args.filing.resolve_intake_options_with_env(stdin, env)?;
+    let intake_opts = resolved_filing.intake;
+    let github_target = args.github_check.resolve_target(
+        args.filing.github_repo.as_deref(),
+        resolved_filing.fetched_pr_head_sha.as_deref(),
+        env,
+    )?;
     let mut output_ctx = AuditOutputContext {
         env,
         stdout,
         github_target: github_target.as_ref(),
     };
-
-    let incoming = args.io.read_caseload(stdin)?;
-    let intake_opts = args.filing.resolve_intake_options(stdin)?;
 
     if can_fast_forward_completed_audit(args, &intake_opts, incoming.as_ref())
         && let Some(completed) = incoming
@@ -397,7 +422,7 @@ fn run_audit_core(
         );
     }
 
-    let outcome = execute_jit_configure_docket_admit_and_audit(
+    let cascade_result = execute_jit_configure_docket_admit_and_audit(
         args,
         env,
         stored_config,
@@ -409,22 +434,14 @@ fn run_audit_core(
     )?;
     telemetry.finish_pipeline();
 
-    let wm = AuditWatermarks {
-        intake: intake_disp,
-        discover: discover_disp,
-        validate: validate_disp,
-        configure: outcome.configure_disp,
-        docket: outcome.docket_disp,
-        admit: outcome.admit_disp,
-        vet: outcome.vet_disp,
-        audit: outcome.audit_disp,
+    finalize_cascade_result(
+        args,
+        cascade_result,
+        (intake_disp, discover_disp, validate_disp),
         total_workspace_canons,
-        docket_threshold: thresholds.docket_threshold,
-        admit_threshold: thresholds.admit_threshold,
-        vet_threshold: thresholds.vet_threshold,
-        audit_threshold: thresholds.audit_threshold,
-    };
-    finalize_verdict_and_exit_code(args, outcome.caseload, &wm, &mut output_ctx)
+        thresholds,
+        &mut output_ctx,
+    )
 }
 
 #[cfg(test)]
@@ -2301,6 +2318,208 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                 "--output-caseload must be flushed to disk prior to GitHub API publication"
             );
             let _ = fs::remove_file(&out_path);
+        }
+
+        fn spawn_pr_and_check_mock_server() -> (
+            std::net::SocketAddr,
+            Arc<Mutex<Option<Value>>>,
+            thread::JoinHandle<()>,
+        ) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let captured_check_post = Arc::new(Mutex::new(None::<Value>));
+            let captured_server = Arc::clone(&captured_check_post);
+
+            let server = thread::spawn(move || {
+                for idx in 0..3 {
+                    let (mut stream, _) = listener.accept().expect("accept request");
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    let mut header_end = None;
+                    let mut content_length = 0usize;
+                    while header_end.is_none() {
+                        let n = stream.read(&mut tmp).expect("read");
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            header_end = Some(pos + 4);
+                            let headers = String::from_utf8_lossy(&buf[..pos]);
+                            for line in headers.lines() {
+                                if let Some((k, v)) = line.split_once(':')
+                                    && k.eq_ignore_ascii_case("content-length")
+                                {
+                                    content_length = v.trim().parse().unwrap_or(0);
+                                }
+                            }
+                        }
+                    }
+                    let start = header_end.expect("headers");
+                    while buf.len() < start + content_length {
+                        let n = stream.read(&mut tmp).expect("read body");
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                    }
+                    let (status, ctype, body) = match idx {
+                        0 => (
+                            "200 OK",
+                            "application/json",
+                            r#"{"title":"feat: native PR","body":"body","head":{"sha":"pr-api-sha-358"}}"#,
+                        ),
+                        1 => (
+                            "200 OK",
+                            "text/plain",
+                            "diff --git a/src/cli/audit.rs b/src/cli/audit.rs\n--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1 +1 @@\n-old\n+new\n",
+                        ),
+                        _ => {
+                            let parsed: Value =
+                                serde_json::from_slice(&buf[start..start + content_length])
+                                    .expect("check-run JSON");
+                            *captured_server.lock().unwrap() = Some(parsed);
+                            ("201 Created", "application/json", r#"{"id":777}"#)
+                        }
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream.write_all(resp.as_bytes()).expect("write response");
+                }
+            });
+
+            (addr, captured_check_post, server)
+        }
+
+        #[test]
+        fn test_github_pr_with_on_missing_credentials_skip_publishes_skipped_check_and_exits_0() {
+            let (addr, captured_check_post, server) = spawn_pr_and_check_mock_server();
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let summary_path = std::env::temp_dir().join(format!("cc-skip-summary-{unique}.md"));
+            let out_path = std::env::temp_dir().join(format!("cc-skip-caseload-{unique}.json"));
+            let out_str = out_path.display().to_string();
+
+            // Notice: NO GEMINI_API_KEY, NO GITHUB_EVENT_PATH, NO GITHUB_SHA!
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_API_URL.to_string(), format!("http://{addr}"));
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "ghs_test".to_string());
+            env.insert(
+                "GITHUB_STEP_SUMMARY".to_string(),
+                summary_path.display().to_string(),
+            );
+
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "--github-pr",
+                "358",
+                "--github-repo",
+                "PAIR-code/canon-clerk",
+                "--publish-github-check",
+                "--on-missing-credentials",
+                "skip",
+                "--output-caseload",
+                &out_str,
+            ]);
+
+            let mut stdout = Vec::new();
+            let caseload = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect("--on-missing-credentials skip must exit 0");
+
+            server.join().expect("server joined");
+
+            assert_eq!(provider.call_count(), 0);
+            assert!(caseload.validation.is_some());
+            assert!(caseload.verdict.is_none());
+            assert!(out_path.exists());
+
+            let step_md = fs::read_to_string(&summary_path).expect("step summary");
+            assert!(step_md.contains("SKIPPED"));
+
+            let check_body = captured_check_post
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("Check Run POST captured");
+            assert_eq!(check_body["conclusion"], "skipped");
+            assert_eq!(check_body["head_sha"], "pr-api-sha-358");
+
+            let _ = fs::remove_file(&summary_path);
+            let _ = fs::remove_file(&out_path);
+        }
+
+        #[test]
+        fn test_on_missing_credentials_skip_still_fails_exit_1_on_validation_error() {
+            let mut ws = WorkspaceSnapshot::default();
+            ws.existing_files.insert("src/lib.rs".to_string());
+            ws.file_contents
+                .insert("src/lib.rs".to_string(), "fn main() {}\n".to_string());
+            let opts = ParseCanonOptions::with_source_ref(".canons/broken.md");
+            ws = ws.with_canon_markdown(
+                "---\nid: [unterminated\n---\n# Broken\nCode MUST work.\n",
+                &opts,
+            );
+
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let empty_env = BTreeMap::new(); // No GEMINI_API_KEY
+
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "src/lib.rs",
+                "--on-missing-credentials",
+                "skip",
+            ]);
+            let mut stdout = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &empty_env,
+                &provider,
+            )
+            .expect_err("static validation failure must still exit 1 even under skip");
+
+            assert_eq!(err.exit_code(), 1);
+            assert_eq!(provider.call_count(), 0);
+        }
+
+        #[test]
+        fn test_default_on_missing_credentials_fail_exits_2() {
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let empty_env = BTreeMap::new(); // No GEMINI_API_KEY
+
+            let args = parse_audit(&["canon-clerk", "audit", "src/cli/audit.rs"]);
+            let mut stdout = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &empty_env,
+                &provider,
+            )
+            .expect_err("default fail-closed behavior must exit 2");
+
+            assert_eq!(err.exit_code(), 2);
+            assert_eq!(provider.call_count(), 0);
         }
     }
 }
