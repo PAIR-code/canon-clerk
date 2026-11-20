@@ -202,7 +202,7 @@ pub trait CheckRunPublisher: Send + Sync {
 
 /// Sanitized GitHub Checks API annotation wire payload.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-pub struct GithubCheckAnnotation {
+pub(crate) struct GithubCheckAnnotation {
     /// Workspace-relative POSIX file path.
     pub path: String,
     /// 1-based starting line number (`>= 1`).
@@ -226,7 +226,7 @@ pub struct GithubCheckAnnotation {
 
 /// Converts a domain [`CodeAnnotation`] into a GitHub Checks API wire annotation,
 /// normalizing 1-based line bounds and omitting columns on multi-line spans to prevent HTTP 422.
-pub fn sanitize_annotation_for_github(ann: &CodeAnnotation) -> GithubCheckAnnotation {
+pub(crate) fn sanitize_annotation_for_github(ann: &CodeAnnotation) -> GithubCheckAnnotation {
     let start_line = ann.start_line.max(1);
     let end_line = ann.end_line.max(start_line);
 
@@ -262,7 +262,7 @@ pub fn sanitize_annotation_for_github(ann: &CodeAnnotation) -> GithubCheckAnnota
 
 /// Truncates `text` to at most `max_chars` Unicode scalar values, appending an explicit
 /// truncation notice when truncation occurs.
-pub fn truncate_github_output(text: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_github_output(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
     }
@@ -278,7 +278,7 @@ pub fn truncate_github_output(text: &str, max_chars: usize) -> String {
 }
 
 /// Parses and validates a GitHub `<owner>/<repo>` repository slug.
-pub fn parse_github_repository(raw: &str) -> Result<(String, String), GithubChecksError> {
+fn parse_github_repository(raw: &str) -> Result<(String, String), GithubChecksError> {
     let trimmed = raw.trim();
     let mut parts = trimmed.split('/');
     let owner = parts.next().unwrap_or("");
@@ -305,7 +305,7 @@ pub fn parse_github_repository(raw: &str) -> Result<(String, String), GithubChec
 }
 
 /// Extracts `.pull_request.head.sha` from a GitHub Actions event JSON document, if present and non-empty.
-pub fn extract_pr_head_sha_from_event_json(event_json: &str) -> Option<String> {
+fn extract_pr_head_sha_from_event_json(event_json: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(event_json).ok()?;
     value
         .get("pull_request")?

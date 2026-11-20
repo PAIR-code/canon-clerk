@@ -137,10 +137,8 @@ pub use github::{
     CheckRunConclusion, CheckRunPublisher, CheckRunReport, DEFAULT_GITHUB_API_TIMEOUT_MS,
     DEFAULT_GITHUB_API_URL, DEFAULT_GITHUB_CHECK_NAME, ENV_GH_TOKEN, ENV_GITHUB_API_URL,
     ENV_GITHUB_EVENT_PATH, ENV_GITHUB_REPOSITORY, ENV_GITHUB_SHA, ENV_GITHUB_TOKEN,
-    GITHUB_CHECKS_MAX_ANNOTATIONS_PER_REQUEST, GITHUB_CHECKS_MAX_OUTPUT_CHARS,
-    GithubCheckAnnotation, GithubCheckTarget, GithubChecksClient, GithubChecksError,
-    PublishedCheckRun, extract_pr_head_sha_from_event_json, parse_github_repository,
-    resolve_github_check_target, sanitize_annotation_for_github, truncate_github_output,
+    GITHUB_CHECKS_MAX_ANNOTATIONS_PER_REQUEST, GITHUB_CHECKS_MAX_OUTPUT_CHARS, GithubCheckTarget,
+    GithubChecksClient, GithubChecksError, PublishedCheckRun, resolve_github_check_target,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{
