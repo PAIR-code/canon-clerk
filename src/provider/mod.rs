@@ -24,7 +24,7 @@ mod retry_delay;
 mod runtime;
 mod typesafe;
 
-pub(crate) use runtime::{HttpAuth, build_pooled_http_client};
+pub(crate) use runtime::{HttpAuth, build_pooled_http_client, http_reactor_handle};
 
 pub use crate::caseload::{
     DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_SCREENING_REASONING_BUDGET,

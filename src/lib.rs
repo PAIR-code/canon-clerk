@@ -25,6 +25,7 @@ mod concurrency;
 pub mod configure;
 pub mod discover;
 pub mod docket;
+pub mod github;
 pub mod intake;
 pub mod probe;
 pub mod provider;
@@ -92,7 +93,7 @@ pub use cli::{
     AppriseNodeModelArgs, AuditArgs, AuditFormat, AuditNodeModelArgs, CanonSelectionArgs,
     CaseloadIoArgs, Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiscoverArgs,
     DiscoverFormat, DocketArgs, DocketFormat, DocketNodeModelArgs, ENV_LOG_FILE, ENV_VERBOSE,
-    FilingSourceArgs, IntakeArgs, ProbeArgs, ProbeFormat, ProviderConfigArgs,
+    FilingSourceArgs, GithubCheckArgs, IntakeArgs, ProbeArgs, ProbeFormat, ProviderConfigArgs,
     ProviderTransportArgs, RejectedUnqualifiedTuningArgs, StageDisposition, StderrProgressSink,
     StderrTelemetryOptions, ValidateArgs, ValidateFormat, VetArgs, VetFormat, VetNodeModelArgs,
     WorkspaceStateArg, build_cli_telemetry_sink, init_logging, open_jsonl_log_sink,
@@ -131,6 +132,15 @@ pub use docket::{
     DocketError, DocketOptions, ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY,
     ENV_DOCKET_THRESHOLD, MAX_DOCKET_FILING_PREFIX_CHARS, execute_docket,
     partition_candidate_canons,
+};
+pub use github::{
+    CheckRunConclusion, CheckRunPublisher, CheckRunReport, DEFAULT_GITHUB_API_TIMEOUT_MS,
+    DEFAULT_GITHUB_API_URL, DEFAULT_GITHUB_CHECK_NAME, ENV_GH_TOKEN, ENV_GITHUB_API_URL,
+    ENV_GITHUB_EVENT_PATH, ENV_GITHUB_REPOSITORY, ENV_GITHUB_SHA, ENV_GITHUB_TOKEN,
+    GITHUB_CHECKS_MAX_ANNOTATIONS_PER_REQUEST, GITHUB_CHECKS_MAX_OUTPUT_CHARS,
+    GithubCheckAnnotation, GithubCheckTarget, GithubChecksClient, GithubChecksError,
+    PublishedCheckRun, extract_pr_head_sha_from_event_json, parse_github_repository,
+    resolve_github_check_target, sanitize_annotation_for_github, truncate_github_output,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use probe::{

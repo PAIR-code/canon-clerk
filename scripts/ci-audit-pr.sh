@@ -27,6 +27,23 @@ if [ -z "${GEMINI_API_KEY:-}" ] && [ -z "${TYPESAFE_API_KEY:-}" ]; then
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         printf '### Canon Clerk Audit Gate: SKIPPED\n\nLive audit skipped because provider API credentials (`GEMINI_API_KEY` / `TYPESAFE_API_KEY`) are unavailable in this execution context.\n' >> "$GITHUB_STEP_SUMMARY"
     fi
+    if [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -r "$GITHUB_EVENT_PATH" ] && [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
+        PR_HEAD_SHA="$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+        if [ -n "$PR_HEAD_SHA" ]; then
+            gh api \
+                --method POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "/repos/${GITHUB_REPOSITORY}/check-runs" \
+                -f name="Canon Clerk Audit" \
+                -f head_sha="$PR_HEAD_SHA" \
+                -f status="completed" \
+                -f conclusion="skipped" \
+                -f "output[title]=Canon Clerk Audit: SKIPPED" \
+                -f "output[summary]=Live audit skipped because provider API credentials (\`GEMINI_API_KEY\` / \`TYPESAFE_API_KEY\`) are unavailable in this execution context." \
+                >/dev/null || echo "Warning: Failed to publish skipped GitHub Check Run." >&2
+        fi
+    fi
     exit 0
 fi
 
@@ -65,7 +82,7 @@ fi
 CANON_CLERK_BIN="${CANON_CLERK_BIN:-./target/debug/canon-clerk}"
 CASELOAD_OUT="${CANON_CLERK_CASELOAD_OUT:-caseload.json}"
 
-set -- audit --diff - --workspace-state base --output-caseload "$CASELOAD_OUT" "$@"
+set -- audit --diff - --workspace-state base --output-caseload "$CASELOAD_OUT" --publish-github-check "$@"
 
 if [ -n "$PR_TITLE" ]; then
     set -- "$@" --pr-title "$PR_TITLE"

@@ -27,7 +27,9 @@ use crate::cli::provenance::{
     write_filing_intake_provenance, write_validate_provenance, write_vet_provenance,
 };
 use crate::cli::telemetry::resolve_verbose_flag;
+use crate::github::{CheckRunConclusion, CheckRunReport};
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -133,7 +135,9 @@ pub(super) fn resolve_effective_format(
         AuditFormat::Json
     } else if let Some(explicit) = args.format {
         explicit
-    } else if env.get("GITHUB_ACTIONS").map(String::as_str) == Some("true") {
+    } else if env.get("GITHUB_ACTIONS").map(String::as_str) == Some("true")
+        && !args.github_check.publish_github_check
+    {
         AuditFormat::Github
     } else {
         AuditFormat::Stylish
@@ -290,6 +294,14 @@ fn append_github_step_summary(
         .append(true)
         .open(summary_path)?;
 
+    write_github_markdown_summary(caseload, wm, &mut file)
+}
+
+fn write_github_markdown_summary(
+    caseload: &Caseload,
+    wm: &AuditWatermarks,
+    out: &mut dyn Write,
+) -> std::io::Result<()> {
     let mut provenance_buf = Vec::new();
     write_seven_stage_provenance(caseload, wm, &mut provenance_buf)?;
     let provenance_text = String::from_utf8_lossy(&provenance_buf);
@@ -303,9 +315,9 @@ fn append_github_step_summary(
         ),
     };
 
-    writeln!(file, "### Canon Clerk Audit Gate: {status_badge}\n")?;
-    writeln!(file, "{summary_line}\n")?;
-    writeln!(file, "```text\n{provenance_text}```\n")?;
+    writeln!(out, "### Canon Clerk Audit Gate: {status_badge}\n")?;
+    writeln!(out, "{summary_line}\n")?;
+    writeln!(out, "```text\n{provenance_text}```\n")?;
 
     if let Some(verdict) = &caseload.verdict
         && !verdict.adjudications.is_empty()
@@ -316,22 +328,141 @@ fn append_github_step_summary(
             .partition(|adj| adj.status == VerdictStatus::Fail);
 
         if !failing.is_empty() {
-            write_markdown_decree_table(&failing, &mut file)?;
+            write_markdown_decree_table(&failing, out)?;
             if !passing.is_empty() {
-                writeln!(file)?;
+                writeln!(out)?;
             }
         }
         if !passing.is_empty() {
             writeln!(
-                file,
+                out,
                 "<details>\n<summary>Passing cases ({})</summary>\n",
                 passing.len()
             )?;
-            write_markdown_decree_table(&passing, &mut file)?;
-            writeln!(file, "\n</details>")?;
+            write_markdown_decree_table(&passing, out)?;
+            writeln!(out, "\n</details>")?;
         }
     }
     Ok(())
+}
+
+pub(super) fn build_audit_check_run_report(
+    check_name: String,
+    caseload: &Caseload,
+    wm: &AuditWatermarks,
+) -> CheckRunReport {
+    let mut summary_buf = Vec::new();
+    let _ = write_github_markdown_summary(caseload, wm, &mut summary_buf);
+    let summary = String::from_utf8_lossy(&summary_buf).into_owned();
+
+    if let Some(verdict) = &caseload.verdict {
+        let conclusion = if verdict.status == VerdictStatus::Fail {
+            CheckRunConclusion::Failure
+        } else {
+            CheckRunConclusion::Success
+        };
+        let badge = if verdict.is_pass() { "PASS" } else { "FAIL" };
+        let title = format!("{check_name}: {badge} ({})", verdict.summary);
+        let (annotations, text) = collect_verdict_findings(verdict);
+        return CheckRunReport {
+            name: check_name,
+            conclusion,
+            title,
+            summary,
+            text,
+            annotations,
+        };
+    }
+
+    let (annotations, text) = collect_validation_findings(caseload);
+    let title = format!("{check_name}: FAIL (Candidate canon static validation failed)");
+    CheckRunReport {
+        name: check_name,
+        conclusion: CheckRunConclusion::Failure,
+        title,
+        summary,
+        text,
+        annotations,
+    }
+}
+
+fn collect_verdict_findings(verdict: &CaseloadVerdict) -> (Vec<CodeAnnotation>, Option<String>) {
+    let mut annotations = Vec::new();
+    let mut text = String::new();
+
+    for adj in &verdict.adjudications {
+        if adj.status == VerdictStatus::Fail && adj.annotations.is_empty() {
+            let _ = writeln!(
+                text,
+                "- **`{}`** (`[failure]`): {}",
+                adj.canon_path,
+                collapse_whitespace(&adj.compliance_summary)
+            );
+        }
+        for ann in &adj.annotations {
+            let mut enriched = ann.clone();
+            if enriched
+                .title
+                .as_deref()
+                .is_none_or(|t| t.trim().is_empty())
+            {
+                enriched.title = Some(adj.canon_path.clone());
+            }
+            let _ = writeln!(
+                text,
+                "- **`{}`** (`{}:{}` · `{}`): {}",
+                adj.canon_path,
+                enriched.path,
+                enriched.start_line,
+                enriched.annotation_level.as_str(),
+                collapse_whitespace(&enriched.message)
+            );
+            annotations.push(enriched);
+        }
+    }
+
+    let text_opt = if text.is_empty() {
+        None
+    } else {
+        Some(format!("### Findings\n\n{text}"))
+    };
+    (annotations, text_opt)
+}
+
+fn collect_validation_findings(caseload: &Caseload) -> (Vec<CodeAnnotation>, Option<String>) {
+    let mut annotations = Vec::new();
+    let mut text = String::new();
+
+    if let Some(validation) = &caseload.validation {
+        for (canon_id, meta) in &validation.results {
+            for diag in &meta.diagnostics {
+                let mut enriched = diag.clone();
+                if enriched
+                    .title
+                    .as_deref()
+                    .is_none_or(|t| t.trim().is_empty())
+                {
+                    enriched.title = Some(canon_id.clone());
+                }
+                let _ = writeln!(
+                    text,
+                    "- **`{canon_id}`** (`{}:{}` · `{}`): {}",
+                    enriched.path,
+                    enriched.start_line,
+                    enriched.annotation_level.as_str(),
+                    collapse_whitespace(&enriched.message)
+                );
+                annotations.push(enriched);
+            }
+        }
+    }
+
+    let text_opt = if text.is_empty() {
+        None
+    } else {
+        Some(format!("### Static Validation Diagnostics\n\n{text}"))
+    };
+    (annotations, text_opt)
 }
 
 fn write_markdown_decree_table(

@@ -41,7 +41,7 @@ pub use apprise::{
     run_apprise_with_snapshot_and_provider, run_apprise_with_telemetry,
 };
 pub use args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs,
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
     ProviderTransportArgs, WorkspaceStateArg,
 };
 pub use audit::{

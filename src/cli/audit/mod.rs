@@ -21,7 +21,8 @@ mod stages;
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVerdict, VerdictStatus};
 use crate::cli::CliError;
 use crate::cli::args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
+    ProviderTransportArgs,
 };
 use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
@@ -31,6 +32,7 @@ use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::node_args::{AuditNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::cli::provenance::StageDisposition;
 use crate::discover::WorkspaceSnapshot;
+use crate::github::{CheckRunPublisher, GithubCheckTarget, GithubChecksClient};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
@@ -38,7 +40,9 @@ use guards::{
     can_fast_forward_completed_audit, enforce_filing_and_case_guard,
     ensure_stage_prefixed_threshold_flags, resolve_and_validate_audit_cli_params,
 };
-use render::{AuditWatermarks, render_audit_output, resolve_effective_format};
+use render::{
+    AuditWatermarks, build_audit_check_run_report, render_audit_output, resolve_effective_format,
+};
 use stages::{AuditCascadeThresholds, execute_jit_configure_docket_admit_and_audit};
 use std::collections::BTreeMap;
 use std::env;
@@ -58,6 +62,9 @@ Examples:
 
   # Run in GitHub Actions annotation mode while archiving caseload.json for CI forensics:
   git diff origin/main | canon-clerk audit --diff - --format github --output-caseload caseload.json
+
+  # Publish all findings via the GitHub Checks REST API (batched 50/request) with forensics archiving:
+  git diff origin/main | canon-clerk audit --diff - --publish-github-check --output-caseload caseload.json
 
   # Use TypeSafe Jev across docket, admit, and vet before escalating contested cases to Gemini Carbon:
   git diff origin/main | canon-clerk audit --diff - --provider typesafe --audit-model google:gemini-4-carbon";
@@ -210,6 +217,9 @@ pub struct AuditArgs {
     #[command(flatten)]
     pub io: CaseloadIoArgs,
 
+    #[command(flatten)]
+    pub github_check: GithubCheckArgs,
+
     /// Propagated top-level `-v` / `--verbose` flag (`CANON_CLERK_VERBOSE`).
     #[arg(skip)]
     pub verbose: bool,
@@ -296,6 +306,12 @@ pub fn run_audit(
     run_audit_live_with_telemetry(args, stdin, stdout, &TelemetrySession::noop())
 }
 
+struct AuditOutputContext<'a> {
+    env: &'a BTreeMap<String, String>,
+    stdout: &'a mut dyn Write,
+    github_target: Option<&'a GithubCheckTarget>,
+}
+
 fn run_audit_core(
     args: &AuditArgs,
     stdin: &mut dyn Read,
@@ -308,6 +324,12 @@ fn run_audit_core(
     args.provider.validate_thinking_flags()?;
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
     let (thresholds, stored_config) = resolve_and_validate_audit_cli_params(args, env)?;
+    let github_target = args.github_check.resolve_target(env)?;
+    let mut output_ctx = AuditOutputContext {
+        env,
+        stdout,
+        github_target: github_target.as_ref(),
+    };
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args.filing.resolve_intake_options(stdin)?;
@@ -323,7 +345,7 @@ fn run_audit_core(
             thresholds.audit_threshold,
             completed.vetting.is_some(),
         );
-        return finalize_verdict_and_exit_code(args, completed, &wm, env, stdout);
+        return finalize_verdict_and_exit_code(args, completed, &wm, &mut output_ctx);
     }
 
     enforce_filing_and_case_guard(&intake_opts, &args.canons, incoming.as_ref())?;
@@ -355,8 +377,7 @@ fn run_audit_core(
             intake_disp,
             total_workspace_canons,
             thresholds,
-            env,
-            stdout,
+            &mut output_ctx,
         );
     }
 
@@ -376,8 +397,7 @@ fn run_audit_core(
             discover_disp,
             total_workspace_canons,
             thresholds,
-            env,
-            stdout,
+            &mut output_ctx,
         );
     }
 
@@ -408,18 +428,46 @@ fn run_audit_core(
         vet_threshold: thresholds.vet_threshold,
         audit_threshold: thresholds.audit_threshold,
     };
-    finalize_verdict_and_exit_code(args, outcome.caseload, &wm, env, stdout)
+    finalize_verdict_and_exit_code(args, outcome.caseload, &wm, &mut output_ctx)
+}
+
+fn publish_github_check_if_enabled(
+    args: &AuditArgs,
+    caseload: &Caseload,
+    wm: &AuditWatermarks,
+    github_target: Option<&GithubCheckTarget>,
+) -> Result<(), CliError> {
+    let Some(target) = github_target else {
+        return Ok(());
+    };
+    let report =
+        build_audit_check_run_report(args.github_check.resolved_check_name(), caseload, wm);
+    let client = GithubChecksClient::new();
+    client.publish_check_run(target, &report).map_err(|err| {
+        let replay_path = args
+            .io
+            .output_caseload
+            .as_deref()
+            .and_then(|p| p.to_str())
+            .unwrap_or("caseload.json");
+        CliError::usage(format!(
+            "Failed to publish GitHub Check Run `{}` to {}/{}: {err}\n  \
+             Hint: Verify `GITHUB_TOKEN` / `GH_TOKEN` has `checks: write` permission and replay without LLM spend via `canon-clerk audit --caseload {replay_path} --publish-github-check`.",
+            report.name, target.owner, target.repo
+        ))
+    })?;
+    Ok(())
 }
 
 fn finalize_verdict_and_exit_code(
     args: &AuditArgs,
     caseload: Caseload,
     wm: &AuditWatermarks,
-    env: &BTreeMap<String, String>,
-    stdout: &mut dyn Write,
+    output_ctx: &mut AuditOutputContext<'_>,
 ) -> Result<Caseload, CliError> {
     args.io.write_output_caseload(&caseload)?;
-    render_audit_output(args, &caseload, wm, env, stdout)?;
+    render_audit_output(args, &caseload, wm, output_ctx.env, output_ctx.stdout)?;
+    publish_github_check_if_enabled(args, &caseload, wm, output_ctx.github_target)?;
     if caseload
         .verdict
         .as_ref()
@@ -436,8 +484,7 @@ fn finish_zero_candidate_audit(
     intake_disp: StageDisposition,
     total_workspace_canons: Option<usize>,
     thresholds: AuditCascadeThresholds,
-    env: &BTreeMap<String, String>,
-    stdout: &mut dyn Write,
+    output_ctx: &mut AuditOutputContext<'_>,
 ) -> Result<Caseload, CliError> {
     let short_circuited = caseload_after_discover
         .with_docket(CaseloadDocket::default())
@@ -445,14 +492,17 @@ fn finish_zero_candidate_audit(
         .with_verdict(CaseloadVerdict::default());
     args.io.write_output_caseload(&short_circuited)?;
     let wm = AuditWatermarks::zero_candidates(intake_disp, total_workspace_canons, thresholds);
-    render_audit_output(args, &short_circuited, &wm, env, stdout)?;
+    render_audit_output(
+        args,
+        &short_circuited,
+        &wm,
+        output_ctx.env,
+        output_ctx.stdout,
+    )?;
+    publish_github_check_if_enabled(args, &short_circuited, &wm, output_ctx.github_target)?;
     Ok(short_circuited)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Internal CLI helper formatting validation failure provenance watermarks across the 8-stage audit closure"
-)]
 fn handle_validation_failure(
     args: &AuditArgs,
     caseload: &Caseload,
@@ -460,8 +510,7 @@ fn handle_validation_failure(
     discover_disp: StageDisposition,
     total_workspace_canons: Option<usize>,
     thresholds: AuditCascadeThresholds,
-    env: &BTreeMap<String, String>,
-    stdout: &mut dyn Write,
+    output_ctx: &mut AuditOutputContext<'_>,
 ) -> Result<Caseload, CliError> {
     args.io.write_output_caseload(caseload)?;
     let wm = AuditWatermarks::validation_failed(
@@ -470,9 +519,10 @@ fn handle_validation_failure(
         total_workspace_canons,
         thresholds,
     );
-    if resolve_effective_format(args, env) != AuditFormat::Compact {
-        render_audit_output(args, caseload, &wm, env, stdout)?;
+    if resolve_effective_format(args, output_ctx.env) != AuditFormat::Compact {
+        render_audit_output(args, caseload, &wm, output_ctx.env, output_ctx.stdout)?;
     }
+    publish_github_check_if_enabled(args, caseload, &wm, output_ctx.github_target)?;
 
     let total_errors: usize = caseload
         .validation
@@ -1979,6 +2029,384 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                 0,
                 "andon cord must fire post-validate with zero audit model calls"
             );
+        }
+    }
+
+    mod github_checks_publication {
+        use super::*;
+        use crate::caseload::{
+            AnnotationLevel, CanonAdjudication, CaseloadIntake, CaseloadVerdict, CodeAnnotation,
+        };
+        use crate::github::{
+            ENV_GITHUB_API_URL, ENV_GITHUB_REPOSITORY, ENV_GITHUB_SHA, ENV_GITHUB_TOKEN,
+        };
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::Arc;
+        use std::thread;
+
+        fn read_mock_github_request(stream: &mut TcpStream) -> (String, Value) {
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 4096];
+            let mut header_end = None;
+            let mut content_length = 0usize;
+
+            while header_end.is_none() {
+                let n = stream.read(&mut tmp).expect("read mock request");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    header_end = Some(pos + 4);
+                    let hdrs = String::from_utf8_lossy(&buf[..pos]);
+                    for line in hdrs.lines() {
+                        if let Some((k, v)) = line.split_once(':')
+                            && k.eq_ignore_ascii_case("content-length")
+                        {
+                            content_length = v.trim().parse::<usize>().unwrap_or(0);
+                        }
+                    }
+                }
+            }
+
+            let start = header_end.expect("header terminator");
+            while buf.len() < start + content_length {
+                let n = stream.read(&mut tmp).expect("read mock body");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+            }
+
+            let request_line = String::from_utf8_lossy(&buf[..start])
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let body: Value =
+                serde_json::from_slice(&buf[start..start + content_length]).expect("json body");
+            (request_line, body)
+        }
+
+        fn write_mock_github_response(stream: &mut TcpStream, status: &str, body: &str) {
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(resp.as_bytes()).expect("write response");
+            stream.flush().expect("flush response");
+        }
+
+        #[test]
+        fn test_publish_github_check_fails_fast_before_model_spend() {
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GEMINI_API_KEY.to_string(), "test-key".to_string());
+
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "src/cli/audit.rs",
+                "--publish-github-check",
+            ]);
+            let mut stdout = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect_err("missing GITHUB_TOKEN must fail fast with exit code 2");
+
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("Hint:"));
+            assert_eq!(provider.call_count(), 0);
+        }
+
+        fn failing_caseload_with_findings(count: usize) -> Vec<u8> {
+            let annotations: Vec<CodeAnnotation> = (1..=count)
+                .map(|i| CodeAnnotation {
+                    path: format!("src/mod_{i}.rs"),
+                    start_line: i,
+                    end_line: i,
+                    start_column: Some(1),
+                    end_column: Some(8),
+                    annotation_level: AnnotationLevel::Failure,
+                    message: format!("Finding #{i}"),
+                    title: None,
+                })
+                .collect();
+
+            let completed = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/mod_1.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_verdict(CaseloadVerdict {
+                    status: VerdictStatus::Fail,
+                    summary: "0 passed, 1 failed across 1 active case(s)".to_string(),
+                    adjudications: vec![CanonAdjudication {
+                        canon_path: ".canons/demo/rule.md".to_string(),
+                        compliance_summary: format!("{count} violations found."),
+                        compliance_score: 0.05,
+                        status: VerdictStatus::Fail,
+                        annotations,
+                    }],
+                });
+            serde_json::to_vec(&completed).expect("serialize caseload")
+        }
+
+        fn mock_github_env(addr: std::net::SocketAddr) -> BTreeMap<String, String> {
+            BTreeMap::from([
+                ("GITHUB_ACTIONS".to_string(), "true".to_string()),
+                (ENV_GITHUB_API_URL.to_string(), format!("http://{addr}")),
+                (ENV_GITHUB_TOKEN.to_string(), "ghs_test".to_string()),
+                (
+                    ENV_GITHUB_REPOSITORY.to_string(),
+                    "PAIR-code/canon-clerk".to_string(),
+                ),
+                (ENV_GITHUB_SHA.to_string(), "deadbeef1234".to_string()),
+            ])
+        }
+
+        #[test]
+        fn test_replay_publishes_batched_annotations_and_suppresses_workflow_commands() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let captured = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+            let captured_ref = Arc::clone(&captured);
+
+            let server = thread::spawn(move || {
+                for (status, body) in [
+                    ("201 Created", r#"{"id":4242}"#),
+                    ("200 OK", r#"{"id":4242}"#),
+                ] {
+                    let (mut stream, _) = listener.accept().expect("accept request");
+                    let req = read_mock_github_request(&mut stream);
+                    captured_ref.lock().expect("lock").push(req);
+                    write_mock_github_response(&mut stream, status, body);
+                }
+            });
+
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "--caseload",
+                "-",
+                "--publish-github-check",
+                "--github-check-name",
+                "Custom Audit Check",
+            ]);
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let mut stdout = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(failing_caseload_with_findings(65)),
+                &mut stdout,
+                &WorkspaceSnapshot::new(),
+                &mock_github_env(addr),
+                &provider,
+            )
+            .expect_err("failing verdict must exit 1");
+
+            server.join().expect("server thread joined");
+            assert_eq!(err.exit_code(), 1);
+            assert_eq!(provider.call_count(), 0);
+
+            let out_str = String::from_utf8(stdout).expect("utf8 stdout");
+            assert!(out_str.contains("Pipeline Provenance:"));
+            assert!(out_str.contains("Verdict: FAIL"));
+            assert!(!out_str.contains("::error "));
+
+            let reqs = captured.lock().expect("lock");
+            assert_eq!(reqs.len(), 2);
+            assert_eq!(
+                reqs[0].0,
+                "POST /repos/PAIR-code/canon-clerk/check-runs HTTP/1.1"
+            );
+            assert_eq!(reqs[0].1["name"], "Custom Audit Check");
+            assert_eq!(reqs[0].1["conclusion"], "failure");
+            assert_eq!(
+                reqs[0].1["output"]["annotations"]
+                    .as_array()
+                    .expect("annotations")
+                    .len(),
+                50
+            );
+            assert!(
+                reqs[0].1["output"]["text"]
+                    .as_str()
+                    .expect("text")
+                    .contains("Finding #65")
+            );
+            assert_eq!(
+                reqs[1].0,
+                "PATCH /repos/PAIR-code/canon-clerk/check-runs/4242 HTTP/1.1"
+            );
+            assert_eq!(
+                reqs[1].1["output"]["annotations"]
+                    .as_array()
+                    .expect("annotations")
+                    .len(),
+                15
+            );
+        }
+
+        #[test]
+        fn test_zero_candidate_and_validation_failure_publish_expected_conclusions() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let captured = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+            let captured_ref = Arc::clone(&captured);
+
+            let server = thread::spawn(move || {
+                for id in [101u64, 102u64] {
+                    let (mut stream, _) = listener.accept().expect("accept request");
+                    let req = read_mock_github_request(&mut stream);
+                    captured_ref.lock().expect("lock").push(req);
+                    write_mock_github_response(
+                        &mut stream,
+                        "201 Created",
+                        &format!(r#"{{"id":{id}}}"#),
+                    );
+                }
+            });
+
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_API_URL.to_string(), format!("http://{addr}"));
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "ghs_test".to_string());
+            env.insert(
+                ENV_GITHUB_REPOSITORY.to_string(),
+                "PAIR-code/canon-clerk".to_string(),
+            );
+            env.insert(ENV_GITHUB_SHA.to_string(), "cafebabe".to_string());
+
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+
+            // 1. Zero-candidate short-circuit -> conclusion: "success", exit 0.
+            let ws = sample_workspace();
+            let zero_args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "README.md",
+                "--publish-github-check",
+            ]);
+            let mut stdout = Vec::new();
+            run_audit_with_snapshot_and_provider(
+                &zero_args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect("zero-candidate audit must pass");
+
+            // 2. Static validation failure -> conclusion: "failure" with validation diagnostics, exit 1.
+            let broken_ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\nunknown_frontmatter_key: true\ntriggers:\n  - \"src/**\"\n---\n# Bad Canon\n\nRule must hold.\n",
+                    &ParseCanonOptions::with_source_ref(".canons/broken.md"),
+                )
+                .with_file("src/cli/audit.rs");
+            let val_args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "src/cli/audit.rs",
+                "--publish-github-check",
+            ]);
+            let mut val_stdout = Vec::new();
+            let val_err = run_audit_with_snapshot_and_provider(
+                &val_args,
+                &mut Cursor::new(b""),
+                &mut val_stdout,
+                &broken_ws,
+                &env,
+                &provider,
+            )
+            .expect_err("validation failure must exit 1");
+            assert_eq!(val_err.exit_code(), 1);
+
+            server.join().expect("server thread joined");
+
+            let reqs = captured.lock().expect("lock");
+            assert_eq!(reqs.len(), 2);
+            assert_eq!(reqs[0].1["conclusion"], "success");
+            assert_eq!(reqs[1].1["conclusion"], "failure");
+            assert!(
+                !reqs[1].1["output"]["annotations"]
+                    .as_array()
+                    .expect("annotations")
+                    .is_empty(),
+                "validation diagnostics must be attached as inline annotations"
+            );
+        }
+
+        #[test]
+        fn test_output_caseload_flushed_before_github_api_error_exits_2() {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept request");
+                let _ = read_mock_github_request(&mut stream);
+                write_mock_github_response(
+                    &mut stream,
+                    "500 Internal Server Error",
+                    r#"{"message":"Internal Server Error"}"#,
+                );
+            });
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let out_path = std::env::temp_dir().join(format!("cc-gh-forensics-{unique}.json"));
+            let out_str = out_path.display().to_string();
+
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_API_URL.to_string(), format!("http://{addr}"));
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "ghs_test".to_string());
+            env.insert(
+                ENV_GITHUB_REPOSITORY.to_string(),
+                "PAIR-code/canon-clerk".to_string(),
+            );
+            env.insert(ENV_GITHUB_SHA.to_string(), "cafebabe".to_string());
+
+            let ws = sample_workspace();
+            let provider = FullCascadeProvider::new(json!({}), json!({}), json!({}));
+            let args = parse_audit(&[
+                "canon-clerk",
+                "audit",
+                "README.md",
+                "--output-caseload",
+                &out_str,
+                "--publish-github-check",
+            ]);
+            let mut stdout = Vec::new();
+            let err = run_audit_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(b""),
+                &mut stdout,
+                &ws,
+                &env,
+                &provider,
+            )
+            .expect_err("GitHub API 500 must exit 2");
+
+            server.join().expect("server thread joined");
+
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("Hint:"));
+            assert!(err.to_string().contains(&out_str));
+            assert!(
+                out_path.exists(),
+                "--output-caseload must be flushed to disk prior to GitHub API publication"
+            );
+            let _ = fs::remove_file(&out_path);
         }
     }
 }
