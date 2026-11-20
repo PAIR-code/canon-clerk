@@ -128,12 +128,12 @@ Canon Clerk embeds a production-grade corpus of **modular, domain-scoped `builti
 | 📐 **OpenSpec** | [`builtins/openspec/`](builtins/openspec/) | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
 | 🔍 **Parser Design** | [`builtins/parser-design/`](builtins/parser-design/) | Lexical/semantic phase separation and explicit multi-occurrence/blank semantics. |
 | 📝 **README Authoring** | [`builtins/readme-authoring/`](builtins/readme-authoring/) | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps, feature parity, responsive dark/light hero banners, and shunting architecture to `docs/`. |
-| 🛡️ **Repository Governance** | [`builtins/repo-governance/`](builtins/repo-governance/) | GitHub repository metadata parity, workflow script delegation, and third-party GitHub App restrictions. |
+| 🛡️ **Repository Governance** | [`builtins/repo-governance/`](builtins/repo-governance/) | GitHub Actions workflow script and CLI delegation hygiene. |
 | 🔒 **Security** | [`builtins/security/`](builtins/security/) | Workspace-external secret storage and POSIX `0600` owner-only credential file enforcement. |
 | 🧪 **Testing** | [`builtins/testing/`](builtins/testing/) | Single-purpose test inputs, behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
 | 🔖 **Versioning** | [`builtins/versioning/`](builtins/versioning/) | Omission of speculative backwards-compatibility shims during pre-`1.0` (`0.y.z`) refactors. |
 | 🎨 **Visual Identity** | [`builtins/visual-identity/`](builtins/visual-identity/) | Standalone brand iconography isolation, transparent canvas defaults, and defringed alpha perimeter standards. |
-| 🏛️ **Repo-Local Dogfooding** | [`.canons/`](.canons/) | Repository-specific dogfood policies: conceptual architecture docs, curated `llms.txt` indexing, spec alignment, and portable built-in standards. |
+| 🏛️ **Repo-Local Dogfooding** | [`.canons/`](.canons/) | Repository-specific dogfood policies: conceptual architecture docs, curated `llms.txt` indexing, spec alignment, `.github/settings.yml` metadata parity, third-party GitHub App restrictions, and portable built-in standards. |
 
 ### Adopting Canons Alongside the CLI
 

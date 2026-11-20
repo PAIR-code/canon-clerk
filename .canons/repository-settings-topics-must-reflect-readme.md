@@ -6,6 +6,7 @@ references:
 inspect:
   - diff
 tags:
+  - internal
   - repo-governance
 ---
 Pull requests introducing, removing, or renaming core capabilities, tools, or architectural domains in `README.md` MUST update `repository.topics` in `.github/settings.yml` to reflect the active taxonomy.
