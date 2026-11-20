@@ -439,6 +439,8 @@ impl CaseloadIoArgs {
     }
 }
 
+pub use crate::cli::github_args::GithubCheckArgs;
+
 #[cfg(test)]
 mod tests {
     use super::*;

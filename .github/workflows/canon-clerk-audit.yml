@@ -23,6 +23,10 @@ jobs:
   audit:
     name: "Audit Pull Request"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
     # Auto-run for trusted maintainers (including triangular fork PRs);
     # require explicit maintainer opt-in via the `audit` label for external PRs.
     if: >-

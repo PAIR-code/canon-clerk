@@ -22,6 +22,7 @@ pub(crate) mod closure;
 pub mod configure;
 pub mod discover;
 pub mod docket;
+mod github_args;
 pub mod intake;
 pub mod io;
 pub mod node_args;
@@ -41,7 +42,7 @@ pub use apprise::{
     run_apprise_with_snapshot_and_provider, run_apprise_with_telemetry,
 };
 pub use args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs,
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
     ProviderTransportArgs, WorkspaceStateArg,
 };
 pub use audit::{

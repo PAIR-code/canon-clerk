@@ -133,7 +133,9 @@ pub(super) fn resolve_effective_format(
         AuditFormat::Json
     } else if let Some(explicit) = args.format {
         explicit
-    } else if env.get("GITHUB_ACTIONS").map(String::as_str) == Some("true") {
+    } else if env.get("GITHUB_ACTIONS").map(String::as_str) == Some("true")
+        && !args.github_check.publish_github_check
+    {
         AuditFormat::Github
     } else {
         AuditFormat::Stylish
@@ -290,6 +292,14 @@ fn append_github_step_summary(
         .append(true)
         .open(summary_path)?;
 
+    write_github_markdown_summary(caseload, wm, &mut file)
+}
+
+pub(super) fn write_github_markdown_summary(
+    caseload: &Caseload,
+    wm: &AuditWatermarks,
+    out: &mut dyn Write,
+) -> std::io::Result<()> {
     let mut provenance_buf = Vec::new();
     write_seven_stage_provenance(caseload, wm, &mut provenance_buf)?;
     let provenance_text = String::from_utf8_lossy(&provenance_buf);
@@ -303,9 +313,9 @@ fn append_github_step_summary(
         ),
     };
 
-    writeln!(file, "### Canon Clerk Audit Gate: {status_badge}\n")?;
-    writeln!(file, "{summary_line}\n")?;
-    writeln!(file, "```text\n{provenance_text}```\n")?;
+    writeln!(out, "### Canon Clerk Audit Gate: {status_badge}\n")?;
+    writeln!(out, "{summary_line}\n")?;
+    writeln!(out, "```text\n{provenance_text}```\n")?;
 
     if let Some(verdict) = &caseload.verdict
         && !verdict.adjudications.is_empty()
@@ -316,19 +326,19 @@ fn append_github_step_summary(
             .partition(|adj| adj.status == VerdictStatus::Fail);
 
         if !failing.is_empty() {
-            write_markdown_decree_table(&failing, &mut file)?;
+            write_markdown_decree_table(&failing, out)?;
             if !passing.is_empty() {
-                writeln!(file)?;
+                writeln!(out)?;
             }
         }
         if !passing.is_empty() {
             writeln!(
-                file,
+                out,
                 "<details>\n<summary>Passing cases ({})</summary>\n",
                 passing.len()
             )?;
-            write_markdown_decree_table(&passing, &mut file)?;
-            writeln!(file, "\n</details>")?;
+            write_markdown_decree_table(&passing, out)?;
+            writeln!(out, "\n</details>")?;
         }
     }
     Ok(())
@@ -460,6 +470,6 @@ fn write_verdict_report(
     Ok(())
 }
 
-fn collapse_whitespace(text: &str) -> String {
+pub(super) fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
