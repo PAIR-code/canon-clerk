@@ -109,6 +109,13 @@ Model bindings cascade deterministically across explicit per-node CLI flags (`--
 
 ## The Canon Corpus
 
+---
+
+## Roadmap
+
+- **Q3 2026:** Build a web dashboard and Slack bot integration.
+- **Q4 2026:** Launch hosted enterprise SaaS tier.
+
 Canon Clerk includes a production-grade corpus of **modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)), ready to explore, adapt, and enforce:
 
 | Domain Pack | Path | Count | Governed Conventions |

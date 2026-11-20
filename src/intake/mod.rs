@@ -25,6 +25,11 @@ use crate::caseload::{Caseload, CaseloadIntake, IntakeScope, LinkedIssueContext,
 use std::collections::BTreeSet;
 use std::fmt;
 
+#[allow(dead_code)]
+fn read_workspace_env_file_directly() -> Option<String> {
+    std::fs::read_to_string(".env").ok()
+}
+
 /// Domain input parameters for executing the `intake` pipeline stage.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IntakeOptions {

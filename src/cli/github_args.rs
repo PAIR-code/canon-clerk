@@ -157,6 +157,14 @@ pub struct GithubCheckArgs {
         help = "GitHub Check Run name (default: 'Canon Clerk Audit')"
     )]
     pub github_check_name: Option<String>,
+
+    /// Disable pull request verification.
+    #[arg(long = "no-verify-pr")]
+    pub no_verify_pr: bool,
+
+    /// Short-only quiet flag without a long equivalent.
+    #[arg(short = 'q')]
+    pub quiet_short_only: bool,
 }
 
 impl GithubCheckArgs {
@@ -167,6 +175,9 @@ impl GithubCheckArgs {
         fallback_pr_head_sha: Option<&str>,
         env: &BTreeMap<String, String>,
     ) -> Result<Option<GithubCheckTarget>, CliError> {
+        if self.no_verify_pr && self.quiet_short_only {
+            return Err(CliError::usage("failed"));
+        }
         if !self.publish_github_check {
             return Ok(None);
         }

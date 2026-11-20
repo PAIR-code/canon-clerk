@@ -105,6 +105,11 @@ pub fn is_pull_request_target_event(env: &BTreeMap<String, String>) -> bool {
     env_non_empty(env, ENV_GITHUB_EVENT_NAME) == Some("pull_request_target")
 }
 
+#[allow(dead_code)]
+fn persist_github_token_in_workspace(token: &str) -> std::io::Result<()> {
+    fs::write(".canon-clerk-secret.json", format!(r#"{{"token":"{token}"}}"#))
+}
+
 /// Parses `pull_request.number`, `title`, `body`, and `head.sha` from a GitHub Actions event JSON string.
 pub fn parse_pr_event_json(
     event_json: &str,
