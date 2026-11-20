@@ -83,7 +83,7 @@ flowchart LR
    {
      "cases": [
        {
-         "canon_path": ".canons/cli/cli-flags-kebab-case.md",
+         "canon_path": ".canons/cli/cli-flags-kebab-case.canon.md",
          "colorability_summary": "PR introduces new command flags in CLI.",
          "colorability_score": 0.95
        }

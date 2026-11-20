@@ -36,8 +36,8 @@ pub use lexer::{
     normalize_canon_content, tokenize_canon,
 };
 pub use sourcing::{
-    CanonScope, CanonSourceInfo, CanonSourceKind, derive_diagnostic_path, derive_scope,
-    has_directory_traversal, resolve_source_info, scope_pattern,
+    CANON_FILE_EXT, CanonScope, CanonSourceInfo, CanonSourceKind, derive_diagnostic_path,
+    derive_scope, has_directory_traversal, resolve_source_info, scope_pattern,
 };
 
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,7 @@ pub struct Canon {
 /// Configuration options for [`parse_canon`] and [`assemble_canon_from_tokens`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParseCanonOptions {
-    /// Optional source-qualified reference or workspace file path (e.g. `".canons/auth/rule.md"`, `"builtin:core/rule"`).
+    /// Optional source-qualified reference or workspace file path (e.g. `".canons/auth/rule.canon.md"`, `"builtin:core/rule"`).
     pub source_ref: Option<String>,
     /// Optional explicit monorepo scope override (e.g. `"packages/ui"`).
     pub scope: Option<String>,
@@ -485,18 +485,18 @@ Body text.";
 
         #[test]
         fn test_root_and_nested_workspace_sourcing() {
-            let root = resolve_source_info(".canons/prs-must-include-tests.md").unwrap();
+            let root = resolve_source_info(".canons/prs-must-include-tests.canon.md").unwrap();
             assert_eq!(root.source_kind, CanonSourceKind::Workspace);
             assert_eq!(
                 root.file_path.as_deref(),
-                Some(".canons/prs-must-include-tests.md")
+                Some(".canons/prs-must-include-tests.canon.md")
             );
             assert_eq!(root.diagnostic_path, "prs-must-include-tests");
             assert_eq!(root.file_stem, "prs-must-include-tests");
             assert_eq!(root.scope, None);
             assert_eq!(derive_id(None, Some(&root)), "prs-must-include-tests");
 
-            let nested = resolve_source_info(".canons/auth/tokens-must-expire.md").unwrap();
+            let nested = resolve_source_info(".canons/auth/tokens-must-expire.canon.md").unwrap();
             assert_eq!(nested.source_kind, CanonSourceKind::Workspace);
             assert_eq!(nested.diagnostic_path, "auth/tokens-must-expire");
             assert_eq!(nested.file_stem, "tokens-must-expire");
@@ -507,7 +507,8 @@ Body text.";
         #[test]
         fn test_scoped_workspace_sourcing() {
             let scoped =
-                resolve_source_info("packages/ui/.canons/auth/tokens-must-expire.md").unwrap();
+                resolve_source_info("packages/ui/.canons/auth/tokens-must-expire.canon.md")
+                    .unwrap();
             assert_eq!(scoped.source_kind, CanonSourceKind::Workspace);
             assert_eq!(
                 scoped.scope.as_ref().map(CanonScope::as_str),
@@ -520,7 +521,8 @@ Body text.";
         #[test]
         fn test_builtin_and_pack_realm_sourcing() {
             let builtin =
-                resolve_source_info("builtin:canon-authoring/canons-must-be-atomic.md").unwrap();
+                resolve_source_info("builtin:canon-authoring/canons-must-be-atomic.canon.md")
+                    .unwrap();
             assert_eq!(builtin.source_kind, CanonSourceKind::Builtin);
             assert_eq!(builtin.file_path, None);
             assert_eq!(
@@ -529,7 +531,7 @@ Body text.";
             );
             assert_eq!(derive_id(None, Some(&builtin)), "canons-must-be-atomic");
 
-            let pack = resolve_source_info("security:auth/tokens-must-expire.md").unwrap();
+            let pack = resolve_source_info("security:auth/tokens-must-expire.canon.md").unwrap();
             assert_eq!(
                 pack.source_kind,
                 CanonSourceKind::Pack("security".to_string())
@@ -674,7 +676,7 @@ Replace custom utilities with platform equivalents.";
             let zero_byte = parse_canon(
                 "",
                 &ParseCanonOptions::with_source_ref(
-                    ".canons/all-caps-spec-must-refer-to-spec-md.md",
+                    ".canons/all-caps-spec-must-refer-to-spec-md.canon.md",
                 ),
             )
             .expect("0-byte canon must be valid");
@@ -721,7 +723,7 @@ Rationale:   \t
 
             let canon = parse_canon(
                 raw,
-                &ParseCanonOptions::with_source_ref(".canons/auth/tokens-must-expire.md"),
+                &ParseCanonOptions::with_source_ref(".canons/auth/tokens-must-expire.canon.md"),
             )
             .expect("blank fields must degrade gracefully");
 
@@ -811,7 +813,7 @@ Normative invariant MUST hold.";
 
             let canon = parse_canon(
                 raw,
-                &ParseCanonOptions::with_source_ref(".canons/fallback-stem.md"),
+                &ParseCanonOptions::with_source_ref(".canons/fallback-stem.canon.md"),
             )
             .expect("mistyped frontmatter fields must degrade gracefully");
 

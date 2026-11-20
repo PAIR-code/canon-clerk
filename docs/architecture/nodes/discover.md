@@ -73,7 +73,7 @@ flowchart LR
 2. **Plenary Canon Discovery (`--all-canons`):** When `all_canons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidate_canons` with `mode: "all-canons"`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
 3. **Canon Corpus Enumeration & Sourcing:** Discovers all candidate canons across both active realms:
-   - **Local Workspace Canons:** Discovered via the default pattern `**/.canons/**/*.md`, retaining workspace-relative file paths.
+   - **Local Workspace Canons:** Discovered via the default pattern `**/.canons/**/*.canon.md`, retaining workspace-relative file paths while ignoring non-canon Markdown documents (such as `.canons/README.md` or `.canons/AGENTS.md`).
    - **Embedded Built-in Standard Canons:** Curated `builtin:<domain>/<stem>` canons compiled directly into the binary are loaded by default alongside local workspace canons (unless disabled via `--no-builtins`).
    - **Virtual Reference Isolation:** Embedded `builtin:*` references are loaded strictly into the canon corpus and are never inserted into the workspace file tree (`existing_files`), preventing virtual keys from polluting `exists:` preconditions or `--all-targets` filings.
    - **Cross-Realm Coexistence (`SPEC.md` §6.2):** Local workspace canons and `builtin:*` canons are disambiguated by their source-qualified references and co-exist without shadowing or colliding even when they share a derived `id`.

@@ -460,15 +460,15 @@ mod tests {
         WorkspaceSnapshot::new()
             .with_canon_markdown(
                 "---\ntriggers:\n  - \"src/cli/**\"\ninspect:\n  - diff\n  - pr_title?\n---\n# CLI Flags Kebab Case\n\nCLI flags MUST use kebab-case naming.\n\n**Exception:** Legacy v0 aliases explicitly marked `hide = true`.\n",
-                &ParseCanonOptions::with_source_ref(".canons/cli/cli-flags-kebab-case.md"),
+                &ParseCanonOptions::with_source_ref(".canons/cli/cli-flags-kebab-case.canon.md"),
             )
             .with_canon_markdown(
                 "---\ntriggers:\n  - \"**/*\"\nreferences:\n  - \"README.md\"\ninspect:\n  - diff\n  - pr_title\n---\n# Feat PRs Must Update README\n\nPull requests introducing new user-facing features (`feat`) MUST update `README.md`.\n",
-                &ParseCanonOptions::with_source_ref(".canons/readme/feat-updates-readme.md"),
+                &ParseCanonOptions::with_source_ref(".canons/readme/feat-updates-readme.canon.md"),
             )
             .with_canon_markdown(
                 "---\ntriggers:\n  - \"**/*\"\ninspect:\n  - pr_title\n---\n# Conventional Commit Title\n\nPR titles MUST use lowercase type prefixes.\n",
-                &ParseCanonOptions::with_source_ref(".canons/git/pr-title-lowercase.md"),
+                &ParseCanonOptions::with_source_ref(".canons/git/pr-title-lowercase.canon.md"),
             )
             .with_file_content("README.md", "# Canon Clerk\n\nExisting documentation.\n")
     }
@@ -513,7 +513,7 @@ mod tests {
         let diffs = sample_intake_diffs();
         let mut exhibits = BTreeMap::new();
         exhibits.insert(
-            ".canons/cli/cli-flags-kebab-case.md".to_string(),
+            ".canons/cli/cli-flags-kebab-case.canon.md".to_string(),
             vec![
                 ExhibitAssessment {
                     file_path: "src/cli/audit.rs".to_string(),
@@ -530,7 +530,7 @@ mod tests {
             ],
         );
         exhibits.insert(
-            ".canons/readme/feat-updates-readme.md".to_string(),
+            ".canons/readme/feat-updates-readme.canon.md".to_string(),
             vec![
                 ExhibitAssessment {
                     file_path: "pr_title".to_string(),
@@ -549,8 +549,8 @@ mod tests {
 
         let mut docket_cases = BTreeMap::new();
         for c in [
-            ".canons/cli/cli-flags-kebab-case.md",
-            ".canons/readme/feat-updates-readme.md",
+            ".canons/cli/cli-flags-kebab-case.canon.md",
+            ".canons/readme/feat-updates-readme.canon.md",
         ] {
             docket_cases.insert(
                 c.to_string(),
@@ -575,8 +575,8 @@ mod tests {
                     "src/internal/excluded_helper.rs".to_string(),
                 ],
                 candidate_canons: vec![
-                    ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                    ".canons/readme/feat-updates-readme.md".to_string(),
+                    ".canons/cli/cli-flags-kebab-case.canon.md".to_string(),
+                    ".canons/readme/feat-updates-readme.canon.md".to_string(),
                 ],
                 ..CaseloadDiscovery::default()
             })
@@ -666,7 +666,7 @@ mod tests {
         fn two_violation_routes() -> BTreeMap<String, Result<Value, ProviderError>> {
             let mut routes = BTreeMap::new();
             routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                ".canons/cli/cli-flags-kebab-case.canon.md".to_string(),
                 Ok(json!({
                     "compliance_summary": "Flag `--auditThreshold` uses camelCase instead of kebab-case `--audit-threshold`.",
                     "compliance_score": 0.08,
@@ -682,7 +682,7 @@ mod tests {
                 })),
             );
             routes.insert(
-                ".canons/readme/feat-updates-readme.md".to_string(),
+                ".canons/readme/feat-updates-readme.canon.md".to_string(),
                 Ok(json!({
                     "compliance_summary": "`feat(cli):` adds a user-facing subcommand without updating `README.md`.",
                     "compliance_score": 0.10,
@@ -768,7 +768,7 @@ mod tests {
             let ws = sample_workspace();
             let mut exhibits = BTreeMap::new();
             exhibits.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                ".canons/cli/cli-flags-kebab-case.canon.md".to_string(),
                 vec![ExhibitAssessment {
                     file_path: "src/cli/audit.rs".to_string(),
                     admissibility_summary: "Legacy hidden alias.".to_string(),
@@ -777,7 +777,7 @@ mod tests {
                 }],
             );
             exhibits.insert(
-                ".canons/git/pr-title-lowercase.md".to_string(),
+                ".canons/git/pr-title-lowercase.canon.md".to_string(),
                 vec![ExhibitAssessment {
                     file_path: "pr_title".to_string(),
                     admissibility_summary: "PR title prefix.".to_string(),
@@ -791,7 +791,7 @@ mod tests {
 
             let mut routes = BTreeMap::new();
             routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                ".canons/cli/cli-flags-kebab-case.canon.md".to_string(),
                 Ok(json!({
                     "compliance_summary": "Satisfies declared Exception: legacy alias is marked `hide = true`.",
                     "compliance_score": 0.88,
@@ -799,7 +799,7 @@ mod tests {
                 })),
             );
             routes.insert(
-                ".canons/git/pr-title-lowercase.md".to_string(),
+                ".canons/git/pr-title-lowercase.canon.md".to_string(),
                 Ok(json!({
                     "compliance_summary": "PR title `FEAT: ...` uses uppercase prefix; change to `feat: ...`.",
                     "compliance_score": 0.05,
@@ -840,7 +840,7 @@ mod tests {
             let ws = sample_workspace();
             let mut vetting_cases = BTreeMap::new();
             vetting_cases.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
+                ".canons/cli/cli-flags-kebab-case.canon.md".to_string(),
                 CanonVettingAssessment {
                     vetting_summary: "Prima facie compliant via discriminative vetting."
                         .to_string(),
@@ -851,7 +851,7 @@ mod tests {
                 },
             );
             vetting_cases.insert(
-                ".canons/readme/feat-updates-readme.md".to_string(),
+                ".canons/readme/feat-updates-readme.canon.md".to_string(),
                 CanonVettingAssessment {
                     vetting_summary: "Contested: missing README update.".to_string(),
                     vetting_score: 0.14,
@@ -865,7 +865,7 @@ mod tests {
                 sample_admitted_caseload().with_vetting(CaseloadVetting::from_cases(vetting_cases));
             let mut routes = BTreeMap::new();
             routes.insert(
-                ".canons/readme/feat-updates-readme.md".to_string(),
+                ".canons/readme/feat-updates-readme.canon.md".to_string(),
                 Ok(json!({
                     "compliance_summary": "`feat(cli):` omits `README.md` update.",
                     "compliance_score": 0.10,
@@ -895,8 +895,8 @@ mod tests {
             // All-vetted caseload short-circuits with zero provider calls and no .config required
             let mut all_vetted = BTreeMap::new();
             for c in [
-                ".canons/cli/cli-flags-kebab-case.md",
-                ".canons/readme/feat-updates-readme.md",
+                ".canons/cli/cli-flags-kebab-case.canon.md",
+                ".canons/readme/feat-updates-readme.canon.md",
             ] {
                 all_vetted.insert(
                     c.to_string(),

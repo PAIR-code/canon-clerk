@@ -183,7 +183,7 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
             "discover",
             "-q",
             "--canon",
-            ".canons/docs/readme-must-be-concise.md",
+            ".canons/docs/readme-must-be-concise.canon.md",
             "src/lib.rs",
         ])
         .output()
@@ -263,7 +263,7 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
             "--intent",
             "Refactor library internals",
             "--canon",
-            ".canons/docs/readme-must-be-concise.md",
+            ".canons/docs/readme-must-be-concise.canon.md",
             "src/lib.rs",
             "--json",
         ])

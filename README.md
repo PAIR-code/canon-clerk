@@ -49,7 +49,7 @@ flowchart LR
     V2 --> CI
 ```
 
-Canon Clerk codifies these rules into plain, zero-friction Markdown files stored in `.canons/` directories. Organized into modular, domain-scoped rule packs (such as CLI ergonomics, canon authoring, and Conventional Commits), canons establish clear, enforceable boundaries for human contributors and AI coding assistants alike.
+Canon Clerk codifies these rules into plain, zero-friction `*.canon.md` Markdown files stored in `.canons/` directories. Organized into modular, domain-scoped rule packs (such as CLI ergonomics, canon authoring, and Conventional Commits), canons establish clear, enforceable boundaries for human contributors and AI coding assistants alike.
 
 ---
 

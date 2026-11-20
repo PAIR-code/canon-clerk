@@ -105,7 +105,7 @@ error: No filing source or canon scope provided for validate.
 - **`compact`:** Emits deterministic tab-separated `<path>\t<line>:<col>\t<level>\t<title>\t<message>` diagnostic lines strictly for validation errors and warnings (omitting warnings under `--quiet`, and exiting `0` with empty `stdout` when zero diagnostics are emitted).
 - **GitHub Actions (CI Mode):** When executing in GitHub Actions (auto-detected via `GITHUB_ACTIONS=true` or `--format github`), emits native GitHub Actions workflow command annotations:
   ```text
-  ::error file=.canons/security/rule.md,line=14,col=5,title=RFC 2119 Violation::Normative keyword 'must' must be uppercase 'MUST'.
+  ::error file=.canons/security/rule.canon.md,line=14,col=5,title=RFC 2119 Violation::Normative keyword 'must' must be uppercase 'MUST'.
   ```
   and appends the validation summary to `$GITHUB_STEP_SUMMARY`.
 - **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON containing structured `results` and `diagnostics` across all evaluated candidate canons.

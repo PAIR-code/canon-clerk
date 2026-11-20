@@ -81,7 +81,7 @@ fn collect_builtin_entries(builtins_root: &PathBuf) -> Result<Vec<BuiltinEntry>,
                 continue;
             }
             let file_name = item.file_name().to_string_lossy().into_owned();
-            if let Some(stem) = file_name.strip_suffix(".md") {
+            if let Some(stem) = file_name.strip_suffix(".canon.md") {
                 files.push((file_name.clone(), stem.to_string()));
             }
         }

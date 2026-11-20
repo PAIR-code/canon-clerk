@@ -14,7 +14,7 @@ This specification defines the syntax, schema, and metadata derivation rules for
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)] [[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)] when, and only when, they appear in all capitals, as shown here.
 
 ### 1.3 Core Principles
-1. **Zero Barrier to Entry:** Even an empty file with a `.md` extension MUST be treated as a fully valid, enforceable canon.
+1. **Zero Barrier to Entry:** Even an empty file with a `.canon.md` extension MUST be treated as a fully valid, enforceable canon.
 2. **Progressive Disclosure:** Advanced optimizations (deterministic path filtering via `triggers:`, custom inspection scopes, and structured rubrics) are strictly OPTIONAL.
 3. **The What / When / Why / How Tetrad:** Canons scale along an intuitive cognitive architecture:
    * **What (The Invariant):** The boundary condition that MUST be true (formulated using RFC 2119 keywords).
@@ -44,7 +44,7 @@ A nominal canon file that fails to embody these attributes SHOULD still be enfor
 
 ### 2.1 File Encoding & Format
 * A canon file MUST be a valid UTF-8 encoded text file.
-* A canon file MUST use the `.md` file extension.
+* A canon file MUST use the `.canon.md` file extension.
 * The body of a canon file is interpreted as CommonMark / GitHub Flavored Markdown (GFM).
 
 ### 2.2 Frontmatter Block
@@ -61,7 +61,7 @@ A nominal canon file that fails to embody these attributes SHOULD still be enfor
 Canons evaluate from three primary sourcing tiers:
 
 1. **Local Workspace Canons:**  
-   Authored directly in the subject repository (e.g. `.canons/agent-orientation/agents-md-must-be-unconditional.md` or `packages/ui/.canons/prs-must-verify-accessibility.md`). Identified by workspace-relative file paths, preserving native IDE link clickability and terminal editor jumps.
+   Authored directly in the subject repository (e.g. `.canons/agent-orientation/agents-md-must-be-unconditional.canon.md` or `packages/ui/.canons/prs-must-verify-accessibility.canon.md`). Identified by workspace-relative file paths, preserving native IDE link clickability and terminal editor jumps.
 2. **Built-in Standard Canons:**  
    Core standard canons bundled directly into the `canon-clerk` binary (e.g. `builtin:canon-authoring/canons-must-be-atomic`). Provided out-of-the-box for instant codex validation without requiring downstream repositories to re-author baseline engineering rules.
 3. **Library Canons (Rule Packs):**  
@@ -73,16 +73,17 @@ Canons evaluate from three primary sourcing tiers:
 ### 3.2 Workspace Discovery & Scoping
 Within the local workspace, discovery locates repository canons:
 
-* **Default Discovery Pattern:** By default, canon discovery in the workspace searches for all Markdown files matching:
+* **Default Discovery Pattern:** By default, canon discovery in the workspace searches for all canon Markdown files matching:
   ```text
-  **/.canons/**/*.md
+  **/.canons/**/*.canon.md
   ```
+  Non-canon Markdown files (such as `.canons/README.md` or `.canons/AGENTS.md`) MUST be ignored by default discovery.
   Implementations MAY allow or use a different pattern, for example to accommodate project-specific configuration.
 * **Global Canons:** Canons residing in the workspace root's `.canons/` directory are **global** and apply across the entire repository.
 * **Scoped Canons (Monorepo Packages):** Canons MAY reside within subdirectories, such as monorepo packages or services:
   ```text
-  packages/ui/.canons/prs-must-verify-accessibility.md
-  services/auth/.canons/tokens-must-expire-promptly.md
+  packages/ui/.canons/prs-must-verify-accessibility.canon.md
+  services/auth/.canons/tokens-must-expire-promptly.canon.md
   ```
   * **Scoping Rule:** A canon located in `<scope>/.canons/` automatically inherits an implicit path boundary of `<scope>/**`. Implementations MUST NOT evaluate a scoped canon against files outside its assigned `<scope>/`.
   * **Subordination & Scope Containment:** A scoped canon MUST NOT refer to or in any way depend on files superior or external to its assigned `<scope>/`. All declared paths and glob patterns in `triggers:`, `exists:`, and `references:` MUST be evaluated strictly relative to `<scope>/`. Any pattern attempting directory traversal outside `<scope>/` (e.g. using `../`) MUST be rejected during validation as a schema error. If, to be functional, a canon requires accessing or inspecting files superior to its scope, that canon file MUST be hoisted to the relevant parent directory's `.canons/` directory (or the repository root), and narrowed via path prefixes in its `triggers`, `exists`, and `references` as needed.
@@ -114,13 +115,13 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * Replace whitespace, slashes (`/`), and underscore characters (`_`) with hyphens (`-`).
      * Strip invalid characters (retaining only lowercase ASCII alphanumeric characters `[a-z0-9]` and hyphens `-`).
      * Collapse consecutive hyphens into a single hyphen, and trim leading and trailing hyphens.
-   * **Implicit ID (Fallback):** If `id` is omitted, derive it from the canon's file name (excluding directory paths) by stripping the `.md` extension and applying the normalization pipeline above.
+   * **Implicit ID (Fallback):** If `id` is omitted, derive it from the canon's file name (excluding directory paths) by stripping the `.canon.md` extension and applying the normalization pipeline above.
    * **Validation:** A derived or explicit `id` MUST NOT be empty.
    * **Diagnostic Path:** Implementations SHOULD report the path relative to the nearest enclosing `.canons/` directory or pack root (e.g. `agent-orientation/agents-md-must-be-unconditional`, `auth/tokens-must-expire`) in diagnostic outputs, logs, and triage summaries to guide human and AI agent triage.
-   * *Example (Local Implicit):* `.canons/prs-must-include-tests.md` -> `prs-must-include-tests`
-   * *Example (Nested Local Implicit):* `.canons/auth/tokens-must-expire.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
-   * *Example (Builtin Implicit):* `builtin:canon-authoring/canons-must-be-atomic.md` -> `canons-must-be-atomic` (diagnostic path: `canon-authoring/canons-must-be-atomic`)
-   * *Example (Pack Implicit):* `security:auth/tokens-must-expire.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
+   * *Example (Local Implicit):* `.canons/prs-must-include-tests.canon.md` -> `prs-must-include-tests`
+   * *Example (Nested Local Implicit):* `.canons/auth/tokens-must-expire.canon.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
+   * *Example (Builtin Implicit):* `builtin:canon-authoring/canons-must-be-atomic` -> `canons-must-be-atomic` (diagnostic path: `canon-authoring/canons-must-be-atomic`)
+   * *Example (Pack Implicit):* `security:auth/tokens-must-expire` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
    * *Example (Explicit):* `id: "Auth: Token Expiry (v2)"` -> `auth-token-expiry-v2`
 
 2. **`title` Derivation:**
@@ -194,7 +195,7 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
 
 8. **`invariant` Derivation (The Invariant Statement):**
    * If a Markdown body contains text outside recognized directive blocks (`Exception`, `Rationale`, `Remediation`), the first text block (excluding any opening `#` or `##` heading) MUST be used as the invariant statement.
-   * If the Markdown body is empty, or consists solely of headings or directives with zero invariant body text (e.g., a 0-byte file such as `all-caps-spec-must-refer-to-spec-md.md` or a heading-only file `# PRs Must Include Tests`), implementations MUST fall back to using the derived `title` as the invariant statement.
+   * If the Markdown body is empty, or consists solely of headings or directives with zero invariant body text (e.g., a 0-byte file such as `all-caps-spec-must-refer-to-spec-md.canon.md` or a heading-only file `# PRs Must Include Tests`), implementations MUST fall back to using the derived `title` as the invariant statement.
    * *Rationale:* Adhering to Principle 1.3.1 (Zero Barrier to Entry) and canon naming standards (`canon-names-must-state-invariants`), a canon's filename or heading embodies its normative policy. This guarantees that minimal, 0-byte, or heading-only files function as valid, evaluable canons without producing empty evaluation prompts.
 
 ---
@@ -305,9 +306,9 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
 ## 6. File Naming & Collision Conventions
 
 1. **Assertive Invariant Slugs (RECOMMENDED):**  
-   Canons SHOULD be named using descriptive kebab-case slugs that state the invariant being enforced (e.g., `prs-must-document-new-features.md`, `services-must-maintain-bounded-contexts.md`).
+   Canons SHOULD be named using descriptive kebab-case slugs with the `.canon.md` extension that state the invariant being enforced (e.g., `prs-must-document-new-features.canon.md`, `services-must-maintain-bounded-contexts.canon.md`).
 2. **Collision Resistance & Disambiguation:**  
    Within Canon Clerk, canon identity and uniqueness are governed by their source-qualified reference (workspace-relative path for local canons, `builtin:<path>` for standard rules, or `<pack-alias>:<path>` for library canons):
    * Within a single directory or pack root, filesystem uniqueness structurally prevents identical paths.
-   * Canons sharing identical filenames or derived `id`s across disparate sources (e.g. `builtin:auth/tokens-must-expire.md` vs local `.canons/auth/tokens-must-expire.md`) or disjoint monorepo scopes (e.g. `packages/auth/.canons/tokens-must-expire.md` vs `packages/billing/.canons/tokens-must-expire.md`) represent distinct statutory authorities and do NOT collide.
+   * Canons sharing identical filenames or derived `id`s across disparate sources (e.g. `builtin:auth/tokens-must-expire` vs local `.canons/auth/tokens-must-expire.canon.md`) or disjoint monorepo scopes (e.g. `packages/auth/.canons/tokens-must-expire.canon.md` vs `packages/billing/.canons/tokens-must-expire.canon.md`) represent distinct statutory authorities and do NOT collide.
    * In user-facing reports, summaries, and CLI outputs where bare `id`s would be ambiguous within an active evaluation run, implementations SHOULD qualify the display name using the canon's diagnostic path or source-qualified reference (e.g. `auth/tokens-must-expire`, `builtin:canon-authoring/canons-must-be-atomic`, `security:auth/tokens-must-expire`).

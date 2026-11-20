@@ -312,15 +312,20 @@ mod tests {
                 fs::create_dir_all(path.join(".canons")).expect("create .canons");
                 fs::create_dir_all(path.join("src")).expect("create src");
                 fs::write(
-                    path.join(".canons/rust-modules-must-compile.md"),
+                    path.join(".canons/rust-modules-must-compile.canon.md"),
                     "---\ntriggers:\n  - \"src/**/*.rs\"\n---\nRust modules MUST compile cleanly.\n",
                 )
                 .expect("write rust fixture canon");
                 fs::write(
-                    path.join(".canons/readme-must-be-concise.md"),
+                    path.join(".canons/readme-must-be-concise.canon.md"),
                     "---\ntriggers:\n  - \"README.md\"\n---\nREADME files MUST be concise.\n",
                 )
                 .expect("write readme fixture canon");
+                fs::write(
+                    path.join(".canons/README.md"),
+                    "# Non-Canon Documentation\n\nThis file must be ignored by discover.\n",
+                )
+                .expect("write non-canon .canons/README.md");
                 fs::write(path.join("src/lib.rs"), "pub fn fixture() {}\n")
                     .expect("write src/lib.rs");
                 Self { path }
@@ -355,7 +360,13 @@ mod tests {
             assert_eq!(disc.mode.as_str(), "all-canons");
             assert!(
                 disc.candidate_canons
-                    .contains(&".canons/rust-modules-must-compile.md".to_string())
+                    .contains(&".canons/rust-modules-must-compile.canon.md".to_string())
+            );
+            assert!(
+                !disc
+                    .candidate_canons
+                    .contains(&".canons/README.md".to_string()),
+                "non-canon .canons/README.md must be excluded from discovery"
             );
             assert!(
                 disc.candidate_canons
@@ -373,7 +384,7 @@ mod tests {
                     ..FilingSourceArgs::default()
                 },
                 canons: CanonSelectionArgs {
-                    canon: vec![".canons/readme-must-be-concise.md".to_string()],
+                    canon: vec![".canons/readme-must-be-concise.canon.md".to_string()],
                     ..CanonSelectionArgs::default()
                 },
                 quiet: true,
@@ -410,7 +421,7 @@ mod tests {
             let disc = caseload.discovery.expect("discovery populated");
             assert_eq!(
                 disc.candidate_canons,
-                vec![".canons/rust-modules-must-compile.md".to_string()]
+                vec![".canons/rust-modules-must-compile.canon.md".to_string()]
             );
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains('\t'));
