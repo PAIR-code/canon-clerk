@@ -20,21 +20,22 @@ mod exhibits;
 mod fold;
 mod prompt;
 mod reference_overlay;
+mod slice_pack;
 mod slices;
 
 pub use error::AuditError;
+pub use exhibits::resolve_canon_reference_paths;
 pub(crate) use exhibits::{
     extract_file_exhibit_lines, format_file_exhibit_heading, is_metadata_plane_id,
 };
-pub use exhibits::resolve_canon_reference_paths;
 pub(crate) use prompt::build_audit_case_user_prompt;
 pub(crate) use reference_overlay::{
     apply_base_diff_to_references, collect_base_reference_disk_paths,
 };
-pub(crate) use slices::{
-    RenderedFileExhibit, build_shared_case_header, format_pinned_reference_exhibits,
-    pack_rendered_exhibit_slices, partition_and_render_file_exhibits,
+pub(crate) use slice_pack::{
+    RenderedFileExhibit, format_pinned_reference_exhibits, pack_rendered_exhibit_slices,
 };
+pub(crate) use slices::{build_shared_case_header, partition_and_render_file_exhibits};
 
 use crate::caseload::{
     CanonAdjudication, Caseload, CaseloadVerdict, HeuristicNode, ResolvedNodeConfig, VerdictStatus,
@@ -1489,7 +1490,9 @@ mod tests {
             assert!(prompt.contains("pub fn hot() {"));
             assert!(prompt.contains("// ... [L"));
             assert!(!prompt.contains("let cold_20 = 20;"));
-            assert!(prompt.contains(&format!("{hot_line:>4} |         let x = Some(1).unwrap();")));
+            assert!(prompt.contains(&format!(
+                "{hot_line:>4} |         let x = Some(1).unwrap();"
+            )));
 
             let verdict = out.verdict.expect("verdict");
             assert_eq!(verdict.failed_count(), 1);

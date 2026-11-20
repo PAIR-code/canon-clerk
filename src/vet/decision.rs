@@ -266,7 +266,10 @@ fn build_slice_noul_items(slice: &VettingExhibitSlice) -> Vec<(String, String)> 
         ));
     }
     for span in &slice.spans {
-        items.push((span_question_key(&span.span_id), span_noul_instruction(span)));
+        items.push((
+            span_question_key(&span.span_id),
+            span_noul_instruction(span),
+        ));
     }
     items
 }

@@ -80,7 +80,9 @@ impl PreparedFileExhibit {
             let tiled_spans = tile_exhibit_lines(&file_path, &lines);
             let lines_chars: usize = lines.iter().map(|l| l.rendered.len() + 1).sum();
             let fence_overhead = if tiled_spans.len() > 1 {
-                tiled_spans.len().saturating_mul(SPAN_FENCE_OVERHEAD_PER_SPAN)
+                tiled_spans
+                    .len()
+                    .saturating_mul(SPAN_FENCE_OVERHEAD_PER_SPAN)
             } else {
                 0
             };
@@ -116,8 +118,12 @@ impl PreparedFileExhibit {
             return Vec::new();
         }
         if self.tiled_spans.len() > 1 {
-            let (fenced, descs) =
-                render_fenced_spans(&self.file_path, &self.lines, &self.tiled_spans, next_span_num);
+            let (fenced, descs) = render_fenced_spans(
+                &self.file_path,
+                &self.lines,
+                &self.tiled_spans,
+                next_span_num,
+            );
             let _ = writeln!(out, "```{}\n{fenced}\n```\n", self.fence_lang);
             descs
                 .into_iter()
@@ -146,7 +152,9 @@ fn fallback_omission_note(file_path: &str, intake: &CaseloadIntake) -> String {
     if let Some(artifact) = intake.diffs.get(file_path)
         && let Some(reason) = artifact.patch_omission_reason
     {
-        return format!("(Diff patch omitted: {reason:?}; anchor file-level annotations at line 1.)");
+        return format!(
+            "(Diff patch omitted: {reason:?}; anchor file-level annotations at line 1.)"
+        );
     }
     "(Target file materialized in workspace scope; anchor file-level annotations at line 1.)"
         .to_string()
@@ -305,7 +313,8 @@ fn assemble_slice_refs(
     total_slices: usize,
 ) -> VettingExhibitSlice {
     let body_est: usize = items.iter().map(|i| i.estimated_chars).sum();
-    let mut state = String::with_capacity(shared_header.len() + body_est + SLICE_FRAME_RESERVE_CHARS);
+    let mut state =
+        String::with_capacity(shared_header.len() + body_est + SLICE_FRAME_RESERVE_CHARS);
     state.push_str(shared_header);
     if total_slices > 1 {
         let _ = writeln!(
@@ -316,7 +325,11 @@ fn assemble_slice_refs(
             items.len()
         );
     } else {
-        let _ = writeln!(state, "## Admitted Exhibits ({} file exhibit(s))\n", items.len());
+        let _ = writeln!(
+            state,
+            "## Admitted Exhibits ({} file exhibit(s))\n",
+            items.len()
+        );
     }
 
     let mut file_paths = Vec::with_capacity(items.len());

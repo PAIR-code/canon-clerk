@@ -891,10 +891,10 @@ mod tests {
                     ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default().with_node_model(
-                    HeuristicNode::Vet,
-                    DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
-                ))
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Vet, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
+                )
                 .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
                     canon_ref.to_string(),
                     CanonDocketAssessment {
@@ -922,17 +922,24 @@ mod tests {
                 .insert("file:src/clean.rs".to_string(), 0.96);
             tier1.question_scores.insert("span:S2".to_string(), 0.14);
 
-            let out = execute_vet(&VetOptions::default(), caseload, &ws, &tier1)
-                .expect("tier 1 vet");
+            let out =
+                execute_vet(&VetOptions::default(), caseload, &ws, &tier1).expect("tier 1 vet");
             let reqs = tier1.decision_requests.lock().unwrap();
-            assert_eq!(reqs.len(), 1, "whole + files + spans packed in 1 forward pass");
+            assert_eq!(
+                reqs.len(),
+                1,
+                "whole + files + spans packed in 1 forward pass"
+            );
             assert!(reqs[0].state.contains("=== [SPAN S2: src/big.rs"));
             assert!(reqs[0].questions.contains_key("file:src/big.rs"));
             assert!(reqs[0].questions.contains_key("span:S2"));
 
             let assessment = &out.vetting.unwrap().cases[canon_ref];
             assert_eq!(assessment.vetting_status, VettingStatus::Contested);
-            assert_eq!(assessment.contested_exhibits, vec!["src/big.rs".to_string()]);
+            assert_eq!(
+                assessment.contested_exhibits,
+                vec!["src/big.rs".to_string()]
+            );
             assert_eq!(assessment.contested_spans.len(), 1);
             assert_eq!(assessment.contested_spans[0].path, "src/big.rs");
             assert!((assessment.contested_spans[0].score - 0.14).abs() < 1e-9);
@@ -962,8 +969,8 @@ mod tests {
             // Tier 3 (omission canon): whole_score < threshold and 0 files/spans < threshold -> full slice fallback
             let mut tier3 = MockVetProvider::empty();
             tier3.question_scores.insert("compliant".to_string(), 0.20);
-            let out3 = execute_vet(&VetOptions::default(), caseload, &ws, &tier3)
-                .expect("tier 3 vet");
+            let out3 =
+                execute_vet(&VetOptions::default(), caseload, &ws, &tier3).expect("tier 3 vet");
             let a3 = &out3.vetting.unwrap().cases[canon_ref];
             assert_eq!(a3.vetting_status, VettingStatus::Contested);
             assert!(a3.contested_exhibits.is_empty());

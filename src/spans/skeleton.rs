@@ -377,9 +377,7 @@ mod tests {
         for i in 1..=20 {
             src.push_str(&format!("        let clean_{i} = {i};\n"));
         }
-        src.push_str(
-            "        0\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    fn cold_test() {\n",
-        );
+        src.push_str("        0\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    fn cold_test() {\n");
         for i in 1..=20 {
             src.push_str(&format!("        let cold_{i} = {i};\n"));
         }
@@ -400,7 +398,9 @@ mod tests {
         assert!(rendered.contains("#[cfg(test)]"));
         assert!(rendered.contains("mod tests {"));
         assert!(rendered.contains("fn hot_test() {"));
-        assert!(rendered.contains(&format!("{hot_line:>4} |         let violation = \"BAD_SENTINEL\";")));
+        assert!(rendered.contains(&format!(
+            "{hot_line:>4} |         let violation = \"BAD_SENTINEL\";"
+        )));
         assert!(rendered.contains("// ... [L"));
         assert!(!rendered.contains("let clean_10 = 10;"));
         assert!(!rendered.contains("let cold_10 = 10;"));
