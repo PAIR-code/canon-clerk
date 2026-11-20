@@ -76,12 +76,20 @@ struct PullRequestApiResponse {
     body: Option<String>,
     #[serde(default)]
     head: Option<PullRequestHeadRef>,
+    #[serde(default)]
+    labels: Vec<PullRequestLabelRef>,
 }
 
 #[derive(Deserialize)]
 struct PullRequestHeadRef {
     #[serde(default)]
     sha: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PullRequestLabelRef {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 /// Live GitHub Checks REST API client executing on Canon Clerk's persistent background Tokio reactor.
@@ -414,6 +422,17 @@ impl GithubPullRequestFetcher for GithubChecksClient {
                 .and_then(|h| h.sha)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
+            labels: parsed
+                .labels
+                .into_iter()
+                .filter_map(|label| {
+                    label
+                        .name
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                })
+                .collect(),
+            actor: None,
         })
     }
 

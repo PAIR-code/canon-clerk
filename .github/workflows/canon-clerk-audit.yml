@@ -10,6 +10,7 @@ on: # zizmor: ignore[dangerous-triggers] -- checks out and builds only trusted m
       - synchronize
       - reopened
       - labeled
+      - unlabeled
 
 permissions:
   contents: read
@@ -28,10 +29,11 @@ jobs:
       pull-requests: read
       checks: write
     # Auto-run for trusted maintainers (including triangular fork PRs);
-    # require explicit maintainer opt-in via the `audit` label for external PRs.
+    # require explicit maintainer opt-in via the `audit` or `skip-audit` label for external PRs.
     if: >-
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-      contains(github.event.pull_request.labels.*.name, 'audit')
+      contains(github.event.pull_request.labels.*.name, 'audit') ||
+      contains(github.event.pull_request.labels.*.name, 'skip-audit')
     steps:
       - name: Checkout trusted base branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,7 +51,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --on-missing-credentials skip --output-caseload caseload.json
+        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --github-bypass-label skip-audit --on-missing-credentials skip --output-caseload caseload.json
 
       - name: Upload Caseload forensics artifact
         if: always()

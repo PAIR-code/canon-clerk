@@ -19,7 +19,8 @@ use super::render::{AuditWatermarks, collapse_whitespace, write_github_markdown_
 use crate::caseload::{Caseload, CaseloadVerdict, CodeAnnotation, VerdictStatus};
 use crate::cli::CliError;
 use crate::github::{
-    CheckRunConclusion, CheckRunPublisher, CheckRunReport, GithubCheckTarget, GithubChecksClient,
+    CheckRunConclusion, CheckRunPublisher, CheckRunReport, GithubBypassMatch, GithubCheckTarget,
+    GithubChecksClient,
 };
 use std::fmt::Write as _;
 
@@ -61,6 +62,44 @@ pub(super) fn publish_skipped_github_check_if_enabled(
 pub(super) fn format_missing_credentials_skip_markdown(missing_provider_slug: &str) -> String {
     format!(
         "### Canon Clerk Audit Gate: SKIPPED\n\nLive audit skipped because provider API credentials for `{missing_provider_slug}` are unavailable in this execution context (`--on-missing-credentials skip`). Deterministic static canon validation passed prior to skip.\n"
+    )
+}
+
+pub(super) fn publish_bypassed_github_check_if_enabled(
+    args: &AuditArgs,
+    bypass: &GithubBypassMatch,
+    github_target: Option<&GithubCheckTarget>,
+) -> Result<(), CliError> {
+    let Some(target) = github_target else {
+        return Ok(());
+    };
+    let check_name = args.github_check.resolved_check_name();
+    let summary = format_bypass_label_skip_markdown(bypass);
+    let report = CheckRunReport {
+        name: check_name.clone(),
+        conclusion: CheckRunConclusion::Skipped,
+        title: format!(
+            "{check_name}: SKIPPED (bypassed via label '{}')",
+            bypass.label
+        ),
+        summary,
+        text: None,
+        annotations: Vec::new(),
+    };
+    publish_check_run_report(args, target, &report)
+}
+
+pub(super) fn format_bypass_label_skip_markdown(bypass: &GithubBypassMatch) -> String {
+    let actor_clause = bypass
+        .actor
+        .as_deref()
+        .map(|actor| format!(" (triggered by `@{actor}`)"))
+        .unwrap_or_default();
+    format!(
+        "### Canon Clerk Audit Gate: SKIPPED (Bypassed via `{}`)\n\n\
+         Audit evaluation was bypassed before model spend (0 tokens, 0 model calls) because the pull request carries the configured bypass label `{}`{actor_clause}.\n\n\
+         Remove the `{}` label to re-run Canon Clerk Audit.\n",
+        bypass.label, bypass.label, bypass.label
     )
 }
 

@@ -27,6 +27,9 @@ use std::path::Path;
 /// Environment variable naming the GitHub Actions trigger event (e.g., `"pull_request_target"`).
 pub const ENV_GITHUB_EVENT_NAME: &str = "GITHUB_EVENT_NAME";
 
+/// Environment variable naming the GitHub actor who triggered the workflow run.
+pub const ENV_GITHUB_ACTOR: &str = "GITHUB_ACTOR";
+
 /// Resolved GitHub repository, pull request number, API endpoint, and bearer token.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GithubPullRequestTarget {
@@ -63,6 +66,19 @@ pub struct GithubPullRequestMetadata {
     pub body: Option<String>,
     /// Pull request head commit SHA, if present.
     pub head_sha: Option<String>,
+    /// Pull request label names (`pull_request.labels[].name`).
+    pub labels: Vec<String>,
+    /// Optional actor login who triggered the GitHub event (`sender.login` in `$GITHUB_EVENT_PATH`).
+    pub actor: Option<String>,
+}
+
+/// Matched pull request bypass label and optional triggering actor context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubBypassMatch {
+    /// Matched pull request label name (preserving the label's casing from GitHub).
+    pub label: String,
+    /// Optional GitHub actor login (`GITHUB_ACTOR` or event `sender.login`).
+    pub actor: Option<String>,
 }
 
 /// Pull request context extracted from a GitHub Actions event JSON file (`$GITHUB_EVENT_PATH`).
@@ -155,13 +171,77 @@ pub fn parse_pr_event_json(
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned);
 
+    let labels = pr
+        .get("labels")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("name")
+                        .and_then(|n| n.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(ToOwned::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let actor = value
+        .get("sender")
+        .and_then(|s| s.get("login"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+
     Ok(GithubPullRequestEventContext {
         number,
         metadata: GithubPullRequestMetadata {
             title,
             body,
             head_sha,
+            labels,
+            actor,
         },
+    })
+}
+
+/// Checks whether `configured_label` matches any label on the pull request (case-insensitively).
+///
+/// Uses `fetched_pr_labels` when available (from `--github-pr`), falling back to
+/// `pull_request.labels[].name` in `$GITHUB_EVENT_PATH` when `--github-pr` was not used.
+pub fn detect_github_bypass_label(
+    configured_label: Option<&str>,
+    fetched_pr_labels: Option<&[String]>,
+    fetched_pr_actor: Option<&str>,
+    env: &BTreeMap<String, String>,
+) -> Option<GithubBypassMatch> {
+    let target_label = configured_label.map(str::trim).filter(|s| !s.is_empty())?;
+    let (labels, event_actor) = match fetched_pr_labels {
+        Some(labels) => (
+            labels.to_vec(),
+            fetched_pr_actor
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToOwned::to_owned),
+        ),
+        None => {
+            let ctx = parse_pr_context_from_event_path(env).ok()?;
+            (ctx.metadata.labels, ctx.metadata.actor)
+        }
+    };
+
+    let matched = labels
+        .into_iter()
+        .find(|label| label.eq_ignore_ascii_case(target_label))?;
+    let actor = env_non_empty(env, ENV_GITHUB_ACTOR)
+        .map(ToOwned::to_owned)
+        .or(event_actor);
+    Some(GithubBypassMatch {
+        label: matched,
+        actor,
     })
 }
 
@@ -357,6 +437,8 @@ mod tests {
                 title: Some("API Title".to_string()),
                 body: Some("API Body".to_string()),
                 head_sha: Some("api-sha-999".to_string()),
+                labels: vec!["type: feat".to_string()],
+                actor: None,
             },
             "diff --git a/x b/x\n",
         );
@@ -394,5 +476,82 @@ mod tests {
         let err_event =
             resolve_github_pr_filing(None, Some("o/r"), &tok_only, &fetcher).unwrap_err();
         assert!(err_event.to_string().contains("Hint:"));
+    }
+
+    mod bypass_label_detection {
+        use super::*;
+        use crate::github::DEFAULT_GITHUB_BYPASS_LABEL;
+
+        #[test]
+        fn test_event_json_extracts_labels_and_sender_actor() {
+            let ctx = parse_pr_event_json(
+                r#"{"sender":{"login":"maintainer-alice"},"pull_request":{"number":360,"title":"hotfix","head":{"sha":"abc"},"labels":[{"name":"Skip-Audit"},{"name":"  "},{"name":"type: fix"}]}}"#,
+            )
+            .expect("parse event with labels");
+
+            assert_eq!(ctx.metadata.labels, vec!["Skip-Audit", "type: fix"]);
+            assert_eq!(ctx.metadata.actor.as_deref(), Some("maintainer-alice"));
+        }
+
+        #[test]
+        fn test_detect_bypass_label_matches_case_insensitively_and_prefers_github_actor() {
+            let fetched = vec!["type: feat".to_string(), "Skip-Audit".to_string()];
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_ACTOR.to_string(), "env-actor".to_string());
+
+            let matched = detect_github_bypass_label(
+                Some(DEFAULT_GITHUB_BYPASS_LABEL),
+                Some(&fetched),
+                Some("sender-actor"),
+                &env,
+            )
+            .expect("should match case-insensitively");
+            assert_eq!(matched.label, "Skip-Audit");
+            assert_eq!(matched.actor.as_deref(), Some("env-actor"));
+
+            let no_env = BTreeMap::new();
+            let fallback_actor = detect_github_bypass_label(
+                Some(DEFAULT_GITHUB_BYPASS_LABEL),
+                Some(&fetched),
+                Some("sender-actor"),
+                &no_env,
+            )
+            .expect("should match with sender fallback");
+            assert_eq!(fallback_actor.actor.as_deref(), Some("sender-actor"));
+
+            assert!(
+                detect_github_bypass_label(Some("other-label"), Some(&fetched), None, &no_env)
+                    .is_none()
+            );
+            assert!(detect_github_bypass_label(None, Some(&fetched), None, &no_env).is_none());
+        }
+
+        #[test]
+        fn test_detect_bypass_label_falls_back_to_github_event_path_when_not_fetched() {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let event_path = std::env::temp_dir().join(format!("cc-bypass-event-{unique}.json"));
+            fs::write(
+                &event_path,
+                r#"{"sender":{"login":"octo-maintainer"},"pull_request":{"number":360,"head":{"sha":"deadbeef"},"labels":[{"name":"skip-audit"}]}}"#,
+            )
+            .expect("write event file");
+
+            let mut env = BTreeMap::new();
+            env.insert(
+                ENV_GITHUB_EVENT_PATH.to_string(),
+                event_path.display().to_string(),
+            );
+
+            let matched =
+                detect_github_bypass_label(Some(DEFAULT_GITHUB_BYPASS_LABEL), None, None, &env)
+                    .expect("fallback event path should match bypass label");
+            let _ = fs::remove_file(&event_path);
+
+            assert_eq!(matched.label, DEFAULT_GITHUB_BYPASS_LABEL);
+            assert_eq!(matched.actor.as_deref(), Some("octo-maintainer"));
+        }
     }
 }
