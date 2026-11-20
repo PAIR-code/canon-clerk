@@ -494,7 +494,30 @@ mod tests {
                     .expect("validate --all-canons");
             let val = caseload.validation.expect("validation populated");
             assert!(!val.has_errors);
-            assert_eq!(val.results.len(), 2);
+            assert_eq!(
+                val.results.len(),
+                2 + crate::builtin::builtin_canons().len()
+            );
+
+            let no_builtins_args = ValidateArgs {
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    no_builtins: true,
+                    ..CanonSelectionArgs::default()
+                },
+                ..args
+            };
+            let mut no_builtins_stdout = Vec::new();
+            let no_builtins_cl = run_validate_in_workspace(
+                &no_builtins_args,
+                &mut stdin,
+                &mut no_builtins_stdout,
+                fixture.path(),
+            )
+            .expect("validate --all-canons --no-builtins");
+            let no_builtins_val = no_builtins_cl.validation.expect("validation populated");
+            assert!(!no_builtins_val.has_errors);
+            assert_eq!(no_builtins_val.results.len(), 2);
         }
 
         #[test]

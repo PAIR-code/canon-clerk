@@ -2,7 +2,7 @@
 triggers:
   - "SPEC.md"
 references:
-  - ".canons/canon-authoring/**"
+  - "builtins/canon-authoring/**"
 inspect:
   - diff
 tags:

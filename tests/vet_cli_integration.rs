@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod common;
+
 use canon_clerk::Caseload;
 use std::process::Command;
 
@@ -42,11 +44,13 @@ fn test_cli_vet_guards_and_zero_candidate_short_circuit() {
     assert_eq!(vet_out_of_closure.status.code(), Some(2));
 
     // 3. Zero-candidate short-circuit exits 0 without API keys and attaches empty .vetting
+    let ws = common::TempCanonWorkspace::new("vet");
     let vet_zero_cand = Command::new(bin_path())
+        .current_dir(ws.path())
         .args([
             "vet",
             "--canon",
-            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
+            ".canons/docs/readme-must-be-concise.md",
             "src/lib.rs",
             "--json",
         ])

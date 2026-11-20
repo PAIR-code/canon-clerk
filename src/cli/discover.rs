@@ -275,6 +275,7 @@ mod tests {
                 canons: CanonSelectionArgs {
                     all_canons: true,
                     canon: vec![".canons/[unclosed/*.md".to_string()],
+                    ..CanonSelectionArgs::default()
                 },
                 ..DiscoverArgs::default()
             };
@@ -289,9 +290,52 @@ mod tests {
 
     mod execution_and_formats {
         use super::*;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct TempDiscoverWorkspace {
+            path: PathBuf,
+        }
+
+        impl TempDiscoverWorkspace {
+            fn new(label: &str) -> Self {
+                let unique = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos();
+                let path = std::env::temp_dir().join(format!(
+                    "canon-clerk-discover-ut-{label}-{unique}-{}",
+                    std::process::id()
+                ));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(path.join(".canons")).expect("create .canons");
+                fs::create_dir_all(path.join("src")).expect("create src");
+                fs::write(
+                    path.join(".canons/rust-modules-must-compile.md"),
+                    "---\ntriggers:\n  - \"src/**/*.rs\"\n---\nRust modules MUST compile cleanly.\n",
+                )
+                .expect("write rust fixture canon");
+                fs::write(
+                    path.join(".canons/readme-must-be-concise.md"),
+                    "---\ntriggers:\n  - \"README.md\"\n---\nREADME files MUST be concise.\n",
+                )
+                .expect("write readme fixture canon");
+                fs::write(path.join("src/lib.rs"), "pub fn fixture() {}\n")
+                    .expect("write src/lib.rs");
+                Self { path }
+            }
+        }
+
+        impl Drop for TempDiscoverWorkspace {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.path);
+            }
+        }
 
         #[test]
-        fn test_all_canons_discovers_repository_corpus() {
+        fn test_all_canons_discovers_workspace_and_builtin_corpus() {
+            let ws = TempDiscoverWorkspace::new("all-canons");
             let args = DiscoverArgs {
                 canons: CanonSelectionArgs {
                     all_canons: true,
@@ -305,25 +349,31 @@ mod tests {
             };
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
-            let caseload =
-                run_discover(&args, &mut stdin, &mut stdout).expect("discover --all-canons");
+            let caseload = run_discover_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
+                .expect("discover --all-canons");
             let disc = caseload.discovery.expect("discovery populated");
             assert_eq!(disc.mode.as_str(), "all-canons");
-            assert!(!disc.candidate_canons.is_empty());
+            assert!(
+                disc.candidate_canons
+                    .contains(&".canons/rust-modules-must-compile.md".to_string())
+            );
+            assert!(
+                disc.candidate_canons
+                    .iter()
+                    .any(|c| c.starts_with("builtin:"))
+            );
         }
 
         #[test]
         fn test_predicate_quiet_mode_exits_1_on_zero_matches() {
+            let ws = TempDiscoverWorkspace::new("quiet-miss");
             let args = DiscoverArgs {
                 filing: FilingSourceArgs {
                     targets: vec!["src/lib.rs".to_string()],
                     ..FilingSourceArgs::default()
                 },
                 canons: CanonSelectionArgs {
-                    canon: vec![
-                        ".canons/readme-authoring/readme-must-lead-with-what-and-why.md"
-                            .to_string(),
-                    ],
+                    canon: vec![".canons/readme-must-be-concise.md".to_string()],
                     ..CanonSelectionArgs::default()
                 },
                 quiet: true,
@@ -331,7 +381,7 @@ mod tests {
             };
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
-            let err = run_discover(&args, &mut stdin, &mut stdout)
+            let err = run_discover_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
                 .expect_err("zero matches in -q must fail");
             assert_eq!(err.exit_code(), 1);
             assert!(err.is_silent());
@@ -340,19 +390,28 @@ mod tests {
 
         #[test]
         fn test_compact_format_emits_tab_separated_lines() {
+            let ws = TempDiscoverWorkspace::new("compact");
             let args = DiscoverArgs {
                 filing: FilingSourceArgs {
-                    targets: vec!["src/cli/mod.rs".to_string()],
+                    targets: vec!["src/lib.rs".to_string()],
                     ..FilingSourceArgs::default()
+                },
+                canons: CanonSelectionArgs {
+                    no_builtins: true,
+                    ..CanonSelectionArgs::default()
                 },
                 format: DiscoverFormat::Compact,
                 ..DiscoverArgs::default()
             };
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
-            let caseload = run_discover(&args, &mut stdin, &mut stdout).expect("discover compact");
+            let caseload = run_discover_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
+                .expect("discover compact");
             let disc = caseload.discovery.expect("discovery populated");
-            assert!(!disc.candidate_canons.is_empty());
+            assert_eq!(
+                disc.candidate_canons,
+                vec![".canons/rust-modules-must-compile.md".to_string()]
+            );
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains('\t'));
         }

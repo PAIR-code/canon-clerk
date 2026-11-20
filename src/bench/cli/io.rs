@@ -18,7 +18,6 @@ use super::ConsistencyBenchFormat;
 use crate::audit::resolve_canon_reference_paths;
 use crate::bench::render::render_consistency_markdown;
 use crate::bench::{BenchmarkStage, ConsistencyBenchReport};
-use crate::canon::ParseCanonOptions;
 use crate::caseload::Caseload;
 use crate::cli::{CliError, map_discover_error};
 use crate::discover::WorkspaceSnapshot;
@@ -35,15 +34,7 @@ pub(super) fn materialize_disk_snapshot(
         WorkspaceSnapshot::from_disk(workspace_root, canon_patterns).map_err(map_discover_error)?;
     if let Some(disc) = incoming.and_then(|c| c.discovery.as_ref()) {
         for canon_ref in &disc.candidate_canons {
-            if !snapshot.canons.contains_key(canon_ref) {
-                let full_path = workspace_root.join(canon_ref);
-                if full_path.is_file()
-                    && let Ok(raw) = fs::read_to_string(&full_path)
-                {
-                    let opts = ParseCanonOptions::with_source_ref(canon_ref.clone());
-                    snapshot = snapshot.with_canon_markdown(&raw, &opts);
-                }
-            }
+            snapshot.backfill_canon_ref(workspace_root, canon_ref);
         }
     }
     Ok(snapshot)

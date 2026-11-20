@@ -15,14 +15,15 @@ set -e
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Deterministically enforces .canons/ directory hygiene, domain allowlist,
-# controlled tags vocabulary, internal/ coupling, and README.md domain parity.
+# Deterministically enforces builtins/ and .canons/ directory hygiene, domain allowlist,
+# controlled tags vocabulary, internal tag coupling, and README.md domain parity.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+BUILTINS_DIR="$REPO_ROOT/builtins"
 CANONS_DIR="$REPO_ROOT/.canons"
 README_FILE="$REPO_ROOT/README.md"
 
-# Canonical allowlist of exportable .canons/<domain>/ directories (1-to-1 with builtin:<domain>/<slug>)
+# Canonical allowlist of exportable builtins/<domain>/ directories (1-to-1 with builtin:<domain>/<slug>)
 ALLOWED_DOMAINS="
 agent-orientation
 agent-scripts
@@ -119,13 +120,18 @@ extract_tags() {
     ' "$1"
 }
 
+if [ ! -d "$BUILTINS_DIR" ]; then
+    echo "FAIL: builtins/ directory does not exist at $BUILTINS_DIR" >&2
+    exit 1
+fi
+
 if [ ! -d "$CANONS_DIR" ]; then
     echo "FAIL: .canons/ directory does not exist at $CANONS_DIR" >&2
     exit 1
 fi
 
-# 1. Check for stray files directly under .canons/
-for entry in "$CANONS_DIR"/* "$CANONS_DIR"/.*; do
+# 1. Check builtins/ contains only allowlisted domain directories (no stray files)
+for entry in "$BUILTINS_DIR"/* "$BUILTINS_DIR"/.*; do
     base="$(basename "$entry")"
     case "$base" in
         .|..|'*'|'.*') continue ;;
@@ -134,32 +140,32 @@ for entry in "$CANONS_DIR"/* "$CANONS_DIR"/.*; do
         continue
     fi
     if [ ! -d "$entry" ]; then
-        echo "FAIL: Stray file at .canons/$base (only allowlisted domain directories and internal/ are permitted)" >&2
+        echo "FAIL: Stray file at builtins/$base (only allowlisted domain directories are permitted)" >&2
         FAILED=1
         continue
     fi
-    if [ "$base" != "internal" ] && ! in_list "$base" "$ALLOWED_DOMAINS"; then
-        echo "FAIL: Unregistered directory .canons/$base/ (add to ALLOWED_DOMAINS in scripts/check-canons.sh or move canons to an existing domain)" >&2
+    if ! in_list "$base" "$ALLOWED_DOMAINS"; then
+        echo "FAIL: Unregistered directory builtins/$base/ (add to ALLOWED_DOMAINS in scripts/check-canons.sh or move canons to an existing domain)" >&2
         FAILED=1
     fi
 done
 
-# 2. Verify every allowlisted domain (and internal) exists and contains at least one .md canon
-for dir in $ALLOWED_DOMAINS internal; do
-    if [ ! -d "$CANONS_DIR/$dir" ]; then
-        echo "FAIL: Allowlisted directory .canons/$dir/ is missing" >&2
+# 2. Verify every allowlisted domain exists under builtins/ and contains at least one .md canon
+for dir in $ALLOWED_DOMAINS; do
+    if [ ! -d "$BUILTINS_DIR/$dir" ]; then
+        echo "FAIL: Allowlisted directory builtins/$dir/ is missing" >&2
         FAILED=1
         continue
     fi
-    md_count="$(find "$CANONS_DIR/$dir" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')"
+    md_count="$(find "$BUILTINS_DIR/$dir" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')"
     if [ "$md_count" -eq 0 ]; then
-        echo "FAIL: Directory .canons/$dir/ contains no .md canon files" >&2
+        echo "FAIL: Directory builtins/$dir/ contains no .md canon files" >&2
         FAILED=1
     fi
 done
 
-# 3. Verify no nested subdirectories and no non-.md files under .canons/<dir>/
-for dir_path in "$CANONS_DIR"/*; do
+# 3. Verify no nested subdirectories and no non-.md files under builtins/<domain>/, and validate tags
+for dir_path in "$BUILTINS_DIR"/*; do
     if [ ! -d "$dir_path" ]; then
         continue
     fi
@@ -173,22 +179,21 @@ for dir_path in "$CANONS_DIR"/*; do
             continue
         fi
         if [ -d "$entry" ]; then
-            echo "FAIL: Nested subdirectory .canons/$dir/$base/ is forbidden (corpus must be flat one level beneath .canons/)" >&2
+            echo "FAIL: Nested subdirectory builtins/$dir/$base/ is forbidden (built-in corpus must be flat one level beneath builtins/)" >&2
             FAILED=1
             continue
         fi
         case "$base" in
             *.md) ;;
             *)
-                echo "FAIL: Non-Markdown file .canons/$dir/$base is forbidden under .canons/" >&2
+                echo "FAIL: Non-Markdown file builtins/$dir/$base is forbidden under builtins/" >&2
                 FAILED=1
                 continue
                 ;;
         esac
 
-        # 4. Validate frontmatter tags for this canon
         CHECKED=$((CHECKED + 1))
-        rel=".canons/$dir/$base"
+        rel="builtins/$dir/$base"
         tags="$(extract_tags "$entry")"
 
         if [ -z "$tags" ]; then
@@ -212,25 +217,75 @@ for dir_path in "$CANONS_DIR"/*; do
             fi
         done
 
-        if [ "$dir" = "internal" ]; then
-            if [ "$has_internal" -eq 0 ]; then
-                echo "FAIL: $rel resides in .canons/internal/ but is missing the 'internal' tag" >&2
-                FAILED=1
-            fi
-        else
-            if [ "$has_internal" -ne 0 ]; then
-                echo "FAIL: $rel carries 'internal' tag outside .canons/internal/" >&2
-                FAILED=1
-            fi
-            if [ "$has_domain" -eq 0 ]; then
-                echo "FAIL: $rel resides in .canons/$dir/ but is missing the '$dir' tag" >&2
-                FAILED=1
-            fi
+        if [ "$has_internal" -ne 0 ]; then
+            echo "FAIL: $rel carries 'internal' tag inside builtins/ (move repo-local canons to .canons/)" >&2
+            FAILED=1
+        fi
+        if [ "$has_domain" -eq 0 ]; then
+            echo "FAIL: $rel resides in builtins/$dir/ but is missing the '$dir' tag" >&2
+            FAILED=1
         fi
     done
 done
 
-# 5. Verify README.md corpus table domain-set parity against .canons/
+# 4. Verify .canons/ is flat (repo-local dogfood canons only) and every canon carries 'internal'
+local_md_count=0
+for entry in "$CANONS_DIR"/* "$CANONS_DIR"/.*; do
+    base="$(basename "$entry")"
+    case "$base" in
+        .|..|'*'|'.*') continue ;;
+    esac
+    if [ ! -e "$entry" ]; then
+        continue
+    fi
+    if [ -d "$entry" ]; then
+        echo "FAIL: Subdirectory .canons/$base/ is forbidden (repo-local canons must reside flat under .canons/, exportable domains under builtins/)" >&2
+        FAILED=1
+        continue
+    fi
+    case "$base" in
+        *.md) ;;
+        *)
+            echo "FAIL: Non-Markdown file .canons/$base is forbidden under .canons/" >&2
+            FAILED=1
+            continue
+            ;;
+    esac
+
+    local_md_count=$((local_md_count + 1))
+    CHECKED=$((CHECKED + 1))
+    rel=".canons/$base"
+    tags="$(extract_tags "$entry")"
+
+    if [ -z "$tags" ]; then
+        echo "FAIL: $rel declares no tags in frontmatter" >&2
+        FAILED=1
+        continue
+    fi
+
+    has_internal=0
+    for tag in $tags; do
+        if ! in_list "$tag" "$ALLOWED_TAGS"; then
+            echo "FAIL: $rel uses unregistered tag '$tag'" >&2
+            FAILED=1
+        fi
+        if [ "$tag" = "internal" ]; then
+            has_internal=1
+        fi
+    done
+
+    if [ "$has_internal" -eq 0 ]; then
+        echo "FAIL: $rel resides in .canons/ but is missing the 'internal' tag" >&2
+        FAILED=1
+    fi
+done
+
+if [ "$local_md_count" -eq 0 ]; then
+    echo "FAIL: Directory .canons/ contains no .md canon files" >&2
+    FAILED=1
+fi
+
+# 5. Verify README.md corpus table domain-set parity against builtins/
 if [ ! -f "$README_FILE" ]; then
     echo "FAIL: README.md not found at $README_FILE" >&2
     FAILED=1
@@ -240,24 +295,24 @@ else
         in_section && /^## / { exit }
         in_section && /^\|/ {
             line = $0
-            while (match(line, /\(\.canons\/[a-z0-9-]+\/\)/)) {
-                tok = substr(line, RSTART + 9, RLENGTH - 11)
+            while (match(line, /\(builtins\/[a-z0-9-]+\/\)/)) {
+                tok = substr(line, RSTART + 10, RLENGTH - 12)
                 print tok
                 line = substr(line, RSTART + RLENGTH)
             }
         }
     ' "$README_FILE" | sort -u)"
 
-    for dir in $ALLOWED_DOMAINS internal; do
+    for dir in $ALLOWED_DOMAINS; do
         if ! in_list "$dir" "$readme_dirs"; then
-            echo "FAIL: README.md corpus table is missing domain '.canons/$dir/'" >&2
+            echo "FAIL: README.md corpus table is missing domain 'builtins/$dir/'" >&2
             FAILED=1
         fi
     done
 
     for rdir in $readme_dirs; do
-        if [ "$rdir" != "internal" ] && ! in_list "$rdir" "$ALLOWED_DOMAINS"; then
-            echo "FAIL: README.md corpus table lists unregistered domain '.canons/$rdir/'" >&2
+        if ! in_list "$rdir" "$ALLOWED_DOMAINS"; then
+            echo "FAIL: README.md corpus table lists unregistered domain 'builtins/$rdir/'" >&2
             FAILED=1
         fi
     done
@@ -269,5 +324,5 @@ if [ "$FAILED" -ne 0 ]; then
     exit 1
 fi
 
-echo "Canon corpus taxonomy check passed: $CHECKED canon(s) across $(printf '%s\n' $ALLOWED_DOMAINS internal | wc -l | tr -d ' ') directories."
+echo "Canon corpus taxonomy check passed: $CHECKED canon(s) across $(printf '%s\n' $ALLOWED_DOMAINS | wc -l | tr -d ' ') builtin domain(s) and .canons/."
 exit 0

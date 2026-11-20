@@ -423,6 +423,7 @@ fn resolve_upstream_discover(
     let discover_opts = DiscoverOptions {
         all_canons,
         canon_patterns: canons.canon.clone(),
+        include_builtins: canons.include_builtins(),
     };
     execute_discover(&discover_opts, caseload, workspace).map_err(|err| {
         ConsistencyBenchError::Setup {

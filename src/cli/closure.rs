@@ -14,7 +14,6 @@
 
 //! Shared closure workspace materialization, metadata merging, and `validate` resolution helpers.
 
-use crate::canon::ParseCanonOptions;
 use crate::caseload::{Caseload, CaseloadIntake};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
@@ -25,7 +24,6 @@ use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::validate::{ValidateError, ValidateOptions, execute_validate};
-use std::fs;
 use std::path::Path;
 
 /// Execution backend for converged CLI closures (`apprise`, `docket`, `admit`, `audit`).
@@ -99,15 +97,7 @@ pub(crate) fn materialize_closure_snapshot(
                 .map_err(map_discover_error)?;
             if let Some(disc) = &caseload.discovery {
                 for canon_ref in &disc.candidate_canons {
-                    if !snapshot.canons.contains_key(canon_ref) {
-                        let full_path = workspace_root.join(canon_ref);
-                        if full_path.is_file()
-                            && let Ok(raw) = fs::read_to_string(&full_path)
-                        {
-                            let opts = ParseCanonOptions::with_source_ref(canon_ref.clone());
-                            snapshot = snapshot.with_canon_markdown(&raw, &opts);
-                        }
-                    }
+                    snapshot.backfill_canon_ref(workspace_root, canon_ref);
                 }
             }
             Ok(snapshot)
@@ -210,6 +200,7 @@ pub(crate) fn resolve_cascade_discover(
     let discover_opts = DiscoverOptions {
         all_canons: canons.all_canons,
         canon_patterns: canons.canon.clone(),
+        include_builtins: canons.include_builtins(),
     };
 
     let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {

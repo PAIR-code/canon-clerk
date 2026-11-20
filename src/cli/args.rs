@@ -191,12 +191,35 @@ pub struct CanonSelectionArgs {
         help = "Explicitly restrict candidate canons to a specific subset"
     )]
     pub canon: Vec<String>,
+
+    /// Include compile-time embedded `builtin:*` standard canons during discovery (default).
+    #[arg(
+        long = "builtins",
+        overrides_with = "no_builtins",
+        help_heading = "Canon Selection",
+        help = "Include embedded builtin:* standard canons (default)"
+    )]
+    pub builtins: bool,
+
+    /// Exclude compile-time embedded `builtin:*` standard canons during discovery.
+    #[arg(
+        long = "no-builtins",
+        overrides_with = "builtins",
+        help_heading = "Canon Selection",
+        help = "Exclude embedded builtin:* standard canons"
+    )]
+    pub no_builtins: bool,
 }
 
 impl CanonSelectionArgs {
-    /// Returns `true` if canon selection is unconstrained (neither `--all-canons` nor `--canon` provided).
+    /// Returns `true` if embedded `builtin:*` standard canons should be included (default: `true`).
+    pub fn include_builtins(&self) -> bool {
+        !self.no_builtins
+    }
+
+    /// Returns `true` if canon selection is unconstrained (no explicit `--all-canons`, `--canon`, `--builtins`, or `--no-builtins`).
     pub fn is_empty(&self) -> bool {
-        !self.all_canons && self.canon.is_empty()
+        !self.all_canons && self.canon.is_empty() && !self.builtins && !self.no_builtins
     }
 }
 
@@ -468,18 +491,33 @@ mod tests {
     fn test_canon_selection_args_is_empty() {
         let default_args = CanonSelectionArgs::default();
         assert!(default_args.is_empty());
+        assert!(default_args.include_builtins());
 
         let all_canons = CanonSelectionArgs {
             all_canons: true,
-            canon: Vec::new(),
+            ..CanonSelectionArgs::default()
         };
         assert!(!all_canons.is_empty());
 
         let specific_canons = CanonSelectionArgs {
-            all_canons: false,
             canon: vec!["foo.md".to_string()],
+            ..CanonSelectionArgs::default()
         };
         assert!(!specific_canons.is_empty());
+
+        let disabled_builtins = CanonSelectionArgs {
+            no_builtins: true,
+            ..CanonSelectionArgs::default()
+        };
+        assert!(!disabled_builtins.is_empty());
+        assert!(!disabled_builtins.include_builtins());
+
+        let explicit_builtins = CanonSelectionArgs {
+            builtins: true,
+            ..CanonSelectionArgs::default()
+        };
+        assert!(!explicit_builtins.is_empty());
+        assert!(explicit_builtins.include_builtins());
     }
 
     #[test]

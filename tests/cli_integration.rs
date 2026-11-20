@@ -175,12 +175,15 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .expect("failed to execute canon-clerk discover");
     assert_eq!(disc_naked.status.code(), Some(2));
 
+    let val_ws = common::TempCanonWorkspace::new("dispatch");
+
     let disc_quiet_miss = Command::new(bin_path())
+        .current_dir(val_ws.path())
         .args([
             "discover",
             "-q",
             "--canon",
-            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
+            ".canons/docs/readme-must-be-concise.md",
             "src/lib.rs",
         ])
         .output()
@@ -188,6 +191,7 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
     assert_eq!(disc_quiet_miss.status.code(), Some(1));
 
     let disc_all = Command::new(bin_path())
+        .current_dir(val_ws.path())
         .args(["discover", "--all-canons", "--json"])
         .output()
         .expect("failed to execute canon-clerk discover --all-canons --json");
@@ -200,7 +204,6 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .expect("failed to execute canon-clerk validate");
     assert_eq!(val_naked.status.code(), Some(2));
 
-    let val_ws = common::TempCanonWorkspace::new("dispatch");
     let val_all = Command::new(bin_path())
         .current_dir(val_ws.path())
         .args(["validate", "--all-canons", "--max-warnings", "0", "--json"])
@@ -254,12 +257,13 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
     assert_eq!(apprise_zero_batch.status.code(), Some(2));
 
     let apprise_zero_cand = Command::new(bin_path())
+        .current_dir(val_ws.path())
         .args([
             "apprise",
             "--intent",
             "Refactor library internals",
             "--canon",
-            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
+            ".canons/docs/readme-must-be-concise.md",
             "src/lib.rs",
             "--json",
         ])
@@ -268,119 +272,6 @@ fn test_cli_subcommand_dispatch_routes_exit_codes() {
         .output()
         .expect("failed to execute canon-clerk apprise zero-candidate run");
     assert_eq!(apprise_zero_cand.status.code(), Some(0));
-}
-
-#[test]
-fn test_cli_docket_guards_and_batch_validation() {
-    // Verify docket Case-or-Controversy guard exits 2 and zero-candidate short-circuit exits 0 without GEMINI_API_KEY
-    let docket_all_canons_no_filing = Command::new(bin_path())
-        .args(["docket", "--all-canons"])
-        .output()
-        .expect("failed to execute canon-clerk docket --all-canons");
-    assert_eq!(docket_all_canons_no_filing.status.code(), Some(2));
-
-    let docket_zero_batch = Command::new(bin_path())
-        .args(["docket", "src/lib.rs", "--docket-batch-size", "0"])
-        .output()
-        .expect("failed to execute canon-clerk docket --docket-batch-size 0");
-    assert_eq!(docket_zero_batch.status.code(), Some(2));
-
-    let docket_zero_cand = Command::new(bin_path())
-        .args([
-            "docket",
-            "--canon",
-            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
-            "src/lib.rs",
-            "--json",
-        ])
-        .env_remove("GEMINI_API_KEY")
-        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
-        .output()
-        .expect("failed to execute canon-clerk docket zero-candidate run");
-    assert_eq!(docket_zero_cand.status.code(), Some(0));
-}
-
-#[test]
-fn test_cli_admit_guards_and_zero_candidate_short_circuit() {
-    // Verify admit Case-or-Controversy guard exits 2
-    let admit_all_canons_no_filing = Command::new(bin_path())
-        .args(["admit", "--all-canons"])
-        .output()
-        .expect("failed to execute canon-clerk admit --all-canons");
-    assert_eq!(admit_all_canons_no_filing.status.code(), Some(2));
-
-    // Verify invalid --admit-concurrency 0 and out-of-closure --apprise-threshold exit 2
-    let admit_zero_conc = Command::new(bin_path())
-        .args(["admit", "src/lib.rs", "--admit-concurrency", "0"])
-        .output()
-        .expect("failed to execute canon-clerk admit --admit-concurrency 0");
-    assert_eq!(admit_zero_conc.status.code(), Some(2));
-
-    let admit_out_of_closure = Command::new(bin_path())
-        .args(["admit", "src/lib.rs", "--apprise-threshold", "0.7"])
-        .output()
-        .expect("failed to execute canon-clerk admit --apprise-threshold 0.7");
-    assert_eq!(admit_out_of_closure.status.code(), Some(2));
-
-    // Verify zero-candidate short-circuit exits 0 without GEMINI_API_KEY
-    let admit_zero_cand = Command::new(bin_path())
-        .args([
-            "admit",
-            "--canon",
-            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
-            "src/lib.rs",
-            "--json",
-        ])
-        .env_remove("GEMINI_API_KEY")
-        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
-        .output()
-        .expect("failed to execute canon-clerk admit zero-candidate run");
-    assert_eq!(admit_zero_cand.status.code(), Some(0));
-    let parsed: Caseload =
-        serde_json::from_slice(&admit_zero_cand.stdout).expect("parse admit Caseload JSON");
-    assert!(parsed.evidence.is_some());
-    assert!(parsed.evidence.expect("evidence").active_cases.is_empty());
-}
-
-#[test]
-fn test_cli_audit_guards_and_zero_candidate_short_circuit() {
-    // Verify audit Case-or-Controversy guard exits 2
-    let audit_all_canons_no_filing = Command::new(bin_path())
-        .args(["audit", "--all-canons"])
-        .output()
-        .expect("failed to execute canon-clerk audit --all-canons");
-    assert_eq!(audit_all_canons_no_filing.status.code(), Some(2));
-
-    // Verify invalid --audit-concurrency 0 and out-of-closure --apprise-threshold exit 2
-    let audit_zero_conc = Command::new(bin_path())
-        .args(["audit", "src/lib.rs", "--audit-concurrency", "0"])
-        .output()
-        .expect("failed to execute canon-clerk audit --audit-concurrency 0");
-    assert_eq!(audit_zero_conc.status.code(), Some(2));
-
-    let audit_out_of_closure = Command::new(bin_path())
-        .args(["audit", "src/lib.rs", "--apprise-threshold", "0.7"])
-        .output()
-        .expect("failed to execute canon-clerk audit --apprise-threshold 0.7");
-    assert_eq!(audit_out_of_closure.status.code(), Some(2));
-
-    // Verify zero-candidate short-circuit exits 0 without GEMINI_API_KEY and attaches passing .verdict
-    let audit_zero_cand = Command::new(bin_path())
-        .args([
-            "audit",
-            "--canon",
-            ".canons/readme-authoring/readme-must-lead-with-what-and-why.md",
-            "src/lib.rs",
-            "--json",
-        ])
-        .env_remove("GEMINI_API_KEY")
-        .env("XDG_CONFIG_HOME", "/nonexistent-canon-clerk-xdg-dir")
-        .output()
-        .expect("failed to execute canon-clerk audit zero-candidate run");
-    assert_eq!(audit_zero_cand.status.code(), Some(0));
-    let parsed: Caseload =
-        serde_json::from_slice(&audit_zero_cand.stdout).expect("parse audit Caseload JSON");
-    assert!(parsed.verdict.expect("verdict").is_pass());
 }
 
 #[test]

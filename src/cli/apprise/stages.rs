@@ -110,6 +110,7 @@ pub(super) fn resolve_apprise_discover(
     let discover_opts = DiscoverOptions {
         all_canons: canons.all_canons || (!intake_has_targets && !canons.canon.is_empty()),
         canon_patterns: canons.canon.clone(),
+        include_builtins: canons.include_builtins(),
     };
 
     let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {

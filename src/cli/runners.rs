@@ -107,6 +107,7 @@ pub fn run_branch_a_discover(
         let discover_opts = DiscoverOptions {
             all_canons: canons.all_canons,
             canon_patterns: canons.canon.clone(),
+            include_builtins: canons.include_builtins(),
         };
         telemetry.run_stage(PipelineStage::Discover, |_scope| {
             execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
@@ -145,6 +146,7 @@ pub fn run_branch_a_validate(
             all_canons: canons.all_canons
                 || (caseload_after_intake.intake.is_none() && !canons.canon.is_empty()),
             canon_patterns: canons.canon.clone(),
+            include_builtins: canons.include_builtins(),
         };
         telemetry.run_stage(PipelineStage::Discover, |_scope| {
             execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)

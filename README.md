@@ -108,32 +108,32 @@ Model bindings cascade deterministically across explicit per-node CLI flags (`--
 
 ## The Canon Corpus
 
-Canon Clerk includes a production-grade corpus of **modular, domain-scoped canons** adhering to the formal specification ([`SPEC.md`](SPEC.md)), ready to explore, adapt, and enforce:
+Canon Clerk embeds a production-grade corpus of **modular, domain-scoped `builtin:*` canons** directly into the binary (sourced from [`builtins/`](builtins/)), alongside Canon Clerk's own repo-local dogfood rules in [`.canons/`](.canons/)—all adhering to the formal specification ([`SPEC.md`](SPEC.md)):
 
-| Domain Pack | Path | Governed Conventions |
+| Domain Pack | Source Path | Governed Conventions |
 | :--- | :--- | :--- |
-| 🧭 **Agent Orientation** | [`.canons/agent-orientation/`](.canons/agent-orientation/) | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
-| 🤖 **Agent Scripts** | [`.canons/agent-scripts/`](.canons/agent-scripts/) | Runtime script standards for AI agent helpers: POSIX shell portability, command echo traces, passthrough fidelity, and `>8KB` output shunting. |
-| 🧩 **Agent Skills** | [`.canons/agent-skills/`](.canons/agent-skills/) | Procedural runtime execution targets and non-duplicative skill metadata. |
-| 🔌 **API Design** | [`.canons/api-design/`](.canons/api-design/) | Single-source defaults, additive exclusions, co-located option/result types, streaming multi-resource APIs, and domain encapsulation. |
-| 🏗️ **Architecture** | [`.canons/architecture/`](.canons/architecture/) | Pure format validators, explicit library dependencies, narrow module option boundaries, and Hexagonal workspace isolation. |
-| 📦 **Build Systems** | [`.canons/build-systems/`](.canons/build-systems/) | Consolidated monorepo root bundling and private-package declaration hygiene. |
-| 📜 **Canon Authoring** | [`.canons/canon-authoring/`](.canons/canon-authoring/) | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
-| 🛠️ **CLI Ergonomics** | [`.canons/cli/`](.canons/cli/) | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
-| ✨ **Code Quality** | [`.canons/code-quality/`](.canons/code-quality/) | Substantiated static-analysis suppressions with documented rationale. |
-| ⚡ **Concurrency & Async I/O** | [`.canons/concurrency/`](.canons/concurrency/) | Persistent, continuously driven runtime lifecycles for shared pooled or multiplexed asynchronous I/O clients. |
-| ⚙️ **Configuration** | [`.canons/configuration/`](.canons/configuration/) | Orthogonal configuration namespaces, `<provider>:<name>` specifier qualification, and deterministic specificity cascades. |
-| 🏷️ **Conventional Commits** | [`.canons/conventional-commits/`](.canons/conventional-commits/) | Semantic commit and PR invariants (`feat` for user-facing functionality, `fix` for user-facing defect repairs). |
-| 🔀 **Git Workflow** | [`.canons/git-workflow/`](.canons/git-workflow/) | Sanctioned issue scope hygiene and independent precursor domain-contract delivery. |
-| 🏛️ **Internal Dogfooding** | [`.canons/internal/`](.canons/internal/) | Repository-specific dogfood policies: conceptual architecture docs, curated `llms.txt` indexing, spec alignment, and portable standards. |
-| 📐 **OpenSpec** | [`.canons/openspec/`](.canons/openspec/) | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
-| 🔍 **Parser Design** | [`.canons/parser-design/`](.canons/parser-design/) | Lexical/semantic phase separation and explicit multi-occurrence/blank semantics. |
-| 📝 **README Authoring** | [`.canons/readme-authoring/`](.canons/readme-authoring/) | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps, feature parity, responsive dark/light hero banners, and shunting architecture to `docs/`. |
-| 🛡️ **Repository Governance** | [`.canons/repo-governance/`](.canons/repo-governance/) | GitHub repository metadata parity, workflow script delegation, and third-party GitHub App restrictions. |
-| 🔒 **Security** | [`.canons/security/`](.canons/security/) | Workspace-external secret storage and POSIX `0600` owner-only credential file enforcement. |
-| 🧪 **Testing** | [`.canons/testing/`](.canons/testing/) | Single-purpose test inputs, behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
-| 🔖 **Versioning** | [`.canons/versioning/`](.canons/versioning/) | Omission of speculative backwards-compatibility shims during pre-`1.0` (`0.y.z`) refactors. |
-| 🎨 **Visual Identity** | [`.canons/visual-identity/`](.canons/visual-identity/) | Standalone brand iconography isolation, transparent canvas defaults, and defringed alpha perimeter standards. |
+| 🧭 **Agent Orientation** | [`builtins/agent-orientation/`](builtins/agent-orientation/) | Unconditional AI assistant orientation in `AGENTS.md` across worktrees and clones. |
+| 🤖 **Agent Scripts** | [`builtins/agent-scripts/`](builtins/agent-scripts/) | Runtime script standards for AI agent helpers: POSIX shell portability, command echo traces, passthrough fidelity, and `>8KB` output shunting. |
+| 🧩 **Agent Skills** | [`builtins/agent-skills/`](builtins/agent-skills/) | Procedural runtime execution targets and non-duplicative skill metadata. |
+| 🔌 **API Design** | [`builtins/api-design/`](builtins/api-design/) | Single-source defaults, additive exclusions, co-located option/result types, streaming multi-resource APIs, and domain encapsulation. |
+| 🏗️ **Architecture** | [`builtins/architecture/`](builtins/architecture/) | Pure format validators, explicit library dependencies, narrow module option boundaries, and Hexagonal workspace isolation. |
+| 📦 **Build Systems** | [`builtins/build-systems/`](builtins/build-systems/) | Consolidated monorepo root bundling and private-package declaration hygiene. |
+| 📜 **Canon Authoring** | [`builtins/canon-authoring/`](builtins/canon-authoring/) | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
+| 🛠️ **CLI Ergonomics** | [`builtins/cli/`](builtins/cli/) | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
+| ✨ **Code Quality** | [`builtins/code-quality/`](builtins/code-quality/) | Substantiated static-analysis suppressions with documented rationale. |
+| ⚡ **Concurrency & Async I/O** | [`builtins/concurrency/`](builtins/concurrency/) | Persistent, continuously driven runtime lifecycles for shared pooled or multiplexed asynchronous I/O clients. |
+| ⚙️ **Configuration** | [`builtins/configuration/`](builtins/configuration/) | Orthogonal configuration namespaces, `<provider>:<name>` specifier qualification, and deterministic specificity cascades. |
+| 🏷️ **Conventional Commits** | [`builtins/conventional-commits/`](builtins/conventional-commits/) | Semantic commit and PR invariants (`feat` for user-facing functionality, `fix` for user-facing defect repairs). |
+| 🔀 **Git Workflow** | [`builtins/git-workflow/`](builtins/git-workflow/) | Sanctioned issue scope hygiene and independent precursor domain-contract delivery. |
+| 📐 **OpenSpec** | [`builtins/openspec/`](builtins/openspec/) | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
+| 🔍 **Parser Design** | [`builtins/parser-design/`](builtins/parser-design/) | Lexical/semantic phase separation and explicit multi-occurrence/blank semantics. |
+| 📝 **README Authoring** | [`builtins/readme-authoring/`](builtins/readme-authoring/) | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps, feature parity, responsive dark/light hero banners, and shunting architecture to `docs/`. |
+| 🛡️ **Repository Governance** | [`builtins/repo-governance/`](builtins/repo-governance/) | GitHub Actions workflow script and CLI delegation hygiene. |
+| 🔒 **Security** | [`builtins/security/`](builtins/security/) | Workspace-external secret storage and POSIX `0600` owner-only credential file enforcement. |
+| 🧪 **Testing** | [`builtins/testing/`](builtins/testing/) | Single-purpose test inputs, behavioral contract assertions, topical sub-suite structure, live-service test segregation, and change-detector prohibition. |
+| 🔖 **Versioning** | [`builtins/versioning/`](builtins/versioning/) | Omission of speculative backwards-compatibility shims during pre-`1.0` (`0.y.z`) refactors. |
+| 🎨 **Visual Identity** | [`builtins/visual-identity/`](builtins/visual-identity/) | Standalone brand iconography isolation, transparent canvas defaults, and defringed alpha perimeter standards. |
+| 🏛️ **Repo-Local Dogfooding** | [`.canons/`](.canons/) | Repository-specific dogfood policies: conceptual architecture docs, curated `llms.txt` indexing, spec alignment, `.github/settings.yml` metadata parity, third-party GitHub App restrictions, and portable built-in standards. |
 
 ### Adopting Canons Alongside the CLI
 
