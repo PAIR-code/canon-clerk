@@ -56,6 +56,16 @@ pub(crate) enum ReferenceOverlayError {
     },
 }
 
+fn format_patch_omission_reason(reason: Option<PatchOmissionReason>) -> &'static str {
+    match reason {
+        Some(PatchOmissionReason::Binary) => "binary file",
+        Some(PatchOmissionReason::Oversized) => "oversized diff",
+        Some(PatchOmissionReason::NotRequested) => "patch not requested",
+        Some(PatchOmissionReason::Unchanged) => "unchanged file",
+        None => "unspecified reason",
+    }
+}
+
 impl fmt::Display for ReferenceOverlayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -66,7 +76,8 @@ impl fmt::Display for ReferenceOverlayError {
             } => write!(
                 f,
                 "Cannot reconstruct referenced file `{path}` for canon `{canon_ref}` under `--workspace-state base`: \
-                 base file `{base_path}` is missing or unreadable in the base workspace."
+                 base file `{base_path}` is missing or unreadable in the base workspace.\n  \
+                 Hint: Verify the base-branch checkout contains `{base_path}`, or check out the PR head and re-run with `--workspace-state head`."
             ),
             Self::OmittedPatch {
                 path,
@@ -75,7 +86,9 @@ impl fmt::Display for ReferenceOverlayError {
             } => write!(
                 f,
                 "Cannot reconstruct referenced file `{path}` for canon `{canon_ref}` under `--workspace-state base`: \
-                 unified diff patch was omitted ({reason:?})."
+                 unified diff patch was omitted ({}).\n  \
+                 Hint: Supply a complete text unified diff for `{path}`, or check out the PR head and re-run with `--workspace-state head`.",
+                format_patch_omission_reason(*reason)
             ),
             Self::PatchFailed {
                 path,
@@ -84,7 +97,8 @@ impl fmt::Display for ReferenceOverlayError {
             } => write!(
                 f,
                 "Cannot apply filing diff to referenced file `{path}` for canon `{canon_ref}` under `--workspace-state base`: \
-                 {detail}. Rebase or merge the base branch so the diff applies cleanly."
+                 {detail}.\n  \
+                 Hint: Rebase or merge the base branch so the diff applies cleanly, or check out the PR head and re-run with `--workspace-state head`."
             ),
         }
     }
@@ -589,6 +603,10 @@ Binary files a/assets/diagram.png and b/assets/diagram.png differ
                 ..
             })
         ));
+        let omitted_msg = err.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(omitted_msg.contains("binary file"));
+        assert!(omitted_msg.contains("Hint:"));
+        assert!(omitted_msg.contains("--workspace-state head"));
 
         let missing_base_diff = "\
 diff --git a/README.md b/README.md
@@ -608,6 +626,9 @@ diff --git a/README.md b/README.md
             err2,
             Err(ReferenceOverlayError::MissingBaseFile { .. })
         ));
+        let missing_msg = err2.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(missing_msg.contains("Hint:"));
+        assert!(missing_msg.contains("--workspace-state head"));
     }
 
     #[test]
