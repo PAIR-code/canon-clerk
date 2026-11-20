@@ -17,6 +17,9 @@
 use crate::canon::Canon;
 use crate::caseload::{CaseloadIntake, ExhibitAssessment, FileArtifact, LinkedIssueContext};
 use crate::discover::{GlobPattern, WorkspaceSnapshot, normalize_workspace_path};
+use crate::spans::{
+    ExhibitLine, parse_snapshot_lines, parse_unified_patch_lines, render_breadcrumb_skeleton,
+};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
@@ -73,12 +76,87 @@ pub(crate) fn append_admitted_exhibit_section(
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
 ) {
+    append_admitted_exhibit_section_with_spans(out, exhibit, intake, workspace, None);
+}
+
+/// Renders a single admitted exhibit, applying Strategy D breadcrumb skeleton elision for file
+/// exhibits when `hot_spans` is non-empty (`docs/architecture/nodes/audit.md` §3–§4).
+pub(crate) fn append_admitted_exhibit_section_with_spans(
+    out: &mut String,
+    exhibit: &ExhibitAssessment,
+    intake: &CaseloadIntake,
+    workspace: &WorkspaceSnapshot,
+    hot_spans: Option<&[(usize, usize)]>,
+) {
     match exhibit.file_path.as_str() {
         "pr_title" => append_pr_title_exhibit(out, exhibit, intake),
         "pr_body" => append_pr_body_exhibit(out, exhibit, intake),
         "linked_issues" => append_linked_issues_exhibit(out, exhibit, intake),
         "commit_messages" => append_commit_messages_exhibit(out, exhibit, intake),
-        file_path => append_admitted_file_exhibit(out, file_path, exhibit, intake, workspace),
+        file_path => {
+            append_admitted_file_exhibit(out, file_path, exhibit, intake, workspace, hot_spans);
+        }
+    }
+}
+
+/// Extracts the untruncated 1-based [`ExhibitLine`] stream for an admitted file exhibit,
+/// returning `(is_diff_patch, lines)` when textual content or patch hunks are available.
+pub(crate) fn extract_file_exhibit_lines(
+    file_path: &str,
+    intake: &CaseloadIntake,
+    workspace: &WorkspaceSnapshot,
+) -> Option<(bool, Vec<ExhibitLine>)> {
+    if let Some(artifact) = intake.diffs.get(file_path) {
+        if let Some(patch) = non_blank(artifact.patch.as_deref()) {
+            return Some((true, parse_unified_patch_lines(patch)));
+        }
+        let content = non_blank(artifact.content.as_deref()).or_else(|| {
+            workspace
+                .file_contents
+                .get(&artifact.path)
+                .and_then(|s| non_blank(Some(s.as_str())))
+        });
+        return content.map(|text| (false, parse_snapshot_lines(text)));
+    }
+
+    workspace
+        .file_contents
+        .get(file_path)
+        .and_then(|s| non_blank(Some(s.as_str())))
+        .map(|text| (false, parse_snapshot_lines(text)))
+}
+
+/// Formats the standard `### Admitted File Exhibit: ...` heading line for a file exhibit.
+pub(crate) fn format_file_exhibit_heading(
+    file_path: &str,
+    exhibit: &ExhibitAssessment,
+    intake: &CaseloadIntake,
+) -> String {
+    if let Some(artifact) = intake.diffs.get(file_path) {
+        match &artifact.previous_path {
+            Some(prev) => format!(
+                "### Admitted File Exhibit: `{}` ({} from `{}`, +{} / -{}, score: {:.2})",
+                artifact.path,
+                artifact.status.as_str(),
+                prev,
+                artifact.lines_added,
+                artifact.lines_deleted,
+                exhibit.admissibility_score
+            ),
+            None => format!(
+                "### Admitted File Exhibit: `{}` ({}, +{} / -{}, score: {:.2})",
+                artifact.path,
+                artifact.status.as_str(),
+                artifact.lines_added,
+                artifact.lines_deleted,
+                exhibit.admissibility_score
+            ),
+        }
+    } else {
+        format!(
+            "### Admitted File Exhibit: `{file_path}` (Target Workspace File, score: {:.2})",
+            exhibit.admissibility_score
+        )
     }
 }
 
@@ -160,9 +238,11 @@ fn append_admitted_file_exhibit(
     exhibit: &ExhibitAssessment,
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    hot_spans: Option<&[(usize, usize)]>,
 ) {
+    let active_spans = hot_spans.filter(|spans| !spans.is_empty());
     if let Some(artifact) = intake.diffs.get(file_path) {
-        append_diff_file_exhibit(out, artifact, exhibit, workspace);
+        append_diff_file_exhibit(out, artifact, exhibit, workspace, active_spans);
     } else {
         let _ = writeln!(
             out,
@@ -174,8 +254,14 @@ fn append_admitted_file_exhibit(
             .get(file_path)
             .and_then(|s| non_blank(Some(s.as_str())))
         {
-            let numbered = annotate_snapshot_lines(content);
-            let bounded = truncate_chars(&numbered, MAX_AUDIT_EXHIBIT_CHARS, "file snapshot");
+            let body = match active_spans {
+                Some(spans) => {
+                    let lines = parse_snapshot_lines(content);
+                    render_breadcrumb_skeleton(file_path, &lines, spans)
+                }
+                None => annotate_snapshot_lines(content),
+            };
+            let bounded = truncate_chars(&body, MAX_AUDIT_EXHIBIT_CHARS, "file snapshot");
             let _ = writeln!(out, "```text\n{bounded}\n```");
         } else {
             let _ = writeln!(
@@ -192,6 +278,7 @@ fn append_diff_file_exhibit(
     artifact: &FileArtifact,
     exhibit: &ExhibitAssessment,
     workspace: &WorkspaceSnapshot,
+    hot_spans: Option<&[(usize, usize)]>,
 ) {
     match &artifact.previous_path {
         Some(prev) => {
@@ -220,8 +307,14 @@ fn append_diff_file_exhibit(
     }
 
     if let Some(patch) = non_blank(artifact.patch.as_deref()) {
-        let numbered = annotate_unified_patch_lines(patch);
-        let bounded = truncate_chars(&numbered, MAX_AUDIT_EXHIBIT_CHARS, "diff patch");
+        let body = match hot_spans {
+            Some(spans) => {
+                let lines = parse_unified_patch_lines(patch);
+                render_breadcrumb_skeleton(&artifact.path, &lines, spans)
+            }
+            None => annotate_unified_patch_lines(patch),
+        };
+        let bounded = truncate_chars(&body, MAX_AUDIT_EXHIBIT_CHARS, "diff patch");
         let _ = writeln!(out, "```diff\n{bounded}\n```");
     } else if let Some(content) = non_blank(artifact.content.as_deref()).or_else(|| {
         workspace
@@ -229,8 +322,14 @@ fn append_diff_file_exhibit(
             .get(&artifact.path)
             .and_then(|s| non_blank(Some(s.as_str())))
     }) {
-        let numbered = annotate_snapshot_lines(content);
-        let bounded = truncate_chars(&numbered, MAX_AUDIT_EXHIBIT_CHARS, "file snapshot");
+        let body = match hot_spans {
+            Some(spans) => {
+                let lines = parse_snapshot_lines(content);
+                render_breadcrumb_skeleton(&artifact.path, &lines, spans)
+            }
+            None => annotate_snapshot_lines(content),
+        };
+        let bounded = truncate_chars(&body, MAX_AUDIT_EXHIBIT_CHARS, "file snapshot");
         let _ = writeln!(out, "```text\n{bounded}\n```");
     } else if let Some(reason) = artifact.patch_omission_reason {
         let _ = writeln!(

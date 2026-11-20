@@ -20,20 +20,22 @@ mod exhibits;
 mod fold;
 mod prompt;
 mod reference_overlay;
+mod slice_pack;
 mod slices;
 
 pub use error::AuditError;
-pub(crate) use exhibits::is_metadata_plane_id;
 pub use exhibits::resolve_canon_reference_paths;
+pub(crate) use exhibits::{
+    extract_file_exhibit_lines, format_file_exhibit_heading, is_metadata_plane_id,
+};
 pub(crate) use prompt::build_audit_case_user_prompt;
 pub(crate) use reference_overlay::{
     apply_base_diff_to_references, collect_base_reference_disk_paths,
 };
-pub(crate) use slices::{
-    RenderedFileExhibit, build_shared_case_header, format_pinned_reference_exhibits,
-    pack_rendered_exhibit_slices, partition_and_render_file_exhibits,
-    render_admitted_file_exhibits,
+pub(crate) use slice_pack::{
+    RenderedFileExhibit, format_pinned_reference_exhibits, pack_rendered_exhibit_slices,
 };
+pub(crate) use slices::{build_shared_case_header, partition_and_render_file_exhibits};
 
 use crate::caseload::{
     CanonAdjudication, Caseload, CaseloadVerdict, HeuristicNode, ResolvedNodeConfig, VerdictStatus,
@@ -47,7 +49,7 @@ use decode::decode_case_adjudication;
 use fold::fold_case_slice_adjudications;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
 use slices::{MAX_AUDIT_TRIAL_CHARS, build_audit_case_slices};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Default substantive compliance threshold for `audit` (`docs/architecture/nodes/audit.md` §4.5).
 pub const DEFAULT_AUDIT_THRESHOLD: f64 = 0.5;
@@ -146,6 +148,23 @@ fn contested_exhibit_subset_for(
     }
 }
 
+fn contested_spans_by_file_for(
+    vetting: Option<&crate::caseload::CaseloadVetting>,
+    canon_ref: &str,
+) -> BTreeMap<String, Vec<(usize, usize)>> {
+    let Some(assessment) = vetting.and_then(|v| v.cases.get(canon_ref)) else {
+        return BTreeMap::new();
+    };
+    let mut grouped: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
+    for span in &assessment.contested_spans {
+        grouped
+            .entry(span.path.clone())
+            .or_default()
+            .push((span.start_line, span.end_line));
+    }
+    grouped
+}
+
 /// Executes the pure `audit` domain stage against an in-memory [`WorkspaceSnapshot`] and
 /// hexagonal [`StructuredModelProvider`] (`docs/architecture/nodes/audit.md` §4).
 pub fn execute_audit(
@@ -198,7 +217,14 @@ pub fn execute_audit(
         if !admitted.is_empty() {
             let contested_subset =
                 contested_exhibit_subset_for(caseload.vetting.as_ref(), canon_ref);
-            active_trials.push((canon_ref.clone(), canon, admitted, contested_subset));
+            let contested_spans = contested_spans_by_file_for(caseload.vetting.as_ref(), canon_ref);
+            active_trials.push((
+                canon_ref.clone(),
+                canon,
+                admitted,
+                contested_subset,
+                contested_spans,
+            ));
         }
     }
 
@@ -256,6 +282,7 @@ type ActiveTrialEntry<'a> = (
     &'a crate::canon::Canon,
     Vec<&'a crate::caseload::ExhibitAssessment>,
     Option<BTreeSet<String>>,
+    BTreeMap<String, Vec<(usize, usize)>>,
 );
 
 fn prepare_all_trial_calls(
@@ -272,12 +299,13 @@ fn prepare_all_trial_calls(
     let mut prepared_calls = Vec::with_capacity(active_trials.len());
     let mut case_slice_counts = Vec::with_capacity(active_trials.len());
 
-    for (canon_ref, canon, admitted_exhibits, contested_subset) in active_trials {
+    for (canon_ref, canon, admitted_exhibits, contested_subset, contested_spans) in active_trials {
         let slices = build_audit_case_slices(
             &canon_ref,
             canon,
             &admitted_exhibits,
             contested_subset.as_ref(),
+            &contested_spans,
             intake,
             discovery,
             workspace,
@@ -819,6 +847,7 @@ mod tests {
                     vetting_score: 0.96,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: Vec::new(),
+                    contested_spans: Vec::new(),
                 },
             );
             vetting_cases.insert(
@@ -828,6 +857,7 @@ mod tests {
                     vetting_score: 0.14,
                     vetting_status: VettingStatus::Contested,
                     contested_exhibits: Vec::new(),
+                    contested_spans: Vec::new(),
                 },
             );
 
@@ -875,6 +905,7 @@ mod tests {
                         vetting_score: 0.95,
                         vetting_status: VettingStatus::Vetted,
                         contested_exhibits: Vec::new(),
+                        contested_spans: Vec::new(),
                     },
                 );
             }
@@ -1357,6 +1388,115 @@ mod tests {
                 "got: {rendered}"
             );
             assert!(rendered.contains("Hint:"), "got: {rendered}");
+        }
+
+        #[test]
+        fn test_audit_renders_strategy_d_breadcrumb_skeleton_for_single_file_contested_spans() {
+            use crate::caseload::ContestedSpan;
+
+            let canon_ref = ".canons/core/no-unwrap.md";
+            let mut src = String::from("use std::fmt;\n\nmod engine {\n    pub fn cold() {\n");
+            for i in 1..=35 {
+                src.push_str(&format!("        let cold_{i} = {i};\n"));
+            }
+            src.push_str(
+                "    }\n\n    pub fn hot() {\n        let x = Some(1).unwrap();\n        let _ = x;\n    }\n}\n",
+            );
+            let hot_line = src
+                .lines()
+                .enumerate()
+                .find(|(_, l)| l.contains("unwrap()"))
+                .map(|(i, _)| i + 1)
+                .expect("unwrap line");
+
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**\"\n---\nProduction code MUST NOT call unwrap.\n",
+                    &ParseCanonOptions::with_source_ref(canon_ref),
+                )
+                .with_file_content("src/engine.rs", &src);
+
+            let vetting = CaseloadVetting::from_cases(BTreeMap::from([(
+                canon_ref.to_string(),
+                CanonVettingAssessment {
+                    vetting_summary: "Localized unwrap violation.".to_string(),
+                    vetting_score: 0.12,
+                    vetting_status: VettingStatus::Contested,
+                    contested_exhibits: Vec::new(),
+                    contested_spans: vec![ContestedSpan {
+                        path: "src/engine.rs".to_string(),
+                        start_line: hot_line.saturating_sub(1),
+                        end_line: hot_line + 1,
+                        score: 0.12,
+                    }],
+                },
+            )]));
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/engine.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default())
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "ok".to_string(),
+                        colorability_score: 0.9,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    vec![ExhibitAssessment {
+                        file_path: "src/engine.rs".to_string(),
+                        admissibility_summary: "ok".to_string(),
+                        admissibility_score: 0.95,
+                        admissibility_status: AdmissibilityStatus::Admitted,
+                    }],
+                )])))
+                .with_vetting(vetting);
+
+            let provider = DualStageMockProvider {
+                vet_violation_marker: String::new(),
+                audit_requests: Mutex::new(Vec::new()),
+                audit_routes: Vec::new(),
+                default_audit_payload: json!({
+                    "compliance_summary": "Calls unwrap() in production code.",
+                    "compliance_score": 0.05,
+                    "annotations": [{
+                        "path": "src/engine.rs",
+                        "start_line": hot_line,
+                        "end_line": hot_line,
+                        "annotation_level": "failure",
+                        "message": "Avoid unwrap()."
+                    }]
+                }),
+            };
+
+            let out = execute_audit(&AuditOptions::default(), caseload, &ws, &provider)
+                .expect("audit with breadcrumb skeleton");
+            let reqs = provider.audit_requests.lock().unwrap();
+            assert_eq!(reqs.len(), 1);
+            let prompt = &reqs[0].user_prompt;
+            assert!(prompt.contains("   1 | use std::fmt;"));
+            assert!(prompt.contains("mod engine {"));
+            assert!(prompt.contains("pub fn hot() {"));
+            assert!(prompt.contains("// ... [L"));
+            assert!(!prompt.contains("let cold_20 = 20;"));
+            assert!(prompt.contains(&format!(
+                "{hot_line:>4} |         let x = Some(1).unwrap();"
+            )));
+
+            let verdict = out.verdict.expect("verdict");
+            assert_eq!(verdict.failed_count(), 1);
+            assert_eq!(verdict.adjudications[0].annotations[0].start_line, hot_line);
         }
     }
 }

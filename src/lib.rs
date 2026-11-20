@@ -29,6 +29,7 @@ pub mod github;
 pub mod intake;
 pub mod probe;
 pub mod provider;
+pub(crate) mod spans;
 pub mod telemetry;
 pub mod validate;
 pub mod vet;
@@ -77,7 +78,7 @@ pub use caseload::{
     CanonAdjudication, CanonApprisalAssessment, CanonDocketAssessment, CanonVettingAssessment,
     Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
     CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadValidation, CaseloadVerdict,
-    CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason,
+    CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason, ContestedSpan,
     DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GENERATIVE_SCREENING_MODEL,
     DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
     DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_SCREENING_REASONING_BUDGET,
@@ -85,8 +86,8 @@ pub use caseload::{
     FileChangeStatus, HeuristicNode, IntakeScope, LinkedIssueContext, PatchOmissionReason,
     ProbeStatus, ProbeTargetResult, ResolvedNodeConfig, TYPESAFE_PROVIDER, ThinkingLevel,
     ValidatedCanonMetadata, ValidationOutcome, VerdictStatus, VettingStatus, WorkspaceState,
-    normalize_admissibility_score, normalize_colorability_score, normalize_compliance_score,
-    normalize_unit_score, normalize_vetting_score, sort_annotations,
+    canonicalize_contested_spans, normalize_admissibility_score, normalize_colorability_score,
+    normalize_compliance_score, normalize_unit_score, normalize_vetting_score, sort_annotations,
 };
 pub use cli::{
     AdmitArgs, AdmitFormat, AdmitNodeModelArgs, AllNodeModelArgs, AppriseArgs, AppriseFormat,

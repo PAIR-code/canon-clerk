@@ -54,7 +54,8 @@ pub use verdict::{
     CanonAdjudication, CaseloadVerdict, VerdictStatus, normalize_compliance_score, sort_annotations,
 };
 pub use vetting::{
-    CanonVettingAssessment, CaseloadVetting, VettingStatus, normalize_vetting_score,
+    CanonVettingAssessment, CaseloadVetting, ContestedSpan, VettingStatus,
+    canonicalize_contested_spans, normalize_vetting_score,
 };
 
 use serde::{Deserialize, Serialize};

@@ -1247,6 +1247,7 @@ mod tests {
                         vetting_score: 0.35,
                         vetting_status: VettingStatus::Contested,
                         contested_exhibits: Vec::new(),
+                        contested_spans: Vec::new(),
                     },
                 ),
                 (
@@ -1256,6 +1257,7 @@ mod tests {
                         vetting_score: 0.40,
                         vetting_status: VettingStatus::Contested,
                         contested_exhibits: Vec::new(),
+                        contested_spans: Vec::new(),
                     },
                 ),
             ]);
