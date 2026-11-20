@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands that execute multi-stage pipelines MUST prefix stage-specific flags with the target stage name (e.g. `--<stage>-<option>`) rather than exposing unqualified flags or cross-stage group names.
 

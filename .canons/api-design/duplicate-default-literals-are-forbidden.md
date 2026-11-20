@@ -5,8 +5,6 @@ inspect:
   - diff
 tags:
   - api-design
-  - constants
-  - maintainability
 ---
 Duplicate instances of the same inline default literal value are FORBIDDEN across module or package boundaries. Configurable defaults and fallback matching patterns MUST be defined once as an exported constant from their governing module and imported at call sites.
 

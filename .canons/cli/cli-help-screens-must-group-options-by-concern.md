@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands that expose more than six configuration options MUST organize their `--help` screen flags into categorized sections (such as Execution, Output, and Credentials) rather than displaying a flat list.
 

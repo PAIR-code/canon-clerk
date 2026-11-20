@@ -6,7 +6,6 @@ references:
   - "**/package.json"
   - "**/pyproject.toml"
 tags:
-  - semver
   - versioning
 ---
 Refactors that rename or replace internal domain concepts in major-version-zero (`0.y.z`) packages MUST atomically update all call sites and excise retired terminology without retaining deprecated aliases, forwarding shims, or transitional compatibility layers.

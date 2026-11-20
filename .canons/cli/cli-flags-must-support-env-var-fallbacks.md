@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI flags configuring persistent operational options (such as API keys, model selectors, and log verbosity) MUST support configuration via environment variables when the command-line flag is omitted.
 

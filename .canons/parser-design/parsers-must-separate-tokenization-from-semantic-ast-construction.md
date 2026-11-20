@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - parser-design
-  - compiler-architecture
 ---
 Parsers converting structured text into domain entities MUST decouple lexical tokenization from semantic AST construction via a two-stage pipeline.
 

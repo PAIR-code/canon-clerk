@@ -6,7 +6,6 @@ inspect:
 tags:
   - architecture
   - api-design
-  - clean-architecture
 ---
 Reusable library packages and domain engines MUST declare all operational dependencies and contextual inputs (such as configuration options, resource handles, and clock sources) as explicit function parameters or constructor arguments.
 

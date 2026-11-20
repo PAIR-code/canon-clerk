@@ -6,8 +6,6 @@ inspect:
   - diff
 tags:
   - concurrency
-  - asynchronous-programming
-  - networking
 ---
 Pooled or multiplexed asynchronous I/O clients shared across threads or synchronous blocking boundaries (`block_on`, `asyncio.run`) MUST execute on a persistent, continuously driven runtime whose lifetime encompasses the client pool, rather than on per-call or thread-local single-threaded executors.
 

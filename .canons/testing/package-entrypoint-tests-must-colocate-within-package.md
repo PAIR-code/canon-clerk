@@ -12,7 +12,6 @@ inspect:
 tags:
   - testing
   - architecture
-  - colocation
 ---
 Hermetic integration tests verifying package entrypoints, binary CLI routers, or distribution bundling MUST remain colocated within that package's test suite rather than relocated to external test workspaces.
 

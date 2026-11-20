@@ -11,7 +11,6 @@ inspect:
 tags:
   - testing
   - ci
-  - ergonomics
 ---
 Live service integration tests MUST fail by default when required external credentials or endpoints are absent, rather than silently skipping.
 

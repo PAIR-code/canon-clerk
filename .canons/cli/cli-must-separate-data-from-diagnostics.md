@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands MUST emit primary payload data exclusively to `stdout`, and MUST direct all diagnostic logging, progress indicators, warnings, and error messages to `stderr`.
 

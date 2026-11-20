@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands MUST NOT read standard input based on stream TTY inspection or implicit pipe detection; standard input MUST be consumed exclusively when `-` is explicitly supplied as a positional operand.
 

@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - architecture
-  - modularity
 ---
 Domain engines and core library modules MUST NOT read user home directories, host profile stores (`~/.config`), or ambient process state outside the workspace envelope.
 

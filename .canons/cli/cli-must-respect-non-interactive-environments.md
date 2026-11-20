@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI commands MUST detect non-interactive or automated environments (`!isTTY`, `CI=true`, or `NO_COLOR=1`) and automatically disable interactive prompts, ANSI color escapes, and animated terminal spinners.
 

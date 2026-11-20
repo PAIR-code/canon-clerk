@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - api-design
-  - asynchronous-programming
 ---
 Asynchronous domain operations that evaluate, transform, or inspect collections of resources MUST yield results as an asynchronous stream or generator rather than buffering entire collections in memory.
 

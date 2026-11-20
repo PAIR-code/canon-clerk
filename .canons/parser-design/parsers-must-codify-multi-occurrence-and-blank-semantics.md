@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - parser-design
-  - data-integrity
 ---
 Document parsers MUST explicitly define and verify behavior for all four data states: missing fields, blank/whitespace-only content, repeated directives, and wrongly-typed inputs.
 

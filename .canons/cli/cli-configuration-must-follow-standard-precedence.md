@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI configuration options resolution MUST adhere to strict hierarchical precedence: explicit CLI flags override environment variables, which override configuration files, which override hardcoded defaults.
 

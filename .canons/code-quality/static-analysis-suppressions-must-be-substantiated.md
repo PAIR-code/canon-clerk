@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - code-quality
-  - static-analysis
   - security
 ---
 Inline static-analysis, linter, and security-scanner suppression directives (such as `zizmor: ignore`, `#[allow(...)]`, `eslint-disable`, `noqa`, `shellcheck disable`, or `@ts-ignore`) MUST include a specific justification that is factually substantiated by the surrounding code.

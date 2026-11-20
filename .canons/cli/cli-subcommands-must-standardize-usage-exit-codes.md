@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 Subcommands in hierarchical CLI command trees MUST configure argument parser exit overrides and error formatters to ensure that option, argument, and syntax errors uniformly terminate with exit status `2` across all subcommand nesting levels.
 

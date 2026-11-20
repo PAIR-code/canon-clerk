@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI processes MUST register handlers for termination signals (`SIGINT`, `SIGTERM`) that clean up active temporary resources and terminate with standard signal exit codes rather than emitting unhandled exception traces.
 

@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - architecture
-  - modularity
 ---
 Domain modules and library functions MUST accept narrow, module-scoped option structures containing only the parameters they consume, rather than accepting or traversing an application-wide configuration container.
 

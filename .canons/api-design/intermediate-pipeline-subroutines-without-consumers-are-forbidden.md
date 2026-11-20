@@ -5,7 +5,6 @@ inspect:
   - diff
 tags:
   - api-design
-  - domain-driven-design
 ---
 Intermediate stages of an execution pipeline MUST NOT be exposed as public domain exports unless they have distinct, documented external consumers beyond the orchestrator itself.
 

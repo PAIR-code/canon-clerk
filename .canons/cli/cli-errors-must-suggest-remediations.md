@@ -2,7 +2,7 @@
 inspect:
   - diff
 tags:
-  - cli-ergonomics
+  - cli
 ---
 CLI error messages for user-correctable errors MUST provide actionable remediation instructions—including the exact command, flag, or environment variable required to resolve the defect—rather than printing raw stack traces.
 
