@@ -23,7 +23,7 @@ pub use glob_matcher::{
 };
 pub use workspace::{WorkspaceSnapshot, parse_canon_or_fallback};
 
-use crate::canon::{Canon, CanonScope, InspectToken};
+use crate::canon::{Canon, CanonScope, CanonSourceKind, InspectToken};
 use crate::caseload::{
     ActiveExhibits, Caseload, CaseloadDiscovery, CaseloadIntake, DiscoveryMode, FileChangeStatus,
     IntakeScope,
@@ -34,13 +34,26 @@ use std::path::Path;
 use workspace::compile_canon_filter_globs;
 
 /// Domain input parameters for executing the `discover` pipeline stage.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoverOptions {
     /// Whether to bypass path trigger intersection and promote all discoverable canons (`--all-canons`).
     pub all_canons: bool,
 
     /// Optional explicit canon file paths or glob patterns restricting candidate canons (`--canon <path|glob>`).
     pub canon_patterns: Vec<String>,
+
+    /// Whether compile-time embedded `builtin:*` standard canons are included during discovery (`--builtins` / `--no-builtins`; default: `true`).
+    pub include_builtins: bool,
+}
+
+impl Default for DiscoverOptions {
+    fn default() -> Self {
+        Self {
+            all_canons: false,
+            canon_patterns: Vec::new(),
+            include_builtins: true,
+        }
+    }
 }
 
 /// Domain errors produced during `discover` execution.
@@ -103,7 +116,11 @@ pub fn execute_discover(
     caseload: Caseload,
     workspace: &WorkspaceSnapshot,
 ) -> Result<Caseload, DiscoverError> {
-    if caseload.discovery.is_some() && !options.all_canons && options.canon_patterns.is_empty() {
+    if caseload.discovery.is_some()
+        && !options.all_canons
+        && options.canon_patterns.is_empty()
+        && options.include_builtins
+    {
         return Ok(caseload);
     }
 
@@ -111,7 +128,11 @@ pub fn execute_discover(
         return Err(DiscoverError::MissingInputSource);
     }
 
-    let filtered_canons = filter_canons(&workspace.canons, &options.canon_patterns)?;
+    let filtered_canons = filter_canons(
+        &workspace.canons,
+        &options.canon_patterns,
+        options.include_builtins,
+    )?;
     let target_files = match &caseload.intake {
         Some(intake) => materialize_target_files(intake, workspace)?,
         None => Vec::new(),
@@ -189,23 +210,35 @@ pub fn execute_discover_on_disk(
     caseload: Caseload,
     workspace_root: &Path,
 ) -> Result<Caseload, DiscoverError> {
-    if caseload.discovery.is_some() && !options.all_canons && options.canon_patterns.is_empty() {
+    if caseload.discovery.is_some()
+        && !options.all_canons
+        && options.canon_patterns.is_empty()
+        && options.include_builtins
+    {
         return Ok(caseload);
     }
     if caseload.intake.is_none() && !options.all_canons {
         return Err(DiscoverError::MissingInputSource);
     }
-    let snapshot = WorkspaceSnapshot::from_disk(workspace_root, &options.canon_patterns)?;
+    let snapshot = WorkspaceSnapshot::from_disk_with_builtins(
+        workspace_root,
+        &options.canon_patterns,
+        options.include_builtins,
+    )?;
     execute_discover(options, caseload, &snapshot)
 }
 
 fn filter_canons<'a>(
     canons: &'a BTreeMap<String, Canon>,
     canon_patterns: &[String],
+    include_builtins: bool,
 ) -> Result<BTreeMap<String, &'a Canon>, DiscoverError> {
     let matchers = compile_canon_filter_globs(canon_patterns)?;
     let mut out = BTreeMap::new();
     for (key, canon) in canons {
+        if !include_builtins && canon.source_kind == Some(CanonSourceKind::Builtin) {
+            continue;
+        }
         if matchers.is_empty() || matchers.iter().any(|m| m.is_match(key)) {
             out.insert(key.clone(), canon);
         }
@@ -546,7 +579,7 @@ mod tests {
             let ws = sample_workspace();
             let opts = DiscoverOptions {
                 all_canons: true,
-                canon_patterns: Vec::new(),
+                ..DiscoverOptions::default()
             };
             let enriched = execute_discover(&opts, Caseload::new(), &ws).expect("all-canons");
             let disc = enriched.discovery.expect("discovery populated");
@@ -668,6 +701,157 @@ mod tests {
             assert_eq!(disc.active_exhibits.pr_title, Some(true));
             // linked_issues is not inspected by any surviving canon, so it is pruned (None)
             assert_eq!(disc.active_exhibits.linked_issues, None);
+        }
+    }
+
+    mod builtin_sourcing_and_isolation {
+        use super::*;
+
+        #[test]
+        fn test_builtins_do_not_pollute_existing_files_or_all_targets() {
+            let ws = WorkspaceSnapshot::new()
+                .with_file("src/lib.rs")
+                .with_builtins();
+            assert_eq!(
+                ws.existing_files,
+                BTreeSet::from(["src/lib.rs".to_string()])
+            );
+            assert!(
+                ws.canons
+                    .contains_key("builtin:cli/cli-flags-must-use-positive-polarity")
+            );
+
+            let intake = CaseloadIntake {
+                scope: IntakeScope::AllTargets,
+                ..CaseloadIntake::default()
+            };
+            let enriched = execute_discover(
+                &DiscoverOptions::default(),
+                Caseload::new().with_intake(intake),
+                &ws,
+            )
+            .expect("discover --all-targets with builtins");
+            let disc = enriched.discovery.expect("discovery");
+            assert_eq!(disc.target_files, vec!["src/lib.rs".to_string()]);
+            assert!(
+                disc.target_files
+                    .iter()
+                    .all(|path| !path.starts_with("builtin:"))
+            );
+        }
+
+        #[test]
+        fn test_include_builtins_false_excludes_embedded_canons_while_keeping_local() {
+            let ws = WorkspaceSnapshot::new()
+                .with_file("src/lib.rs")
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**/*.rs\"\n---\nLocal rule MUST hold.\n",
+                    &ParseCanonOptions::with_source_ref(".canons/local-rule.md"),
+                )
+                .with_builtins();
+
+            let opts = DiscoverOptions {
+                all_canons: true,
+                include_builtins: false,
+                ..DiscoverOptions::default()
+            };
+            let enriched = execute_discover(&opts, Caseload::new(), &ws).expect("no-builtins");
+            let disc = enriched.discovery.expect("discovery");
+            assert_eq!(
+                disc.candidate_canons,
+                vec![".canons/local-rule.md".to_string()]
+            );
+        }
+
+        #[test]
+        fn test_builtin_canon_filter_globs_support_exact_prefix_and_wildcard_selectors() {
+            let ws = WorkspaceSnapshot::new().with_builtins();
+
+            // 1. Exact ref (without .md)
+            let exact = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec![
+                        "builtin:cli/cli-flags-must-use-positive-polarity".to_string(),
+                    ],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("exact builtin ref");
+            assert_eq!(
+                exact.discovery.expect("disc").candidate_canons,
+                vec!["builtin:cli/cli-flags-must-use-positive-polarity".to_string()]
+            );
+
+            // 2. Exact ref with optional .md suffix
+            let exact_md = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec![
+                        "builtin:cli/cli-flags-must-use-positive-polarity.md".to_string(),
+                    ],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("exact builtin ref with .md");
+            assert_eq!(
+                exact_md.discovery.expect("disc").candidate_canons,
+                vec!["builtin:cli/cli-flags-must-use-positive-polarity".to_string()]
+            );
+
+            // 3. Domain prefix (`builtin:cli`)
+            let domain = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec!["builtin:cli".to_string()],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("domain prefix");
+            let domain_canons = domain.discovery.expect("disc").candidate_canons;
+            assert!(!domain_canons.is_empty());
+            assert!(domain_canons.iter().all(|c| c.starts_with("builtin:cli/")));
+
+            // 4. Glob (`builtin:security/**`)
+            let security = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec!["builtin:security/**".to_string()],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("security glob");
+            let sec_canons = security.discovery.expect("disc").candidate_canons;
+            assert!(!sec_canons.is_empty());
+            assert!(
+                sec_canons
+                    .iter()
+                    .all(|c| c.starts_with("builtin:security/"))
+            );
+
+            // 5. Wildcard (`builtin:**`)
+            let all_b = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec!["builtin:**".to_string()],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("builtin wildcard");
+            assert_eq!(
+                all_b.discovery.expect("disc").candidate_canons.len(),
+                crate::builtin::builtin_canons().len()
+            );
         }
     }
 }

@@ -76,11 +76,14 @@ mod cli_surface_and_exit_codes {
         assert!(err.to_string().contains("Hint:"));
 
         // Isolated environment without GEMINI_API_KEY fails fast with exit code 2 + remediation
-        let ws = WorkspaceSnapshot::from_disk(
-            &env::current_dir().expect("cwd"),
-            &[".canons/cli/cli-flags-must-use-positive-polarity.md".to_string()],
-        )
-        .expect("load disk workspace");
+        let ws = WorkspaceSnapshot::new()
+            .with_file("src/cli/mod.rs")
+            .with_canon_markdown(
+                "---\ntriggers:\n  - \"src/cli/**/*.rs\"\n---\nCLI flags MUST use positive polarity.\n",
+                &canon_clerk::ParseCanonOptions::with_source_ref(
+                    ".canons/cli/cli-flags-must-use-positive-polarity.md",
+                ),
+            );
         let empty_env = BTreeMap::new();
         let clock = SteppingTelemetryClock::new(1_767_225_600_000, 50);
         let dummy_provider = canon_clerk::GeminiModelProvider::new("unused");

@@ -109,6 +109,7 @@ pub(super) fn resolve_docket_discover(
     let discover_opts = DiscoverOptions {
         all_canons: canons.all_canons,
         canon_patterns: canons.canon.clone(),
+        include_builtins: canons.include_builtins(),
     };
 
     let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {

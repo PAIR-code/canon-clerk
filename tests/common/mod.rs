@@ -33,12 +33,18 @@ impl TempCanonWorkspace {
         ));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(path.join(".canons/cli")).expect("create .canons/cli");
+        fs::create_dir_all(path.join(".canons/docs")).expect("create .canons/docs");
         fs::create_dir_all(path.join("src")).expect("create src");
         fs::write(
             path.join(".canons/cli/flags-must-use-positive-polarity.md"),
             "---\ntriggers:\n  - \"src/**/*.rs\"\ntags:\n  - cli\n---\nCLI flags MUST use positive polarity.\n",
         )
         .expect("write fixture canon");
+        fs::write(
+            path.join(".canons/docs/readme-must-be-concise.md"),
+            "---\ntriggers:\n  - \"README.md\"\ntags:\n  - docs\n---\nREADME files MUST be concise.\n",
+        )
+        .expect("write readme fixture canon");
         fs::write(path.join("src/lib.rs"), "pub fn fixture() {}\n").expect("write fixture target");
         Self { path }
     }

@@ -18,6 +18,7 @@ pub mod admit;
 pub mod apprise;
 pub mod audit;
 pub mod bench;
+pub mod builtin;
 pub mod canon;
 pub mod caseload;
 pub mod cli;
@@ -61,6 +62,7 @@ pub use bench::{
     parse_batch_tokens, prepare_upstream_caseload, render_consistency_markdown,
     resolve_config_specs, run_consistency_bench_cli, run_consistency_bench_hermetic,
 };
+pub use builtin::{BUILTIN_CANONS, BuiltinCanon, builtin_canons, find_builtin_canon};
 pub use canon::{
     Canon, CanonBody, CanonMetadata, CanonParseError, CanonScope, CanonSourceInfo, CanonSourceKind,
     CanonToken, CanonTokenKind, DEFAULT_FALLBACK_ID, DEFAULT_GLOBAL_TRIGGER_PATTERN,

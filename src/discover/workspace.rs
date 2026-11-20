@@ -16,11 +16,13 @@
 
 use super::DiscoverError;
 use super::glob_matcher::{
-    DEFAULT_CANON_GLOB, GlobPattern, is_ignored_path, normalize_workspace_path,
+    DEFAULT_CANON_GLOB, GlobPattern, is_ignored_path, is_wildcard_pattern, normalize_workspace_path,
 };
+use crate::builtin::{builtin_canons, find_builtin_canon};
 use crate::canon::{
-    Canon, DEFAULT_GLOBAL_TRIGGER_PATTERN, DEFAULT_INSPECT_PLANES, ParseCanonOptions, derive_id,
-    derive_triggers, id_to_title_case, parse_canon, resolve_source_info,
+    Canon, CanonSourceKind, DEFAULT_GLOBAL_TRIGGER_PATTERN, DEFAULT_INSPECT_PLANES,
+    ParseCanonOptions, derive_id, derive_triggers, id_to_title_case, parse_canon,
+    resolve_source_info,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -96,29 +98,87 @@ impl WorkspaceSnapshot {
     }
 
     /// Inserts a pre-parsed [`Canon`] keyed by its workspace-relative path or source reference.
+    ///
+    /// Only local workspace canon paths are inserted into `existing_files`; virtual `builtin:*`
+    /// and pack references remain isolated from the target file tree.
     pub fn with_canon(mut self, source_ref: impl Into<String>, canon: Canon) -> Self {
         let key = source_ref.into();
-        self.existing_files.insert(key.clone());
+        if is_workspace_source_ref(&key) {
+            self.existing_files.insert(key.clone());
+        }
         self.canons.insert(key, canon);
         self
     }
 
     /// Parses raw Canon Markdown and inserts it into the snapshot under `options.source_ref`.
+    ///
+    /// Only local workspace canon paths are inserted into `existing_files`; virtual `builtin:*`
+    /// and pack references remain isolated from the target file tree.
     pub fn with_canon_markdown(mut self, raw_markdown: &str, options: &ParseCanonOptions) -> Self {
         let key = options
             .source_ref
             .clone()
             .unwrap_or_else(|| ".canons/unnamed.md".to_string());
         let canon = parse_canon_or_fallback(raw_markdown, options);
-        self.existing_files.insert(key.clone());
+        if is_workspace_source_ref(&key) {
+            self.existing_files.insert(key.clone());
+        }
         self.canons.insert(key, canon);
         self
     }
 
-    /// Materializes a [`WorkspaceSnapshot`] by traversing `workspace_root` on disk.
+    /// Inserts all compile-time embedded `builtin:*` standard canons into `self.canons`
+    /// without polluting `self.existing_files`.
+    pub fn with_builtins(mut self) -> Self {
+        for entry in builtin_canons() {
+            let opts = ParseCanonOptions::with_source_ref(entry.source_ref);
+            let canon = parse_canon_or_fallback(entry.raw_markdown, &opts);
+            self.canons.insert(entry.source_ref.to_string(), canon);
+        }
+        self
+    }
+
+    /// Backfills a single candidate canon reference into `self.canons` when not already loaded,
+    /// resolving `builtin:*` references from the embedded registry and workspace paths from disk.
+    pub fn backfill_canon_ref(&mut self, workspace_root: &Path, canon_ref: &str) {
+        if self.canons.contains_key(canon_ref) {
+            return;
+        }
+        if let Some(entry) = find_builtin_canon(canon_ref) {
+            let opts = ParseCanonOptions::with_source_ref(entry.source_ref);
+            let canon = parse_canon_or_fallback(entry.raw_markdown, &opts);
+            self.canons.insert(entry.source_ref.to_string(), canon);
+            return;
+        }
+        if !is_workspace_source_ref(canon_ref) {
+            return;
+        }
+        let full_path = workspace_root.join(canon_ref);
+        if full_path.is_file()
+            && let Ok(raw_content) = fs::read_to_string(&full_path)
+        {
+            let opts = ParseCanonOptions::with_source_ref(canon_ref.to_string());
+            let canon = parse_canon_or_fallback(&raw_content, &opts);
+            self.existing_files.insert(canon_ref.to_string());
+            self.canons.insert(canon_ref.to_string(), canon);
+        }
+    }
+
+    /// Materializes a [`WorkspaceSnapshot`] by traversing `workspace_root` on disk and loading
+    /// embedded `builtin:*` standard canons by default.
     pub fn from_disk(
         workspace_root: &Path,
         canon_patterns: &[String],
+    ) -> Result<Self, DiscoverError> {
+        Self::from_disk_with_builtins(workspace_root, canon_patterns, true)
+    }
+
+    /// Materializes a [`WorkspaceSnapshot`] by traversing `workspace_root` on disk, optionally
+    /// loading compile-time embedded `builtin:*` standard canons.
+    pub fn from_disk_with_builtins(
+        workspace_root: &Path,
+        canon_patterns: &[String],
+        include_builtins: bool,
     ) -> Result<Self, DiscoverError> {
         let default_glob = GlobPattern::parse(DEFAULT_CANON_GLOB)?;
         let explicit_matchers = compile_canon_filter_globs(canon_patterns)?;
@@ -150,6 +210,20 @@ impl WorkspaceSnapshot {
             }
         }
 
+        if include_builtins {
+            for entry in builtin_canons() {
+                let matches_builtin = explicit_matchers.is_empty()
+                    || explicit_matchers
+                        .iter()
+                        .any(|m| m.is_match(entry.source_ref));
+                if matches_builtin {
+                    let opts = ParseCanonOptions::with_source_ref(entry.source_ref);
+                    let canon = parse_canon_or_fallback(entry.raw_markdown, &opts);
+                    canons.insert(entry.source_ref.to_string(), canon);
+                }
+            }
+        }
+
         Ok(Self {
             existing_files,
             canons,
@@ -159,7 +233,12 @@ impl WorkspaceSnapshot {
     }
 }
 
-/// Compiles `--canon <path|glob>` patterns into [`GlobPattern`]s, expanding directory prefixes.
+fn is_workspace_source_ref(source_ref: &str) -> bool {
+    resolve_source_info(source_ref)
+        .is_some_and(|info| info.source_kind == CanonSourceKind::Workspace)
+}
+
+/// Compiles `--canon <path|glob>` patterns into [`GlobPattern`]s, expanding directory and `builtin:` domain prefixes.
 pub(crate) fn compile_canon_filter_globs(
     canon_patterns: &[String],
 ) -> Result<Vec<GlobPattern>, DiscoverError> {
@@ -169,10 +248,39 @@ pub(crate) fn compile_canon_filter_globs(
         if trimmed.is_empty() {
             continue;
         }
+        if let Some(rest) = trimmed.strip_prefix("builtin:") {
+            let clean_rest = rest.trim_start_matches('/').trim_end_matches('/');
+            if clean_rest.is_empty() || clean_rest == "**" || clean_rest == "*" {
+                compiled.push(GlobPattern::parse("builtin:*/**")?);
+                continue;
+            }
+            if clean_rest
+                .replace('\\', "/")
+                .split('/')
+                .any(|seg| seg == "..")
+            {
+                return Err(DiscoverError::PathEscapesWorkspace { path: raw.clone() });
+            }
+            let normalized_rest = if !is_wildcard_pattern(clean_rest)
+                && clean_rest.len() >= 3
+                && clean_rest[clean_rest.len() - 3..].eq_ignore_ascii_case(".md")
+            {
+                &clean_rest[..clean_rest.len() - 3]
+            } else {
+                clean_rest
+            };
+            let canonical = format!("builtin:{normalized_rest}");
+            compiled.push(GlobPattern::parse(&canonical)?);
+            if !is_wildcard_pattern(normalized_rest) && !normalized_rest.contains('/') {
+                compiled.push(GlobPattern::parse(&format!("{canonical}/**"))?);
+            }
+            continue;
+        }
+
         let normalized = normalize_workspace_path(trimmed)
             .map_err(|_| DiscoverError::PathEscapesWorkspace { path: raw.clone() })?;
         compiled.push(GlobPattern::parse(&normalized)?);
-        if !normalized.ends_with(".md") && !normalized.contains(['*', '?', '[', '{']) {
+        if !normalized.ends_with(".md") && !is_wildcard_pattern(&normalized) {
             let dir_glob = if normalized == "." {
                 DEFAULT_CANON_GLOB.to_string()
             } else {

@@ -70,7 +70,7 @@ flowchart LR
    - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`).
    - **Scope Containment Verification:** Enforces that scoped canons located in `<scope>/.canons/**` do not attempt directory traversal (e.g. `../`) or declare paths superior or external to `<scope>/` in `triggers:`, `exists:`, or `references:`.
    - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
-   - **Canon Naming & ID Standards:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`), non-empty canonical `id` derivation from file stems, and scope-level `id` uniqueness.
+   - **Canon Naming & ID Standards:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`), non-empty canonical `id` derivation from file stems, and realm-and-scope `id` uniqueness (`(source_kind, scope, id)`), preserving `SPEC.md` §6.2 cross-realm coexistence without false `duplicate-canon-id` collisions.
    - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
    - **Directive Headers:** Validates `Exception`, `Rationale`, and `Remediation` directive blocks.
 4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon into precise line-and-column `CodeAnnotation`s (e.g. YAML parse errors, lowercase RFC 2119 keyword locations, unclosed directives).
@@ -111,7 +111,8 @@ error: No filing source or canon scope provided for validate.
 - **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON containing structured `results` and `diagnostics` across all evaluated candidate canons.
 
 ### CLI Flags & Environment
-- `--all-canons`: Validates all canons in `.canons/**` by directing discovery to yield the full corpus.
+- `--all-canons`: Validates all active canons (local workspace `.canons/**` and embedded `builtin:*` canons unless `--no-builtins` is set) by directing discovery to yield the full corpus.
+- `--builtins` / `--no-builtins`: Include (default) or exclude embedded `builtin:*` standard canons.
 - `--max-warnings <n>`: Warning threshold before triggering non-zero exit code.
 - `--format <stylish|json|compact|github>`: Output formatting choice (defaults to `github` when `GITHUB_ACTIONS=true`).
 - `-q` / `--quiet`: Suppress warnings and non-essential output.

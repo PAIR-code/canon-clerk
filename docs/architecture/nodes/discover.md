@@ -29,7 +29,7 @@
 flowchart LR
     subgraph Inputs["Inputs"]
         Intake["intake (or --caseload)<br/><code>.intake</code>"]
-        Params["Stage Flags<br/><i>(--all-canons, --canons, --filter)</i>"]
+        Params["Stage Flags<br/><i>(--all-canons, --canon, --builtins / --no-builtins)</i>"]
     end
 
     Intake --> Discover["discover<br/><b>(Current Node)</b><br/><code>.discovery</code>"]
@@ -72,7 +72,12 @@ flowchart LR
 1. **Exhibit Materialization:** Resolves exhibit discovery directives from `caseload.intake` (e.g. expanding directory recursion roots and matching target glob patterns against workspace checkout into concrete file exhibits).
 2. **Plenary Canon Discovery (`--all-canons`):** When `all_canons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace is placed directly into `candidate_canons` with `mode: "all-canons"`. This establishes the full statutory corpus for downstream `validate --all-canons` ("Codex Audit").
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
-3. **Canon Corpus Enumeration & Sourcing:** Discovers all candidate canons across the workspace (default pattern: `**/.canons/**/*.md`), retaining their workspace-relative file paths (alongside any active `builtin:<category>/<rule>` or configured pack `<pack-alias>:<path>` rules).
+3. **Canon Corpus Enumeration & Sourcing:** Discovers all candidate canons across both active realms:
+   - **Local Workspace Canons:** Discovered via the default pattern `**/.canons/**/*.md`, retaining workspace-relative file paths.
+   - **Embedded Built-in Standard Canons:** Curated `builtin:<domain>/<stem>` canons compiled directly into the binary are loaded by default alongside local workspace canons (unless disabled via `--no-builtins`).
+   - **Virtual Reference Isolation:** Embedded `builtin:*` references are loaded strictly into the canon corpus and are never inserted into the workspace file tree (`existing_files`), preventing virtual keys from polluting `exists:` preconditions or `--all-targets` filings.
+   - **Cross-Realm Coexistence (`SPEC.md` §6.2):** Local workspace canons and `builtin:*` canons are disambiguated by their source-qualified references and co-exist without shadowing or colliding even when they share a derived `id`.
+   - **Realm-Aware `--canon` Filtering:** Explicit `--canon` selectors support workspace paths/globs as well as `builtin:` selectors (exact references like `builtin:cli/<stem>`, domain prefixes like `builtin:cli`, and globs like `builtin:security/**`).
 4. **Monorepo Subordination & Scope Containment:** Enforces strict boundary encapsulation:
    - Global canons in `.canons/**` apply repository-wide.
    - Scoped canons located in `<scope>/.canons/**` automatically inherit an implicit `<scope>/**` boundary:
@@ -112,9 +117,10 @@ git diff origin/main | canon-clerk discover -q -
 ```
 
 ### CLI Flags & Options
-- `--all-canons`: Discovers and compiles all repository canons into candidate_canons, bypassing path trigger matching.
+- `--all-canons`: Discovers and compiles all active canons (local workspace and embedded built-ins unless `--no-builtins` is set) into `candidate_canons`, bypassing path trigger matching.
+- `--builtins` / `--no-builtins`: Include (default) or exclude embedded `builtin:*` standard canons (positive-polarity toggle cascading across `discover`, `validate`, `apprise`, `docket`, `admit`, `vet`, and `audit`).
 - `-q, --quiet`: Predicate mode. Suppresses stdout and indicates match presence via exit code.
-- `--canon <path|glob>`: Explicitly restrict candidate canons to a specific subset.
+- `--canon <path|glob>`: Explicitly restrict candidate canons to a specific subset (workspace paths/globs or `builtin:` references/prefixes/globs).
 - `--format <stylish|json|compact>`: Formats matched canons and triggering files.
 - `--caseload <path|->`: Ingests upstream Caseload JSON.
 - `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.

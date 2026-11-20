@@ -18,8 +18,8 @@ mod rules_body;
 mod rules_frontmatter;
 
 use crate::canon::{
-    Canon, DEFAULT_FALLBACK_ID, ParseCanonOptions, derive_id, extract_frontmatter_from_tokens,
-    parse_body_from_tokens, resolve_source_info, tokenize_canon,
+    Canon, CanonSourceKind, DEFAULT_FALLBACK_ID, ParseCanonOptions, derive_id,
+    extract_frontmatter_from_tokens, parse_body_from_tokens, resolve_source_info, tokenize_canon,
 };
 use crate::caseload::{
     AnnotationLevel, Caseload, CaseloadValidation, CodeAnnotation, ValidatedCanonMetadata,
@@ -30,7 +30,6 @@ use rules_body::lint_body;
 use rules_frontmatter::{annotation_from_parse_error, lint_frontmatter};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs;
 use std::path::Path;
 
 /// Domain input parameters for executing the `validate` pipeline stage.
@@ -174,7 +173,11 @@ pub fn execute_validate(
                 scope: canon.scope.clone(),
             };
             let mut meta = lint_canon_source(&canon.raw_content, &parse_opts);
-            let scope_key = (canon.scope.clone(), canon.id.clone());
+            let scope_key = (
+                canon.source_kind.clone(),
+                canon.scope.clone(),
+                canon.id.clone(),
+            );
             if let Some(colliding_paths) = duplicate_id_map.get(&scope_key)
                 && colliding_paths.len() > 1
             {
@@ -259,30 +262,28 @@ pub fn execute_validate_on_disk(
 
     let mut snapshot = WorkspaceSnapshot::from_disk(workspace_root, &[])?;
 
-    // Ensure any explicit candidate canon path present on disk is loaded even if outside default globs
+    // Ensure any explicit candidate canon ref (builtin:* or workspace path) is loaded
     for canon_ref in &discovery.candidate_canons {
-        if !snapshot.canons.contains_key(canon_ref) {
-            let full_path = workspace_root.join(canon_ref);
-            if full_path.is_file()
-                && let Ok(raw_content) = fs::read_to_string(&full_path)
-            {
-                let opts = ParseCanonOptions::with_source_ref(canon_ref.clone());
-                snapshot = snapshot.with_canon_markdown(&raw_content, &opts);
-            }
-        }
+        snapshot.backfill_canon_ref(workspace_root, canon_ref);
     }
 
     execute_validate(options, caseload, &snapshot)
 }
 
+type ScopeIdKey = (Option<CanonSourceKind>, Option<String>, String);
+
 fn build_scope_id_collision_map(
     canons: &BTreeMap<String, Canon>,
-) -> BTreeMap<(Option<String>, String), Vec<String>> {
-    let mut map: BTreeMap<(Option<String>, String), Vec<String>> = BTreeMap::new();
+) -> BTreeMap<ScopeIdKey, Vec<String>> {
+    let mut map: BTreeMap<ScopeIdKey, Vec<String>> = BTreeMap::new();
     for (path, canon) in canons {
-        map.entry((canon.scope.clone(), canon.id.clone()))
-            .or_default()
-            .push(path.clone());
+        map.entry((
+            canon.source_kind.clone(),
+            canon.scope.clone(),
+            canon.id.clone(),
+        ))
+        .or_default()
+        .push(path.clone());
     }
     map
 }
@@ -616,6 +617,43 @@ Rationale: Two rules in one canon.";
                 val.results.get(".canons/rule-must-hold.md").unwrap().result,
                 ValidationOutcome::Fail
             );
+        }
+
+        #[test]
+        fn test_cross_realm_same_id_coexists_without_duplicate_canon_id_error() {
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**/*.rs\"\n---\nLocal CLI flags MUST use positive polarity.\n",
+                    &ParseCanonOptions::with_source_ref(
+                        ".canons/cli-flags-must-use-positive-polarity.md",
+                    ),
+                )
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**/*.rs\"\n---\nBuilt-in CLI flags MUST use positive polarity.\n",
+                    &ParseCanonOptions::with_source_ref(
+                        "builtin:cli/cli-flags-must-use-positive-polarity",
+                    ),
+                );
+            let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
+                mode: DiscoveryMode::AllCanons,
+                target_files: Vec::new(),
+                candidate_canons: vec![
+                    ".canons/cli-flags-must-use-positive-polarity.md".to_string(),
+                    "builtin:cli/cli-flags-must-use-positive-polarity".to_string(),
+                ],
+                active_exhibits: ActiveExhibits::default(),
+                triggers_join: BTreeMap::new(),
+            });
+
+            let validated =
+                execute_validate(&ValidateOptions::default(), caseload, &ws).expect("validate");
+            let val = validated.validation.expect("validation");
+            assert!(
+                !val.has_errors,
+                "cross-realm same-id canons must coexist per SPEC.md §6.2: {:?}",
+                val.results
+            );
+            assert_eq!(val.results.len(), 2);
         }
     }
 }

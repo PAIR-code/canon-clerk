@@ -18,7 +18,7 @@ use super::lexer::CanonParseError;
 use serde::{Deserialize, Serialize};
 
 /// Sourcing realm for a Canon rule (`SPEC.md` §3.1).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(tag = "kind", content = "pack", rename_all = "snake_case")]
 pub enum CanonSourceKind {
     /// Local workspace canon authored in the repository (`.canons/...` or `<scope>/.canons/...`).
