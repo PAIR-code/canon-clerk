@@ -103,6 +103,93 @@ fn canonical_score_bits(score: f64) -> u64 {
     }
 }
 
+/// Localized contested line span within an admitted file exhibit (`docs/architecture/nodes/vet.md` §3).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ContestedSpan {
+    /// Repository-relative POSIX path of the admitted file exhibit.
+    pub path: String,
+    /// Inclusive 1-based post-image start line in the target file (`>= 1`).
+    pub start_line: usize,
+    /// Inclusive 1-based post-image end line in the target file (`>= start_line`).
+    pub end_line: usize,
+    /// Continuous prima facie compliance score in `[0.0, 1.0]` for this span.
+    #[serde(
+        serialize_with = "serialize_vetting_score",
+        deserialize_with = "deserialize_vetting_score"
+    )]
+    pub score: f64,
+}
+
+impl ContestedSpan {
+    /// Normalizes line bounds (`start_line >= 1`, `end_line >= start_line`) and `-0.0` score.
+    pub fn canonicalized(mut self) -> Self {
+        self.start_line = self.start_line.max(1);
+        self.end_line = self.end_line.max(self.start_line);
+        if self.score == 0.0 {
+            self.score = 0.0;
+        }
+        self
+    }
+}
+
+impl PartialEq for ContestedSpan {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.start_line == other.start_line
+            && self.end_line == other.end_line
+            && canonical_score_bits(self.score) == canonical_score_bits(other.score)
+    }
+}
+
+impl Eq for ContestedSpan {}
+
+/// Deterministically normalizes, sorts by `(path, start_line, end_line)`, and deduplicates
+/// contested spans (retaining the lowest score when two spans share identical coordinates).
+pub fn canonicalize_contested_spans(spans: &mut Vec<ContestedSpan>) {
+    for span in spans.iter_mut() {
+        span.start_line = span.start_line.max(1);
+        span.end_line = span.end_line.max(span.start_line);
+        if span.score == 0.0 {
+            span.score = 0.0;
+        }
+    }
+    spans.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.start_line.cmp(&b.start_line))
+            .then_with(|| a.end_line.cmp(&b.end_line))
+            .then_with(|| a.score.total_cmp(&b.score))
+    });
+    spans.dedup_by(|later, earlier| {
+        later.path == earlier.path
+            && later.start_line == earlier.start_line
+            && later.end_line == earlier.end_line
+    });
+}
+
+fn deserialize_sorted_contested_spans<'de, D>(
+    deserializer: D,
+) -> Result<Vec<ContestedSpan>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut spans = Vec::<ContestedSpan>::deserialize(deserializer)?;
+    canonicalize_contested_spans(&mut spans);
+    Ok(spans)
+}
+
+fn serialize_sorted_contested_spans<S>(
+    spans: &[ContestedSpan],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut sorted = spans.to_vec();
+    canonicalize_contested_spans(&mut sorted);
+    sorted.serialize(serializer)
+}
+
 /// Prima facie compliance vetting assessment for a single active case (`docs/architecture/nodes/vet.md` §3).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CanonVettingAssessment {
@@ -116,8 +203,8 @@ pub struct CanonVettingAssessment {
     pub vetting_score: f64,
     /// Deterministically derived prima facie compliance status (`"vetted"` or `"contested"`).
     pub vetting_status: VettingStatus,
-    /// Stably sorted contested file exhibit paths when multi-slice vetting cleared a proper subset of
-    /// slices (`vetting_status == Contested`); omitted when `"vetted"` or when all sliceable file exhibits are contested.
+    /// Stably sorted contested file exhibit paths when discriminative vetting cleared a proper subset of
+    /// exhibits (`vetting_status == Contested`); omitted when `"vetted"` or when all sliceable file exhibits are contested.
     #[serde(
         default,
         skip_serializing_if = "Vec::is_empty",
@@ -125,6 +212,15 @@ pub struct CanonVettingAssessment {
         deserialize_with = "deserialize_sorted_string_list"
     )]
     pub contested_exhibits: Vec<String>,
+    /// Deterministically sorted localized contested spans (`vetting_status == Contested`),
+    /// ordered by `(path, start_line, end_line)` and omitted when `"vetted"` or empty.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_sorted_contested_spans",
+        deserialize_with = "deserialize_sorted_contested_spans"
+    )]
+    pub contested_spans: Vec<ContestedSpan>,
 }
 
 impl PartialEq for CanonVettingAssessment {
@@ -133,6 +229,7 @@ impl PartialEq for CanonVettingAssessment {
             && canonical_score_bits(self.vetting_score) == canonical_score_bits(other.vetting_score)
             && self.vetting_status == other.vetting_status
             && self.contested_exhibits == other.contested_exhibits
+            && self.contested_spans == other.contested_spans
     }
 }
 
@@ -162,11 +259,13 @@ impl CaseloadVetting {
             match assessment.vetting_status {
                 VettingStatus::Vetted => {
                     assessment.contested_exhibits.clear();
+                    assessment.contested_spans.clear();
                     vetted_cases.push(canon_ref.clone());
                 }
                 VettingStatus::Contested => {
                     assessment.contested_exhibits.sort();
                     assessment.contested_exhibits.dedup();
+                    canonicalize_contested_spans(&mut assessment.contested_spans);
                     contested_cases.push(canon_ref.clone());
                 }
             }
@@ -219,6 +318,7 @@ mod tests {
                     vetting_score: 0.94,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: Vec::new(),
+                    contested_spans: Vec::new(),
                 },
             );
             cases.insert(
@@ -230,6 +330,7 @@ mod tests {
                     vetting_score: 0.42,
                     vetting_status: VettingStatus::Contested,
                     contested_exhibits: Vec::new(),
+                    contested_spans: Vec::new(),
                 },
             );
             cases.insert(
@@ -239,6 +340,7 @@ mod tests {
                     vetting_score: 0.98,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: Vec::new(),
+                    contested_spans: Vec::new(),
                 },
             );
 
@@ -304,18 +406,21 @@ mod tests {
                 vetting_score: -0.0,
                 vetting_status: VettingStatus::Contested,
                 contested_exhibits: Vec::new(),
+                contested_spans: Vec::new(),
             };
             let pos_zero = CanonVettingAssessment {
                 vetting_summary: "Contested.".to_string(),
                 vetting_score: 0.0,
                 vetting_status: VettingStatus::Contested,
                 contested_exhibits: Vec::new(),
+                contested_spans: Vec::new(),
             };
             assert_eq!(neg_zero, pos_zero);
             let json = serde_json::to_string(&neg_zero).expect("serialize -0.0");
             assert!(!json.contains("-0.0"));
             assert!(json.contains("\"vetting_score\":0.0"));
             assert!(!json.contains("contested_exhibits"));
+            assert!(!json.contains("contested_spans"));
         }
 
         #[test]
@@ -328,6 +433,12 @@ mod tests {
                     vetting_score: 0.91,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: vec!["src/should_be_cleared.rs".to_string()],
+                    contested_spans: vec![ContestedSpan {
+                        path: "src/should_be_cleared.rs".to_string(),
+                        start_line: 10,
+                        end_line: 55,
+                        score: 0.2,
+                    }],
                 },
             );
             cases.insert(
@@ -341,6 +452,26 @@ mod tests {
                         "src/a_mod.rs".to_string(),
                         "src/z_mod.rs".to_string(),
                     ],
+                    contested_spans: vec![
+                        ContestedSpan {
+                            path: "src/z_mod.rs".to_string(),
+                            start_line: 90,
+                            end_line: 140,
+                            score: 0.34,
+                        },
+                        ContestedSpan {
+                            path: "src/a_mod.rs".to_string(),
+                            start_line: 0,
+                            end_line: 0,
+                            score: -0.0,
+                        },
+                        ContestedSpan {
+                            path: "src/z_mod.rs".to_string(),
+                            start_line: 90,
+                            end_line: 140,
+                            score: 0.18,
+                        },
+                    ],
                 },
             );
 
@@ -350,13 +481,36 @@ mod tests {
                     .contested_exhibits
                     .is_empty()
             );
+            assert!(
+                vetting.cases[".canons/vetted.md"]
+                    .contested_spans
+                    .is_empty()
+            );
             assert_eq!(
                 vetting.cases[".canons/partial.md"].contested_exhibits,
                 vec!["src/a_mod.rs".to_string(), "src/z_mod.rs".to_string()]
             );
+            assert_eq!(
+                vetting.cases[".canons/partial.md"].contested_spans,
+                vec![
+                    ContestedSpan {
+                        path: "src/a_mod.rs".to_string(),
+                        start_line: 1,
+                        end_line: 1,
+                        score: 0.0,
+                    },
+                    ContestedSpan {
+                        path: "src/z_mod.rs".to_string(),
+                        start_line: 90,
+                        end_line: 140,
+                        score: 0.18,
+                    },
+                ]
+            );
 
             let encoded = serde_json::to_string(&vetting).expect("serialize partial vetting");
             assert_eq!(encoded.matches("\"contested_exhibits\"").count(), 1);
+            assert_eq!(encoded.matches("\"contested_spans\"").count(), 1);
             assert!(encoded.contains(r#""contested_exhibits":["src/a_mod.rs","src/z_mod.rs"]"#));
 
             let decoded: CaseloadVetting =

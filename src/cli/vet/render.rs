@@ -116,9 +116,19 @@ fn render_compact_output(vetting: &CaseloadVetting, stdout: &mut dyn Write) -> s
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
+        let spans_col = if assessment.contested_spans.is_empty() {
+            "-".to_string()
+        } else {
+            assessment
+                .contested_spans
+                .iter()
+                .map(|s| format!("{}:L{}..L{}", s.path, s.start_line, s.end_line))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
         writeln!(
             stdout,
-            "{canon_ref}\t{}\t{:.2}\t{single_line}",
+            "{canon_ref}\t{}\t{:.2}\t{single_line}\t{spans_col}",
             assessment.vetting_status.as_str(),
             assessment.vetting_score
         )?;
@@ -234,6 +244,13 @@ fn write_vetting_summary(
             item.vetting_score
         )?;
         writeln!(stdout, "      {}", item.vetting_summary)?;
+        for span in &item.contested_spans {
+            writeln!(
+                stdout,
+                "      span: {}:L{}..L{} (score: {:.2})",
+                span.path, span.start_line, span.end_line, span.score
+            )?;
+        }
     }
     if contested > 0 {
         writeln!(

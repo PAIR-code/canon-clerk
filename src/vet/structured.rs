@@ -93,6 +93,7 @@ fn decode_vet_payload(
         vetting_score,
         vetting_status,
         contested_exhibits: Vec::new(),
+        contested_spans: Vec::new(),
     })
 }
 

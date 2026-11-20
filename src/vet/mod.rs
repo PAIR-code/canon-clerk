@@ -285,7 +285,6 @@ fn prepare_vetting_cases<'a>(
                     &canon_ref,
                     canon,
                     &admitted,
-                    &user_prompt,
                     intake,
                     discovery,
                     workspace,
@@ -323,6 +322,7 @@ mod tests {
 
     struct MockVetProvider {
         decision_scores: BTreeMap<String, f64>,
+        question_scores: BTreeMap<String, f64>,
         max_tokens_trigger: Option<String>,
         structured_routes: BTreeMap<String, Value>,
         decision_requests: Mutex<Vec<DecisionRequest>>,
@@ -333,6 +333,7 @@ mod tests {
         fn empty() -> Self {
             Self {
                 decision_scores: BTreeMap::new(),
+                question_scores: BTreeMap::new(),
                 max_tokens_trigger: None,
                 structured_routes: BTreeMap::new(),
                 decision_requests: Mutex::new(Vec::new()),
@@ -390,14 +391,23 @@ mod tests {
                     diagnostic: "HTTP 400 max_tokens_exceeded".to_string(),
                 });
             }
-            let score = self
+            let default_score = self
                 .decision_scores
                 .iter()
                 .find(|(k, _)| request.state.contains(k.as_str()))
                 .map(|(_, s)| *s)
                 .unwrap_or(0.95);
+            let mut scores = BTreeMap::new();
+            for key in request.questions.keys() {
+                let s = self
+                    .question_scores
+                    .get(key)
+                    .copied()
+                    .unwrap_or(default_score);
+                scores.insert(key.clone(), s);
+            }
             Ok(DecisionResponse {
-                scores: BTreeMap::from([(decision::COMPLIANCE_QUESTION_KEY.to_string(), score)]),
+                scores,
                 resolved_model: "jev-1.14.0".to_string(),
                 latency_ms: 85,
                 usage: TokenUsage {
@@ -834,6 +844,130 @@ mod tests {
                 vetting.contested_cases,
                 vec![".canons/cli/contested-rule.md".to_string()]
             );
+        }
+
+        fn span_localization_fixture(canon_ref: &str) -> (WorkspaceSnapshot, Caseload) {
+            let mut big_file = String::from("use std::io;\n\n");
+            for i in 1..=3 {
+                big_file.push_str(&format!("fn section_{i}() {{\n"));
+                for j in 1..=45 {
+                    big_file.push_str(&format!("    let v_{i}_{j} = {j};\n"));
+                }
+                big_file.push_str("}\n\n");
+            }
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**\"\n---\nProduction code MUST NOT call unwrap.\n",
+                    &ParseCanonOptions::with_source_ref(canon_ref),
+                )
+                .with_file_content("src/big.rs", &big_file)
+                .with_file_content("src/clean.rs", "pub fn ok() -> usize { 1 }\n");
+
+            let exhibits = BTreeMap::from([(
+                canon_ref.to_string(),
+                vec![
+                    ExhibitAssessment {
+                        file_path: "src/big.rs".to_string(),
+                        admissibility_summary: "big file".to_string(),
+                        admissibility_score: 0.95,
+                        admissibility_status: AdmissibilityStatus::Admitted,
+                    },
+                    ExhibitAssessment {
+                        file_path: "src/clean.rs".to_string(),
+                        admissibility_summary: "clean file".to_string(),
+                        admissibility_score: 0.95,
+                        admissibility_status: AdmissibilityStatus::Admitted,
+                    },
+                ],
+            )]);
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/big.rs".to_string(), "src/clean.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(CaseloadConfig::default().with_node_model(
+                    HeuristicNode::Vet,
+                    DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+                ))
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "docketed".to_string(),
+                        colorability_score: 0.95,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(exhibits));
+            (ws, caseload)
+        }
+
+        #[test]
+        fn test_single_pass_span_localization_records_spans_and_prunes_clean_files() {
+            let canon_ref = ".canons/core/no-unwrap.md";
+            let (ws, caseload) = span_localization_fixture(canon_ref);
+
+            let mut tier1 = MockVetProvider::empty();
+            tier1.question_scores.insert("compliant".to_string(), 0.25);
+            tier1
+                .question_scores
+                .insert("file:src/big.rs".to_string(), 0.22);
+            tier1
+                .question_scores
+                .insert("file:src/clean.rs".to_string(), 0.96);
+            tier1.question_scores.insert("span:S2".to_string(), 0.14);
+
+            let out = execute_vet(&VetOptions::default(), caseload, &ws, &tier1)
+                .expect("tier 1 vet");
+            let reqs = tier1.decision_requests.lock().unwrap();
+            assert_eq!(reqs.len(), 1, "whole + files + spans packed in 1 forward pass");
+            assert!(reqs[0].state.contains("=== [SPAN S2: src/big.rs"));
+            assert!(reqs[0].questions.contains_key("file:src/big.rs"));
+            assert!(reqs[0].questions.contains_key("span:S2"));
+
+            let assessment = &out.vetting.unwrap().cases[canon_ref];
+            assert_eq!(assessment.vetting_status, VettingStatus::Contested);
+            assert_eq!(assessment.contested_exhibits, vec!["src/big.rs".to_string()]);
+            assert_eq!(assessment.contested_spans.len(), 1);
+            assert_eq!(assessment.contested_spans[0].path, "src/big.rs");
+            assert!((assessment.contested_spans[0].score - 0.14).abs() < 1e-9);
+        }
+
+        #[test]
+        fn test_three_tier_fail_safe_fallback_handles_washout_and_omission_canons() {
+            let canon_ref = ".canons/core/no-unwrap.md";
+            let (ws, caseload) = span_localization_fixture(canon_ref);
+
+            // Tier 2 (Jev washout): file_score < threshold and 0 hot spans -> keep full file, empty spans
+            let mut tier2 = MockVetProvider::empty();
+            tier2.question_scores.insert("compliant".to_string(), 0.30);
+            tier2
+                .question_scores
+                .insert("file:src/big.rs".to_string(), 0.30);
+            tier2
+                .question_scores
+                .insert("file:src/clean.rs".to_string(), 0.95);
+            let out2 = execute_vet(&VetOptions::default(), caseload.clone(), &ws, &tier2)
+                .expect("tier 2 vet");
+            let a2 = &out2.vetting.unwrap().cases[canon_ref];
+            assert_eq!(a2.vetting_status, VettingStatus::Contested);
+            assert_eq!(a2.contested_exhibits, vec!["src/big.rs".to_string()]);
+            assert!(a2.contested_spans.is_empty());
+
+            // Tier 3 (omission canon): whole_score < threshold and 0 files/spans < threshold -> full slice fallback
+            let mut tier3 = MockVetProvider::empty();
+            tier3.question_scores.insert("compliant".to_string(), 0.20);
+            let out3 = execute_vet(&VetOptions::default(), caseload, &ws, &tier3)
+                .expect("tier 3 vet");
+            let a3 = &out3.vetting.unwrap().cases[canon_ref];
+            assert_eq!(a3.vetting_status, VettingStatus::Contested);
+            assert!(a3.contested_exhibits.is_empty());
+            assert!(a3.contested_spans.is_empty());
         }
     }
 }

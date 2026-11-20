@@ -788,6 +788,7 @@ mod tests {
                             vetting_score: 0.94,
                             vetting_status: VettingStatus::Vetted,
                             contested_exhibits: Vec::new(),
+                            contested_spans: Vec::new(),
                         },
                     ),
                     (
@@ -797,6 +798,7 @@ mod tests {
                             vetting_score: 0.38,
                             vetting_status: VettingStatus::Contested,
                             contested_exhibits: Vec::new(),
+                            contested_spans: Vec::new(),
                         },
                     ),
                 ])));
@@ -866,8 +868,96 @@ mod tests {
             let compact_text = String::from_utf8(compact_out).expect("utf8");
             assert_eq!(
                 compact_text,
-                ".canons/cli/kebab.md\tcontested\t0.38\tCamelCase flag suspected.\n"
+                ".canons/cli/kebab.md\tcontested\t0.38\tCamelCase flag suspected.\t-\n"
             );
+        }
+
+        #[test]
+        fn test_vet_renders_contested_spans_in_stylish_compact_and_json() {
+            use crate::caseload::{
+                CanonVettingAssessment, CaseloadIntake, ContestedSpan, VettingStatus,
+            };
+
+            let ws = sample_ws();
+            let provider = HermeticJevProvider {
+                compliance_score: 0.95,
+            };
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/cli/app.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_vetting(CaseloadVetting::from_cases(BTreeMap::from([(
+                    ".canons/cli/kebab.md".to_string(),
+                    CanonVettingAssessment {
+                        vetting_summary: "CamelCase flag suspected.".to_string(),
+                        vetting_score: 0.38,
+                        vetting_status: VettingStatus::Contested,
+                        contested_exhibits: Vec::new(),
+                        contested_spans: vec![ContestedSpan {
+                            path: "src/cli/app.rs".to_string(),
+                            start_line: 12,
+                            end_line: 58,
+                            score: 0.38,
+                        }],
+                    },
+                )])));
+            let serialized = serde_json::to_vec(&caseload).expect("serialize");
+            let base_args = VetArgs {
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
+                ..VetArgs::default()
+            };
+
+            let mut stylish_out = Vec::new();
+            let _ = run_vet_with_snapshot_and_provider(
+                &base_args,
+                &mut Cursor::new(&serialized),
+                &mut stylish_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("contested exits 1");
+            let stylish_text = String::from_utf8(stylish_out).expect("utf8");
+            assert!(stylish_text.contains("      span: src/cli/app.rs:L12..L58 (score: 0.38)"));
+
+            let mut compact_out = Vec::new();
+            let _ = run_vet_with_snapshot_and_provider(
+                &VetArgs {
+                    format: VetFormat::Compact,
+                    ..base_args.clone()
+                },
+                &mut Cursor::new(&serialized),
+                &mut compact_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("contested exits 1");
+            assert_eq!(
+                String::from_utf8(compact_out).expect("utf8"),
+                ".canons/cli/kebab.md\tcontested\t0.38\tCamelCase flag suspected.\tsrc/cli/app.rs:L12..L58\n"
+            );
+
+            let mut json_out = Vec::new();
+            let _ = run_vet_with_snapshot_and_provider(
+                &VetArgs {
+                    format: VetFormat::Json,
+                    ..base_args
+                },
+                &mut Cursor::new(&serialized),
+                &mut json_out,
+                &ws,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("contested exits 1");
+            let json_text = String::from_utf8(json_out).expect("utf8");
+            assert!(json_text.contains("\"contested_spans\""));
+            assert!(json_text.contains("\"start_line\": 12"));
         }
     }
 }
