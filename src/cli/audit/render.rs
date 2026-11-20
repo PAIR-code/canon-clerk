@@ -173,19 +173,21 @@ pub(super) fn render_audit_output(
                     CliError::runtime(format!("Failed to write GitHub annotations: {err}"))
                 })?;
             }
-            if let Some(summary_path) = env
-                .get("GITHUB_STEP_SUMMARY")
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            {
-                let _ = append_github_step_summary(Path::new(summary_path), caseload, watermarks);
-            }
         }
         AuditFormat::Stylish => {
             render_stylish_output(caseload, watermarks, verbose, stdout).map_err(|err| {
                 CliError::runtime(format!("Failed to write stylish output: {err}"))
             })?;
         }
+    }
+
+    if (effective_format == AuditFormat::Github || args.github_check.publish_github_check)
+        && let Some(summary_path) = env
+            .get("GITHUB_STEP_SUMMARY")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+    {
+        let _ = append_github_step_summary(Path::new(summary_path), caseload, watermarks);
     }
 
     Ok(())

@@ -99,8 +99,8 @@ The outbound GitHub Checks client enforces the following wire invariants over Ca
 
 ## 5. CLI Ergonomics, Forensics Durability & Replay
 
-1. **Duplicate Annotation Suppression:**  
-   When `--publish-github-check` is active and neither `--format` nor `--json` is explicitly specified under `GITHUB_ACTIONS=true`, terminal `stdout` defaults to `stylish` rather than `github`. This prevents GitHub Actions from rendering duplicate `::error::` workflow commands alongside the Check Run's inline annotations. Explicit `--format github` remains available for zero-setup workflows that do not grant `checks: write`.
+1. **Duplicate Annotation Suppression & Step Summary Parity:**  
+   When `--publish-github-check` is active and neither `--format` nor `--json` is explicitly specified under `GITHUB_ACTIONS=true`, terminal `stdout` defaults to `stylish` rather than `github`. This prevents GitHub Actions from rendering duplicate `::error::` workflow commands alongside the Check Run's inline annotations, while still appending the rendered Markdown Funnel Provenance Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY` when set so the Actions workflow run summary page displays full results alongside the standalone Check Run. Explicit `--format github` remains available for zero-setup workflows that do not grant `checks: write`.
 2. **Forensics-First Durability:**  
    `--output-caseload <PATH>` is always flushed to disk **before** issuing any GitHub Checks API request. If GitHub returns a transient HTTP or transport error, the CLI exits with code `2` and prints an actionable replay hint referencing the saved Caseload artifact so forensics and LLM results are never lost.
 3. **Zero-Spend Replay:**  
