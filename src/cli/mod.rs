@@ -22,6 +22,7 @@ pub(crate) mod closure;
 pub mod configure;
 pub mod discover;
 pub mod docket;
+mod github_args;
 pub mod intake;
 pub mod io;
 pub mod node_args;

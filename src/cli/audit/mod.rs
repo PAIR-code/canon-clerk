@@ -14,11 +14,13 @@
 
 //! CLI driving adapter for the `canon-clerk audit` subcommand (`docs/architecture/nodes/audit.md` §5).
 
+mod finalize;
+mod github_check;
 pub mod guards;
 mod render;
 mod stages;
 
-use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVerdict, VerdictStatus};
+use crate::caseload::Caseload;
 use crate::cli::CliError;
 use crate::cli::args::{
     CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
@@ -30,20 +32,20 @@ use crate::cli::closure::{
 };
 use crate::cli::io::ensure_single_stdin_source;
 use crate::cli::node_args::{AuditNodeModelArgs, RejectedUnqualifiedTuningArgs};
-use crate::cli::provenance::StageDisposition;
 use crate::discover::WorkspaceSnapshot;
-use crate::github::{CheckRunPublisher, GithubCheckTarget, GithubChecksClient};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
+use finalize::{
+    AuditOutputContext, finalize_verdict_and_exit_code, finish_zero_candidate_audit,
+    handle_validation_failure,
+};
 use guards::{
     can_fast_forward_completed_audit, enforce_filing_and_case_guard,
     ensure_stage_prefixed_threshold_flags, resolve_and_validate_audit_cli_params,
 };
-use render::{
-    AuditWatermarks, build_audit_check_run_report, render_audit_output, resolve_effective_format,
-};
-use stages::{AuditCascadeThresholds, execute_jit_configure_docket_admit_and_audit};
+use render::AuditWatermarks;
+use stages::execute_jit_configure_docket_admit_and_audit;
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{Read, Write};
@@ -306,12 +308,6 @@ pub fn run_audit(
     run_audit_live_with_telemetry(args, stdin, stdout, &TelemetrySession::noop())
 }
 
-struct AuditOutputContext<'a> {
-    env: &'a BTreeMap<String, String>,
-    stdout: &'a mut dyn Write,
-    github_target: Option<&'a GithubCheckTarget>,
-}
-
 fn run_audit_core(
     args: &AuditArgs,
     stdin: &mut dyn Read,
@@ -431,113 +427,11 @@ fn run_audit_core(
     finalize_verdict_and_exit_code(args, outcome.caseload, &wm, &mut output_ctx)
 }
 
-fn publish_github_check_if_enabled(
-    args: &AuditArgs,
-    caseload: &Caseload,
-    wm: &AuditWatermarks,
-    github_target: Option<&GithubCheckTarget>,
-) -> Result<(), CliError> {
-    let Some(target) = github_target else {
-        return Ok(());
-    };
-    let report =
-        build_audit_check_run_report(args.github_check.resolved_check_name(), caseload, wm);
-    let client = GithubChecksClient::new();
-    client.publish_check_run(target, &report).map_err(|err| {
-        let replay_path = args
-            .io
-            .output_caseload
-            .as_deref()
-            .and_then(|p| p.to_str())
-            .unwrap_or("caseload.json");
-        CliError::usage(format!(
-            "Failed to publish GitHub Check Run `{}` to {}/{}: {err}\n  \
-             Hint: Verify `GITHUB_TOKEN` / `GH_TOKEN` has `checks: write` permission and replay without LLM spend via `canon-clerk audit --caseload {replay_path} --publish-github-check`.",
-            report.name, target.owner, target.repo
-        ))
-    })?;
-    Ok(())
-}
-
-fn finalize_verdict_and_exit_code(
-    args: &AuditArgs,
-    caseload: Caseload,
-    wm: &AuditWatermarks,
-    output_ctx: &mut AuditOutputContext<'_>,
-) -> Result<Caseload, CliError> {
-    args.io.write_output_caseload(&caseload)?;
-    render_audit_output(args, &caseload, wm, output_ctx.env, output_ctx.stdout)?;
-    publish_github_check_if_enabled(args, &caseload, wm, output_ctx.github_target)?;
-    if caseload
-        .verdict
-        .as_ref()
-        .is_some_and(|v| v.status == VerdictStatus::Fail)
-    {
-        return Err(CliError::silent(1));
-    }
-    Ok(caseload)
-}
-
-fn finish_zero_candidate_audit(
-    args: &AuditArgs,
-    caseload_after_discover: Caseload,
-    intake_disp: StageDisposition,
-    total_workspace_canons: Option<usize>,
-    thresholds: AuditCascadeThresholds,
-    output_ctx: &mut AuditOutputContext<'_>,
-) -> Result<Caseload, CliError> {
-    let short_circuited = caseload_after_discover
-        .with_docket(CaseloadDocket::default())
-        .with_evidence(CaseloadEvidence::default())
-        .with_verdict(CaseloadVerdict::default());
-    args.io.write_output_caseload(&short_circuited)?;
-    let wm = AuditWatermarks::zero_candidates(intake_disp, total_workspace_canons, thresholds);
-    render_audit_output(
-        args,
-        &short_circuited,
-        &wm,
-        output_ctx.env,
-        output_ctx.stdout,
-    )?;
-    publish_github_check_if_enabled(args, &short_circuited, &wm, output_ctx.github_target)?;
-    Ok(short_circuited)
-}
-
-fn handle_validation_failure(
-    args: &AuditArgs,
-    caseload: &Caseload,
-    intake_disp: StageDisposition,
-    discover_disp: StageDisposition,
-    total_workspace_canons: Option<usize>,
-    thresholds: AuditCascadeThresholds,
-    output_ctx: &mut AuditOutputContext<'_>,
-) -> Result<Caseload, CliError> {
-    args.io.write_output_caseload(caseload)?;
-    let wm = AuditWatermarks::validation_failed(
-        intake_disp,
-        discover_disp,
-        total_workspace_canons,
-        thresholds,
-    );
-    if resolve_effective_format(args, output_ctx.env) != AuditFormat::Compact {
-        render_audit_output(args, caseload, &wm, output_ctx.env, output_ctx.stdout)?;
-    }
-    publish_github_check_if_enabled(args, caseload, &wm, output_ctx.github_target)?;
-
-    let total_errors: usize = caseload
-        .validation
-        .as_ref()
-        .map_or(1, |v| v.results.values().map(|m| m.error_count).sum());
-    Err(CliError::runtime(format!(
-        "Candidate canon validation failed with {total_errors} error(s); aborting `audit` before model spend.\n  \
-         Hint: Run `canon-clerk validate` to inspect and repair malformed candidate canons."
-    )))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::canon::ParseCanonOptions;
+    use crate::caseload::VerdictStatus;
     use crate::cli::{Cli, Commands};
     use crate::configure::ENV_GEMINI_API_KEY;
     use crate::provider::{GenerationRequest, GenerationResponse, ProviderError, TokenUsage};
