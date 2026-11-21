@@ -36,8 +36,12 @@ fn is_metadata_plane_present(plane: InspectToken, intake: &CaseloadIntake) -> bo
     match plane {
         InspectToken::PrTitle => non_blank(intake.pr_title.as_deref()).is_some(),
         InspectToken::PrBody => non_blank(intake.pr_body.as_deref()).is_some(),
+        InspectToken::CommitMessages => intake
+            .commit_messages
+            .as_ref()
+            .is_some_and(|v| !v.is_empty()),
         InspectToken::LinkedIssues => intake.linked_issues.as_ref().is_some_and(|v| !v.is_empty()),
-        InspectToken::Diff | InspectToken::CommitMessages => false,
+        InspectToken::Diff => false,
     }
 }
 
@@ -45,6 +49,10 @@ fn is_metadata_id_present(exhibit_id: &str, intake: &CaseloadIntake) -> bool {
     match exhibit_id {
         "pr_title" => non_blank(intake.pr_title.as_deref()).is_some(),
         "pr_body" => non_blank(intake.pr_body.as_deref()).is_some(),
+        "commit_messages" => intake
+            .commit_messages
+            .as_ref()
+            .is_some_and(|v| !v.is_empty()),
         "linked_issues" => intake.linked_issues.as_ref().is_some_and(|v| !v.is_empty()),
         _ => false,
     }
@@ -125,9 +133,27 @@ pub(super) fn append_candidate_exhibit_section(
     match exhibit_id {
         "pr_title" => append_pr_title_exhibit(out, intake),
         "pr_body" => append_pr_body_exhibit(out, intake),
+        "commit_messages" => append_commit_messages_exhibit(out, intake),
         "linked_issues" => append_linked_issues_exhibit(out, intake),
         file_path => append_file_exhibit(out, file_path, intake, workspace),
     }
+}
+
+fn append_commit_messages_exhibit(out: &mut String, intake: &CaseloadIntake) {
+    let _ = writeln!(
+        out,
+        "### Candidate Exhibit: `commit_messages` (Commit Messages Metadata)"
+    );
+    if let Some(commits) = intake.commit_messages.as_deref().filter(|v| !v.is_empty()) {
+        crate::audit::metadata::append_commit_messages_block(
+            out,
+            commits,
+            "",
+            50,
+            MAX_MICRO_EXHIBIT_CHARS,
+        );
+    }
+    let _ = writeln!(out, "- Exact `file_path`: `commit_messages`\n");
 }
 
 fn append_pr_title_exhibit(out: &mut String, intake: &CaseloadIntake) {
@@ -307,5 +333,27 @@ mod tests {
             )
         );
         assert!(out.contains("Body text"));
+    }
+
+    #[test]
+    fn test_commit_messages_candidate_exhibit_presence_and_rendering() {
+        let intake = CaseloadIntake {
+            commit_messages: Some(vec![crate::caseload::CommitMessageContext {
+                sha: Some("deadbeef1234".to_string()),
+                message: "feat(cli): support commit_messages".to_string(),
+            }]),
+            ..CaseloadIntake::default()
+        };
+        assert!(is_metadata_plane_present(
+            InspectToken::CommitMessages,
+            &intake
+        ));
+        assert!(is_metadata_id_present("commit_messages", &intake));
+
+        let rendered =
+            render_candidate_exhibit("commit_messages", &intake, &WorkspaceSnapshot::default());
+        assert!(rendered.contains("### Candidate Exhibit: `commit_messages`"));
+        assert!(rendered.contains("1. [deadbee] feat(cli): support commit_messages"));
+        assert!(rendered.contains("- Exact `file_path`: `commit_messages`"));
     }
 }

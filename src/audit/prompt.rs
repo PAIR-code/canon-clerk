@@ -44,7 +44,7 @@ Evaluation Rules (The Four-Step Judicial Decision Tree):
    - In `compliance_summary`, state the concrete violation observed in the Admitted Exhibits followed by concise, actionable remediation guidance (`How`).
 4. Step 4 — Deterministic `CodeAnnotation` Anchoring Guardrails:
    - When `compliance_score >= 0.5`: `annotations` MUST be `[]`.
-   - When `compliance_score < 0.5` and `## Admitted File Exhibit Paths` lists `(none — metadata-only case)`: `annotations` MUST be `[]` (never pass metadata tokens like `pr_title` or `pr_body` as file paths).
+   - When `compliance_score < 0.5` and `## Admitted File Exhibit Paths` lists `(none — metadata-only case)`: `annotations` MUST be `[]` (never pass metadata tokens like `pr_title`, `pr_body`, `commit_messages`, or `linked_issues` as file paths).
    - When `compliance_score < 0.5` and `## Admitted File Exhibit Paths` is non-empty:
      * Every `path` MUST be copied verbatim from `## Admitted File Exhibit Paths` (NEVER cite un-admitted files or missing companion files such as an un-touched `README.md`).
      * Use exact 1-based target-file line numbers shown in the left margin (`+  42 |` or `  42 |`) with `start_line >= 1` and `end_line >= start_line`.
@@ -195,6 +195,9 @@ pub(crate) fn append_case_overview(
     let _ = writeln!(out, "- Discovery Mode: {}", discovery.mode.as_str());
     if let Some(title) = non_blank(intake.pr_title.as_deref()) {
         let _ = writeln!(out, "- PR Title: {title}");
+    }
+    if let Some(commits) = intake.commit_messages.as_deref().filter(|v| !v.is_empty()) {
+        let _ = writeln!(out, "- Commit Messages Count: {}", commits.len());
     }
     if let Some(intent) = non_blank(intake.intent.as_deref()) {
         let _ = writeln!(out, "- Design Intent: {intent}");

@@ -14,10 +14,9 @@
 
 //! Composable Clap argument groups for Caseload DAG stage subcommands.
 
-use crate::caseload::{Caseload, ThinkingLevel, WorkspaceState};
+use crate::caseload::{ThinkingLevel, WorkspaceState};
 use crate::cli::CliError;
 use crate::cli::github_args::{resolve_filing_source, resolve_filing_source_with_fetcher};
-use crate::cli::io::{read_caseload_operand, write_caseload_file};
 use crate::configure::{ConfigureError, StoredConfig, parse_thinking_level};
 use crate::github::GithubPullRequestFetcher;
 use crate::intake::IntakeOptions;
@@ -27,7 +26,6 @@ use crate::provider::{
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::PathBuf;
 
 /// CLI value enum for `--workspace-state <head|base>`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +141,7 @@ pub struct FilingSourceArgs {
     )]
     pub pr_body_file: Option<String>,
 
-    /// Repeatable JSON file path or `-` for stdin supplying linked issue metadata (`SPEC.md` §3.4).
+    /// Repeatable JSON file path or `-` for stdin supplying linked issue metadata (`SPEC.md` §4.2).
     #[arg(
         long = "linked-issue",
         value_name = "PATH|-",
@@ -151,6 +149,26 @@ pub struct FilingSourceArgs {
         help = "Ingest linked issue JSON (single object or array; native, gh, or GitHub REST shape) from file or '-' for stdin"
     )]
     pub linked_issues: Vec<String>,
+
+    /// Repeatable literal commit message text (`SPEC.md` §4.2; mutually exclusive with `--commit-messages-file`).
+    #[arg(
+        long = "commit-message",
+        value_name = "TEXT",
+        conflicts_with = "commit_messages_files",
+        help_heading = "Pull Request Metadata",
+        help = "Ingest a commit message literal (repeatable; preserves chronological order)"
+    )]
+    pub commit_messages: Vec<String>,
+
+    /// Repeatable JSON file path or `-` for stdin supplying commit messages (`SPEC.md` §4.2; mutually exclusive with `--commit-message`).
+    #[arg(
+        long = "commit-messages-file",
+        value_name = "PATH|-",
+        conflicts_with = "commit_messages",
+        help_heading = "Pull Request Metadata",
+        help = "Ingest commit messages JSON (string/array, native, GitHub REST, or gh CLI shape) from file or '-' for stdin"
+    )]
+    pub commit_messages_files: Vec<String>,
 }
 
 impl FilingSourceArgs {
@@ -444,52 +462,8 @@ impl ProviderTransportArgs {
     }
 }
 
-/// Composable CLI argument group for Caseload envelope I/O across all stage subcommands.
-#[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
-pub struct CaseloadIoArgs {
-    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
-    #[arg(
-        long = "caseload",
-        value_name = "PATH|-",
-        help_heading = "Caseload & Output",
-        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
-    )]
-    pub caseload: Option<String>,
-
-    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
-    #[arg(
-        long = "output-caseload",
-        value_name = "PATH",
-        help_heading = "Caseload & Output",
-        help = "Write cumulative Caseload JSON to disk independently of stdout"
-    )]
-    pub output_caseload: Option<PathBuf>,
-
-    /// Emit the enriched `Caseload` as JSON to standard output.
-    #[arg(
-        long = "json",
-        help_heading = "Caseload & Output",
-        help = "Emit enriched Caseload JSON to stdout"
-    )]
-    pub json: bool,
-}
-
-impl CaseloadIoArgs {
-    /// Reads incoming Caseload JSON from `--caseload` if specified.
-    pub fn read_caseload(&self, stdin: &mut dyn Read) -> Result<Option<Caseload>, CliError> {
-        read_caseload_operand(self.caseload.as_deref(), stdin)
-    }
-
-    /// Writes the cumulative Caseload to `--output-caseload` if specified.
-    pub fn write_output_caseload(&self, caseload: &Caseload) -> Result<(), CliError> {
-        if let Some(path) = &self.output_caseload {
-            write_caseload_file(path, caseload)?;
-        }
-        Ok(())
-    }
-}
-
 pub use crate::cli::github_args::{GithubCheckArgs, ResolvedFilingSource};
+pub use crate::cli::io::CaseloadIoArgs;
 
 #[cfg(test)]
 mod tests {

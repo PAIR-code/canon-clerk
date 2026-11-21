@@ -21,7 +21,10 @@ pub use diff::{
     parse_unified_diff, tokenize_diff, unquote_git_path,
 };
 
-use crate::caseload::{Caseload, CaseloadIntake, IntakeScope, LinkedIssueContext, WorkspaceState};
+use crate::caseload::{
+    Caseload, CaseloadIntake, CommitMessageContext, IntakeScope, LinkedIssueContext,
+    WorkspaceState, normalize_commit_messages,
+};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -51,6 +54,9 @@ pub struct IntakeOptions {
 
     /// Optional linked issues context.
     pub linked_issues: Option<Vec<LinkedIssueContext>>,
+
+    /// Optional chronological commit message contexts.
+    pub commit_messages: Option<Vec<CommitMessageContext>>,
 }
 
 impl IntakeOptions {
@@ -66,6 +72,10 @@ impl IntakeOptions {
                 .linked_issues
                 .as_ref()
                 .is_some_and(|issues| !issues.is_empty())
+            || self
+                .commit_messages
+                .as_ref()
+                .is_some_and(|commits| commits.iter().any(|c| !c.message.trim().is_empty()))
     }
 }
 
@@ -186,6 +196,10 @@ pub fn execute_intake(
         .linked_issues
         .clone()
         .filter(|issues| !issues.is_empty());
+    let commit_messages = options
+        .commit_messages
+        .clone()
+        .and_then(normalize_commit_messages);
 
     let intake = CaseloadIntake {
         pr_title: normalize_optional_text(&options.pr_title),
@@ -196,6 +210,7 @@ pub fn execute_intake(
         target_paths,
         diffs,
         linked_issues,
+        commit_messages,
     };
 
     Ok(base_caseload.with_intake(intake))

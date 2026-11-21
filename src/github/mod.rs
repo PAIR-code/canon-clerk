@@ -15,6 +15,7 @@
 //! Stage-agnostic GitHub REST API outbound adapter (Pull Request ingestion and Checks publication).
 
 mod client;
+mod commits;
 mod linked_issues;
 mod pull_request;
 

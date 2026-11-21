@@ -14,8 +14,12 @@
 
 //! Admitted exhibit line-annotated rendering and statutory `references:` resolution for `audit` (`docs/architecture/nodes/audit.md` §4).
 
+use super::metadata::{
+    append_commit_messages_exhibit, append_linked_issues_exhibit, append_pr_body_exhibit,
+    append_pr_title_exhibit,
+};
 use crate::canon::Canon;
-use crate::caseload::{CaseloadIntake, ExhibitAssessment, FileArtifact, LinkedIssueContext};
+use crate::caseload::{CaseloadIntake, ExhibitAssessment, FileArtifact};
 use crate::discover::{GlobPattern, WorkspaceSnapshot, normalize_workspace_path};
 use crate::spans::{
     ExhibitLine, parse_snapshot_lines, parse_unified_patch_lines, render_breadcrumb_skeleton,
@@ -23,7 +27,7 @@ use crate::spans::{
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-const MAX_AUDIT_EXHIBIT_CHARS: usize = 24_576;
+pub(super) const MAX_AUDIT_EXHIBIT_CHARS: usize = 24_576;
 const MAX_AUDIT_REFERENCE_CHARS: usize = 12_288;
 
 /// Returns `true` if `exhibit_id` names a reserved filing metadata plane rather than a workspace file path.
@@ -157,99 +161,6 @@ pub(crate) fn format_file_exhibit_heading(
             "### Admitted File Exhibit: `{file_path}` (Target Workspace File, score: {:.2})",
             exhibit.admissibility_score
         )
-    }
-}
-
-fn append_commit_messages_exhibit(
-    out: &mut String,
-    exhibit: &ExhibitAssessment,
-    intake: &CaseloadIntake,
-) {
-    let _ = writeln!(
-        out,
-        "### Admitted Metadata Exhibit: `commit_messages` (score: {:.2})",
-        exhibit.admissibility_score
-    );
-    if let Some(title) = non_blank(intake.pr_title.as_deref()) {
-        let _ = writeln!(out, "{title}");
-    }
-    if let Some(body) = non_blank(intake.pr_body.as_deref()) {
-        let bounded = truncate_chars(body, MAX_AUDIT_EXHIBIT_CHARS, "commit messages");
-        let _ = writeln!(out, "{bounded}");
-    }
-    out.push('\n');
-}
-
-fn append_pr_title_exhibit(out: &mut String, exhibit: &ExhibitAssessment, intake: &CaseloadIntake) {
-    let _ = writeln!(
-        out,
-        "### Admitted Metadata Exhibit: `pr_title` (score: {:.2})",
-        exhibit.admissibility_score
-    );
-    if let Some(title) = non_blank(intake.pr_title.as_deref()) {
-        let _ = writeln!(out, "{title}");
-    }
-    out.push('\n');
-}
-
-fn append_pr_body_exhibit(out: &mut String, exhibit: &ExhibitAssessment, intake: &CaseloadIntake) {
-    let _ = writeln!(
-        out,
-        "### Admitted Metadata Exhibit: `pr_body` (score: {:.2})",
-        exhibit.admissibility_score
-    );
-    if let Some(body) = non_blank(intake.pr_body.as_deref()) {
-        let bounded = truncate_chars(body, MAX_AUDIT_EXHIBIT_CHARS, "PR description");
-        let _ = writeln!(out, "{bounded}");
-    }
-    out.push('\n');
-}
-
-fn append_linked_issues_exhibit(
-    out: &mut String,
-    exhibit: &ExhibitAssessment,
-    intake: &CaseloadIntake,
-) {
-    let _ = writeln!(
-        out,
-        "### Admitted Metadata Exhibit: `linked_issues` (score: {:.2})",
-        exhibit.admissibility_score
-    );
-    if let Some(issues) = intake.linked_issues.as_deref().filter(|v| !v.is_empty()) {
-        append_linked_issues(out, issues);
-    }
-    out.push('\n');
-}
-
-fn append_linked_issues(out: &mut String, issues: &[LinkedIssueContext]) {
-    for issue in issues {
-        let title = non_blank(issue.title.as_deref()).unwrap_or("(untitled)");
-        let meta = format_linked_issue_metadata(issue);
-        let _ = writeln!(out, "- Issue #{}: {title}{meta}", issue.number);
-        if let Some(body) = non_blank(issue.body.as_deref()) {
-            let bounded = truncate_chars(body, MAX_AUDIT_EXHIBIT_CHARS / 2, "issue body");
-            let _ = writeln!(out, "  {bounded}");
-        }
-    }
-}
-
-fn format_linked_issue_metadata(issue: &LinkedIssueContext) -> String {
-    let mut parts = Vec::new();
-    if let Some(author) = non_blank(issue.author.as_deref()) {
-        parts.push(format!("author: @{author}"));
-    }
-    let labels: Vec<&str> = issue
-        .labels
-        .iter()
-        .filter_map(|label| non_blank(Some(label.as_str())))
-        .collect();
-    if !labels.is_empty() {
-        parts.push(format!("labels: {}", labels.join(", ")));
-    }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", parts.join("; "))
     }
 }
 
@@ -464,7 +375,7 @@ pub(crate) fn non_blank(text: Option<&str>) -> Option<&str> {
     text.map(str::trim).filter(|s| !s.is_empty())
 }
 
-fn truncate_chars(text: &str, max_chars: usize, label: &str) -> String {
+pub(super) fn truncate_chars(text: &str, max_chars: usize, label: &str) -> String {
     let mut char_indices = text.char_indices();
     match char_indices.nth(max_chars) {
         Some((byte_idx, _)) => format!(
@@ -472,30 +383,5 @@ fn truncate_chars(text: &str, max_chars: usize, label: &str) -> String {
             &text[..byte_idx]
         ),
         None => text.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_append_linked_issues_renders_author_and_labels() {
-        let mut out = String::new();
-        append_linked_issues(
-            &mut out,
-            &[LinkedIssueContext {
-                number: 383,
-                title: Some("Ingest linked_issues".to_string()),
-                author: Some("jimbojw".to_string()),
-                labels: vec!["type: feat".to_string(), "scope: core".to_string()],
-                body: Some("Body text".to_string()),
-                url: None,
-            }],
-        );
-        assert!(out.contains(
-            "- Issue #383: Ingest linked_issues (author: @jimbojw; labels: type: feat, scope: core)"
-        ));
-        assert!(out.contains("Body text"));
     }
 }

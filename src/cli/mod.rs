@@ -19,6 +19,7 @@ pub mod apprise;
 pub mod args;
 pub mod audit;
 pub(crate) mod closure;
+mod commit_messages;
 pub mod configure;
 pub mod discover;
 pub mod docket;

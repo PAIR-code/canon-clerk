@@ -182,6 +182,10 @@ fn append_filing_metadata_section(
     if let Some(issues) = intake.linked_issues.as_deref().filter(|v| !v.is_empty()) {
         append_linked_issues(out, issues);
     }
+    if let Some(commits) = intake.commit_messages.as_deref().filter(|v| !v.is_empty()) {
+        let _ = writeln!(out, "- Commit Messages ({}):", commits.len());
+        crate::audit::metadata::append_commit_messages_block(out, commits, "  ", 25, 4_096);
+    }
     out.push('\n');
 }
 

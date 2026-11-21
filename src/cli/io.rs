@@ -17,9 +17,10 @@
 use crate::caseload::Caseload;
 use crate::cli::CliError;
 use crate::cli::args::FilingSourceArgs;
+use clap::Args;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Enforces the single-stdin guard: at most one operand may consume standard input (`-`).
 pub fn ensure_single_stdin_source(
@@ -59,6 +60,21 @@ pub fn ensure_single_stdin_source(
     }
     if linked_issue_stdin_count == 1 {
         stdin_consumers.push("`--linked-issue -`");
+    }
+    let commit_file_stdin_count = filing
+        .commit_messages_files
+        .iter()
+        .filter(|s| s.as_str() == "-")
+        .count();
+    if commit_file_stdin_count > 1 {
+        return Err(CliError::usage(
+            "Standard input (`-`) was specified multiple times in `--commit-messages-file`.\n  \
+             Hint: Pass `--commit-messages-file -` at most once to read commit messages JSON from stdin."
+                .to_string(),
+        ));
+    }
+    if commit_file_stdin_count == 1 {
+        stdin_consumers.push("`--commit-messages-file -`");
     }
     if caseload == Some("-") {
         stdin_consumers.push("`--caseload -`");
@@ -171,6 +187,51 @@ pub fn write_caseload_file(path: &Path, caseload: &Caseload) -> Result<(), CliEr
             path.display()
         ))
     })
+}
+
+/// Composable CLI argument group for Caseload envelope I/O across all stage subcommands.
+#[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaseloadIoArgs {
+    /// Read an existing upstream `Caseload` JSON from a file path or `-` for stdin.
+    #[arg(
+        long = "caseload",
+        value_name = "PATH|-",
+        help_heading = "Caseload & Output",
+        help = "Ingest existing upstream Caseload JSON from file or '-' for stdin"
+    )]
+    pub caseload: Option<String>,
+
+    /// Write the cumulative `Caseload` JSON to a file path independently of stdout.
+    #[arg(
+        long = "output-caseload",
+        value_name = "PATH",
+        help_heading = "Caseload & Output",
+        help = "Write cumulative Caseload JSON to disk independently of stdout"
+    )]
+    pub output_caseload: Option<PathBuf>,
+
+    /// Emit the enriched `Caseload` as JSON to standard output.
+    #[arg(
+        long = "json",
+        help_heading = "Caseload & Output",
+        help = "Emit enriched Caseload JSON to stdout"
+    )]
+    pub json: bool,
+}
+
+impl CaseloadIoArgs {
+    /// Reads incoming Caseload JSON from `--caseload` if specified.
+    pub fn read_caseload(&self, stdin: &mut dyn Read) -> Result<Option<Caseload>, CliError> {
+        read_caseload_operand(self.caseload.as_deref(), stdin)
+    }
+
+    /// Writes the cumulative Caseload to `--output-caseload` if specified.
+    pub fn write_output_caseload(&self, caseload: &Caseload) -> Result<(), CliError> {
+        if let Some(path) = &self.output_caseload {
+            write_caseload_file(path, caseload)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

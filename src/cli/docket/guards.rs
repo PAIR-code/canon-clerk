@@ -226,6 +226,10 @@ pub(crate) fn has_concrete_cli_filing(intake_opts: &IntakeOptions) -> bool {
             .linked_issues
             .as_ref()
             .is_some_and(|issues| !issues.is_empty())
+        || intake_opts
+            .commit_messages
+            .as_ref()
+            .is_some_and(|commits| commits.iter().any(|c| !c.message.trim().is_empty()))
 }
 
 pub(super) fn enforce_filing_and_case_guard(
