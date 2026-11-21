@@ -557,6 +557,7 @@ Rationale: Two rules in one canon.";
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
+                config_files: Vec::new(),
                 candidate_canons: vec![
                     ".canons/a/first-must-hold.md".to_string(),
                     ".canons/b/second-must-hold.md".to_string(),
@@ -588,6 +589,7 @@ Rationale: Two rules in one canon.";
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
+                config_files: Vec::new(),
                 candidate_canons: vec![".canons/rule-must-hold.md".to_string()],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
@@ -637,6 +639,7 @@ Rationale: Two rules in one canon.";
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
+                config_files: Vec::new(),
                 candidate_canons: vec![
                     ".canons/cli-flags-must-use-positive-polarity.md".to_string(),
                     "builtin:cli/cli-flags-must-use-positive-polarity".to_string(),

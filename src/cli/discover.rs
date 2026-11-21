@@ -426,5 +426,89 @@ mod tests {
             let rendered = String::from_utf8(stdout).expect("utf8");
             assert!(rendered.contains('\t'));
         }
+
+        #[test]
+        fn test_policy_config_on_disk_exit_code_2_on_invalid_and_nested_warning_ignored() {
+            let ws = TempDiscoverWorkspace::new("policy-config-cli");
+            // Create a valid root config and an ignored nested config inside `.canons/security/`
+            std::fs::write(
+                ws.path.join(".canons/config.yaml"),
+                "canon-policy-chain:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
+            )
+            .expect("write root config");
+            std::fs::create_dir_all(ws.path.join(".canons/security")).expect("mkdir security");
+            std::fs::write(
+                ws.path.join(".canons/security/config.yaml"),
+                "this is invalid yaml: [unclosed",
+            )
+            .expect("write nested config");
+
+            let args = DiscoverArgs {
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    ..CanonSelectionArgs::default()
+                },
+                format: DiscoverFormat::Json,
+                ..DiscoverArgs::default()
+            };
+            let mut stdin = Cursor::new(b"");
+            let mut stdout = Vec::new();
+            let caseload = run_discover_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
+                .expect("valid root config with ignored nested config must succeed");
+            let disc = caseload.discovery.expect("discovery");
+            assert_eq!(disc.config_files, vec![".canons/config.yaml".to_string()]);
+            assert_eq!(
+                disc.candidate_canons,
+                vec![".canons/rust-modules-must-compile.canon.md".to_string()]
+            );
+
+            // Now write a forbidden credential key in root `.canons/config.yaml` -> exit code 2
+            std::fs::write(
+                ws.path.join(".canons/config.yaml"),
+                "providers:\n  gemini:\n    apiKey: secret\n",
+            )
+            .expect("write invalid root config");
+            let mut stdin2 = Cursor::new(b"");
+            let mut stdout2 = Vec::new();
+            let err = run_discover_in_workspace(&args, &mut stdin2, &mut stdout2, &ws.path)
+                .expect_err("credential key in .canons/config.yaml must fail fast");
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("config.json"));
+        }
+
+        #[test]
+        fn test_validate_all_canons_respects_unconditional_policy_config() {
+            let ws = TempDiscoverWorkspace::new("policy-validate-all-canons");
+            std::fs::write(
+                ws.path.join(".canons/config.yaml"),
+                "canon-policy-chain:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
+            )
+            .expect("write config");
+
+            let args = crate::cli::ValidateArgs {
+                canons: CanonSelectionArgs {
+                    all_canons: true,
+                    ..CanonSelectionArgs::default()
+                },
+                ..crate::cli::ValidateArgs::default()
+            };
+            let mut stdin = Cursor::new(b"");
+            let mut stdout = Vec::new();
+            let caseload =
+                crate::cli::run_validate_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
+                    .expect("validate --all-canons");
+            let disc = caseload.discovery.expect("discovery");
+            assert_eq!(disc.config_files, vec![".canons/config.yaml".to_string()]);
+            assert_eq!(
+                disc.candidate_canons,
+                vec![".canons/rust-modules-must-compile.canon.md".to_string()]
+            );
+            let val = caseload.validation.expect("validation");
+            assert_eq!(val.results.len(), 1);
+            assert!(
+                val.results
+                    .contains_key(".canons/rust-modules-must-compile.canon.md")
+            );
+        }
     }
 }

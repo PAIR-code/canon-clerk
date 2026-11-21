@@ -14,7 +14,9 @@
 
 //! Core domain execution engine for the `discover` Caseload DAG stage (`docs/architecture/nodes/discover.md`).
 
+mod evaluate;
 pub mod glob_matcher;
+mod policy;
 pub mod workspace;
 
 pub use glob_matcher::{
@@ -23,11 +25,13 @@ pub use glob_matcher::{
 };
 pub use workspace::{WorkspaceSnapshot, parse_canon_or_fallback};
 
-use crate::canon::{Canon, CanonScope, CanonSourceKind, InspectToken};
+use crate::canon::{Canon, CanonSourceKind};
 use crate::caseload::{
     ActiveExhibits, Caseload, CaseloadDiscovery, CaseloadIntake, DiscoveryMode, FileChangeStatus,
     IntakeScope,
 };
+use evaluate::evaluate_candidate_canon;
+use policy::{WorkspacePolicySet, detect_nested_policy_configs};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
@@ -65,6 +69,8 @@ pub enum DiscoverError {
     InvalidGlob(GlobSyntaxError),
     /// Target or canon path attempts directory traversal (`..`) escaping the workspace root.
     PathEscapesWorkspace { path: String },
+    /// Malformed or schema-invalid `<scope>/.canons/config.yaml` policy file (`SPEC.md` §7.2).
+    InvalidPolicyConfig { path: String, message: String },
     /// Workspace filesystem traversal or file read error.
     Io { path: String, message: String },
 }
@@ -89,6 +95,13 @@ impl fmt::Display for DiscoverError {
                 "Path `{path}` escapes the workspace root directory.\n  \
                  Hint: All target and canon paths must reside within the repository workspace."
             ),
+            Self::InvalidPolicyConfig { path, message } => write!(
+                f,
+                "Invalid workspace policy configuration `{path}`: {message}\n  \
+                 Hint: Define a top-level `canon-policy-chain:` list of `allow:`/`deny:` entries \
+                 with optional `exhibits:` globs (e.g., `canon-policy-chain: [{{ deny: \"builtin:**\", exhibits: [\"third_party/**\"] }}]`), \
+                 and keep runtime provider credentials in `~/.config/canon-clerk/config.json`."
+            ),
             Self::Io { path, message } => write!(f, "Failed to read `{path}`: {message}"),
         }
     }
@@ -100,14 +113,6 @@ impl From<GlobSyntaxError> for DiscoverError {
     fn from(err: GlobSyntaxError) -> Self {
         Self::InvalidGlob(err)
     }
-}
-
-struct EvaluatedCanonMatch {
-    matched_files: Vec<String>,
-    inspected_metadata: Vec<String>,
-    active_pr_title: bool,
-    active_pr_body: bool,
-    active_linked_issues: bool,
 }
 
 /// Executes the pure `discover` domain stage against an in-memory [`WorkspaceSnapshot`].
@@ -128,6 +133,17 @@ pub fn execute_discover(
         return Err(DiscoverError::MissingInputSource);
     }
 
+    for nested_path in detect_nested_policy_configs(&workspace.existing_files) {
+        tracing::warn!(
+            path = %nested_path,
+            "Ignoring nested `config.yaml` inside `.canons/` subdirectory; place workspace policy at `<scope>/.canons/config.yaml`"
+        );
+    }
+
+    let policy_set = WorkspacePolicySet::compile(&workspace.policy_configs)?;
+    let config_files = policy_set.config_files().to_vec();
+    let active_policy = options.canon_patterns.is_empty().then_some(&policy_set);
+
     let filtered_canons = filter_canons(
         &workspace.canons,
         &options.canon_patterns,
@@ -139,7 +155,13 @@ pub fn execute_discover(
     };
 
     if options.all_canons {
-        let candidate_canons: Vec<String> = filtered_canons.keys().cloned().collect();
+        let candidate_canons: Vec<String> = filtered_canons
+            .iter()
+            .filter(|(canon_ref, canon)| {
+                active_policy.is_none_or(|p| p.allows_unconditional(canon_ref, canon))
+            })
+            .map(|(canon_ref, _)| canon_ref.clone())
+            .collect();
         let mut triggers_join = BTreeMap::new();
         for canon_ref in &candidate_canons {
             triggers_join.insert(canon_ref.clone(), Vec::new());
@@ -147,6 +169,7 @@ pub fn execute_discover(
         let discovery = CaseloadDiscovery {
             mode: DiscoveryMode::AllCanons,
             target_files: target_files.clone(),
+            config_files,
             candidate_canons,
             active_exhibits: ActiveExhibits {
                 files: target_files,
@@ -168,9 +191,14 @@ pub fn execute_discover(
     let mut triggers_join = BTreeMap::new();
 
     for (canon_ref, canon) in filtered_canons {
-        if let Some(eval) =
-            evaluate_candidate_canon(canon, &intake, &target_files, &target_file_tree)
-        {
+        if let Some(eval) = evaluate_candidate_canon(
+            &canon_ref,
+            canon,
+            &intake,
+            &target_files,
+            &target_file_tree,
+            active_policy,
+        ) {
             candidate_canons.push(canon_ref.clone());
             for f in &eval.matched_files {
                 active_files_set.insert(f.clone());
@@ -196,6 +224,7 @@ pub fn execute_discover(
     let discovery = CaseloadDiscovery {
         mode: DiscoveryMode::Triggered,
         target_files,
+        config_files,
         candidate_canons,
         active_exhibits,
         triggers_join,
@@ -329,153 +358,6 @@ fn build_target_file_tree(
     tree
 }
 
-fn evaluate_candidate_canon(
-    canon: &Canon,
-    intake: &CaseloadIntake,
-    target_files: &[String],
-    target_file_tree: &BTreeSet<String>,
-) -> Option<EvaluatedCanonMatch> {
-    let canon_scope = canon.scope.as_deref().map(|s| CanonScope(s.to_string()));
-
-    let in_scope_targets: Vec<&String> = target_files
-        .iter()
-        .filter(|f| scope_relative_path(f, canon_scope.as_ref()).is_some())
-        .collect();
-
-    if canon_scope.is_some() && in_scope_targets.is_empty() {
-        return None;
-    }
-
-    if !verify_exists_preconditions(canon, canon_scope.as_ref(), target_file_tree) {
-        return None;
-    }
-
-    let matched_files = match_canon_triggers(canon, canon_scope.as_ref(), &in_scope_targets);
-    evaluate_bipartite_inspect(canon, intake, target_files, matched_files)
-}
-
-fn verify_exists_preconditions(
-    canon: &Canon,
-    canon_scope: Option<&CanonScope>,
-    target_file_tree: &BTreeSet<String>,
-) -> bool {
-    if canon.exists.is_empty() {
-        return true;
-    }
-
-    for pattern in &canon.exists {
-        let Ok(glob) = GlobPattern::parse(pattern) else {
-            return false;
-        };
-        let matched = target_file_tree.iter().any(|file| {
-            let Some(rel_in_scope) = scope_relative_path(file, canon_scope) else {
-                return false;
-            };
-            glob.is_match(file) || glob.is_match(&rel_in_scope)
-        });
-        if !matched {
-            return false;
-        }
-    }
-    true
-}
-
-fn match_canon_triggers(
-    canon: &Canon,
-    canon_scope: Option<&CanonScope>,
-    in_scope_targets: &[&String],
-) -> Vec<String> {
-    let trigger_globs: Vec<GlobPattern> = canon
-        .triggers
-        .iter()
-        .filter_map(|t| GlobPattern::parse(t).ok())
-        .collect();
-
-    let mut matched = Vec::new();
-    for &file in in_scope_targets {
-        let Some(rel_in_scope) = scope_relative_path(file, canon_scope) else {
-            continue;
-        };
-        let is_triggered = trigger_globs.is_empty()
-            || trigger_globs
-                .iter()
-                .any(|g| g.is_match(file) || g.is_match(&rel_in_scope));
-        if is_triggered {
-            matched.push(file.clone());
-        }
-    }
-    matched
-}
-
-fn evaluate_bipartite_inspect(
-    canon: &Canon,
-    intake: &CaseloadIntake,
-    target_files: &[String],
-    matched_files: Vec<String>,
-) -> Option<EvaluatedCanonMatch> {
-    let has_diff_match = !matched_files.is_empty();
-    let has_pr_title = intake.pr_title.is_some();
-    let has_pr_body = intake.pr_body.is_some();
-    let has_linked_issues = intake.linked_issues.as_ref().is_some_and(|v| !v.is_empty());
-
-    let inspects_diff = canon.inspect.iter().any(|p| p.token == InspectToken::Diff);
-    let has_explicit_triggers = canon
-        .raw_frontmatter
-        .as_ref()
-        .is_some_and(|fm| fm.contains_key("triggers"));
-
-    if !inspects_diff && has_explicit_triggers && !target_files.is_empty() && !has_diff_match {
-        return None;
-    }
-
-    let retained_files = if inspects_diff {
-        matched_files
-    } else {
-        Vec::new()
-    };
-
-    let mut inspected_metadata = Vec::new();
-    let mut active_pr_title = false;
-    let mut active_pr_body = false;
-    let mut active_linked_issues = false;
-
-    for plane in &canon.inspect {
-        let available = match plane.token {
-            InspectToken::Diff => has_diff_match,
-            InspectToken::PrTitle => has_pr_title,
-            InspectToken::PrBody => has_pr_body,
-            InspectToken::CommitMessages => false,
-            InspectToken::LinkedIssues => has_linked_issues,
-        };
-
-        if !plane.optional && !available {
-            return None;
-        }
-
-        if available && plane.token != InspectToken::Diff {
-            inspected_metadata.push(plane.token.as_str().to_string());
-            match plane.token {
-                InspectToken::PrTitle => active_pr_title = true,
-                InspectToken::PrBody => active_pr_body = true,
-                InspectToken::LinkedIssues => active_linked_issues = true,
-                InspectToken::Diff | InspectToken::CommitMessages => {}
-            }
-        }
-    }
-
-    if retained_files.is_empty() && inspected_metadata.is_empty() {
-        return None;
-    }
-
-    Some(EvaluatedCanonMatch {
-        matched_files: retained_files,
-        inspected_metadata,
-        active_pr_title,
-        active_pr_body,
-        active_linked_issues,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,6 +403,7 @@ mod tests {
             let existing = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::Triggered,
                 target_files: vec!["src/lib.rs".to_string()],
+                config_files: Vec::new(),
                 candidate_canons: vec![".canons/rust/rust-code-rule.md".to_string()],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
@@ -947,6 +830,450 @@ mod tests {
             .discovery
             .expect("discovery");
             assert!(disc_readme.candidate_canons.is_empty());
+        }
+    }
+
+    mod workspace_policy_config {
+        use super::*;
+        use crate::caseload::WorkspaceState;
+
+        fn monorepo_workspace() -> WorkspaceSnapshot {
+            WorkspaceSnapshot::new()
+                .with_file("src/lib.rs")
+                .with_file("src/legacy/old.rs")
+                .with_file("packages/ui/src/button.tsx")
+                .with_file("packages/ui/src/generated.tsx")
+                .with_file("packages/ui/vendor/lib.tsx")
+                .with_file("packages/ui/nested/deep.tsx")
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"**/*.{rs,tsx}\"\n---\n# Root Arch Rule\n\nRoot arch rule MUST hold.",
+                    &ParseCanonOptions::with_source_ref(".canons/architecture/foo.canon.md"),
+                )
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"**/*.{rs,tsx}\"\n---\n# Root Style Rule\n\nRoot style rule MUST hold.",
+                    &ParseCanonOptions::with_source_ref(".canons/style/bar.canon.md"),
+                )
+                .with_canon_markdown(
+                    "---\ninspect:\n  - pr_title\n---\n# PR Title Policy Rule\n\nPR titles MUST be concise.",
+                    &ParseCanonOptions::with_source_ref(".canons/git/pr-title.canon.md"),
+                )
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"**/*.tsx\"\n---\n# UI Local Rule\n\nUI components MUST use tokens.",
+                    &ParseCanonOptions::with_source_ref("packages/ui/.canons/ui/tokens.canon.md"),
+                )
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"**/*.tsx\"\n---\n# Nested Local Rule\n\nNested code MUST be pure.",
+                    &ParseCanonOptions::with_source_ref(
+                        "packages/ui/nested/.canons/pure.canon.md",
+                    ),
+                )
+        }
+
+        #[test]
+        fn test_ordered_first_match_wins_and_default_allow() {
+            let ws = monorepo_workspace().with_policy_config(
+                ".canons/config.yaml",
+                "canon-policy-chain:\n  - allow: \"architecture/foo\"\n  - deny: \"architecture/**\"\n",
+            );
+            let intake = CaseloadIntake {
+                target_paths: vec!["src/lib.rs".to_string()],
+                ..CaseloadIntake::default()
+            };
+            let disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(intake),
+                &ws,
+            )
+            .expect("discover")
+            .discovery
+            .expect("discovery");
+
+            assert_eq!(disc.config_files, vec![".canons/config.yaml".to_string()]);
+            assert_eq!(
+                disc.candidate_canons,
+                vec![
+                    ".canons/architecture/foo.canon.md".to_string(),
+                    ".canons/style/bar.canon.md".to_string(),
+                ]
+            );
+        }
+
+        #[test]
+        fn test_nearest_scope_cascade_fallthrough_and_subtree_isolation() {
+            let ws = monorepo_workspace()
+                .with_policy_config(
+                    ".canons/config.yaml",
+                    "canon-policy-chain:\n  - deny: \"style/bar\"\n",
+                )
+                .with_policy_config(
+                    "packages/ui/.canons/config.yaml",
+                    "canon-policy-chain:\n  - allow: \"parents:style/bar\"\n  - deny: \"parents:architecture/foo\"\n",
+                )
+                .with_policy_config(
+                    "packages/ui/vendor/.canons/config.yaml",
+                    "canon-policy-chain:\n  - deny: all\n",
+                );
+
+            // 1. In packages/ui/src/button.tsx: child re-allows parents:style/bar, denies parents:architecture/foo,
+            //    and allows its own ui/tokens by default.
+            let ui_disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    target_paths: vec!["packages/ui/src/button.tsx".to_string()],
+                    ..CaseloadIntake::default()
+                }),
+                &ws,
+            )
+            .expect("ui discover")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                ui_disc.config_files,
+                vec![
+                    ".canons/config.yaml".to_string(),
+                    "packages/ui/.canons/config.yaml".to_string(),
+                    "packages/ui/vendor/.canons/config.yaml".to_string(),
+                ]
+            );
+            assert_eq!(
+                ui_disc.candidate_canons,
+                vec![
+                    ".canons/style/bar.canon.md".to_string(),
+                    "packages/ui/.canons/ui/tokens.canon.md".to_string(),
+                ]
+            );
+
+            // 2. In packages/ui/vendor/lib.tsx: `- deny: all` isolates the subtree completely.
+            let vendor_disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    target_paths: vec!["packages/ui/vendor/lib.tsx".to_string()],
+                    ..CaseloadIntake::default()
+                }),
+                &ws,
+            )
+            .expect("vendor discover")
+            .discovery
+            .expect("discovery");
+            assert!(vendor_disc.candidate_canons.is_empty());
+        }
+
+        #[test]
+        fn test_parents_selector_multilevel_and_root_noop() {
+            let ws = monorepo_workspace()
+                .with_policy_config(
+                    ".canons/config.yaml",
+                    // `parents:` in root config matches zero canons
+                    "canon-policy-chain:\n  - deny: \"parents:**\"\n",
+                )
+                .with_policy_config(
+                    "packages/ui/nested/.canons/config.yaml",
+                    // Disables both root `architecture/foo` and intermediate `ui/tokens`
+                    "canon-policy-chain:\n  - deny: \"parents:architecture/foo\"\n  - deny: \"parents:ui/*\"\n",
+                );
+
+            let nested_disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    target_paths: vec!["packages/ui/nested/deep.tsx".to_string()],
+                    ..CaseloadIntake::default()
+                }),
+                &ws,
+            )
+            .expect("nested discover")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                nested_disc.candidate_canons,
+                vec![
+                    ".canons/style/bar.canon.md".to_string(),
+                    "packages/ui/nested/.canons/pure.canon.md".to_string(),
+                ]
+            );
+
+            // Root `parents:**` did not deny root canons on `src/lib.rs`
+            let root_disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    target_paths: vec!["src/lib.rs".to_string()],
+                    ..CaseloadIntake::default()
+                }),
+                &ws,
+            )
+            .expect("root discover")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                root_disc.candidate_canons,
+                vec![
+                    ".canons/architecture/foo.canon.md".to_string(),
+                    ".canons/style/bar.canon.md".to_string(),
+                ]
+            );
+        }
+
+        #[test]
+        fn test_canon_md_extension_normalization_and_exhibits_filtering() {
+            let ws = monorepo_workspace().with_policy_config(
+                ".canons/config.yaml",
+                "canon-policy-chain:\n  - deny: \"architecture/foo.canon.md\"\n    exhibits: \"src/legacy/**\"\n  - deny: \"style/*.canon.md\"\n    exhibits: [\"src/legacy/**\", \"src/lib.rs\"]\n",
+            );
+
+            let disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    target_paths: vec!["src/lib.rs".to_string(), "src/legacy/old.rs".to_string()],
+                    ..CaseloadIntake::default()
+                }),
+                &ws,
+            )
+            .expect("discover")
+            .discovery
+            .expect("discovery");
+
+            // architecture/foo survives on src/lib.rs (only src/legacy/old.rs was filtered out)
+            // style/bar has zero surviving exhibits and is dropped
+            assert_eq!(
+                disc.candidate_canons,
+                vec![".canons/architecture/foo.canon.md".to_string()]
+            );
+            assert_eq!(
+                disc.triggers_join.get(".canons/architecture/foo.canon.md"),
+                Some(&vec!["src/lib.rs".to_string()])
+            );
+            assert_eq!(disc.active_exhibits.files, vec!["src/lib.rs".to_string()]);
+        }
+
+        #[test]
+        fn test_all_canons_and_metadata_only_respect_unconditional_rules_only() {
+            let ws = monorepo_workspace()
+                .with_policy_config(
+                    ".canons/config.yaml",
+                    "canon-policy-chain:\n  - deny: \"architecture/foo\"\n    exhibits: \"src/**\"\n  - deny: \"style/bar\"\n  - deny: \"git/pr-title\"\n    exhibits: \"src/**\"\n",
+                )
+                .with_policy_config(
+                    "packages/ui/.canons/config.yaml",
+                    "canon-policy-chain:\n  - deny: \"ui/tokens\"\n",
+                );
+
+            // --all-canons drops unconditional denies (`style/bar`, `ui/tokens`) but keeps rules with `exhibits:`
+            let all_disc = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("all-canons")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                all_disc.candidate_canons,
+                vec![
+                    ".canons/architecture/foo.canon.md".to_string(),
+                    ".canons/git/pr-title.canon.md".to_string(),
+                    "packages/ui/nested/.canons/pure.canon.md".to_string(),
+                ]
+            );
+
+            // Metadata-only filing is unaffected by `deny: git/pr-title` with `exhibits: src/**`
+            let meta_disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    pr_title: Some("feat: add policy".to_string()),
+                    ..CaseloadIntake::default()
+                }),
+                &ws,
+            )
+            .expect("meta discover")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                meta_disc.candidate_canons,
+                vec![".canons/git/pr-title.canon.md".to_string()]
+            );
+
+            // Unconditional deny drops metadata-only canon
+            let ws_denied_meta = monorepo_workspace().with_policy_config(
+                ".canons/config.yaml",
+                "canon-policy-chain:\n  - deny: \"git/pr-title\"\n",
+            );
+            let denied_meta_disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(CaseloadIntake {
+                    pr_title: Some("feat: add policy".to_string()),
+                    ..CaseloadIntake::default()
+                }),
+                &ws_denied_meta,
+            )
+            .expect("denied meta discover")
+            .discovery
+            .expect("discovery");
+            assert!(denied_meta_disc.candidate_canons.is_empty());
+        }
+
+        #[test]
+        fn test_cli_precedence_canon_no_builtins_and_builtins() {
+            let ws = monorepo_workspace().with_builtins().with_policy_config(
+                ".canons/config.yaml",
+                "canon-policy-chain:\n  - allow: \"builtin:cli/**\"\n  - deny: \"builtin:**\"\n  - deny: \"architecture/foo\"\n",
+            );
+
+            // 1. --builtins (include_builtins: true) respects config.yaml deny for non-cli builtins
+            let default_disc = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    include_builtins: true,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("default builtins")
+            .discovery
+            .expect("discovery");
+            assert!(
+                default_disc
+                    .candidate_canons
+                    .iter()
+                    .any(|c| c.starts_with("builtin:cli/"))
+            );
+            assert!(
+                !default_disc
+                    .candidate_canons
+                    .iter()
+                    .any(|c| c.starts_with("builtin:canon-authoring/"))
+            );
+            assert!(
+                !default_disc
+                    .candidate_canons
+                    .contains(&".canons/architecture/foo.canon.md".to_string())
+            );
+
+            // 2. --no-builtins excludes all builtins despite `allow: builtin:cli/**`
+            let no_builtins_disc = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("no-builtins")
+            .discovery
+            .expect("discovery");
+            assert!(
+                !no_builtins_disc
+                    .candidate_canons
+                    .iter()
+                    .any(|c| c.starts_with("builtin:"))
+            );
+
+            // 3. Explicit --canon overrides config.yaml deny rules
+            let explicit_disc = execute_discover(
+                &DiscoverOptions {
+                    all_canons: true,
+                    canon_patterns: vec![
+                        ".canons/architecture/foo.canon.md".to_string(),
+                        "builtin:canon-authoring/canons-must-be-atomic".to_string(),
+                    ],
+                    include_builtins: true,
+                },
+                Caseload::new(),
+                &ws,
+            )
+            .expect("explicit --canon")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                explicit_disc.candidate_canons,
+                vec![
+                    ".canons/architecture/foo.canon.md".to_string(),
+                    "builtin:canon-authoring/canons-must-be-atomic".to_string(),
+                ]
+            );
+        }
+
+        #[test]
+        fn test_nested_config_ignored_and_workspace_state_base_ignores_diff_policy_injection() {
+            let ws = monorepo_workspace()
+                .with_file(".canons/security/config.yaml")
+                .with_policy_config(".canons/config.yaml", "canon-policy-chain: []\n");
+
+            // Untrusted PR diff attempts to inject `- deny: all` into `.canons/config.yaml` under `--workspace-state base`
+            let mut diffs = BTreeMap::new();
+            diffs.insert(
+                ".canons/config.yaml".to_string(),
+                FileArtifact {
+                    path: ".canons/config.yaml".to_string(),
+                    status: FileChangeStatus::Modified,
+                    previous_path: None,
+                    lines_added: 2,
+                    lines_deleted: 1,
+                    patch: Some(
+                        "@@ -1 +1,2 @@\n-canon-policy-chain: []\n+canon-policy-chain:\n+  - deny: all\n"
+                            .to_string(),
+                    ),
+                    patch_omission_reason: None,
+                    content: Some("canon-policy-chain:\n  - deny: all\n".to_string()),
+                    content_omission_reason: None,
+                },
+            );
+            let intake = CaseloadIntake {
+                workspace_state: WorkspaceState::Base,
+                target_paths: vec!["src/lib.rs".to_string()],
+                diffs,
+                ..CaseloadIntake::default()
+            };
+
+            let disc = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(intake),
+                &ws,
+            )
+            .expect("discover base state")
+            .discovery
+            .expect("discovery");
+
+            // Nested config is NOT in config_files; untrusted diff injection did NOT deny root canons
+            assert_eq!(disc.config_files, vec![".canons/config.yaml".to_string()]);
+            assert_eq!(
+                disc.candidate_canons,
+                vec![
+                    ".canons/architecture/foo.canon.md".to_string(),
+                    ".canons/style/bar.canon.md".to_string(),
+                ]
+            );
         }
     }
 }
