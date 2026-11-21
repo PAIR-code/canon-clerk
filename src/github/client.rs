@@ -14,11 +14,12 @@
 
 //! HTTP client implementation for GitHub Checks REST API publication.
 
+use super::linked_issues::parse_github_issue_json;
 use super::{
     CheckRunPublisher, CheckRunReport, DEFAULT_GITHUB_API_TIMEOUT_MS,
     GITHUB_CHECKS_MAX_ANNOTATIONS_PER_REQUEST, GITHUB_CHECKS_MAX_OUTPUT_CHARS,
     GithubCheckAnnotation, GithubCheckTarget, GithubChecksError, GithubPullRequestFetcher,
-    GithubPullRequestMetadata, GithubPullRequestTarget, PublishedCheckRun, parse_github_issue_json,
+    GithubPullRequestMetadata, GithubPullRequestTarget, PublishedCheckRun,
     sanitize_annotation_for_github, truncate_github_output,
 };
 use crate::caseload::LinkedIssueContext;

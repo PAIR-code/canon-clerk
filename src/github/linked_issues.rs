@@ -55,7 +55,7 @@ struct GithubIssueLabelRef {
 
 /// Extracts unique, deterministically sorted (ascending) same-repo issue numbers referenced
 /// by `SPEC.md` §3.4 closing keywords: `(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#(\d+)`.
-pub fn extract_closing_issue_numbers(pr_body: &str) -> Vec<u64> {
+fn extract_closing_issue_numbers(pr_body: &str) -> Vec<u64> {
     let mut numbers = BTreeSet::new();
     let bytes = pr_body.as_bytes();
     let mut idx = 0usize;
@@ -125,7 +125,7 @@ fn match_closing_keyword_ref(text: &str, start: usize) -> Option<(usize, u64)> {
 
 /// Decodes a GitHub REST `GET /repos/{owner}/{repo}/issues/{number}` JSON payload into a
 /// [`LinkedIssueContext`], returning `Ok(None)` when the endpoint returned a pull request.
-pub fn parse_github_issue_json(
+pub(super) fn parse_github_issue_json(
     response_body: &str,
 ) -> Result<Option<LinkedIssueContext>, GithubChecksError> {
     let parsed: GithubIssueApiResponse = serde_json::from_str(response_body).map_err(|err| {

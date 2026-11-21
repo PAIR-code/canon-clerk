@@ -120,7 +120,7 @@ impl LinkedIssueJsonRecord {
 
 /// Strictly parses linked-issue JSON (single object or JSON array) in native
 /// [`LinkedIssueContext`], `gh issue view --json`, or GitHub REST API issue shape.
-pub fn parse_linked_issues_json(
+fn parse_linked_issues_json(
     raw: &str,
     source_label: &str,
 ) -> Result<Vec<LinkedIssueContext>, CliError> {
@@ -145,7 +145,7 @@ pub fn parse_linked_issues_json(
 
 /// Reads and parses repeatable `--linked-issue <PATH|->` operands, deduplicating by issue number
 /// in deterministic ascending order. Returns `Ok(None)` when `sources` is empty.
-pub fn resolve_linked_issue_operands(
+pub(super) fn resolve_linked_issue_operands(
     sources: &[String],
     stdin: &mut dyn Read,
 ) -> Result<Option<Vec<LinkedIssueContext>>, CliError> {
