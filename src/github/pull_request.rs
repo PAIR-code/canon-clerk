@@ -19,6 +19,7 @@ use super::{
     ENV_GITHUB_REPOSITORY, ENV_GITHUB_TOKEN, GithubChecksError, env_non_empty,
     parse_github_repository,
 };
+use crate::caseload::LinkedIssueContext;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
@@ -101,7 +102,7 @@ pub struct ResolvedGithubPullRequest {
     pub diff: String,
 }
 
-/// Outbound port for fetching GitHub Pull Request metadata and unified diffs.
+/// Outbound port for fetching GitHub Pull Request metadata, unified diffs, and linked issues.
 pub trait GithubPullRequestFetcher: Send + Sync {
     /// Fetches pull request metadata (`title`, `body`, `head.sha`) via `Accept: application/vnd.github+json`.
     fn fetch_pull_request_metadata(
@@ -114,6 +115,18 @@ pub trait GithubPullRequestFetcher: Send + Sync {
         &self,
         target: &GithubPullRequestTarget,
     ) -> Result<String, GithubChecksError>;
+
+    /// Fetches a single GitHub issue via `GET /repos/{owner}/{repo}/issues/{issue_number}`.
+    ///
+    /// Returns `Ok(None)` when the endpoint returns a pull request or HTTP `404` / `403`.
+    fn fetch_issue(
+        &self,
+        target: &GithubPullRequestTarget,
+        issue_number: u64,
+    ) -> Result<Option<LinkedIssueContext>, GithubChecksError> {
+        let _ = (target, issue_number);
+        Ok(None)
+    }
 }
 
 /// Returns `true` when `GITHUB_EVENT_NAME` equals `"pull_request_target"`.

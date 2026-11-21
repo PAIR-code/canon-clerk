@@ -99,6 +99,12 @@ pub struct LinkedIssueContext {
     /// Issue title text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Issue author login or handle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Issue label names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
     /// Issue description body in Markdown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
@@ -233,6 +239,8 @@ mod tests {
             linked_issues: Some(vec![LinkedIssueContext {
                 number: 222,
                 title: Some("Implement intake in Rust".to_string()),
+                author: Some("jimbojw".to_string()),
+                labels: vec!["type: feat".to_string(), "scope: core".to_string()],
                 body: None,
                 url: Some("https://github.com/PAIR-code/canon-clerk/issues/222".to_string()),
             }]),
@@ -295,5 +303,19 @@ mod tests {
         let decoded_base: CaseloadIntake =
             serde_json::from_str(&base_json).expect("deserialize base intake");
         assert_eq!(decoded_base.workspace_state, WorkspaceState::Base);
+    }
+
+    #[test]
+    fn test_linked_issue_backward_compatible_deserialization_and_omission() {
+        let legacy_json = r#"{"number": 42, "title": "Legacy issue"}"#;
+        let decoded: LinkedIssueContext =
+            serde_json::from_str(legacy_json).expect("decode legacy linked issue");
+        assert_eq!(decoded.number, 42);
+        assert_eq!(decoded.author, None);
+        assert!(decoded.labels.is_empty());
+
+        let reserialized = serde_json::to_string(&decoded).expect("reserialize");
+        assert!(!reserialized.contains("author"));
+        assert!(!reserialized.contains("labels"));
     }
 }

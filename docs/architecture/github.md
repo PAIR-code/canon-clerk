@@ -19,19 +19,19 @@ flowchart LR
     end
 
     subgraph CliBoundary ["CLI Driving Adapter"]
-        PrFlags["PR Filing Flags<br/>(--github-pr [&lt;NUMBER&gt;],<br/>--github-repo)"]
+        PrFlags["PR Filing Flags<br/>(--github-pr [&lt;NUMBER&gt;],<br/>--github-repo, --linked-issue)"]
         CheckFlags["GitHub Check Flags<br/>(--publish-github-check,<br/>--github-head-sha, --github-check-name,<br/>--github-bypass-label [&lt;LABEL&gt;])"]
         Forensics["Forensics Flush<br/>(--output-caseload)"]
     end
 
     subgraph GithubAdapter ["Driven GitHub Adapter"]
         Context["Context &amp; Credential Resolver<br/>(GITHUB_TOKEN / GH_TOKEN,<br/>GITHUB_REPOSITORY, GITHUB_EVENT_PATH,<br/>GITHUB_EVENT_NAME, GITHUB_SHA, GITHUB_API_URL)"]
-        PrFetcher["Pull Request Fetcher<br/>(Event Payload Parser, PR Metadata JSON,<br/>Unified Diff Fetcher)"]
+        PrFetcher["Pull Request &amp; Issue Fetcher<br/>(Event Payload Parser, PR Metadata JSON,<br/>Unified Diff &amp; Linked Issue Fetcher)"]
         Publisher["Stage-Agnostic Check Run Publisher<br/>(Annotation Sanitizer, 65,535-Char Guards,<br/>POST + 50-Annotation PATCH Batching)"]
     end
 
     subgraph GitHub ["GitHub REST API"]
-        Pulls["Pulls API<br/>(/repos/{owner}/{repo}/pulls/{number})"]
+        Pulls["Pulls &amp; Issues API<br/>(/repos/{owner}/{repo}/pulls/{number},<br/>/repos/{owner}/{repo}/issues/{number})"]
         Checks["Checks API<br/>(/repos/{owner}/{repo}/check-runs)"]
     end
 
@@ -53,7 +53,7 @@ When either option is enabled, Canon Clerk resolves and validates the required G
 
 | Parameter | Resolution Precedence | Validation & Security Constraints |
 | :--- | :--- | :--- |
-| **Auth Token** | `GITHUB_TOKEN` $\to$ `GH_TOKEN` | Read strictly from environment variables; **never** accepted as a CLI flag and redacted from debug/diagnostic output. Requires `pull-requests: read` for PR ingestion and `checks: write` for Check Run publication. |
+| **Auth Token** | `GITHUB_TOKEN` $\to$ `GH_TOKEN` | Read strictly from environment variables; **never** accepted as a CLI flag and redacted from debug/diagnostic output. Requires `pull-requests: read` for PR ingestion, `issues: read` for linked-issue fetching on private/restricted repos, and `checks: write` for Check Run publication. |
 | **Repository** | `--github-repo <OWNER/REPO>` $\to$ `GITHUB_REPOSITORY` | Shared across filing ingestion (`FilingSourceArgs`) and Check Run publication without flag collisions. Must be a valid `<owner>/<repo>` slug (two non-empty path segments, no whitespace or traversal). |
 | **Pull Request Number** | `--github-pr <NUMBER>` $\to$ `pull_request.number` in `GITHUB_EVENT_PATH` | Required when `--github-pr` is active; must be a positive integer (`>= 1`). |
 | **Head Commit SHA** | `--github-head-sha <SHA>` $\to$ `pull_request.head.sha` in `GITHUB_EVENT_PATH` $\to$ fetched PR API `head.sha` (when `--github-pr` is active) $\to$ `GITHUB_SHA` | Preferring `pull_request.head.sha` over `GITHUB_SHA` ensures triangular fork PRs running under `pull_request_target` annotate the pull request's head commit rather than the base branch; falling back to the fetched PR API `head.sha` enables `--github-pr <NUMBER> --publish-github-check` outside GitHub Actions. |
@@ -72,11 +72,14 @@ The CLI driving adapter supports native pull request ingestion via `--github-pr 
    - **Explicit `--github-pr <NUMBER>`:** Fetches pull request metadata (`title`, `body`, `head.sha`, `labels[].name`) via `GET /repos/{owner}/{repo}/pulls/{pull_number}` with `Accept: application/vnd.github+json`.
 2. **Unified Diff Fetching:**
    - Fetches the pull request unified diff directly via `GET /repos/{owner}/{repo}/pulls/{pull_number}` with `Accept: application/vnd.github.v3.diff` over Canon Clerk's persistent background HTTP reactor (`transport.md` §2), setting `X-GitHub-Api-Version: 2022-11-28`, `User-Agent: canon-clerk/<version>`, and `Authorization: Bearer <token>`.
-3. **Flag Composition & Precedence:**
+3. **Linked-Issue Discovery & Fetching (`linked_issues`):**
+   - Unless overridden by explicit `--linked-issue <PATH|->` CLI flags, Canon Clerk scans the resolved `pr_body` (after `--pr-body` / `--pr-body-file` override resolution) for same-repo closing keywords matching `SPEC.md` §3.4's case-insensitive pattern `(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#(\d+)`, deduplicated in deterministic ascending issue-number order. (GraphQL `closingIssuesReferences` is not used by the REST adapter.)
+   - For each discovered issue number, the adapter fetches `GET /repos/{owner}/{repo}/issues/{issue_number}` with `Accept: application/vnd.github+json` and projects strictly `number`, `title`, `user.login` (`author`), `labels[].name` (`labels`), `body`, and `html_url` (`url`) onto `LinkedIssueContext`—excluding issue comments and reaction trails per `SPEC.md` §3.4.
+   - **Graceful Degradation:** Pull requests returned by the GitHub Issues endpoint (responses containing a `"pull_request"` key), HTTP `404` / `403` responses (e.g., missing `issues: read` permission), and transient per-issue fetch errors are skipped with diagnostic warnings rather than aborting the audit.
+4. **Flag Composition & Precedence:**
    - `--github-pr` conflicts with `--diff` (mutually exclusive patch sources).
-   - Explicit `--pr-title`, `--pr-body`, and `--pr-body-file` always override metadata fetched from `$GITHUB_EVENT_PATH` or the GitHub API (`CLI flag > event/API metadata`).
+   - Explicit `--pr-title`, `--pr-body`, `--pr-body-file`, and `--linked-issue` always override metadata fetched from `$GITHUB_EVENT_PATH` or the GitHub API (`CLI flag > event/API metadata`). When explicit `--linked-issue` flags are supplied, GitHub Issues API fetches are skipped.
    - **Workspace State Heuristic:** When `--github-pr` is active and `--workspace-state` is omitted, `--workspace-state` defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"`; otherwise it preserves the default `head`. An explicit `--workspace-state <head|base>` always overrides.
-   - **Linked Issues Scope:** Fetching `linked_issues` via additional GitHub Issues API calls is intentionally out of scope for basic PR ingestion and reserved for a follow-up capability.
 
 ---
 

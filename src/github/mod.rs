@@ -15,6 +15,7 @@
 //! Stage-agnostic GitHub REST API outbound adapter (Pull Request ingestion and Checks publication).
 
 mod client;
+mod linked_issues;
 mod pull_request;
 
 use crate::caseload::{AnnotationLevel, CodeAnnotation};
@@ -25,6 +26,7 @@ use std::fs;
 use std::path::Path;
 
 pub use client::GithubChecksClient;
+pub use linked_issues::fetch_linked_issues_for_pr_body;
 pub use pull_request::{
     ENV_GITHUB_ACTOR, ENV_GITHUB_EVENT_NAME, GithubBypassMatch, GithubPullRequestEventContext,
     GithubPullRequestFetcher, GithubPullRequestMetadata, GithubPullRequestTarget,

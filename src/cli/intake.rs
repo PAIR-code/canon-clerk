@@ -108,6 +108,13 @@ fn render_human_summary(intake: &CaseloadIntake, stdout: &mut dyn Write) -> std:
     if let Some(intent) = &intake.intent {
         writeln!(stdout, "  Design Intent   : {intent}")?;
     }
+    if let Some(issues) = intake.linked_issues.as_deref().filter(|v| !v.is_empty()) {
+        writeln!(stdout, "  Linked Issues   : {} issue(s)", issues.len())?;
+        for issue in issues {
+            let title = issue.title.as_deref().unwrap_or("(untitled)");
+            writeln!(stdout, "    - #{}: {title}", issue.number)?;
+        }
+    }
 
     writeln!(
         stdout,

@@ -565,6 +565,8 @@ mod tests {
                 linked_issues: Some(vec![LinkedIssueContext {
                     number: 1,
                     title: None,
+                    author: None,
+                    labels: Vec::new(),
                     body: None,
                     url: None,
                 }]),

@@ -49,7 +49,7 @@ flowchart LR
 ### Caseload Delta
 `intake` populates the `.intake` namespace on the cumulative `Caseload` envelope with three categories of filing records:
 
-- **Tendered Metadata Exhibits:** Literal pull request or commit context (`pr_title`, `pr_body`), prospective architectural design `intent`, and optional `linked_issues` context (issue number, title, body, and canonical URL).
+- **Tendered Metadata Exhibits:** Literal pull request or commit context (`pr_title`, `pr_body`), prospective architectural design `intent`, and optional `linked_issues` context (issue `number`, `title`, `author`, `labels`, `body`, and canonical `url`, excluding issue comments and reaction trails per `SPEC.md` §3.4).
 - **Target Scope & Discovery Directives:** Normalized target scope (`"targeted"` vs. `"all-targets"`), explicit target path, directory, or glob pattern directives (`target_paths`) queued for downstream materialization in `discover`, and optional `workspace_state` (`"head"` vs. `"base"`, defaulting to `"head"` and omitted when `"head"`) declaring whether the checked-out workspace on disk already contains the diff's post-patch files (`"head"`) or represents the pre-patch base branch (`"base"`, as under GitHub Actions `pull_request_target`).
 - **Parsed File Exhibits (`diffs`):** In-flight code modifications parsed from unified diff streams into immutable `FileArtifact` records keyed by repository-relative POSIX path. Each artifact captures file change `status` (`"added"`, `"modified"`, `"deleted"`, `"renamed"`, `"copied"`, `"unchanged"`), `previous_path` (when renamed or copied), insertion and deletion counts (`lines_added`, `lines_deleted`), unified hunk `patch` text, and explicit omission rationales.
 
@@ -62,7 +62,7 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), GitHub pull request (`--github-pr [<number>]`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`), or an incoming `--caseload`.
+1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), GitHub pull request (`--github-pr [<number>]`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`, `--linked-issue`), or an incoming `--caseload`.
    - **Missing Source Guard (Naked Invocation):** Invoking `canon-clerk intake` with zero sources fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance. The CLI never silently hangs waiting for input on a TTY.
    - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `target_paths: []`) and exits `0`.
 2. **Tendered Exhibits Cataloging:** Captures raw literal exhibits directly from the invocation context:
@@ -112,10 +112,11 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 - `--all-targets`: Ingests all repository files as target artifacts (used for full-repo sweeps).
 - `--pr-title <text>`: Ingests PR title text (overrides title fetched by `--github-pr`).
 - `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description (overrides body fetched by `--github-pr`).
+- `--linked-issue <path|->`: Repeatable flag ingesting one or more linked issue records from JSON files or `-` for stdin (governed by the single-stdin guard). Strictly JSON (no raw Markdown fallback); accepts a single object or JSON array in native `LinkedIssueContext`, `gh issue view --json`, or GitHub REST API issue shape while ignoring comments/reactions (`SPEC.md` §3.4). Explicit `--linked-issue` flags override linked issues auto-fetched by `--github-pr` (`CLI flag > event/API metadata`).
 - `--caseload <path|->`: Ingests existing Caseload JSON.
 - `--output-caseload <path>`: Writes cumulative `Caseload` JSON to disk independently of terminal stdout.
 - `--json`: Emits enriched Caseload JSON to stdout.
 
 ### CLI Exit Codes
 - **0:** Successful intake (including an empty filing from a clean diff stream).
-- **2:** Usage error, missing input source (naked invocation), conflicting `--diff` and `--github-pr`, conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--caseload`), missing/invalid GitHub token, repository, PR number, or `$GITHUB_EVENT_PATH` payload, GitHub API fetch failure, or corrupted diff/JSON stream.
+- **2:** Usage error, missing input source (naked invocation), conflicting `--diff` and `--github-pr`, conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--linked-issue`, `--caseload`), missing/invalid GitHub token, repository, PR number, or `$GITHUB_EVENT_PATH` payload, GitHub API fetch failure, or corrupted diff/JSON stream.
