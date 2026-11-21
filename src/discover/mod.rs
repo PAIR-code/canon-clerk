@@ -98,7 +98,9 @@ impl fmt::Display for DiscoverError {
             Self::InvalidPolicyConfig { path, message } => write!(
                 f,
                 "Invalid workspace policy configuration `{path}`: {message}\n  \
-                 Hint: See SPEC.md §7 for the `.canons/config.yaml` schema."
+                 Hint: Define a top-level `canon-policy-chain:` list of `allow:`/`deny:` entries \
+                 with optional `exhibits:` globs (e.g., `canon-policy-chain: [{{ deny: \"builtin:**\", exhibits: [\"third_party/**\"] }}]`), \
+                 and keep runtime provider credentials in `~/.config/canon-clerk/config.json`."
             ),
             Self::Io { path, message } => write!(f, "Failed to read `{path}`: {message}"),
         }
