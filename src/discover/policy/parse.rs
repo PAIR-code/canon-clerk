@@ -20,6 +20,8 @@ use crate::discover::DiscoverError;
 use crate::discover::glob_matcher::GlobPattern;
 use serde_yaml::Value;
 
+const POLICY_CHAIN_KEY: &str = "canon-policy-chain";
+
 const RUNTIME_CREDENTIAL_KEYS: &[&str] = &[
     "providers",
     "defaults",
@@ -57,7 +59,7 @@ pub(super) fn parse_policy_config(
     let Some(root) = value.as_mapping() else {
         return Err(invalid_config(
             path,
-            "Root YAML document must be a mapping (e.g., `rules: [...]`).",
+            "Root YAML document must be a mapping (e.g., `canon-policy-chain: [...]`).",
         ));
     };
 
@@ -68,12 +70,12 @@ pub(super) fn parse_policy_config(
                 "Top-level keys in `.canons/config.yaml` must be strings.",
             ));
         };
-        if key_str != "rules" {
+        if key_str != POLICY_CHAIN_KEY {
             return Err(unknown_key_error(path, key_str, "top-level"));
         }
     }
 
-    let Some(rules_val) = root.get(Value::String("rules".to_string())) else {
+    let Some(rules_val) = root.get(Value::String(POLICY_CHAIN_KEY.to_string())) else {
         return Ok(CompiledPolicyConfig { rules: Vec::new() });
     };
 
@@ -84,7 +86,7 @@ pub(super) fn parse_policy_config(
     let Some(rules_seq) = rules_val.as_sequence() else {
         return Err(invalid_config(
             path,
-            "`rules` must be a YAML sequence of rule mappings.",
+            "`canon-policy-chain` must be a YAML sequence of policy entry mappings.",
         ));
     };
 
@@ -104,7 +106,9 @@ fn parse_policy_rule(
     let Some(mapping) = item.as_mapping() else {
         return Err(invalid_config(
             path,
-            format!("`rules[{idx}]` must be a YAML mapping specifying `allow` or `deny`."),
+            format!(
+                "`{POLICY_CHAIN_KEY}[{idx}]` must be a YAML mapping specifying `allow` or `deny`."
+            ),
         ));
     };
 
@@ -112,11 +116,15 @@ fn parse_policy_rule(
         let Some(key_str) = key.as_str() else {
             return Err(invalid_config(
                 path,
-                format!("`rules[{idx}]` keys must be strings."),
+                format!("`{POLICY_CHAIN_KEY}[{idx}]` keys must be strings."),
             ));
         };
         if !matches!(key_str, "allow" | "deny" | "exhibits") {
-            return Err(unknown_key_error(path, key_str, &format!("`rules[{idx}]`")));
+            return Err(unknown_key_error(
+                path,
+                key_str,
+                &format!("`{POLICY_CHAIN_KEY}[{idx}]`"),
+            ));
         }
     }
 
@@ -129,13 +137,13 @@ fn parse_policy_rule(
         (Some(_), Some(_)) => {
             return Err(invalid_config(
                 path,
-                format!("`rules[{idx}]` cannot specify both `allow` and `deny`."),
+                format!("`{POLICY_CHAIN_KEY}[{idx}]` cannot specify both `allow` and `deny`."),
             ));
         }
         (None, None) => {
             return Err(invalid_config(
                 path,
-                format!("`rules[{idx}]` must specify either `allow` or `deny`."),
+                format!("`{POLICY_CHAIN_KEY}[{idx}]` must specify either `allow` or `deny`."),
             ));
         }
     };
@@ -143,7 +151,7 @@ fn parse_policy_rule(
     let Some(selector_str) = selector_val.as_str() else {
         return Err(invalid_config(
             path,
-            format!("`rules[{idx}]` action selector must be a non-empty string."),
+            format!("`{POLICY_CHAIN_KEY}[{idx}]` action selector must be a non-empty string."),
         ));
     };
     let selector = parse_canon_selector(path, idx, selector_str)?;
@@ -169,7 +177,7 @@ fn parse_canon_selector(
     if trimmed.is_empty() {
         return Err(invalid_config(
             path,
-            format!("`rules[{idx}]` canon selector must not be empty."),
+            format!("`{POLICY_CHAIN_KEY}[{idx}]` canon selector must not be empty."),
         ));
     }
 
@@ -191,7 +199,7 @@ fn parse_canon_selector(
         return Err(invalid_config(
             path,
             format!(
-                "`rules[{idx}]` selector `{trimmed}` uses a deferred v1 prefix (`tag:`/`inspect:` are not supported in v1)."
+                "`{POLICY_CHAIN_KEY}[{idx}]` selector `{trimmed}` uses a deferred v1 prefix (`tag:`/`inspect:` are not supported in v1)."
             ),
         ));
     }
@@ -210,17 +218,23 @@ fn parse_selector_glob(
     if trimmed.is_empty() {
         return Err(invalid_config(
             path,
-            format!("`rules[{idx}]` selector `{prefix}{raw_pattern}` must not be empty."),
+            format!(
+                "`{POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}` must not be empty."
+            ),
         ));
     }
-    validate_no_traversal_or_absolute(path, &format!("`rules[{idx}]` selector"), trimmed)?;
+    validate_no_traversal_or_absolute(
+        path,
+        &format!("`{POLICY_CHAIN_KEY}[{idx}]` selector"),
+        trimmed,
+    )?;
 
     let stripped = strip_trailing_canon_ext(trimmed);
     if stripped.trim().is_empty() {
         return Err(invalid_config(
             path,
             format!(
-                "`rules[{idx}]` selector `{prefix}{raw_pattern}` is empty after extension normalization."
+                "`{POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}` is empty after extension normalization."
             ),
         ));
     }
@@ -228,7 +242,7 @@ fn parse_selector_glob(
     GlobPattern::parse(stripped).map_err(|err| {
         invalid_config(
             path,
-            format!("`rules[{idx}]` selector `{prefix}{raw_pattern}`: {err}"),
+            format!("`{POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}`: {err}"),
         )
     })
 }
@@ -246,7 +260,9 @@ fn parse_exhibits(
                 let Some(s) = elem.as_str() else {
                     return Err(invalid_config(
                         path,
-                        format!("`rules[{idx}].exhibits[{item_idx}]` must be a glob string."),
+                        format!(
+                            "`{POLICY_CHAIN_KEY}[{idx}].exhibits[{item_idx}]` must be a glob string."
+                        ),
                     ));
                 };
                 items.push(s);
@@ -256,7 +272,9 @@ fn parse_exhibits(
         _ => {
             return Err(invalid_config(
                 path,
-                format!("`rules[{idx}].exhibits` must be a glob string or list of glob strings."),
+                format!(
+                    "`{POLICY_CHAIN_KEY}[{idx}].exhibits` must be a glob string or list of glob strings."
+                ),
             ));
         }
     };
@@ -267,22 +285,26 @@ fn parse_exhibits(
         if trimmed.is_empty() {
             return Err(invalid_config(
                 path,
-                format!("`rules[{idx}].exhibits` contains an empty glob pattern."),
+                format!("`{POLICY_CHAIN_KEY}[{idx}].exhibits` contains an empty glob pattern."),
             ));
         }
         if trimmed.starts_with("plane=") {
             return Err(invalid_config(
                 path,
                 format!(
-                    "`rules[{idx}].exhibits` entry `{trimmed}` uses a deferred fielded exhibit query (not supported in v1)."
+                    "`{POLICY_CHAIN_KEY}[{idx}].exhibits` entry `{trimmed}` uses a deferred fielded exhibit query (not supported in v1)."
                 ),
             ));
         }
-        validate_no_traversal_or_absolute(path, &format!("`rules[{idx}].exhibits`"), trimmed)?;
+        validate_no_traversal_or_absolute(
+            path,
+            &format!("`{POLICY_CHAIN_KEY}[{idx}].exhibits`"),
+            trimmed,
+        )?;
         let glob = GlobPattern::parse(trimmed).map_err(|err| {
             invalid_config(
                 path,
-                format!("`rules[{idx}].exhibits` pattern `{raw}`: {err}"),
+                format!("`{POLICY_CHAIN_KEY}[{idx}].exhibits` pattern `{raw}`: {err}"),
             )
         })?;
         globs.push(glob);

@@ -871,7 +871,7 @@ mod tests {
         fn test_ordered_first_match_wins_and_default_allow() {
             let ws = monorepo_workspace().with_policy_config(
                 ".canons/config.yaml",
-                "rules:\n  - allow: \"architecture/foo\"\n  - deny: \"architecture/**\"\n",
+                "canon-policy-chain:\n  - allow: \"architecture/foo\"\n  - deny: \"architecture/**\"\n",
             );
             let intake = CaseloadIntake {
                 target_paths: vec!["src/lib.rs".to_string()],
@@ -904,15 +904,15 @@ mod tests {
             let ws = monorepo_workspace()
                 .with_policy_config(
                     ".canons/config.yaml",
-                    "rules:\n  - deny: \"style/bar\"\n",
+                    "canon-policy-chain:\n  - deny: \"style/bar\"\n",
                 )
                 .with_policy_config(
                     "packages/ui/.canons/config.yaml",
-                    "rules:\n  - allow: \"parents:style/bar\"\n  - deny: \"parents:architecture/foo\"\n",
+                    "canon-policy-chain:\n  - allow: \"parents:style/bar\"\n  - deny: \"parents:architecture/foo\"\n",
                 )
                 .with_policy_config(
                     "packages/ui/vendor/.canons/config.yaml",
-                    "rules:\n  - deny: all\n",
+                    "canon-policy-chain:\n  - deny: all\n",
                 );
 
             // 1. In packages/ui/src/button.tsx: child re-allows parents:style/bar, denies parents:architecture/foo,
@@ -971,12 +971,12 @@ mod tests {
                 .with_policy_config(
                     ".canons/config.yaml",
                     // `parents:` in root config matches zero canons
-                    "rules:\n  - deny: \"parents:**\"\n",
+                    "canon-policy-chain:\n  - deny: \"parents:**\"\n",
                 )
                 .with_policy_config(
                     "packages/ui/nested/.canons/config.yaml",
                     // Disables both root `architecture/foo` and intermediate `ui/tokens`
-                    "rules:\n  - deny: \"parents:architecture/foo\"\n  - deny: \"parents:ui/*\"\n",
+                    "canon-policy-chain:\n  - deny: \"parents:architecture/foo\"\n  - deny: \"parents:ui/*\"\n",
                 );
 
             let nested_disc = execute_discover(
@@ -1029,7 +1029,7 @@ mod tests {
         fn test_canon_md_extension_normalization_and_exhibits_filtering() {
             let ws = monorepo_workspace().with_policy_config(
                 ".canons/config.yaml",
-                "rules:\n  - deny: \"architecture/foo.canon.md\"\n    exhibits: \"src/legacy/**\"\n  - deny: \"style/*.canon.md\"\n    exhibits: [\"src/legacy/**\", \"src/lib.rs\"]\n",
+                "canon-policy-chain:\n  - deny: \"architecture/foo.canon.md\"\n    exhibits: \"src/legacy/**\"\n  - deny: \"style/*.canon.md\"\n    exhibits: [\"src/legacy/**\", \"src/lib.rs\"]\n",
             );
 
             let disc = execute_discover(
@@ -1065,11 +1065,11 @@ mod tests {
             let ws = monorepo_workspace()
                 .with_policy_config(
                     ".canons/config.yaml",
-                    "rules:\n  - deny: \"architecture/foo\"\n    exhibits: \"src/**\"\n  - deny: \"style/bar\"\n  - deny: \"git/pr-title\"\n    exhibits: \"src/**\"\n",
+                    "canon-policy-chain:\n  - deny: \"architecture/foo\"\n    exhibits: \"src/**\"\n  - deny: \"style/bar\"\n  - deny: \"git/pr-title\"\n    exhibits: \"src/**\"\n",
                 )
                 .with_policy_config(
                     "packages/ui/.canons/config.yaml",
-                    "rules:\n  - deny: \"ui/tokens\"\n",
+                    "canon-policy-chain:\n  - deny: \"ui/tokens\"\n",
                 );
 
             // --all-canons drops unconditional denies (`style/bar`, `ui/tokens`) but keeps rules with `exhibits:`
@@ -1117,7 +1117,7 @@ mod tests {
             // Unconditional deny drops metadata-only canon
             let ws_denied_meta = monorepo_workspace().with_policy_config(
                 ".canons/config.yaml",
-                "rules:\n  - deny: \"git/pr-title\"\n",
+                "canon-policy-chain:\n  - deny: \"git/pr-title\"\n",
             );
             let denied_meta_disc = execute_discover(
                 &DiscoverOptions {
@@ -1140,7 +1140,7 @@ mod tests {
         fn test_cli_precedence_canon_no_builtins_and_builtins() {
             let ws = monorepo_workspace().with_builtins().with_policy_config(
                 ".canons/config.yaml",
-                "rules:\n  - allow: \"builtin:cli/**\"\n  - deny: \"builtin:**\"\n  - deny: \"architecture/foo\"\n",
+                "canon-policy-chain:\n  - allow: \"builtin:cli/**\"\n  - deny: \"builtin:**\"\n  - deny: \"architecture/foo\"\n",
             );
 
             // 1. --builtins (include_builtins: true) respects config.yaml deny for non-cli builtins
@@ -1223,7 +1223,7 @@ mod tests {
         fn test_nested_config_ignored_and_workspace_state_base_ignores_diff_policy_injection() {
             let ws = monorepo_workspace()
                 .with_file(".canons/security/config.yaml")
-                .with_policy_config(".canons/config.yaml", "rules: []\n");
+                .with_policy_config(".canons/config.yaml", "canon-policy-chain: []\n");
 
             // Untrusted PR diff attempts to inject `- deny: all` into `.canons/config.yaml` under `--workspace-state base`
             let mut diffs = BTreeMap::new();
@@ -1235,9 +1235,12 @@ mod tests {
                     previous_path: None,
                     lines_added: 2,
                     lines_deleted: 1,
-                    patch: Some("@@ -1 +1,2 @@\n-rules: []\n+rules:\n+  - deny: all\n".to_string()),
+                    patch: Some(
+                        "@@ -1 +1,2 @@\n-canon-policy-chain: []\n+canon-policy-chain:\n+  - deny: all\n"
+                            .to_string(),
+                    ),
                     patch_omission_reason: None,
-                    content: Some("rules:\n  - deny: all\n".to_string()),
+                    content: Some("canon-policy-chain:\n  - deny: all\n".to_string()),
                     content_omission_reason: None,
                 },
             );

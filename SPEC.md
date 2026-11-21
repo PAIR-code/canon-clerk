@@ -330,11 +330,12 @@ Workspace policy configuration provides a declarative, version-controlled mechan
 
 ### 7.2 Schema & Validation Contract
 
-A `.canons/config.yaml` file MUST be a valid UTF-8 YAML mapping. An empty file or `rules: []` is a valid no-op that falls through to the default **`allow`** policy.
+A `.canons/config.yaml` file MUST be a valid UTF-8 YAML mapping. An empty file or `canon-policy-chain: []` is a valid no-op that falls through to the default **`allow`** policy.
 
 ```yaml
 # <scope>/.canons/config.yaml
-rules:
+# Evaluated top-to-bottom; first match wins (default: allow).
+canon-policy-chain:
   # Deny all builtins on third-party and generated files
   - deny: "builtin:**"
     exhibits: ["third_party/**", "**/*.generated.ts"]
@@ -354,7 +355,7 @@ rules:
   - deny: all
 ```
 
-* **`rules:`** Ordered list of rule entries. Each entry MUST be a mapping specifying:
+* **`canon-policy-chain:`** Ordered list of policy chain entries evaluated top-to-bottom (first match wins). Each entry MUST be a mapping specifying:
   * **Action & Canon Selector (REQUIRED):** Exactly one action key—`allow` or `deny`—whose value is a non-empty `<canon-selector>` string:
     * `all` — matches every canon in scope.
     * `builtin:<path-or-glob>` — matches embedded built-in standard canons (e.g., `builtin:**`, `builtin:api-design/**`, `builtin:canon-authoring/*`).

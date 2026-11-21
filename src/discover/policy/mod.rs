@@ -345,7 +345,12 @@ mod tests {
 
     #[test]
     fn test_empty_and_empty_rules_are_valid_noops() {
-        for raw in ["", "   \n# comment\n", "rules: []", "rules:"] {
+        for raw in [
+            "",
+            "   \n# comment\n",
+            "canon-policy-chain: []",
+            "canon-policy-chain:",
+        ] {
             let mut configs = BTreeMap::new();
             configs.insert(".canons/config.yaml".to_string(), raw.to_string());
             let set = WorkspacePolicySet::compile(&configs).expect("valid noop");
@@ -356,50 +361,72 @@ mod tests {
     #[test]
     fn test_schema_validation_rejects_malformed_unknown_credential_and_traversal() {
         let invalid_cases = [
-            ("malformed yaml", "rules:\n  - deny: [unclosed"),
+            ("malformed yaml", "canon-policy-chain:\n  - deny: [unclosed"),
             ("non-mapping root", "- deny: all"),
             ("unknown top-level key", "unknown_key: true"),
+            ("legacy rules key rejected", "rules:\n  - deny: all"),
             ("credential key providers", "providers:\n  gemini: {}"),
             ("credential key apiKey", "apiKey: secret"),
             ("credential key defaults", "defaults:\n  model: x"),
             ("credential key nodes", "nodes:\n  audit: {}"),
             ("deferred key validate", "validate:\n  rules: {}"),
             ("deferred key packs", "packs:\n  foo: bar"),
-            ("missing allow/deny", "rules:\n  - exhibits: 'src/**'"),
+            (
+                "missing allow/deny",
+                "canon-policy-chain:\n  - exhibits: 'src/**'",
+            ),
             (
                 "conflicting allow and deny",
-                "rules:\n  - allow: all\n    deny: all",
+                "canon-policy-chain:\n  - allow: all\n    deny: all",
             ),
-            ("unknown rule key", "rules:\n  - deny: all\n    extra: 1"),
-            ("empty selector", "rules:\n  - deny: ''"),
-            ("empty builtin selector", "rules:\n  - deny: 'builtin:'"),
-            ("empty parents selector", "rules:\n  - deny: 'parents:'"),
-            ("deferred tag selector", "rules:\n  - deny: 'tag:security'"),
+            (
+                "unknown rule key",
+                "canon-policy-chain:\n  - deny: all\n    extra: 1",
+            ),
+            ("empty selector", "canon-policy-chain:\n  - deny: ''"),
+            (
+                "empty builtin selector",
+                "canon-policy-chain:\n  - deny: 'builtin:'",
+            ),
+            (
+                "empty parents selector",
+                "canon-policy-chain:\n  - deny: 'parents:'",
+            ),
+            (
+                "deferred tag selector",
+                "canon-policy-chain:\n  - deny: 'tag:security'",
+            ),
             (
                 "deferred inspect selector",
-                "rules:\n  - deny: 'inspect:pr_title'",
+                "canon-policy-chain:\n  - deny: 'inspect:pr_title'",
             ),
-            ("traversal in selector", "rules:\n  - deny: '../foo'"),
+            (
+                "traversal in selector",
+                "canon-policy-chain:\n  - deny: '../foo'",
+            ),
             (
                 "traversal in parents selector",
-                "rules:\n  - deny: 'parents:../foo'",
+                "canon-policy-chain:\n  - deny: 'parents:../foo'",
             ),
-            ("invalid glob in selector", "rules:\n  - deny: 'foo/[bad'"),
+            (
+                "invalid glob in selector",
+                "canon-policy-chain:\n  - deny: 'foo/[bad'",
+            ),
             (
                 "empty exhibit glob",
-                "rules:\n  - deny: all\n    exhibits: ''",
+                "canon-policy-chain:\n  - deny: all\n    exhibits: ''",
             ),
             (
                 "traversal in exhibits",
-                "rules:\n  - deny: all\n    exhibits: '../outside/**'",
+                "canon-policy-chain:\n  - deny: all\n    exhibits: '../outside/**'",
             ),
             (
                 "invalid glob in exhibits",
-                "rules:\n  - deny: all\n    exhibits: 'src/{a,b'",
+                "canon-policy-chain:\n  - deny: all\n    exhibits: 'src/{a,b'",
             ),
             (
                 "deferred fielded exhibit",
-                "rules:\n  - deny: all\n    exhibits: 'plane=commit_messages'",
+                "canon-policy-chain:\n  - deny: all\n    exhibits: 'plane=commit_messages'",
             ),
         ];
 

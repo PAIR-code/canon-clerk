@@ -433,7 +433,7 @@ mod tests {
             // Create a valid root config and an ignored nested config inside `.canons/security/`
             std::fs::write(
                 ws.path.join(".canons/config.yaml"),
-                "rules:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
+                "canon-policy-chain:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
             )
             .expect("write root config");
             std::fs::create_dir_all(ws.path.join(".canons/security")).expect("mkdir security");
@@ -481,7 +481,7 @@ mod tests {
             let ws = TempDiscoverWorkspace::new("policy-validate-all-canons");
             std::fs::write(
                 ws.path.join(".canons/config.yaml"),
-                "rules:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
+                "canon-policy-chain:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
             )
             .expect("write config");
 
