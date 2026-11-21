@@ -37,7 +37,8 @@ pub fn map_discover_error(err: DiscoverError) -> CliError {
     match err {
         DiscoverError::MissingInputSource
         | DiscoverError::InvalidGlob(_)
-        | DiscoverError::PathEscapesWorkspace { .. } => CliError::usage(err.to_string()),
+        | DiscoverError::PathEscapesWorkspace { .. }
+        | DiscoverError::InvalidPolicyConfig { .. } => CliError::usage(err.to_string()),
         DiscoverError::Io { .. } => CliError::runtime(err.to_string()),
     }
 }

@@ -568,6 +568,7 @@ mod tests {
             .with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::Triggered,
                 target_files: vec!["src/cli/admit.rs".to_string()],
+                config_files: Vec::new(),
                 candidate_canons: vec![
                     ".canons/cli/cli-flags-kebab-case.md".to_string(),
                     ".canons/readme/feat-updates-readme.md".to_string(),
@@ -1128,6 +1129,7 @@ mod tests {
                 .with_discovery(CaseloadDiscovery {
                     mode: DiscoveryMode::Triggered,
                     target_files: target_files.clone(),
+                    config_files: Vec::new(),
                     candidate_canons: vec![cli_ref.to_string(), readme_ref.to_string()],
                     active_exhibits: ActiveExhibits {
                         files: target_files,
