@@ -43,7 +43,7 @@ The complete architectural specification is partitioned across the following ded
 Comprehensive specifications for each of the ten imperative verb stages:
 
 - **[intake](architecture/nodes/intake.md):** Universal front door parsing diffs, target paths/globs, prospective intent queries, or whole-repo target scope (`--all-targets`) into `FileArtifact` records (Branch A).
-- **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs against modified files, short-circuiting on zero matches, or compiling the full corpus via `--all-canons` (Branch A).
+- **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs and declarative `<scope>/.canons/config.yaml` allow/deny policy against modified files, short-circuiting on zero matches, or compiling the full corpus via `--all-canons` (Branch A).
 - **[validate](architecture/nodes/validate.md):** Deterministic AST and YAML schema pre-flight linter for candidate canons or full corpus (Branch A).
 - **[configure](architecture/nodes/configure.md):** Local environment and provider credential normalizer (Branch B).
 - **[probe](architecture/nodes/probe.md):** Diagnostic leaf measuring live provider reachability and roundtrip endpoint latency.
