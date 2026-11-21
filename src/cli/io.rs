@@ -45,6 +45,21 @@ pub fn ensure_single_stdin_source(
     if filing.pr_body_file.as_deref() == Some("-") {
         stdin_consumers.push("`--pr-body-file -`");
     }
+    let linked_issue_stdin_count = filing
+        .linked_issues
+        .iter()
+        .filter(|s| s.as_str() == "-")
+        .count();
+    if linked_issue_stdin_count > 1 {
+        return Err(CliError::usage(
+            "Standard input (`-`) was specified multiple times in `--linked-issue`.\n  \
+             Hint: Pass `--linked-issue -` at most once to read linked issue JSON from stdin."
+                .to_string(),
+        ));
+    }
+    if linked_issue_stdin_count == 1 {
+        stdin_consumers.push("`--linked-issue -`");
+    }
     if caseload == Some("-") {
         stdin_consumers.push("`--caseload -`");
     }
@@ -188,6 +203,27 @@ mod tests {
         };
         let err =
             ensure_single_stdin_source(&filing_conflict, Some("-")).expect_err("conflicting stdin");
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("Conflicting standard input"));
+
+        // Invalid: duplicate `--linked-issue -`
+        let filing_dup_issue = FilingSourceArgs {
+            linked_issues: vec!["-".to_string(), "-".to_string()],
+            ..FilingSourceArgs::default()
+        };
+        let err = ensure_single_stdin_source(&filing_dup_issue, None)
+            .expect_err("dup linked-issue stdin");
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("--linked-issue"));
+
+        // Invalid: `--diff -` combined with `--linked-issue -`
+        let filing_diff_and_issue = FilingSourceArgs {
+            diff: Some("-".to_string()),
+            linked_issues: vec!["-".to_string()],
+            ..FilingSourceArgs::default()
+        };
+        let err = ensure_single_stdin_source(&filing_diff_and_issue, None)
+            .expect_err("diff and linked-issue stdin conflict");
         assert_eq!(err.exit_code(), 2);
         assert!(err.to_string().contains("Conflicting standard input"));
     }

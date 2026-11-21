@@ -497,6 +497,8 @@ mod tests {
                 linked_issues: Some(vec![LinkedIssueContext {
                     number: 260,
                     title: Some("Implement docket stage".to_string()),
+                    author: None,
+                    labels: Vec::new(),
                     body: Some("Add CaseloadDocket and CLI.".to_string()),
                     url: None,
                 }]),

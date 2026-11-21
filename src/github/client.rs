@@ -18,9 +18,10 @@ use super::{
     CheckRunPublisher, CheckRunReport, DEFAULT_GITHUB_API_TIMEOUT_MS,
     GITHUB_CHECKS_MAX_ANNOTATIONS_PER_REQUEST, GITHUB_CHECKS_MAX_OUTPUT_CHARS,
     GithubCheckAnnotation, GithubCheckTarget, GithubChecksError, GithubPullRequestFetcher,
-    GithubPullRequestMetadata, GithubPullRequestTarget, PublishedCheckRun,
+    GithubPullRequestMetadata, GithubPullRequestTarget, PublishedCheckRun, parse_github_issue_json,
     sanitize_annotation_for_github, truncate_github_output,
 };
+use crate::caseload::LinkedIssueContext;
 use crate::provider::{build_pooled_http_client, http_reactor_handle};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -454,6 +455,29 @@ impl GithubPullRequestFetcher for GithubChecksClient {
         }
         Ok(body)
     }
+
+    fn fetch_issue(
+        &self,
+        target: &GithubPullRequestTarget,
+        issue_number: u64,
+    ) -> Result<Option<LinkedIssueContext>, GithubChecksError> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            target.api_base_url, target.owner, target.repo, issue_number
+        );
+        let (status, body) = self.send_get(&url, &target.token, GITHUB_API_ACCEPT)?;
+        if status == 404 || status == 403 {
+            return Ok(None);
+        }
+        if !(200..300).contains(&status) {
+            return Err(GithubChecksError::Http {
+                status,
+                url,
+                message: extract_github_error_message(&body),
+            });
+        }
+        parse_github_issue_json(&body)
+    }
 }
 
 #[cfg(test)]
@@ -798,5 +822,71 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("accept: application/vnd.github.v3.diff")
         );
+    }
+
+    #[test]
+    fn test_fetch_issue_handles_issue_pr_404_and_403() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured_server = Arc::clone(&captured);
+
+        let server = thread::spawn(move || {
+            for idx in 0..4 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let req = read_http_request(&mut stream);
+                captured_server.lock().unwrap().push(req.request_line);
+
+                let (status_line, body) = match idx {
+                    0 => (
+                        "200 OK",
+                        r#"{"number":383,"title":"Ingest linked_issues","user":{"login":"jimbojw"},"labels":[{"name":"type: feat"}],"body":"Details","html_url":"https://github.com/o/r/issues/383"}"#,
+                    ),
+                    1 => (
+                        "200 OK",
+                        r#"{"number":380,"title":"A PR","pull_request":{"url":"https://api.github.com/repos/o/r/pulls/380"}}"#,
+                    ),
+                    2 => ("404 Not Found", r#"{"message":"Not Found"}"#),
+                    _ => ("403 Forbidden", r#"{"message":"Resource not accessible"}"#),
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(resp.as_bytes()).expect("write resp");
+            }
+        });
+
+        let client = GithubChecksClient::with_timeout_ms(5_000);
+        let target = GithubPullRequestTarget {
+            api_base_url: format!("http://{addr}"),
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            pull_number: 99,
+            token: "ghs_tok".to_string(),
+        };
+
+        let issue = client
+            .fetch_issue(&target, 383)
+            .expect("fetch 383")
+            .expect("some issue");
+        assert_eq!(issue.number, 383);
+        assert_eq!(issue.author.as_deref(), Some("jimbojw"));
+        assert_eq!(issue.labels, vec!["type: feat"]);
+        assert_eq!(
+            issue.url.as_deref(),
+            Some("https://github.com/o/r/issues/383")
+        );
+
+        assert_eq!(client.fetch_issue(&target, 380).expect("pr as issue"), None);
+        assert_eq!(client.fetch_issue(&target, 404).expect("404 issue"), None);
+        assert_eq!(client.fetch_issue(&target, 403).expect("403 issue"), None);
+
+        server.join().expect("server thread");
+        let reqs = captured.lock().unwrap();
+        assert_eq!(reqs[0], "GET /repos/o/r/issues/383 HTTP/1.1");
+        assert_eq!(reqs[1], "GET /repos/o/r/issues/380 HTTP/1.1");
+        assert_eq!(reqs[2], "GET /repos/o/r/issues/404 HTTP/1.1");
+        assert_eq!(reqs[3], "GET /repos/o/r/issues/403 HTTP/1.1");
     }
 }

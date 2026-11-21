@@ -25,6 +25,7 @@ pub mod docket;
 mod github_args;
 pub mod intake;
 pub mod io;
+pub mod linked_issues;
 pub mod node_args;
 pub mod probe;
 mod provenance;

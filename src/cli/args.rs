@@ -142,6 +142,15 @@ pub struct FilingSourceArgs {
         help = "Ingest pull request Markdown description from a file"
     )]
     pub pr_body_file: Option<String>,
+
+    /// Repeatable JSON file path or `-` for stdin supplying linked issue metadata (`SPEC.md` §3.4).
+    #[arg(
+        long = "linked-issue",
+        value_name = "PATH|-",
+        help_heading = "Pull Request Metadata",
+        help = "Ingest linked issue JSON (single object or array; native, gh, or GitHub REST shape) from file or '-' for stdin"
+    )]
+    pub linked_issues: Vec<String>,
 }
 
 impl FilingSourceArgs {

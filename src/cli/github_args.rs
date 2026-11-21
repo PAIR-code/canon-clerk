@@ -19,9 +19,11 @@ use crate::caseload::WorkspaceState;
 use crate::cli::CliError;
 use crate::cli::args::FilingSourceArgs;
 use crate::cli::io::{read_operand_source, resolve_target_operands};
+use crate::cli::linked_issues::resolve_linked_issue_operands;
 use crate::github::{
     DEFAULT_GITHUB_BYPASS_LABEL, DEFAULT_GITHUB_CHECK_NAME, ENV_CANON_CLERK_GITHUB_BYPASS_LABEL,
-    GithubCheckTarget, GithubChecksClient, GithubPullRequestFetcher, is_pull_request_target_event,
+    GithubCheckTarget, GithubChecksClient, GithubPullRequestFetcher,
+    fetch_linked_issues_for_pr_body, is_pull_request_target_event,
     resolve_github_check_target_with_fallback_sha, resolve_github_pr_filing,
 };
 use crate::intake::IntakeOptions;
@@ -66,6 +68,7 @@ pub(crate) fn resolve_filing_source_with_fetcher(
     };
 
     let target_paths = resolve_target_operands(&args.targets, stdin)?;
+    let explicit_linked_issues = resolve_linked_issue_operands(&args.linked_issues, stdin)?;
 
     if let Some(pr_number_override) = args.github_pr {
         let resolved = resolve_github_pr_filing(
@@ -78,6 +81,14 @@ pub(crate) fn resolve_filing_source_with_fetcher(
 
         let pr_title = args.pr_title.clone().or(resolved.metadata.title);
         let pr_body = explicit_pr_body.or(resolved.metadata.body);
+        let linked_issues = match explicit_linked_issues {
+            Some(explicit) => Some(explicit).filter(|v| !v.is_empty()),
+            None => {
+                let fetched =
+                    fetch_linked_issues_for_pr_body(&resolved.target, pr_body.as_deref(), fetcher);
+                Some(fetched).filter(|v| !v.is_empty())
+            }
+        };
         let workspace_state = args.workspace_state.map(WorkspaceState::from).or_else(|| {
             if is_pull_request_target_event(env) {
                 Some(WorkspaceState::Base)
@@ -95,7 +106,7 @@ pub(crate) fn resolve_filing_source_with_fetcher(
                 patch_content: Some(resolved.diff),
                 all_targets: args.all_targets,
                 workspace_state,
-                linked_issues: None,
+                linked_issues,
             },
             fetched_pr_head_sha: resolved.metadata.head_sha,
             fetched_pr_labels: Some(resolved.metadata.labels),
@@ -117,7 +128,7 @@ pub(crate) fn resolve_filing_source_with_fetcher(
             patch_content,
             all_targets: args.all_targets,
             workspace_state: args.workspace_state.map(WorkspaceState::from),
-            linked_issues: None,
+            linked_issues: explicit_linked_issues.filter(|v| !v.is_empty()),
         },
         fetched_pr_head_sha: None,
         fetched_pr_labels: None,
@@ -480,6 +491,134 @@ mod tests {
                 .expect_err("whitespace-only bypass label must fail fast");
             assert_eq!(err.exit_code(), 2);
             assert!(err.to_string().contains("Hint:"));
+        }
+    }
+
+    mod linked_issues_cli_args {
+        use super::*;
+        use crate::caseload::LinkedIssueContext;
+        use std::sync::Mutex;
+
+        struct TrackingIssueFetcher {
+            metadata: GithubPullRequestMetadata,
+            issues: BTreeMap<u64, LinkedIssueContext>,
+            issue_calls: Mutex<Vec<u64>>,
+        }
+
+        impl GithubPullRequestFetcher for TrackingIssueFetcher {
+            fn fetch_pull_request_metadata(
+                &self,
+                _target: &GithubPullRequestTarget,
+            ) -> Result<GithubPullRequestMetadata, GithubChecksError> {
+                Ok(self.metadata.clone())
+            }
+
+            fn fetch_pull_request_diff(
+                &self,
+                _target: &GithubPullRequestTarget,
+            ) -> Result<String, GithubChecksError> {
+                Ok("diff --git a/src/lib.rs b/src/lib.rs\n".to_string())
+            }
+
+            fn fetch_issue(
+                &self,
+                _target: &GithubPullRequestTarget,
+                issue_number: u64,
+            ) -> Result<Option<LinkedIssueContext>, GithubChecksError> {
+                self.issue_calls.lock().unwrap().push(issue_number);
+                Ok(self.issues.get(&issue_number).cloned())
+            }
+        }
+
+        #[test]
+        fn test_github_pr_discovers_and_fetches_linked_issues_and_cli_overrides() {
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "tok".to_string());
+            env.insert(ENV_GITHUB_REPOSITORY.to_string(), "o/r".to_string());
+
+            let mut issues = BTreeMap::new();
+            issues.insert(
+                383,
+                LinkedIssueContext {
+                    number: 383,
+                    title: Some("Ingest linked_issues".to_string()),
+                    author: Some("jimbojw".to_string()),
+                    labels: vec!["type: feat".to_string()],
+                    body: Some("Issue 383 body".to_string()),
+                    url: Some("https://github.com/o/r/issues/383".to_string()),
+                },
+            );
+
+            let fetcher = TrackingIssueFetcher {
+                metadata: GithubPullRequestMetadata {
+                    title: Some("feat: linked issues".to_string()),
+                    body: Some("Closes #383".to_string()),
+                    head_sha: Some("sha123".to_string()),
+                    labels: Vec::new(),
+                    actor: None,
+                },
+                issues,
+                issue_calls: Mutex::new(Vec::new()),
+            };
+
+            // 1. Auto-fetch from resolved PR body
+            let args = FilingSourceArgs {
+                github_pr: Some(Some(99)),
+                ..FilingSourceArgs::default()
+            };
+            let resolved =
+                resolve_filing_source_with_fetcher(&args, &mut Cursor::new(b""), &env, &fetcher)
+                    .expect("resolve with auto-fetched linked issues");
+            assert_eq!(*fetcher.issue_calls.lock().unwrap(), vec![383]);
+            let fetched = resolved.intake.linked_issues.expect("linked_issues");
+            assert_eq!(fetched.len(), 1);
+            assert_eq!(fetched[0].number, 383);
+            assert_eq!(fetched[0].author.as_deref(), Some("jimbojw"));
+
+            // 2. Explicit `--linked-issue -` overrides auto-fetch and skips GitHub Issues API
+            fetcher.issue_calls.lock().unwrap().clear();
+            let override_args = FilingSourceArgs {
+                github_pr: Some(Some(99)),
+                linked_issues: vec!["-".to_string()],
+                ..FilingSourceArgs::default()
+            };
+            let override_json =
+                r#"{"number":7,"title":"CLI override","author":{"login":"override-bot"}}"#;
+            let resolved_override = resolve_filing_source_with_fetcher(
+                &override_args,
+                &mut Cursor::new(override_json),
+                &env,
+                &fetcher,
+            )
+            .expect("resolve with explicit linked issue override");
+            assert!(
+                fetcher.issue_calls.lock().unwrap().is_empty(),
+                "explicit --linked-issue must skip GitHub Issues API calls"
+            );
+            let overridden = resolved_override
+                .intake
+                .linked_issues
+                .expect("overridden linked_issues");
+            assert_eq!(overridden.len(), 1);
+            assert_eq!(overridden[0].number, 7);
+            assert_eq!(overridden[0].author.as_deref(), Some("override-bot"));
+
+            // 3. Local CLI `--linked-issue` without `--github-pr`
+            let local_parsed = Cli::try_parse_from([
+                "canon-clerk",
+                "intake",
+                "--linked-issue",
+                "a.json",
+                "--linked-issue",
+                "b.json",
+            ])
+            .expect("repeatable --linked-issue parses");
+            match local_parsed.command {
+                Some(Commands::Intake(cmd)) => {
+                    assert_eq!(cmd.filing.linked_issues, vec!["a.json", "b.json"]);
+                }
+                _ => panic!("expected Intake"),
+            }
         }
     }
 }

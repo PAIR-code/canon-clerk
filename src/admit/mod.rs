@@ -560,6 +560,8 @@ mod tests {
                 linked_issues: Some(vec![LinkedIssueContext {
                     number: 291,
                     title: Some("Implement admit stage".to_string()),
+                    author: None,
+                    labels: Vec::new(),
                     body: Some("Micro evidentiary triage.".to_string()),
                     url: None,
                 }]),
@@ -1121,6 +1123,8 @@ mod tests {
                     linked_issues: Some(vec![LinkedIssueContext {
                         number: 313,
                         title: Some("Slice admit exhibits".to_string()),
+                        author: None,
+                        labels: Vec::new(),
                         body: Some("Prevent 60s request timeouts.".to_string()),
                         url: None,
                     }]),

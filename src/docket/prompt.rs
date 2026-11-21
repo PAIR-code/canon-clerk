@@ -189,10 +189,31 @@ fn append_linked_issues(out: &mut String, issues: &[LinkedIssueContext]) {
     let _ = writeln!(out, "- Linked Issues:");
     for issue in issues {
         let title = non_blank(issue.title.as_deref()).unwrap_or("(untitled)");
-        let _ = writeln!(out, "  - #{}: {title}", issue.number);
+        let meta = format_linked_issue_metadata(issue);
+        let _ = writeln!(out, "  - #{}: {title}{meta}", issue.number);
         if let Some(body) = non_blank(issue.body.as_deref()) {
             let _ = writeln!(out, "    {body}");
         }
+    }
+}
+
+fn format_linked_issue_metadata(issue: &LinkedIssueContext) -> String {
+    let mut parts = Vec::new();
+    if let Some(author) = non_blank(issue.author.as_deref()) {
+        parts.push(format!("author: @{author}"));
+    }
+    let labels: Vec<&str> = issue
+        .labels
+        .iter()
+        .filter_map(|label| non_blank(Some(label.as_str())))
+        .collect();
+    if !labels.is_empty() {
+        parts.push(format!("labels: {}", labels.join(", ")));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join("; "))
     }
 }
 
@@ -332,5 +353,30 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
             &text[..byte_idx]
         ),
         None => text.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_append_linked_issues_renders_author_and_labels() {
+        let mut out = String::new();
+        append_linked_issues(
+            &mut out,
+            &[LinkedIssueContext {
+                number: 383,
+                title: Some("Ingest linked_issues".to_string()),
+                author: Some("jimbojw".to_string()),
+                labels: vec!["type: feat".to_string(), "scope: cli".to_string()],
+                body: Some("Wire ingestion.".to_string()),
+                url: None,
+            }],
+        );
+        assert!(out.contains(
+            "#383: Ingest linked_issues (author: @jimbojw; labels: type: feat, scope: cli)"
+        ));
+        assert!(out.contains("Wire ingestion."));
     }
 }

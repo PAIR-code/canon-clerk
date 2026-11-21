@@ -486,6 +486,8 @@ mod tests {
                 linked_issues: Some(vec![LinkedIssueContext {
                     number: 313,
                     title: Some("Partition large generative admit cases".to_string()),
+                    author: None,
+                    labels: Vec::new(),
                     body: Some("Prevent 60s timeouts on 46-file PRs.".to_string()),
                     url: None,
                 }]),
