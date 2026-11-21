@@ -132,7 +132,7 @@ Conversely, when an explicitly designated stream yields zero changes or `discove
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
-- `--diff <PATH|->`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
+- `--diff <PATH|->`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`, `--linked-issue <PATH|->`, `--commit-message <TEXT>`, `--commit-messages-file <PATH|->`: Shared filing source and metadata flags.
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags (evaluated against the underlying filing).
 - `--docket-threshold <FLOAT>` (fallback env: `CANON_CLERK_DOCKET_THRESHOLD`; config key: `nodes.docket.threshold`): Subject-matter jurisdiction screening threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage flags (`--apprise-*`, `--admit-*`, `--vet-*`, `--audit-*`) are rejected with exit code `2` and guidance pointing to `--docket-*`.
 - `--docket-batch-size <COUNT>` (fallback env: `CANON_CLERK_DOCKET_BATCH_SIZE`; config key: `nodes.docket.batchSize`): Optional positive integer (`>= 1`) capping the maximum candidate canons evaluated per model call (default: `256` on `google:gemini-decision-*`, `48` on `typesafe:jev-*`, `25` on `Generator` models). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).

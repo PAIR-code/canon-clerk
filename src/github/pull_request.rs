@@ -19,7 +19,7 @@ use super::{
     ENV_GITHUB_REPOSITORY, ENV_GITHUB_TOKEN, GithubChecksError, env_non_empty,
     parse_github_repository,
 };
-use crate::caseload::LinkedIssueContext;
+use crate::caseload::{CommitMessageContext, LinkedIssueContext};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
@@ -126,6 +126,15 @@ pub trait GithubPullRequestFetcher: Send + Sync {
     ) -> Result<Option<LinkedIssueContext>, GithubChecksError> {
         let _ = (target, issue_number);
         Ok(None)
+    }
+
+    /// Fetches pull request commits via `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits?per_page=100`.
+    fn fetch_pull_request_commits(
+        &self,
+        target: &GithubPullRequestTarget,
+    ) -> Result<Vec<CommitMessageContext>, GithubChecksError> {
+        let _ = target;
+        Ok(Vec::new())
     }
 }
 

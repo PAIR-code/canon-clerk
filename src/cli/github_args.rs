@@ -18,6 +18,7 @@
 use crate::caseload::WorkspaceState;
 use crate::cli::CliError;
 use crate::cli::args::FilingSourceArgs;
+use crate::cli::commit_messages::resolve_commit_message_operands;
 use crate::cli::io::{read_operand_source, resolve_target_operands};
 use crate::cli::linked_issues::resolve_linked_issue_operands;
 use crate::github::{
@@ -69,6 +70,8 @@ pub(crate) fn resolve_filing_source_with_fetcher(
 
     let target_paths = resolve_target_operands(&args.targets, stdin)?;
     let explicit_linked_issues = resolve_linked_issue_operands(&args.linked_issues, stdin)?;
+    let explicit_commit_messages =
+        resolve_commit_message_operands(&args.commit_messages, &args.commit_messages_files, stdin)?;
 
     if let Some(pr_number_override) = args.github_pr {
         let resolved = resolve_github_pr_filing(
@@ -86,6 +89,15 @@ pub(crate) fn resolve_filing_source_with_fetcher(
             None => {
                 let fetched =
                     fetch_linked_issues_for_pr_body(&resolved.target, pr_body.as_deref(), fetcher);
+                Some(fetched).filter(|v| !v.is_empty())
+            }
+        };
+        let commit_messages = match explicit_commit_messages {
+            Some(explicit) => Some(explicit).filter(|v| !v.is_empty()),
+            None => {
+                let fetched = fetcher
+                    .fetch_pull_request_commits(&resolved.target)
+                    .map_err(|err| CliError::usage(err.to_string()))?;
                 Some(fetched).filter(|v| !v.is_empty())
             }
         };
@@ -107,6 +119,7 @@ pub(crate) fn resolve_filing_source_with_fetcher(
                 all_targets: args.all_targets,
                 workspace_state,
                 linked_issues,
+                commit_messages,
             },
             fetched_pr_head_sha: resolved.metadata.head_sha,
             fetched_pr_labels: Some(resolved.metadata.labels),
@@ -129,6 +142,7 @@ pub(crate) fn resolve_filing_source_with_fetcher(
             all_targets: args.all_targets,
             workspace_state: args.workspace_state.map(WorkspaceState::from),
             linked_issues: explicit_linked_issues.filter(|v| !v.is_empty()),
+            commit_messages: explicit_commit_messages.filter(|v| !v.is_empty()),
         },
         fetched_pr_head_sha: None,
         fetched_pr_labels: None,
@@ -619,6 +633,131 @@ mod tests {
                 }
                 _ => panic!("expected Intake"),
             }
+        }
+    }
+
+    mod commit_messages_cli_args {
+        use super::*;
+        use crate::caseload::CommitMessageContext;
+        use crate::cli::Cli;
+        use crate::cli::io::ensure_single_stdin_source;
+        use crate::github::{GithubChecksError, GithubPullRequestTarget};
+        use clap::Parser;
+        use std::io::Cursor;
+        use std::sync::Mutex;
+
+        struct TrackingCommitsFetcher {
+            commits: Result<Vec<CommitMessageContext>, GithubChecksError>,
+            commit_calls: Mutex<usize>,
+        }
+
+        impl GithubPullRequestFetcher for TrackingCommitsFetcher {
+            fn fetch_pull_request_metadata(
+                &self,
+                _target: &GithubPullRequestTarget,
+            ) -> Result<GithubPullRequestMetadata, GithubChecksError> {
+                Ok(GithubPullRequestMetadata::default())
+            }
+
+            fn fetch_pull_request_diff(
+                &self,
+                _target: &GithubPullRequestTarget,
+            ) -> Result<String, GithubChecksError> {
+                Ok("diff --git a/src/lib.rs b/src/lib.rs\n".to_string())
+            }
+
+            fn fetch_pull_request_commits(
+                &self,
+                _target: &GithubPullRequestTarget,
+            ) -> Result<Vec<CommitMessageContext>, GithubChecksError> {
+                *self.commit_calls.lock().unwrap() += 1;
+                self.commits.clone()
+            }
+        }
+
+        #[test]
+        fn test_github_pr_fetches_commits_and_cli_override_skips_api_and_fails_fast() {
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GITHUB_TOKEN.to_string(), "tok".to_string());
+            env.insert(ENV_GITHUB_REPOSITORY.to_string(), "o/r".to_string());
+
+            let fetcher = TrackingCommitsFetcher {
+                commits: Ok(vec![CommitMessageContext {
+                    sha: Some("1234567".to_string()),
+                    message: "feat(cli): api commit".to_string(),
+                }]),
+                commit_calls: Mutex::new(0),
+            };
+
+            // 1. Auto-fetch commits on --github-pr
+            let args = FilingSourceArgs {
+                github_pr: Some(Some(384)),
+                ..FilingSourceArgs::default()
+            };
+            let resolved =
+                resolve_filing_source_with_fetcher(&args, &mut Cursor::new(b""), &env, &fetcher)
+                    .expect("auto-fetch commits");
+            assert_eq!(*fetcher.commit_calls.lock().unwrap(), 1);
+            assert_eq!(resolved.intake.commit_messages.as_ref().unwrap().len(), 1);
+
+            // 2. Explicit --commit-message overrides and skips GitHub PR Commits API
+            *fetcher.commit_calls.lock().unwrap() = 0;
+            let override_args = FilingSourceArgs {
+                github_pr: Some(Some(384)),
+                commit_messages: vec!["fix(core): cli override".to_string()],
+                ..FilingSourceArgs::default()
+            };
+            let resolved_override = resolve_filing_source_with_fetcher(
+                &override_args,
+                &mut Cursor::new(b""),
+                &env,
+                &fetcher,
+            )
+            .expect("override commits");
+            assert_eq!(*fetcher.commit_calls.lock().unwrap(), 0);
+            assert_eq!(
+                resolved_override.intake.commit_messages.unwrap()[0].message,
+                "fix(core): cli override"
+            );
+
+            // 3. Fail fast on GitHub Commits API error
+            let failing_fetcher = TrackingCommitsFetcher {
+                commits: Err(GithubChecksError::Http {
+                    status: 500,
+                    url: "https://api.github.com/repos/o/r/pulls/384/commits".to_string(),
+                    message: "Internal error\n  Hint: Retry".to_string(),
+                }),
+                commit_calls: Mutex::new(0),
+            };
+            let err = resolve_filing_source_with_fetcher(
+                &args,
+                &mut Cursor::new(b""),
+                &env,
+                &failing_fetcher,
+            )
+            .expect_err("API failure must fail fast");
+            assert_eq!(err.exit_code(), 2);
+
+            // 4. Clap conflict between --commit-message and --commit-messages-file
+            assert!(
+                Cli::try_parse_from([
+                    "canon-clerk",
+                    "intake",
+                    "--commit-message",
+                    "feat: a",
+                    "--commit-messages-file",
+                    "commits.json",
+                ])
+                .is_err()
+            );
+
+            // 5. Single-stdin guard on --commit-messages-file -
+            let conflict_stdin = FilingSourceArgs {
+                diff: Some("-".to_string()),
+                commit_messages_files: vec!["-".to_string()],
+                ..FilingSourceArgs::default()
+            };
+            assert!(ensure_single_stdin_source(&conflict_stdin, None).is_err());
         }
     }
 }

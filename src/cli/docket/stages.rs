@@ -69,7 +69,11 @@ fn execute_docket_intake_body(
             || intake_opts
                 .pr_body
                 .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
+                .is_some_and(|s| !s.trim().is_empty())
+            || intake_opts
+                .commit_messages
+                .as_ref()
+                .is_some_and(|commits| commits.iter().any(|c| !c.message.trim().is_empty()));
         let merged = merge_metadata_onto_intake(prev_intake, intake_opts);
         existing.docket = None;
         existing.intake = Some(merged);

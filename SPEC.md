@@ -160,6 +160,11 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
      * **Payload Boundary:** For each discovered issue, the injected payload MUST include the issue number, title, author, labels, and issue body Markdown.
      * **Token Preservation Boundary:** To preserve context window hygiene, issue comments and reaction trails MUST be excluded by default.
      * **Direct Specification:** In local CLI environments, `linked_issues` MAY be supplied by external file content via explicit command line flag or other input mechanism.
+   * **Discovery & Boundary Semantics for `commit_messages`:**
+     * **Discovery:** In pull request CI contexts, implementations SHOULD fetch commits associated with the pull request via the forge's pull request commits endpoint (e.g., `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits`), following pagination in chronological order up to a bounded ceiling (250 commits, matching GitHub's PR commits limit) and emitting a diagnostic warning if truncated at the cap.
+     * **Payload & Token Preservation Boundary:** For each commit, the injected payload MUST carry the normalized commit message and optional commit SHA (`sha`) when available. To preserve context window hygiene, commit diffs/stats, tree/parent hashes, signatures/verification metadata, timestamps, and author/committer emails MUST be excluded by default.
+     * **Normalization, Ordering & Deduplication:** Implementations MUST normalize `\r\n` line endings to `\n`, trim leading/trailing whitespace on commit messages (preserving internal blank lines in multi-line bodies), normalize blank SHAs to absent, and drop blank/whitespace-only entries (collapsing an empty resulting list to absent). Implementations MUST preserve chronological/ingestion order (never sort lexicographically) and MUST deduplicate only on identical non-empty SHA values—never deduplicating by message text, since distinct commits sharing identical subjects remain distinct exhibits.
+     * **Direct Specification:** In local CLI environments, `commit_messages` MAY be supplied via repeatable literal flags or structured JSON file/stdin operands.
 
 5. **`tags` Derivation:**
    * If omitted, defaults to an empty list: `[]`.

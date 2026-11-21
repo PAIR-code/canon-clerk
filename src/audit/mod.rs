@@ -18,6 +18,7 @@ mod decode;
 mod error;
 mod exhibits;
 mod fold;
+pub(crate) mod metadata;
 mod prompt;
 mod reference_overlay;
 mod slice_pack;

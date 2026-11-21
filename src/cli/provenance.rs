@@ -121,7 +121,8 @@ pub(crate) fn write_filing_intake_provenance(
         Some(inc)
             if inc.pr_title.is_some()
                 || inc.pr_body.is_some()
-                || inc.linked_issues.as_ref().is_some_and(|v| !v.is_empty()) =>
+                || inc.linked_issues.as_ref().is_some_and(|v| !v.is_empty())
+                || inc.commit_messages.as_ref().is_some_and(|v| !v.is_empty()) =>
         {
             "pull request metadata ingested".to_string()
         }

@@ -26,6 +26,7 @@ pub(super) struct EvaluatedCanonMatch {
     pub(super) inspected_metadata: Vec<String>,
     pub(super) active_pr_title: bool,
     pub(super) active_pr_body: bool,
+    pub(super) active_commit_messages: bool,
     pub(super) active_linked_issues: bool,
 }
 
@@ -128,6 +129,10 @@ fn evaluate_bipartite_inspect(
     let has_diff_match = !matched_files.is_empty();
     let has_pr_title = intake.pr_title.is_some();
     let has_pr_body = intake.pr_body.is_some();
+    let has_commit_messages = intake
+        .commit_messages
+        .as_ref()
+        .is_some_and(|v| !v.is_empty());
     let has_linked_issues = intake.linked_issues.as_ref().is_some_and(|v| !v.is_empty());
 
     let inspects_diff = canon.inspect.iter().any(|p| p.token == InspectToken::Diff);
@@ -149,6 +154,7 @@ fn evaluate_bipartite_inspect(
     let mut inspected_metadata = Vec::new();
     let mut active_pr_title = false;
     let mut active_pr_body = false;
+    let mut active_commit_messages = false;
     let mut active_linked_issues = false;
 
     for plane in &canon.inspect {
@@ -156,7 +162,7 @@ fn evaluate_bipartite_inspect(
             InspectToken::Diff => has_diff_match,
             InspectToken::PrTitle => has_pr_title,
             InspectToken::PrBody => has_pr_body,
-            InspectToken::CommitMessages => false,
+            InspectToken::CommitMessages => has_commit_messages,
             InspectToken::LinkedIssues => has_linked_issues,
         };
 
@@ -169,8 +175,9 @@ fn evaluate_bipartite_inspect(
             match plane.token {
                 InspectToken::PrTitle => active_pr_title = true,
                 InspectToken::PrBody => active_pr_body = true,
+                InspectToken::CommitMessages => active_commit_messages = true,
                 InspectToken::LinkedIssues => active_linked_issues = true,
-                InspectToken::Diff | InspectToken::CommitMessages => {}
+                InspectToken::Diff => {}
             }
         }
     }
@@ -184,6 +191,7 @@ fn evaluate_bipartite_inspect(
         inspected_metadata,
         active_pr_title,
         active_pr_body,
+        active_commit_messages,
         active_linked_issues,
     })
 }

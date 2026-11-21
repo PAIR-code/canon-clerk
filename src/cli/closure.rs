@@ -14,7 +14,7 @@
 
 //! Shared closure workspace materialization, metadata merging, and `validate` resolution helpers.
 
-use crate::caseload::{Caseload, CaseloadIntake};
+use crate::caseload::{Caseload, CaseloadIntake, normalize_commit_messages};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
 use crate::cli::provenance::StageDisposition;
@@ -76,6 +76,13 @@ pub(crate) fn merge_metadata_onto_intake(
         .filter(|s| !s.is_empty())
     {
         base.pr_body = Some(body.to_string());
+    }
+    if let Some(commits) = opts
+        .commit_messages
+        .clone()
+        .and_then(normalize_commit_messages)
+    {
+        base.commit_messages = Some(commits);
     }
     if let Some(ws_state) = opts.workspace_state {
         base.workspace_state = ws_state;
@@ -150,7 +157,11 @@ fn execute_cascade_intake_body(
             || intake_opts
                 .pr_body
                 .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
+                .is_some_and(|s| !s.trim().is_empty())
+            || intake_opts
+                .commit_messages
+                .as_ref()
+                .is_some_and(|commits| commits.iter().any(|c| !c.message.trim().is_empty()));
         let merged = merge_metadata_onto_intake(prev_intake, intake_opts);
         existing.docket = None;
         existing.evidence = None;
@@ -225,4 +236,48 @@ pub(crate) fn resolve_closure_validate(
         })
     })?;
     Ok((updated, StageDisposition::Executed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::caseload::{CaseloadDiscovery, CaseloadValidation, CommitMessageContext};
+
+    #[test]
+    fn test_caseload_override_with_commit_messages_merges_and_invalidates_discovery() {
+        let incoming = Caseload::new()
+            .with_intake(CaseloadIntake {
+                target_paths: vec!["src/lib.rs".to_string()],
+                ..CaseloadIntake::default()
+            })
+            .with_discovery(CaseloadDiscovery::default())
+            .with_validation(CaseloadValidation::default());
+
+        let intake_opts = IntakeOptions {
+            commit_messages: Some(vec![CommitMessageContext {
+                sha: Some("abc1234".to_string()),
+                message: "feat(cli): override commit".to_string(),
+            }]),
+            ..IntakeOptions::default()
+        };
+
+        let (updated, disp, intake_changed) = resolve_cascade_intake(
+            "audit",
+            &intake_opts,
+            Some(incoming),
+            &TelemetrySession::noop(),
+        )
+        .expect("merge commit_messages onto incoming caseload");
+
+        assert_eq!(disp, StageDisposition::Executed);
+        assert!(intake_changed);
+        assert!(updated.discovery.is_none());
+        assert!(updated.validation.is_none());
+        let intake = updated.intake.expect("intake");
+        assert_eq!(intake.target_paths, vec!["src/lib.rs".to_string()]);
+        assert_eq!(
+            intake.commit_messages.unwrap()[0].message,
+            "feat(cli): override commit"
+        );
+    }
 }

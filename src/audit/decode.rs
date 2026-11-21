@@ -98,7 +98,7 @@ pub(super) fn decode_case_adjudication(
             annotations.push(normalized);
         }
     } else if status == VerdictStatus::Fail {
-        // Pure metadata-plane case (`pr_title`, `pr_body`, `linked_issues`): validate element
+        // Pure metadata-plane case (`pr_title`, `pr_body`, `linked_issues`, `commit_messages`): validate element
         // shapes if the model emitted any, then enforce `annotations: []`.
         for (idx, item) in raw_annotations.iter().enumerate() {
             validate_annotation_shape_only(item, idx, canon_ref, model_specifier)?;

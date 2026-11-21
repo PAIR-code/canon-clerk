@@ -115,6 +115,20 @@ fn render_human_summary(intake: &CaseloadIntake, stdout: &mut dyn Write) -> std:
             writeln!(stdout, "    - #{}: {title}", issue.number)?;
         }
     }
+    if let Some(commits) = intake.commit_messages.as_deref().filter(|v| !v.is_empty()) {
+        writeln!(stdout, "  Commit Messages : {} commit(s)", commits.len())?;
+        for commit in commits {
+            let subject = commit.message.lines().next().unwrap_or("").trim();
+            match commit
+                .sha
+                .as_deref()
+                .map(|s| s.chars().take(7).collect::<String>())
+            {
+                Some(short_sha) => writeln!(stdout, "    - [{short_sha}] {subject}")?,
+                None => writeln!(stdout, "    - {subject}")?,
+            }
+        }
+    }
 
     writeln!(
         stdout,

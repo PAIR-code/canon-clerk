@@ -29,7 +29,7 @@ const MAX_OVERVIEW_MANIFEST_PATHS: usize = 200;
 
 pub(super) const ADMIT_SYSTEM_INSTRUCTION: &str = "\
 You are the Clerk of the Court for Canon Clerk performing Micro Evidentiary Admissibility Triage (`admit`).
-Given a set of candidate exhibits from an in-flight filing (modified file diffs, target workspace files, and inspected pull request metadata planes such as `pr_title`, `pr_body`, or `linked_issues`) followed by ONE active Case's Governing Canon, determine for EACH candidate exhibit independently whether it is admissible as direct, relevant evidence prior to judicial adjudication (`audit`).
+Given a set of candidate exhibits from an in-flight filing (modified file diffs, target workspace files, and inspected pull request metadata planes such as `pr_title`, `pr_body`, `commit_messages`, or `linked_issues`) followed by ONE active Case's Governing Canon, determine for EACH candidate exhibit independently whether it is admissible as direct, relevant evidence prior to judicial adjudication (`audit`).
 
 Evaluation Rules:
 1. Exact Single-Item Domain Indirection: For each entry in `exhibits`, set `file_path` to ONE exact candidate exhibit identifier copied verbatim from `### Candidate Exhibit:` / `## Required file_path Identifiers`. NEVER comma-separate, group, or combine multiple file paths into a single `file_path` string—every candidate exhibit MUST have its own separate JSON object in `exhibits`.
@@ -41,10 +41,10 @@ Evaluation Rules:
    - Universal Construct Coverage (Every Matching Instance Counts): Most canons govern a general class of constructs across the repository (such as ALL CLI subcommands, flags, help screens, stdin operands, error remediations, or output formatters; ALL domain entities; ALL credential handlers)—never assume a canon refers to some other hypothetical command or module. When a new or modified feature spans a multi-file package (e.g., `src/cli/<cmd>/{mod.rs, guards.rs, render.rs, stages.rs}`), admit (`0.75 - 0.95`) whichever specific file(s) actually implement the governed concern (such as `mod.rs` for CLI args/flags/help/stdin, `guards.rs` for CLI error hints or env-var fallbacks, and `render.rs`/`mod.rs` for `--json` or `stdout`/`stderr` stream separation).
    - Cross-Layer Exclusion (No PR-Wide Halo): Exclude (`0.05 - 0.25`) files belonging to other architectural layers in the same PR that do not instantiate the governed construct—for example, exclude internal domain engines, data-plane models, JSON decoders, and benchmark harnesses when evaluating a `cli-*` canon, and exclude CLI adapters when evaluating an internal domain-entity, validator, or parser canon.
    - Code Stratum vs. Documentation Stratum: When the canon governs source-code or runtime constructs (CLI flags/arguments/help/streams/exit codes, domain entities, validators, parsers, credentials, or test suites), prose Markdown documentation and architecture specs (`*.md`) that merely describe options or behavior do NOT implement the code construct and MUST be scored `0.05 - 0.25` (Excluded)—never admit docs as \"contextual support\". Admit `*.md` files (`0.75 - 0.95`) ONLY when the canon itself governs documentation or specification files (`README.md`, `AGENTS.md`, `llms.txt`, `SPEC.md`, `docs/architecture/`).
-   - Contingent Commit-Type & Construct Preconditions: Inspect exact Conventional Commit prefixes carefully (`feat(...)` is NOT `fix(...)` or `refactor(...)`). When a canon applies ONLY to a specific commit/PR type or construct (e.g., `fix` PRs repairing defects, `refactor` PRs, live external service tests, or POSIX signal traps) and that precondition is NOT met (for example, `pr_title` starts with `feat(...)` on a `fix`-only canon), score EVERY candidate exhibit—INCLUDING `pr_title`, `pr_body`, and `linked_issues` themselves—`0.05 - 0.25` (Excluded) so the inapplicable case is dismissed with zero admitted exhibits.
+   - Contingent Commit-Type & Construct Preconditions: Inspect exact Conventional Commit prefixes carefully (`feat(...)` is NOT `fix(...)` or `refactor(...)`). When a canon applies ONLY to a specific commit/PR type or construct (e.g., `fix` PRs/commits repairing defects, `refactor` PRs, live external service tests, or POSIX signal traps) and that precondition is NOT met (for example, `pr_title` and `commit_messages` contain only `feat(...)` on a `fix`-only canon), score EVERY candidate exhibit—INCLUDING `pr_title`, `pr_body`, `commit_messages`, and `linked_issues` themselves—`0.05 - 0.25` (Excluded) so the inapplicable case is dismissed with zero admitted exhibits.
    - NEVER Exclude Because of Compliance: When an individual exhibit DOES directly define, implement, or modify an instance of the governed construct in the governed stratum and cleanly obeys the rule, you MUST score `0.75 - 0.95` (Admitted) so `audit` receives affirmative evidence of compliance.
-   - Omission & Companion-Artifact Rules: When a canon's triggering precondition IS met (e.g., a `feat(...)` PR required to update `README.md`, or a PR required to link its motivating issue) and the required companion artifact is absent from the diff, admit (`0.75 - 0.95`) the exhibits evidencing the triggering user-facing change (`pr_title`, `pr_body`, `linked_issues`, and primary user-facing entrypoint files), while excluding unrelated internal helper modules.
-   - Metadata Plane Hygiene: Admit `pr_title`, `pr_body`, or `linked_issues` (`0.75 - 0.95`) ONLY when the canon's precondition IS met AND the canon governs commits/PRs/workflow scope or declares `Exception` criteria grounded in PR/issue justification; exclude (`0.05 - 0.25`) metadata planes on self-contained source-code canons.
+   - Omission & Companion-Artifact Rules: When a canon's triggering precondition IS met (e.g., a `feat(...)` PR/commit required to update `README.md`, or a PR required to link its motivating issue) and the required companion artifact is absent from the diff, admit (`0.75 - 0.95`) the exhibits evidencing the triggering user-facing change (`pr_title`, `pr_body`, `commit_messages`, `linked_issues`, and primary user-facing entrypoint files), while excluding unrelated internal helper modules.
+   - Metadata Plane Hygiene: Admit `pr_title`, `pr_body`, `commit_messages`, or `linked_issues` (`0.75 - 0.95`) ONLY when the canon's precondition IS met AND the canon governs commits/PRs/workflow scope or declares `Exception` criteria grounded in PR/commit/issue justification; exclude (`0.05 - 0.25`) metadata planes on self-contained source-code canons.
    - Avoid ambiguous boundary scores in `0.35 - 0.65`: commit decisively to `>= 0.75` when directly relevant or `<= 0.25` when absent/orthogonal.
 4. Completeness & 1-to-1 Cardinality: Return an `exhibits` array whose length equals the exact count in `## Required file_path Identifiers`, with one separate object per identifier in the exact order listed—never group multiple identifiers into one `file_path`, never omit an identifier, and never emit duplicates or unknown paths.";
 
@@ -71,7 +71,7 @@ fn single_exhibit_schema() -> Value {
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "SINGLE exact candidate exhibit identifier copied verbatim from `## Required file_path Identifiers` (either one repository-relative file path or one metadata plane token such as `pr_title`, `pr_body`, `linked_issues`). NEVER comma-separate or combine multiple paths into one string."
+                "description": "SINGLE exact candidate exhibit identifier copied verbatim from `## Required file_path Identifiers` (either one repository-relative file path or one metadata plane token such as `pr_title`, `pr_body`, `commit_messages`, `linked_issues`). NEVER comma-separate or combine multiple paths into one string."
             },
             "admissibility_summary": {
                 "type": "string",
@@ -231,6 +231,12 @@ pub(super) fn build_sliced_filing_overview(
                 issues.len() - MAX_OVERVIEW_LINKED_ISSUES
             );
         }
+        out.push('\n');
+    }
+
+    if let Some(commits) = intake.commit_messages.as_deref().filter(|v| !v.is_empty()) {
+        let _ = writeln!(out, "### Commit Messages Context ({})", commits.len());
+        crate::audit::metadata::append_commit_messages_block(&mut out, commits, "", 15, 1_536);
         out.push('\n');
     }
 

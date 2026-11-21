@@ -165,12 +165,12 @@ impl GithubChecksClient {
         })?
     }
 
-    fn send_get(
+    fn send_get_with_link(
         &self,
         url: &str,
         token: &str,
         accept: &str,
-    ) -> Result<(u16, String), GithubChecksError> {
+    ) -> Result<(u16, Option<String>, String), GithubChecksError> {
         let handle =
             http_reactor_handle("github-pr").map_err(|(err, _)| GithubChecksError::Transport {
                 url: url.to_string(),
@@ -209,13 +209,13 @@ async fn execute_github_get_request(
     token: &str,
     accept: &str,
     timeout: Duration,
-) -> Result<(u16, String), GithubChecksError> {
+) -> Result<(u16, Option<String>, String), GithubChecksError> {
     let request = client
         .request(Method::GET, url)
         .timeout(timeout)
         .header(reqwest::header::ACCEPT, accept)
         .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-        .header(reqwest::header::USER_AGENT, GITHUB_USER_AGENT)
+        .header("User-Agent", GITHUB_USER_AGENT)
         .bearer_auth(token)
         .build()
         .map_err(|err| GithubChecksError::Transport {
@@ -232,6 +232,11 @@ async fn execute_github_get_request(
         })?;
 
     let status = response.status().as_u16();
+    let link_header = response
+        .headers()
+        .get(reqwest::header::LINK)
+        .and_then(|v| v.to_str().ok())
+        .map(ToOwned::to_owned);
     let body = response
         .text()
         .await
@@ -240,7 +245,7 @@ async fn execute_github_get_request(
             message: err.to_string(),
         })?;
 
-    Ok((status, body))
+    Ok((status, link_header, body))
 }
 
 async fn execute_github_request(
@@ -286,7 +291,7 @@ async fn execute_github_request(
     Ok((status, body))
 }
 
-fn extract_github_error_message(body: &str) -> String {
+pub(super) fn extract_github_error_message(body: &str) -> String {
     if let Ok(parsed) = serde_json::from_str::<GithubErrorResponse>(body)
         && let Some(msg) = parsed.message.map(|m| m.trim().to_string())
         && !msg.is_empty()
@@ -400,7 +405,7 @@ impl GithubPullRequestFetcher for GithubChecksClient {
             "{}/repos/{}/{}/pulls/{}",
             target.api_base_url, target.owner, target.repo, target.pull_number
         );
-        let (status, body) = self.send_get(&url, &target.token, GITHUB_API_ACCEPT)?;
+        let (status, _, body) = self.send_get_with_link(&url, &target.token, GITHUB_API_ACCEPT)?;
         if !(200..300).contains(&status) {
             return Err(GithubChecksError::Http {
                 status,
@@ -446,7 +451,8 @@ impl GithubPullRequestFetcher for GithubChecksClient {
             "{}/repos/{}/{}/pulls/{}",
             target.api_base_url, target.owner, target.repo, target.pull_number
         );
-        let (status, body) = self.send_get(&url, &target.token, GITHUB_API_DIFF_ACCEPT)?;
+        let (status, _, body) =
+            self.send_get_with_link(&url, &target.token, GITHUB_API_DIFF_ACCEPT)?;
         if !(200..300).contains(&status) {
             return Err(GithubChecksError::Http {
                 status,
@@ -466,7 +472,7 @@ impl GithubPullRequestFetcher for GithubChecksClient {
             "{}/repos/{}/{}/issues/{}",
             target.api_base_url, target.owner, target.repo, issue_number
         );
-        let (status, body) = self.send_get(&url, &target.token, GITHUB_API_ACCEPT)?;
+        let (status, _, body) = self.send_get_with_link(&url, &target.token, GITHUB_API_ACCEPT)?;
         if status == 404 || status == 403 {
             return Ok(None);
         }
@@ -478,6 +484,15 @@ impl GithubPullRequestFetcher for GithubChecksClient {
             });
         }
         parse_github_issue_json(&body)
+    }
+
+    fn fetch_pull_request_commits(
+        &self,
+        target: &GithubPullRequestTarget,
+    ) -> Result<Vec<crate::caseload::CommitMessageContext>, GithubChecksError> {
+        super::commits::fetch_pr_commits_paginated(target, |url| {
+            self.send_get_with_link(url, &target.token, GITHUB_API_ACCEPT)
+        })
     }
 }
 

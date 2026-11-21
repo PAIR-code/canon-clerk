@@ -2399,7 +2399,7 @@ diff --git a/.github/settings.yml b/.github/settings.yml
             let captured_server = Arc::clone(&captured_check_post);
 
             let server = thread::spawn(move || {
-                for idx in 0..3 {
+                for idx in 0..4 {
                     let (mut stream, _) = listener.accept().expect("accept request");
                     let mut buf = Vec::new();
                     let mut tmp = [0u8; 4096];
@@ -2441,6 +2441,11 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                             "200 OK",
                             "text/plain",
                             "diff --git a/src/cli/audit.rs b/src/cli/audit.rs\n--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1 +1 @@\n-old\n+new\n",
+                        ),
+                        2 => (
+                            "200 OK",
+                            "application/json",
+                            r#"[{"sha":"abc1234","commit":{"message":"feat: native PR"}}]"#,
                         ),
                         _ => {
                             let parsed: Value =
@@ -2700,6 +2705,11 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                     "diff --git a/src/cli/audit.rs b/src/cli/audit.rs\n--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1 +1 @@\n-old\n+new\n"
                         .to_string(),
                 ),
+                (
+                    "200 OK",
+                    "application/json",
+                    r#"[{"sha":"abc1234","commit":{"message":"hotfix: bypass test"}}]"#.to_string(),
+                ),
                 ("201 Created", "application/json", r#"{"id":901}"#.to_string()),
             ]);
 
@@ -2790,7 +2800,10 @@ diff --git a/.github/settings.yml b/.github/settings.yml
 
         #[test]
         fn test_bypass_label_from_numbered_pr_api_and_non_matching_label_does_not_bypass() {
-            // Explicit --github-pr 360 fetches metadata (1 GET), diff (1 GET), then posts Check Run (1 POST).
+            // Explicit --github-pr 360 fetches metadata, diff, commits, then posts Check Run.
+            let commits_json =
+                r#"[{"sha":"api-bypass-sha","commit":{"message":"hotfix: emergency"}}]"#
+                    .to_string();
             let (addr, captured_posts, server) = spawn_mock_github_server(vec![
                 (
                     "200 OK",
@@ -2804,6 +2817,7 @@ diff --git a/.github/settings.yml b/.github/settings.yml
                     "diff --git a/src/cli/audit.rs b/src/cli/audit.rs\n--- a/src/cli/audit.rs\n+++ b/src/cli/audit.rs\n@@ -1 +1 @@\n-old\n+new\n"
                         .to_string(),
                 ),
+                ("200 OK", "application/json", commits_json),
                 ("201 Created", "application/json", r#"{"id":902}"#.to_string()),
             ]);
 

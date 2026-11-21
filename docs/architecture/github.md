@@ -19,19 +19,19 @@ flowchart LR
     end
 
     subgraph CliBoundary ["CLI Driving Adapter"]
-        PrFlags["PR Filing Flags<br/>(--github-pr [&lt;NUMBER&gt;],<br/>--github-repo, --linked-issue)"]
+        PrFlags["PR Filing Flags<br/>(--github-pr [&lt;NUMBER&gt;],<br/>--github-repo, --linked-issue,<br/>--commit-message, --commit-messages-file)"]
         CheckFlags["GitHub Check Flags<br/>(--publish-github-check,<br/>--github-head-sha, --github-check-name,<br/>--github-bypass-label [&lt;LABEL&gt;])"]
         Forensics["Forensics Flush<br/>(--output-caseload)"]
     end
 
     subgraph GithubAdapter ["Driven GitHub Adapter"]
         Context["Context &amp; Credential Resolver<br/>(GITHUB_TOKEN / GH_TOKEN,<br/>GITHUB_REPOSITORY, GITHUB_EVENT_PATH,<br/>GITHUB_EVENT_NAME, GITHUB_SHA, GITHUB_API_URL)"]
-        PrFetcher["Pull Request &amp; Issue Fetcher<br/>(Event Payload Parser, PR Metadata JSON,<br/>Unified Diff &amp; Linked Issue Fetcher)"]
+        PrFetcher["Pull Request, Commit &amp; Issue Fetcher<br/>(Event Payload Parser, PR Metadata JSON,<br/>Unified Diff, Paginated Commits &amp; Linked Issues)"]
         Publisher["Stage-Agnostic Check Run Publisher<br/>(Annotation Sanitizer, 65,535-Char Guards,<br/>POST + 50-Annotation PATCH Batching)"]
     end
 
     subgraph GitHub ["GitHub REST API"]
-        Pulls["Pulls &amp; Issues API<br/>(/repos/{owner}/{repo}/pulls/{number},<br/>/repos/{owner}/{repo}/issues/{number})"]
+        Pulls["Pulls &amp; Issues API<br/>(/repos/{owner}/{repo}/pulls/{number},<br/>/pulls/{number}/commits,<br/>/repos/{owner}/{repo}/issues/{number})"]
         Checks["Checks API<br/>(/repos/{owner}/{repo}/check-runs)"]
     end
 
@@ -73,12 +73,16 @@ The CLI driving adapter supports native pull request ingestion via `--github-pr 
 2. **Unified Diff Fetching:**
    - Fetches the pull request unified diff directly via `GET /repos/{owner}/{repo}/pulls/{pull_number}` with `Accept: application/vnd.github.v3.diff` over Canon Clerk's persistent background HTTP reactor (`transport.md` §2), setting `X-GitHub-Api-Version: 2022-11-28`, `User-Agent: canon-clerk/<version>`, and `Authorization: Bearer <token>`.
 3. **Linked-Issue Discovery & Fetching (`linked_issues`):**
-   - Unless overridden by explicit `--linked-issue <PATH|->` CLI flags, Canon Clerk scans the resolved `pr_body` (after `--pr-body` / `--pr-body-file` override resolution) for same-repo closing keywords matching `SPEC.md` §3.4's case-insensitive pattern `(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#(\d+)`, deduplicated in deterministic ascending issue-number order. (GraphQL `closingIssuesReferences` is not used by the REST adapter.)
-   - For each discovered issue number, the adapter fetches `GET /repos/{owner}/{repo}/issues/{issue_number}` with `Accept: application/vnd.github+json` and projects strictly `number`, `title`, `user.login` (`author`), `labels[].name` (`labels`), `body`, and `html_url` (`url`) onto `LinkedIssueContext`—excluding issue comments and reaction trails per `SPEC.md` §3.4.
+   - Unless overridden by explicit `--linked-issue <PATH|->` CLI flags, Canon Clerk scans the resolved `pr_body` (after `--pr-body` / `--pr-body-file` override resolution) for same-repo closing keywords matching `SPEC.md` §4.2's case-insensitive pattern `(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+#(\d+)`, deduplicated in deterministic ascending issue-number order. (GraphQL `closingIssuesReferences` is not used by the REST adapter.)
+   - For each discovered issue number, the adapter fetches `GET /repos/{owner}/{repo}/issues/{issue_number}` with `Accept: application/vnd.github+json` and projects strictly `number`, `title`, `user.login` (`author`), `labels[].name` (`labels`), `body`, and `html_url` (`url`) onto `LinkedIssueContext`—excluding issue comments and reaction trails per `SPEC.md` §4.2.
    - **Graceful Degradation:** Pull requests returned by the GitHub Issues endpoint (responses containing a `"pull_request"` key), HTTP `404` / `403` responses (e.g., missing `issues: read` permission), and transient per-issue fetch errors are skipped with diagnostic warnings rather than aborting the audit.
-4. **Flag Composition & Precedence:**
+4. **Commit Message Ingestion (`commit_messages`):**
+   - Unless overridden by explicit `--commit-message <TEXT>` or `--commit-messages-file <PATH|->` CLI flags, Canon Clerk fetches pull request commits via `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits?per_page=100` (`Accept: application/vnd.github+json`), projecting strictly `sha` and `commit.message` (excluding commit diffs/stats, tree/parent hashes, signatures/verification, timestamps, and author/committer emails per `SPEC.md` §4.2).
+   - Follows RFC 8288 `Link: rel="next"` pagination deterministically up to a cap of **3 pages / 250 commits** (matching GitHub's PR commits ceiling) while preserving API chronological order; if truncated at the cap, emits a diagnostic warning to `stderr` rather than omitting commits silently.
+   - **Fail-Fast Error Semantics:** Unlike optional cross-repo `linked_issues` `403`/`404` degradation, `/pulls/{pull_number}/commits` uses the same `pull-requests: read` permission as PR metadata and unified diffs, and failing open with empty commits would silently prune all `commit_messages` canons (`discover` false green). HTTP and transport failures on `/pulls/{pull_number}/commits` MUST fail fast with exit code `2` and an actionable `Hint:`.
+5. **Flag Composition & Precedence:**
    - `--github-pr` conflicts with `--diff` (mutually exclusive patch sources).
-   - Explicit `--pr-title`, `--pr-body`, `--pr-body-file`, and `--linked-issue` always override metadata fetched from `$GITHUB_EVENT_PATH` or the GitHub API (`CLI flag > event/API metadata`). When explicit `--linked-issue` flags are supplied, GitHub Issues API fetches are skipped.
+   - Explicit `--pr-title`, `--pr-body`, `--pr-body-file`, `--linked-issue`, `--commit-message`, and `--commit-messages-file` always override metadata fetched from `$GITHUB_EVENT_PATH` or the GitHub API (`CLI flag > event/API metadata`). When explicit `--linked-issue` flags are supplied, GitHub Issues API fetches are skipped; when explicit `--commit-message` or `--commit-messages-file` flags are supplied, GitHub PR Commits API fetches are skipped.
    - **Workspace State Heuristic:** When `--github-pr` is active and `--workspace-state` is omitted, `--workspace-state` defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"`; otherwise it preserves the default `head`. An explicit `--workspace-state <head|base>` always overrides.
 
 ---

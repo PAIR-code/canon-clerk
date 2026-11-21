@@ -187,6 +187,7 @@ pub fn execute_discover(
     let mut active_files_set = BTreeSet::new();
     let mut active_pr_title = false;
     let mut active_pr_body = false;
+    let mut active_commit_messages = false;
     let mut active_linked_issues = false;
     let mut triggers_join = BTreeMap::new();
 
@@ -205,6 +206,7 @@ pub fn execute_discover(
             }
             active_pr_title |= eval.active_pr_title;
             active_pr_body |= eval.active_pr_body;
+            active_commit_messages |= eval.active_commit_messages;
             active_linked_issues |= eval.active_linked_issues;
 
             let mut join_items = eval.matched_files;
@@ -217,7 +219,7 @@ pub fn execute_discover(
         files: active_files_set.into_iter().collect(),
         pr_title: active_pr_title.then_some(true),
         pr_body: active_pr_body.then_some(true),
-        commit_messages: None,
+        commit_messages: active_commit_messages.then_some(true),
         linked_issues: active_linked_issues.then_some(true),
     };
 
@@ -1275,6 +1277,73 @@ mod tests {
                     ".canons/architecture/foo.canon.md".to_string(),
                     ".canons/style/bar.canon.md".to_string(),
                 ]
+            );
+        }
+
+        #[test]
+        fn test_commit_messages_required_plane_prunes_when_absent_and_survives_when_present() {
+            let mut ws = WorkspaceSnapshot::default();
+            ws.existing_files.insert("src/lib.rs".to_string());
+            ws.canons.insert(
+                ".canons/commits.canon.md".to_string(),
+                crate::canon::parse_canon(
+                    "---\ntriggers:\n  - \"**/*\"\ninspect:\n  - diff\n  - commit_messages\n---\nCommits must follow convention.\n",
+                    &crate::canon::ParseCanonOptions {
+                        source_ref: Some(".canons/commits.canon.md".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            );
+
+            let base_intake = CaseloadIntake {
+                target_paths: vec!["src/lib.rs".to_string()],
+                ..CaseloadIntake::default()
+            };
+
+            let pruned = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(base_intake.clone()),
+                &ws,
+            )
+            .expect("discover without commits")
+            .discovery
+            .expect("discovery");
+            assert!(pruned.candidate_canons.is_empty());
+            assert_eq!(pruned.active_exhibits.commit_messages, None);
+
+            let with_commits = CaseloadIntake {
+                commit_messages: Some(vec![crate::caseload::CommitMessageContext {
+                    sha: Some("abc1234".to_string()),
+                    message: "feat(cli): add commit messages".to_string(),
+                }]),
+                ..base_intake
+            };
+            let matched = execute_discover(
+                &DiscoverOptions {
+                    include_builtins: false,
+                    ..DiscoverOptions::default()
+                },
+                Caseload::new().with_intake(with_commits),
+                &ws,
+            )
+            .expect("discover with commits")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                matched.candidate_canons,
+                vec![".canons/commits.canon.md".to_string()]
+            );
+            assert_eq!(matched.active_exhibits.commit_messages, Some(true));
+            assert!(
+                matched
+                    .triggers_join
+                    .get(".canons/commits.canon.md")
+                    .unwrap()
+                    .contains(&"commit_messages".to_string())
             );
         }
     }

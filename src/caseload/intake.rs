@@ -15,7 +15,7 @@
 //! Data plane models for the `.intake` namespace (`docs/architecture/nodes/intake.md` §3).
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// File modification status relative to the base commit or working tree.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +113,53 @@ pub struct LinkedIssueContext {
     pub url: Option<String>,
 }
 
+/// Contextual metadata for a commit message associated with a pull request or change filing.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CommitMessageContext {
+    /// Optional commit SHA (omitted when unavailable or blank).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
+    /// Normalized commit message text (preserving internal blank lines in multi-line bodies).
+    pub message: String,
+}
+
+/// Normalizes commit message entries per `SPEC.md` §4.2:
+/// - Converts `\r\n` to `\n` and trims leading/trailing whitespace on `message` (preserving internal blank lines).
+/// - Normalizes blank `sha` strings to `None`.
+/// - Drops blank/whitespace-only messages and collapses an empty resulting list to `None`.
+/// - Preserves chronological/ingestion order and deduplicates strictly on identical non-empty `sha` values.
+pub fn normalize_commit_messages(
+    commits: Vec<CommitMessageContext>,
+) -> Option<Vec<CommitMessageContext>> {
+    let mut seen_shas = BTreeSet::new();
+    let mut normalized = Vec::with_capacity(commits.len());
+
+    for commit in commits {
+        let message = commit.message.replace("\r\n", "\n").trim().to_string();
+        if message.is_empty() {
+            continue;
+        }
+        let sha = commit
+            .sha
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+        if let Some(ref s) = sha
+            && !seen_shas.insert(s.clone())
+        {
+            continue;
+        }
+        normalized.push(CommitMessageContext { sha, message });
+    }
+
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
 /// Target evaluation scope established during `intake`.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntakeScope {
@@ -189,6 +236,9 @@ pub struct CaseloadIntake {
     /// Optional linked issue contexts associated with the filing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked_issues: Option<Vec<LinkedIssueContext>>,
+    /// Optional chronological commit message contexts associated with the filing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_messages: Option<Vec<CommitMessageContext>>,
 }
 
 #[cfg(test)]
@@ -244,6 +294,16 @@ mod tests {
                 body: None,
                 url: Some("https://github.com/PAIR-code/canon-clerk/issues/222".to_string()),
             }]),
+            commit_messages: Some(vec![
+                CommitMessageContext {
+                    sha: Some("abcdef1234567890".to_string()),
+                    message: "feat(intake): implement front door\n\nBody details.".to_string(),
+                },
+                CommitMessageContext {
+                    sha: None,
+                    message: "test(intake): add round-trip coverage".to_string(),
+                },
+            ]),
         };
 
         let caseload = Caseload::new().with_intake(intake);
@@ -317,5 +377,54 @@ mod tests {
         let reserialized = serde_json::to_string(&decoded).expect("reserialize");
         assert!(!reserialized.contains("author"));
         assert!(!reserialized.contains("labels"));
+    }
+
+    #[test]
+    fn test_normalize_commit_messages_preserves_order_and_dedups_sha_only() {
+        let normalized = normalize_commit_messages(vec![
+            CommitMessageContext {
+                sha: Some("  aaa1111  ".to_string()),
+                message: "  feat(cli): first\r\n\r\nBody line  \r\n".to_string(),
+            },
+            CommitMessageContext {
+                sha: Some("   ".to_string()),
+                message: "wip".to_string(),
+            },
+            CommitMessageContext {
+                sha: None,
+                message: "wip".to_string(),
+            },
+            CommitMessageContext {
+                sha: Some("aaa1111".to_string()),
+                message: "duplicate sha should drop".to_string(),
+            },
+            CommitMessageContext {
+                sha: Some("bbb2222".to_string()),
+                message: "   \r\n\t  ".to_string(),
+            },
+            CommitMessageContext {
+                sha: Some("ccc3333".to_string()),
+                message: "fix(core): last".to_string(),
+            },
+        ])
+        .expect("normalized commits");
+
+        assert_eq!(normalized.len(), 4);
+        assert_eq!(normalized[0].sha.as_deref(), Some("aaa1111"));
+        assert_eq!(normalized[0].message, "feat(cli): first\n\nBody line");
+        assert_eq!(normalized[1].sha, None);
+        assert_eq!(normalized[1].message, "wip");
+        assert_eq!(normalized[2].sha, None);
+        assert_eq!(normalized[2].message, "wip");
+        assert_eq!(normalized[3].sha.as_deref(), Some("ccc3333"));
+        assert_eq!(normalized[3].message, "fix(core): last");
+
+        assert_eq!(
+            normalize_commit_messages(vec![CommitMessageContext {
+                sha: Some("abc".to_string()),
+                message: "   \n ".to_string(),
+            }]),
+            None
+        );
     }
 }

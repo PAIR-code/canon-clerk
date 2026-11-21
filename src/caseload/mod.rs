@@ -43,8 +43,9 @@ pub use evidence::{
     AdmissibilityStatus, CaseloadEvidence, ExhibitAssessment, normalize_admissibility_score,
 };
 pub use intake::{
-    CaseloadIntake, ContentOmissionReason, FileArtifact, FileChangeStatus, IntakeScope,
-    LinkedIssueContext, PatchOmissionReason, WorkspaceState,
+    CaseloadIntake, CommitMessageContext, ContentOmissionReason, FileArtifact, FileChangeStatus,
+    IntakeScope, LinkedIssueContext, PatchOmissionReason, WorkspaceState,
+    normalize_commit_messages,
 };
 pub use probe::{CaseloadProbe, ProbeStatus, ProbeTargetResult};
 pub use validation::{

@@ -129,7 +129,7 @@ Conversely, when an explicitly designated stream yields zero changes, `discover`
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
-- `--diff <PATH|->`, `--workspace-state <head|base>`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
+- `--diff <PATH|->`, `--workspace-state <head|base>`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`, `--linked-issue <PATH|->`, `--commit-message <TEXT>`, `--commit-messages-file <PATH|->`: Shared filing source and metadata flags.
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags (evaluated against the underlying filing).
 - `--vet-threshold <FLOAT>` (fallback env: `CANON_CLERK_VET_THRESHOLD`; config key: `nodes.vet.threshold`): Prima facie compliance threshold in `[0.0, 1.0]` (default: `0.80`). Ambiguous unqualified `--threshold` and out-of-closure `--audit-*` or `--apprise-*` flags are rejected with exit code `2` and guidance pointing to `--vet-*`, `--admit-*`, and `--docket-*`.
 - `--vet-concurrency <COUNT>` (fallback env: `CANON_CLERK_VET_CONCURRENCY`; config key: `nodes.vet.concurrency`): Optional positive integer (`>= 1`) bounding maximum concurrent in-flight per-case vetting calls (default: `4`). Follows standard precedence (explicit CLI flag $\to$ environment variable $\to$ `~/.config/canon-clerk/config.json` $\to$ built-in default).
