@@ -20,7 +20,9 @@ use crate::admit::{AdmitOptions, execute_admit};
 use crate::caseload::{Caseload, CaseloadEvidence, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::args::CanonSelectionArgs;
-use crate::cli::closure::{ClosureBackend, merge_metadata_onto_intake};
+use crate::cli::closure::{
+    ClosureBackend, has_filing_metadata_overrides, merge_metadata_onto_intake,
+};
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
@@ -76,18 +78,7 @@ fn execute_admit_intake_body(
         && let Some(existing) = incoming.as_mut()
         && let Some(prev_intake) = existing.intake.take()
     {
-        let pr_meta_added = intake_opts
-            .pr_title
-            .as_deref()
-            .is_some_and(|s| !s.trim().is_empty())
-            || intake_opts
-                .pr_body
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty())
-            || intake_opts
-                .commit_messages
-                .as_ref()
-                .is_some_and(|commits| commits.iter().any(|c| !c.message.trim().is_empty()));
+        let pr_meta_added = has_filing_metadata_overrides(intake_opts);
         let merged = merge_metadata_onto_intake(prev_intake, intake_opts);
         existing.docket = None;
         existing.evidence = None;
@@ -375,4 +366,61 @@ fn run_admit_stage(
             execute_admit(opts, caseload, snapshot, &instrumented)
         })
         .map_err(|err| CliError::usage(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::caseload::{
+        CaseloadDiscovery, CaseloadDocket, CaseloadIntake, CaseloadValidation, LinkedIssueContext,
+    };
+
+    #[test]
+    fn test_admit_caseload_override_with_linked_issues_replaces_and_invalidates_upstream() {
+        let incoming = Caseload::new()
+            .with_intake(CaseloadIntake {
+                target_paths: vec!["src/lib.rs".to_string()],
+                linked_issues: Some(vec![LinkedIssueContext {
+                    number: 383,
+                    title: Some("Original issue".to_string()),
+                    author: None,
+                    labels: Vec::new(),
+                    body: None,
+                    url: None,
+                }]),
+                ..CaseloadIntake::default()
+            })
+            .with_discovery(CaseloadDiscovery::default())
+            .with_validation(CaseloadValidation::default())
+            .with_docket(CaseloadDocket::default())
+            .with_evidence(CaseloadEvidence::default());
+
+        let intake_opts = IntakeOptions {
+            linked_issues: Some(vec![LinkedIssueContext {
+                number: 391,
+                title: Some("Override issue".to_string()),
+                author: None,
+                labels: Vec::new(),
+                body: None,
+                url: None,
+            }]),
+            ..IntakeOptions::default()
+        };
+
+        let (updated, disp, intake_changed) =
+            resolve_admit_intake(&intake_opts, Some(incoming), &TelemetrySession::noop())
+                .expect("merge linked_issues onto incoming admit caseload");
+
+        assert_eq!(disp, StageDisposition::Executed);
+        assert!(intake_changed);
+        assert!(updated.discovery.is_none());
+        assert!(updated.validation.is_none());
+        assert!(updated.docket.is_none());
+        assert!(updated.evidence.is_none());
+        let intake = updated.intake.expect("intake");
+        assert_eq!(intake.target_paths, vec!["src/lib.rs".to_string()]);
+        let issues = intake.linked_issues.expect("linked_issues");
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].number, 391);
+    }
 }
