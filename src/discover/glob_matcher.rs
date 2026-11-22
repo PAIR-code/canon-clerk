@@ -15,6 +15,7 @@
 //! Pure POSIX path normalization, scope containment, and glob matching (`SPEC.md` §3.2, §4.2).
 
 use crate::canon::CanonScope;
+use globset::{GlobBuilder, GlobMatcher};
 use std::fmt;
 
 /// Default noise directories excluded from workspace traversal and discovery.
@@ -45,11 +46,19 @@ impl fmt::Display for GlobSyntaxError {
 impl std::error::Error for GlobSyntaxError {}
 
 /// Compiled glob pattern supporting `**`, `*`, `?`, `[...]`, and `{a,b}` brace expansion.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct GlobPattern {
     raw: String,
-    variants: Vec<Vec<String>>,
+    matcher: GlobMatcher,
 }
+
+impl PartialEq for GlobPattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl Eq for GlobPattern {}
 
 impl GlobPattern {
     /// Parses and validates a glob pattern string.
@@ -62,28 +71,19 @@ impl GlobPattern {
             });
         }
 
-        validate_delimiters(trimmed)?;
         let normalized = normalize_glob_str(trimmed);
-        let expanded = expand_braces(&normalized);
-        let variants = expanded
-            .into_iter()
-            .map(|variant| {
-                let clean = normalize_glob_str(&variant);
-                if clean == "**/*" || clean == "**" {
-                    vec!["**".to_string()]
-                } else {
-                    clean
-                        .split('/')
-                        .filter(|s| !s.is_empty())
-                        .map(ToOwned::to_owned)
-                        .collect()
-                }
-            })
-            .collect();
+        let matcher = GlobBuilder::new(&normalized)
+            .literal_separator(true)
+            .build()
+            .map_err(|err| GlobSyntaxError {
+                pattern: raw.to_string(),
+                message: err.kind().to_string(),
+            })?
+            .compile_matcher();
 
         Ok(Self {
             raw: trimmed.to_string(),
-            variants,
+            matcher,
         })
     }
 
@@ -98,14 +98,7 @@ impl GlobPattern {
         if clean_path.is_empty() || clean_path == "." {
             return false;
         }
-        let path_segments: Vec<&str> = clean_path.split('/').filter(|s| !s.is_empty()).collect();
-        if path_segments.is_empty() {
-            return false;
-        }
-
-        self.variants
-            .iter()
-            .any(|variant| match_segments(variant, &path_segments))
+        self.matcher.is_match(&clean_path)
     }
 }
 
@@ -184,183 +177,16 @@ fn normalize_glob_str(raw: &str) -> String {
     while let Some(rest) = s.strip_prefix("./") {
         s = rest;
     }
-    s.trim_matches('/').to_string()
-}
-
-fn validate_delimiters(pattern: &str) -> Result<(), GlobSyntaxError> {
-    let mut in_brackets = false;
-    let mut brace_depth: usize = 0;
-    let mut escaped = false;
-
-    for ch in pattern.chars() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-        match ch {
-            '[' if !in_brackets => in_brackets = true,
-            ']' if in_brackets => in_brackets = false,
-            '{' if !in_brackets => brace_depth += 1,
-            '}' if !in_brackets => {
-                if brace_depth == 0 {
-                    return Err(GlobSyntaxError {
-                        pattern: pattern.to_string(),
-                        message: "unmatched closing brace `}`".to_string(),
-                    });
-                }
-                brace_depth -= 1;
-            }
-            _ => {}
-        }
+    let trimmed = s.trim_matches('/');
+    if trimmed.contains("//") {
+        trimmed
+            .split('/')
+            .filter(|seg| !seg.is_empty())
+            .collect::<Vec<_>>()
+            .join("/")
+    } else {
+        trimmed.to_string()
     }
-
-    if in_brackets {
-        return Err(GlobSyntaxError {
-            pattern: pattern.to_string(),
-            message: "unclosed character class `[`".to_string(),
-        });
-    }
-    if brace_depth > 0 {
-        return Err(GlobSyntaxError {
-            pattern: pattern.to_string(),
-            message: "unclosed brace expansion `{`".to_string(),
-        });
-    }
-    Ok(())
-}
-
-fn expand_braces(pattern: &str) -> Vec<String> {
-    let Some(open_idx) = pattern.find('{') else {
-        return vec![pattern.to_string()];
-    };
-
-    let mut depth = 0;
-    let mut close_idx = None;
-    let mut top_commas = Vec::new();
-
-    for (offset, ch) in pattern[open_idx..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    close_idx = Some(open_idx + offset);
-                    break;
-                }
-            }
-            ',' if depth == 1 => top_commas.push(open_idx + offset),
-            _ => {}
-        }
-    }
-
-    let Some(close) = close_idx else {
-        return vec![pattern.to_string()];
-    };
-    if top_commas.is_empty() {
-        let inner = &pattern[open_idx + 1..close];
-        let combined = format!("{}{}{}", &pattern[..open_idx], inner, &pattern[close + 1..]);
-        return expand_braces(&combined);
-    }
-
-    let prefix = &pattern[..open_idx];
-    let suffix = &pattern[close + 1..];
-    let mut results = Vec::new();
-    let mut start = open_idx + 1;
-    for comma in top_commas {
-        let alt = &pattern[start..comma];
-        let candidate = format!("{prefix}{alt}{suffix}");
-        results.extend(expand_braces(&candidate));
-        start = comma + 1;
-    }
-    let last_alt = &pattern[start..close];
-    let candidate = format!("{prefix}{last_alt}{suffix}");
-    results.extend(expand_braces(&candidate));
-    results
-}
-
-fn match_segments(pat: &[String], path: &[&str]) -> bool {
-    if pat.is_empty() {
-        return path.is_empty();
-    }
-    if pat[0] == "**" {
-        if pat.len() == 1 {
-            return true;
-        }
-        if match_segments(&pat[1..], path) {
-            return true;
-        }
-        return !path.is_empty() && match_segments(pat, &path[1..]);
-    }
-    if path.is_empty() {
-        return false;
-    }
-    let p_chars: Vec<char> = pat[0].chars().collect();
-    let t_chars: Vec<char> = path[0].chars().collect();
-    match_segment_chars(&p_chars, &t_chars) && match_segments(&pat[1..], &path[1..])
-}
-
-fn match_segment_chars(pat: &[char], text: &[char]) -> bool {
-    if pat.is_empty() {
-        return text.is_empty();
-    }
-    match pat[0] {
-        '*' => {
-            let mut idx = 1;
-            while idx < pat.len() && pat[idx] == '*' {
-                idx += 1;
-            }
-            if match_segment_chars(&pat[idx..], text) {
-                return true;
-            }
-            !text.is_empty() && match_segment_chars(&pat[idx - 1..], &text[1..])
-        }
-        '?' => !text.is_empty() && match_segment_chars(&pat[1..], &text[1..]),
-        '[' => {
-            if text.is_empty() {
-                return false;
-            }
-            if let Some((matched, next_pat_idx)) = match_char_class(&pat[1..], text[0]) {
-                matched && match_segment_chars(&pat[1 + next_pat_idx..], &text[1..])
-            } else {
-                pat[0] == text[0] && match_segment_chars(&pat[1..], &text[1..])
-            }
-        }
-        c => !text.is_empty() && c == text[0] && match_segment_chars(&pat[1..], &text[1..]),
-    }
-}
-
-fn match_char_class(pat_after_open: &[char], target: char) -> Option<(bool, usize)> {
-    let close_pos = pat_after_open.iter().position(|&c| c == ']')?;
-    let class_chars = &pat_after_open[..close_pos];
-    let (negated, items) =
-        if !class_chars.is_empty() && (class_chars[0] == '!' || class_chars[0] == '^') {
-            (true, &class_chars[1..])
-        } else {
-            (false, class_chars)
-        };
-
-    let mut found = false;
-    let mut i = 0;
-    while i < items.len() {
-        if i + 2 < items.len() && items[i + 1] == '-' {
-            if target >= items[i] && target <= items[i + 2] {
-                found = true;
-            }
-            i += 3;
-        } else {
-            if items[i] == target {
-                found = true;
-            }
-            i += 1;
-        }
-    }
-
-    let result = if negated { !found } else { found };
-    Some((result, close_pos + 1))
 }
 
 #[cfg(test)]
@@ -378,6 +204,11 @@ mod tests {
         let class_glob = GlobPattern::parse("tests/test_[0-9].rs").expect("valid class glob");
         assert!(class_glob.is_match("tests/test_4.rs"));
         assert!(!class_glob.is_match("tests/test_a.rs"));
+
+        let dotfile_glob = GlobPattern::parse(DEFAULT_CANON_GLOB).expect("valid default glob");
+        assert!(dotfile_glob.is_match(".canons/rule.canon.md"));
+        assert!(dotfile_glob.is_match("pkg/.canons/sub/rule.canon.md"));
+        assert!(!dotfile_glob.is_match("src/lib.rs"));
     }
 
     #[test]
