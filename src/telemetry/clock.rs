@@ -110,6 +110,12 @@ impl TelemetryClock for SteppingTelemetryClock {
 ///
 /// Uses Howard Hinnant's proleptic Gregorian `civil_from_days` algorithm to convert UTC days
 /// without ambient locale or timezone dependencies.
+///
+/// **Architectural Exception (`reinventing-standard-solutions-is-forbidden`, #402):**
+/// Intentionally retained as ~25 lines of pure, total `u128` UTC calendar arithmetic rather than
+/// pulling a general-purpose date/time crate (`time`, `chrono`, `jiff`) into the CLI dependency
+/// graph solely to emit one fixed-width UTC telemetry timestamp. Unlike HTTP-date parsing, this
+/// path performs no external input parsing, timezone resolution, or DST calculation.
 pub fn format_unix_millis_iso8601(epoch_ms: u128) -> String {
     let millis = epoch_ms % 1_000;
     let total_secs = epoch_ms / 1_000;

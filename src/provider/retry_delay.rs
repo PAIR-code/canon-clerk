@@ -15,6 +15,7 @@
 //! Multi-source upstream retry-delay extraction (`Retry-After` RFC 9110 headers, JSON `RetryInfo`, and message hints).
 
 use serde_json::Value;
+use std::time::UNIX_EPOCH;
 
 /// Extracts an upstream-advised retry delay in milliseconds across Tiers 1–3 in descending precedence:
 /// 1. HTTP `Retry-After` response header (delta-seconds or RFC 9110 HTTP-date).
@@ -168,86 +169,40 @@ fn parse_retry_after_header(header: &str, now_unix_ms: u64) -> Option<u64> {
 
 /// Parses RFC 9110 §5.6.7 HTTP-date formats (`IMF-fixdate`, `rfc850-date`, `asctime-date`) into UTC epoch ms.
 pub(crate) fn parse_http_date_unix_ms(input: &str) -> Option<u64> {
-    let trimmed = input.trim();
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    let (year, month, day, hms) = match parts.as_slice() {
-        [_, day_s, mon_s, year_s, time_s, "GMT"] => (
-            year_s.parse::<i64>().ok()?,
-            parse_month(mon_s)?,
-            day_s.parse::<u32>().ok()?,
-            *time_s,
-        ),
-        [_, dmy_s, time_s, "GMT"] => {
-            let mut segs = dmy_s.split('-');
-            let day = segs.next()?.parse::<u32>().ok()?;
-            let month = parse_month(segs.next()?)?;
-            let two_yr = segs.next()?.parse::<i64>().ok()?;
-            let year = if two_yr >= 70 {
-                1900 + two_yr
-            } else {
-                2000 + two_yr
-            };
-            (year, month, day, *time_s)
-        }
-        [_, mon_s, day_s, time_s, year_s] => (
-            year_s.parse::<i64>().ok()?,
-            parse_month(mon_s)?,
-            day_s.parse::<u32>().ok()?,
-            *time_s,
-        ),
-        _ => return None,
-    };
-
-    let (hour, min, sec) = parse_hms(hms)?;
-    if !(1..=31).contains(&day) || year < 1970 {
-        return None;
-    }
-    let days = days_from_civil(year, month, day);
-    if days < 0 {
-        return None;
-    }
-    let total_secs = (days as u64)
-        .checked_mul(86_400)?
-        .checked_add(u64::from(hour) * 3_600 + u64::from(min) * 60 + u64::from(sec))?;
-    total_secs.checked_mul(1_000)
+    let system_time = httpdate::parse_http_date(input.trim()).ok()?;
+    let duration = system_time.duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(duration.as_millis()).ok()
 }
 
-fn parse_month(mon: &str) -> Option<u32> {
-    match mon {
-        "Jan" => Some(1),
-        "Feb" => Some(2),
-        "Mar" => Some(3),
-        "Apr" => Some(4),
-        "May" => Some(5),
-        "Jun" => Some(6),
-        "Jul" => Some(7),
-        "Aug" => Some(8),
-        "Sep" => Some(9),
-        "Oct" => Some(10),
-        "Nov" => Some(11),
-        "Dec" => Some(12),
-        _ => None,
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn parse_hms(hms: &str) -> Option<(u32, u32, u32)> {
-    let mut it = hms.split(':');
-    let h: u32 = it.next()?.parse().ok()?;
-    let m: u32 = it.next()?.parse().ok()?;
-    let s: u32 = it.next()?.parse().ok()?;
-    if it.next().is_some() || h > 23 || m > 59 || s > 60 {
-        return None;
+    #[test]
+    fn test_parse_http_date_formats_and_rejects_invalid_calendar_dates() {
+        // IMF-fixdate: 2026-11-16T00:00:00Z = 1_794_787_200_000 ms
+        assert_eq!(
+            parse_http_date_unix_ms("Mon, 16 Nov 2026 00:00:00 GMT"),
+            Some(1_794_787_200_000)
+        );
+        // RFC 850 obsolete format: 1994-11-06T08:49:37Z = 784_111_777_000 ms
+        assert_eq!(
+            parse_http_date_unix_ms("Sunday, 06-Nov-94 08:49:37 GMT"),
+            Some(784_111_777_000)
+        );
+        // ANSI C asctime() format: 1994-11-06T08:49:37Z
+        assert_eq!(
+            parse_http_date_unix_ms("Sun Nov  6 08:49:37 1994"),
+            Some(784_111_777_000)
+        );
+        // Invalid calendar dates must be rejected rather than rolled forward.
+        assert_eq!(
+            parse_http_date_unix_ms("Sat, 31 Feb 2026 00:00:00 GMT"),
+            None
+        );
+        assert_eq!(
+            parse_http_date_unix_ms("Sun, 29 Feb 2026 00:00:00 GMT"),
+            None
+        );
     }
-    Some((h, m, s))
-}
-
-fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let y = year - i64::from(month <= 2);
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let m = u64::from(month);
-    let d = u64::from(day);
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + (doe as i64) - 719_468
 }
