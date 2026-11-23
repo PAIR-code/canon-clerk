@@ -819,12 +819,12 @@ mod tests {
 
     mod loopback_http_transport {
         use super::*;
-        use std::io::{Read, Write};
+        use std::io::{ErrorKind, Read, Write};
         use std::net::TcpListener;
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Condvar, Mutex};
         use std::thread;
-        use std::time::Duration;
+        use std::time::{Duration, Instant};
 
         fn read_complete_http_request(stream: &mut std::net::TcpStream) -> String {
             stream
@@ -1078,58 +1078,126 @@ mod tests {
             assert_eq!(custom_with_base.base_url(), "http://custom-proxy:8080");
         }
 
+        fn serve_staged_keep_alive_connection(
+            mut stream: std::net::TcpStream,
+            served: Arc<AtomicUsize>,
+            shutdown: Arc<AtomicBool>,
+            stage2_latch: Arc<(Mutex<usize>, Condvar)>,
+        ) {
+            loop {
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(200)))
+                    .expect("set read timeout");
+                let mut probe = [0_u8; 1];
+                match stream.peek(&mut probe) {
+                    Ok(0) => break,
+                    Err(err)
+                        if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                    {
+                        continue;
+                    }
+                    Err(_) => break,
+                    Ok(_) => {}
+                }
+                let raw_req = read_complete_http_request(&mut stream);
+                if raw_req.is_empty() {
+                    break;
+                }
+                let n = served.fetch_add(1, Ordering::SeqCst) + 1;
+                if n >= 2 {
+                    let (lock, cvar) = &*stage2_latch;
+                    let mut arrived = lock.lock().expect("stage2 latch lock");
+                    *arrived += 1;
+                    if *arrived >= 4 {
+                        cvar.notify_all();
+                    } else {
+                        let deadline = Instant::now() + Duration::from_secs(2);
+                        while *arrived < 4 && !shutdown.load(Ordering::Acquire) {
+                            let remaining = deadline.saturating_duration_since(Instant::now());
+                            if remaining.is_zero() {
+                                break;
+                            }
+                            let (guard, wait_res) = cvar
+                                .wait_timeout(arrived, remaining)
+                                .expect("stage2 latch wait");
+                            arrived = guard;
+                            if wait_res.timed_out() {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let body = json!({
+                    "candidates": [{
+                        "content": {
+                            "parts": [{ "text": format!("{{\"req_num\":{n}}}") }]
+                        },
+                        "finishReason": "STOP"
+                    }],
+                    "modelVersion": "gemini-4-hydrogen"
+                })
+                .to_string();
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                if stream.write_all(resp.as_bytes()).is_err() {
+                    break;
+                }
+                let _ = stream.flush();
+            }
+        }
+
         #[test]
         fn test_parked_warmer_thread_does_not_starve_downstream_concurrent_workers() {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            listener
+                .set_nonblocking(true)
+                .expect("set nonblocking accept");
             let addr = listener.local_addr().expect("local addr");
             let accepted_sockets = Arc::new(AtomicUsize::new(0));
             let served_requests = Arc::new(AtomicUsize::new(0));
+            let shutdown = Arc::new(AtomicBool::new(false));
+            let stage2_arrived = Arc::new((Mutex::new(0_usize), Condvar::new()));
+
             let accepted_ref = Arc::clone(&accepted_sockets);
             let served_ref = Arc::clone(&served_requests);
+            let shutdown_ref = Arc::clone(&shutdown);
+            let stage2_ref = Arc::clone(&stage2_arrived);
 
-            // Serve 5 total requests across at most 4 keep-alive sockets (1 warmed + reused + 3 fresh).
+            // Serve 5 total requests across 4 keep-alive sockets (1 warmed + reused + 3 fresh),
+            // terminating cleanly via `shutdown` and synchronizing Stage 2's 4 workers on a
+            // bounded latch so all 4 are simultaneously in-flight.
             let server = thread::spawn(move || {
                 let mut conn_threads = Vec::new();
-                for _ in 0..4 {
-                    let (mut stream, _) = listener.accept().expect("accept pooled socket");
-                    accepted_ref.fetch_add(1, Ordering::SeqCst);
-                    let served_inner = Arc::clone(&served_ref);
-                    conn_threads.push(thread::spawn(move || {
-                        loop {
+                while !shutdown_ref.load(Ordering::Acquire) {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
                             stream
-                                .set_read_timeout(Some(Duration::from_millis(400)))
-                                .expect("set read timeout");
-                            let mut probe = [0_u8; 1];
-                            match stream.peek(&mut probe) {
-                                Ok(0) | Err(_) => break,
-                                Ok(_) => {}
-                            }
-                            let raw_req = read_complete_http_request(&mut stream);
-                            if raw_req.is_empty() {
-                                break;
-                            }
-                            let n = served_inner.fetch_add(1, Ordering::SeqCst) + 1;
-                            let body = json!({
-                                "candidates": [{
-                                    "content": {
-                                        "parts": [{ "text": format!("{{\"req_num\":{n}}}") }]
-                                    },
-                                    "finishReason": "STOP"
-                                }],
-                                "modelVersion": "gemini-4-hydrogen"
-                            })
-                            .to_string();
-                            let resp = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                                body.len(),
-                                body
-                            );
-                            if stream.write_all(resp.as_bytes()).is_err() {
-                                break;
-                            }
-                            let _ = stream.flush();
+                                .set_nonblocking(false)
+                                .expect("set accepted socket blocking");
+                            accepted_ref.fetch_add(1, Ordering::SeqCst);
+                            let served_inner = Arc::clone(&served_ref);
+                            let shutdown_inner = Arc::clone(&shutdown_ref);
+                            let stage2_inner = Arc::clone(&stage2_ref);
+                            conn_threads.push(thread::spawn(move || {
+                                serve_staged_keep_alive_connection(
+                                    stream,
+                                    served_inner,
+                                    shutdown_inner,
+                                    stage2_inner,
+                                );
+                            }));
                         }
-                    }));
+                        Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(err) => panic!("accept pooled socket: {err}"),
+                    }
                 }
                 for h in conn_threads {
                     let _ = h.join();
@@ -1141,7 +1209,7 @@ mod tests {
                 format!("http://{addr}/v1beta"),
             );
             let mut req = sample_request(None);
-            req.timeout_ms = 500;
+            req.timeout_ms = 1_000;
 
             // Stage 1 (simulating 1-canon `docket` inline on caller thread): warm 1 pooled socket.
             let warm = provider
@@ -1151,29 +1219,34 @@ mod tests {
 
             // Stage 2 (simulating 4-slice `admit` parking caller thread inside `std::thread::scope`):
             // One worker pops the warmed keep-alive socket while caller thread is parked on join.
-            std::thread::scope(|scope| {
+            let worker_results: Vec<_> = std::thread::scope(|scope| {
                 let mut handles = Vec::new();
                 for _ in 0..4 {
                     let prov = provider.clone();
                     let worker_req = req.clone();
                     handles.push(scope.spawn(move || prov.generate_structured(&worker_req)));
                 }
-                for handle in handles {
-                    let res = handle
-                        .join()
-                        .expect("worker thread joined")
-                        .expect("concurrent worker call must not stall on parked warmer thread");
-                    assert!(res.payload["req_num"].as_u64().is_some());
-                }
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().expect("worker thread joined"))
+                    .collect()
             });
 
             drop(provider);
+            shutdown.store(true, Ordering::Release);
+            stage2_arrived.1.notify_all();
             server.join().expect("server joined");
+
+            for res in worker_results {
+                let res =
+                    res.expect("concurrent worker call must not stall on parked warmer thread");
+                assert!(res.payload["req_num"].as_u64().is_some());
+            }
             assert_eq!(served_requests.load(Ordering::SeqCst), 5);
             assert_eq!(
                 accepted_sockets.load(Ordering::SeqCst),
                 4,
-                "5 total calls across 4 concurrent workers must reuse the warmed socket"
+                "5 total calls across 4 simultaneously in-flight workers must reuse the warmed socket"
             );
         }
 
