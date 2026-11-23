@@ -1,0 +1,39 @@
+name: "Repo Metadata Sync"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/settings.yml"
+      - ".github/workflows/repo-metadata-sync.yml"
+      - ".github/scripts/repo_settings.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: "Apply"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Synchronize repository settings
+        run: python3 .github/scripts/repo_settings.py sync
+        env:
+          GH_TOKEN: ${{ secrets.REPO_SETTINGS_TOKEN }}

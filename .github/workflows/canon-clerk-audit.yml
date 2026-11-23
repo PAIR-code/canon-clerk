@@ -1,4 +1,4 @@
-name: "Canon Clerk Audit"
+name: "Canon Audit"
 
 on: # zizmor: ignore[dangerous-triggers] -- checks out and builds only trusted main; PR diff and metadata are ingested strictly as data, gated by author_association or the `audit` label
   pull_request_target:
@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   audit:
-    name: "Audit Pull Request"
+    name: "Run"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,7 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --github-bypass-label skip-audit --on-missing-credentials skip --output-caseload caseload.json
+        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --github-check-name "Canon Audit Report" --github-bypass-label skip-audit --on-missing-credentials skip --output-caseload caseload.json
 
       - name: Upload Caseload forensics artifact
         if: always()

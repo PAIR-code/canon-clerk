@@ -55,7 +55,7 @@ Queries failing checks, retrieves logs via REST endpoint, saves complete logs to
 
 When diagnosing failing status checks, classify the failure into one of four categories:
 
-1. **PR Title Linter (`Validate PR Title`):** Fails if PR title violates Conventional Commits. Fix with `gh pr edit <pr-number> --title "type(scope): description (#issue)"` (no code commit needed).
+1. **PR Title Linter (`PR Title / Conventional Commits`):** Fails if PR title violates Conventional Commits. Fix with `gh pr edit <pr-number> --title "type(scope): description (#issue)"` (no code commit needed).
 2. **Security & Policy Scans (`Google GitHub Admin`, `zizmor`):** Fails on workflow policies (e.g. unpinned actions, script injection). Fix by pinning action SHAs or addressing SARIF findings.
 3. **Contributor License Agreement (`cla/google`):** Fails if author email lacks signed Google CLA. Remind author to sign via `https://cla.developers.google.com/`.
 4. **Repository CI (Tests, Lint, Build):** Inspect failure lines via `pr-failed-logs.sh`, reproduce locally in the worktree, and push fixes.

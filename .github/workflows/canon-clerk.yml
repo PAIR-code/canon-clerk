@@ -1,4 +1,4 @@
-name: "Canon Clerk"
+name: "Canon Corpus"
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   validate:
-    name: "Validate Canons"
+    name: "Lint & Schema"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
