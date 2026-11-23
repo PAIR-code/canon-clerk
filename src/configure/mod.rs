@@ -435,6 +435,12 @@ pub fn execute_configure(
         if node == HeuristicNode::Audit && capability == ModelCapability::Discriminator {
             return Err(ConfigureError::DiscriminativeAuditUnsupported { specifier: model });
         }
+        if node != HeuristicNode::Audit && capability == ModelCapability::Generator {
+            return Err(ConfigureError::GenerativeScreeningUnsupported {
+                node,
+                specifier: model,
+            });
+        }
 
         let existing_node = existing.and_then(|c| c.node(node));
         let (thinking_level, reasoning_budget) = resolve_node_thinking_options(
@@ -782,7 +788,7 @@ mod tests {
             stored_nodes.insert(
                 HeuristicNode::Docket,
                 StoredNodeConfig {
-                    model: Some("google:gemini-2.5-flash-lite".to_string()),
+                    model: Some("google:gemini-decision-1".to_string()),
                     ..StoredNodeConfig::default()
                 },
             );
@@ -805,10 +811,7 @@ mod tests {
             };
 
             let mut env = BTreeMap::new();
-            env.insert(
-                ENV_ADMIT_MODEL.to_string(),
-                "google:gemini-4-hydrogen".to_string(),
-            );
+            env.insert(ENV_ADMIT_MODEL.to_string(), "local:kev-4b".to_string());
 
             let opts = ConfigureOptions {
                 stored_config: Some(stored),
@@ -829,19 +832,11 @@ mod tests {
             );
             assert_eq!(
                 resolved.node(HeuristicNode::Docket),
-                Some(&ResolvedNodeConfig::with_thinking(
-                    "google:gemini-2.5-flash-lite",
-                    Some(ThinkingLevel::Medium),
-                    None
-                ))
+                Some(&ResolvedNodeConfig::new("google:gemini-decision-1"))
             );
             assert_eq!(
                 resolved.node(HeuristicNode::Admit),
-                Some(&ResolvedNodeConfig::with_thinking(
-                    "google:gemini-4-hydrogen",
-                    Some(ThinkingLevel::Medium),
-                    None
-                ))
+                Some(&ResolvedNodeConfig::new("local:kev-4b"))
             );
             assert_eq!(
                 resolved.node(HeuristicNode::Vet),
@@ -855,6 +850,35 @@ mod tests {
                     Some(2048)
                 ))
             );
+        }
+
+        #[test]
+        fn test_rejects_generative_models_on_all_screening_stages() {
+            for node in [
+                HeuristicNode::Apprise,
+                HeuristicNode::Docket,
+                HeuristicNode::Admit,
+                HeuristicNode::Vet,
+            ] {
+                let opts = ConfigureOptions {
+                    env: env_with_google_key(),
+                    ..ConfigureOptions::default()
+                }
+                .with_node_model(node, DEFAULT_GOOGLE_GENERATOR_MODEL);
+                let err = execute_configure(&opts, None)
+                    .expect_err("generator model on screening node must fail");
+                assert_eq!(
+                    err,
+                    ConfigureError::GenerativeScreeningUnsupported {
+                        node,
+                        specifier: DEFAULT_GOOGLE_GENERATOR_MODEL.to_string(),
+                    }
+                );
+                let msg = err.to_string();
+                assert!(msg.contains("google:gemini-decision-1"));
+                assert!(msg.contains("typesafe:jev-latest"));
+                assert!(msg.contains("local:kev-4b"));
+            }
         }
 
         #[test]

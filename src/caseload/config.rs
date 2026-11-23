@@ -34,17 +34,11 @@ pub const DEFAULT_GOOGLE_DISCRIMINATOR_MODEL: &str = "google:gemini-decision-1";
 /// Default canonical Google `Generator` model specifier (`docs/architecture/nodes/configure.md` §4).
 pub const DEFAULT_GOOGLE_GENERATOR_MODEL: &str = "google:gemini-4-carbon";
 
-/// Canonical Google `Generator` model specifier frequently used when overriding screening stages.
-pub const DEFAULT_GENERATIVE_SCREENING_MODEL: &str = "google:gemini-4-hydrogen";
-
 /// Default canonical TypeSafe AI `Discriminator` model specifier (`docs/architecture/nodes/configure.md` §4).
 pub const DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL: &str = "typesafe:jev-latest";
 
 /// Default canonical built-in local `Discriminator` model specifier (`docs/architecture/nodes/configure.md` §4).
 pub const DEFAULT_LOCAL_DISCRIMINATOR_MODEL: &str = "local:kev-4b";
-
-/// Explicit minimal/zero reasoning budget signal for generative screening/vetting stages (`apprise`, `docket`, `admit`, `vet`).
-pub const DEFAULT_SCREENING_REASONING_BUDGET: Option<u32> = Some(0);
 
 /// Default qualitative thinking level applied to `audit` trials when neither `thinking_level` nor `reasoning_budget` is configured.
 pub const DEFAULT_AUDIT_THINKING_LEVEL: ThinkingLevel = ThinkingLevel::Low;
@@ -229,16 +223,6 @@ impl ResolvedNodeConfig {
             model: model.into(),
             thinking_level,
             reasoning_budget,
-        }
-    }
-
-    /// Returns effective `(thinking_level, reasoning_budget)` for generative screening/vetting stages,
-    /// defaulting to minimal/zero reasoning ([`DEFAULT_SCREENING_REASONING_BUDGET`]) when unset.
-    pub const fn effective_screening_thinking(&self) -> (Option<ThinkingLevel>, Option<u32>) {
-        match (self.thinking_level, self.reasoning_budget) {
-            (Some(level), _) => (Some(level), None),
-            (None, Some(budget)) => (None, Some(budget)),
-            (None, None) => (None, DEFAULT_SCREENING_REASONING_BUDGET),
         }
     }
 

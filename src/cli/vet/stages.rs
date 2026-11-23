@@ -31,7 +31,7 @@ use crate::cli::runners::{
 };
 use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
+use crate::docket::{DocketOptions, execute_docket};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::vet::{VetOptions, execute_vet};
@@ -188,7 +188,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
         threshold: thresholds.docket_threshold,
         timeout_ms: explicit_timeout_ms
             .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(docket_model)),
-        max_canons_per_call: effective_docket_batch_size(explicit_docket_batch_size, docket_model),
+        max_canons_per_call: explicit_docket_batch_size,
         max_concurrent_calls: docket_concurrency,
     };
     let admit_opts = AdmitOptions {

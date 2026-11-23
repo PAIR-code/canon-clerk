@@ -14,8 +14,7 @@
 
 //! Shared-state discriminative `Noul` exhibit screening for `admit` (`google:gemini-decision-*`, `typesafe:jev-*`).
 
-use super::exhibits::append_candidate_exhibit_section;
-use super::prompt::append_filing_overview;
+use super::exhibits::{append_candidate_exhibit_section, non_blank};
 use super::{AdmitError, AdmitOptions, DEFAULT_ADMIT_MAX_CONCURRENT_CALLS};
 use crate::canon::Canon;
 use crate::caseload::{
@@ -37,6 +36,36 @@ struct PairSubject {
     canon_ref: String,
     exhibit_id: String,
     question_text: String,
+}
+
+fn append_filing_overview(
+    out: &mut String,
+    intake: &CaseloadIntake,
+    discovery: &CaseloadDiscovery,
+) {
+    let _ = writeln!(out, "## Filing Overview");
+    let _ = writeln!(out, "- Intake Scope: {}", intake.scope.as_str());
+    let _ = writeln!(out, "- Discovery Mode: {}", discovery.mode.as_str());
+    if let Some(title) = non_blank(intake.pr_title.as_deref()) {
+        let _ = writeln!(out, "- PR Title: {title}");
+    }
+    if !intake.diffs.is_empty() {
+        let _ = writeln!(
+            out,
+            "- Total Modified Files in Filing: {}",
+            intake.diffs.len()
+        );
+    } else if !discovery.target_files.is_empty() {
+        let _ = writeln!(
+            out,
+            "- Total Target Files in Scope: {}",
+            discovery.target_files.len()
+        );
+    }
+    if let Some(intent) = non_blank(intake.intent.as_deref()) {
+        let _ = writeln!(out, "- Design Intent: {intent}");
+    }
+    out.push('\n');
 }
 
 pub(super) fn execute_admit_decisions(

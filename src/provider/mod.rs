@@ -28,8 +28,7 @@ mod typesafe_wire;
 pub(crate) use runtime::{HttpAuth, build_pooled_http_client, http_reactor_handle};
 
 pub use crate::caseload::{
-    DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_SCREENING_REASONING_BUDGET,
-    ThinkingLevel,
+    DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_PROBE_THINKING_LEVEL, ThinkingLevel,
 };
 pub(crate) use decision::partition_decision_items;
 pub use decision::{

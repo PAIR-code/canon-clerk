@@ -37,13 +37,11 @@ pub mod vet;
 
 pub use admit::{
     AdmitError, AdmitOptions, DEFAULT_ADMIT_MAX_CONCURRENT_CALLS, DEFAULT_ADMIT_THRESHOLD,
-    ENV_ADMIT_CONCURRENCY, ENV_ADMIT_THRESHOLD, MAX_ADMIT_EXHIBITS_PER_SLICE,
-    MAX_ADMIT_SLICE_CHARS, execute_admit,
+    ENV_ADMIT_CONCURRENCY, ENV_ADMIT_THRESHOLD, execute_admit,
 };
 pub use apprise::{
-    AppriseError, AppriseOptions, DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS,
-    DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY,
-    ENV_APPRISE_THRESHOLD, execute_apprise,
+    AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
+    ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD, execute_apprise,
 };
 pub use audit::{
     AuditError, AuditOptions, DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, DEFAULT_AUDIT_THRESHOLD,
@@ -81,16 +79,15 @@ pub use caseload::{
     Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
     CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadValidation, CaseloadVerdict,
     CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason, ContestedSpan,
-    DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GENERATIVE_SCREENING_MODEL,
-    DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
-    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER,
-    DEFAULT_SCREENING_REASONING_BUDGET, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
-    ExhibitAssessment, FileArtifact, FileChangeStatus, HeuristicNode, IntakeScope, LOCAL_PROVIDER,
-    LinkedIssueContext, PatchOmissionReason, ProbeStatus, ProbeTargetResult, ResolvedNodeConfig,
-    TYPESAFE_PROVIDER, ThinkingLevel, ValidatedCanonMetadata, ValidationOutcome, VerdictStatus,
-    VettingStatus, WorkspaceState, canonicalize_contested_spans, normalize_admissibility_score,
-    normalize_colorability_score, normalize_compliance_score, normalize_unit_score,
-    normalize_vetting_score, sort_annotations,
+    DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+    DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_LOCAL_DISCRIMINATOR_MODEL,
+    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL,
+    DiscoveryMode, ExhibitAssessment, FileArtifact, FileChangeStatus, HeuristicNode, IntakeScope,
+    LOCAL_PROVIDER, LinkedIssueContext, PatchOmissionReason, ProbeStatus, ProbeTargetResult,
+    ResolvedNodeConfig, TYPESAFE_PROVIDER, ThinkingLevel, ValidatedCanonMetadata,
+    ValidationOutcome, VerdictStatus, VettingStatus, WorkspaceState, canonicalize_contested_spans,
+    normalize_admissibility_score, normalize_colorability_score, normalize_compliance_score,
+    normalize_unit_score, normalize_vetting_score, sort_annotations,
 };
 pub use cli::{
     AdmitArgs, AdmitFormat, AdmitNodeModelArgs, AllNodeModelArgs, AppriseArgs, AppriseFormat,
@@ -133,9 +130,8 @@ pub use discover::{
     scope_relative_path,
 };
 pub use docket::{
-    DEFAULT_DOCKET_BATCH_SIZE, DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD,
-    DocketError, DocketOptions, ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY,
-    ENV_DOCKET_THRESHOLD, MAX_DOCKET_FILING_PREFIX_CHARS, execute_docket,
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD, DocketError, DocketOptions,
+    ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD, execute_docket,
     partition_candidate_canons,
 };
 pub use github::{

@@ -14,11 +14,11 @@
 
 //! Discriminative `Noul` batch screening for `apprise` (`google:gemini-decision-*`, `typesafe:jev-*`).
 
-use super::prompt::{append_canon_section, build_apprise_intent_prefix};
 use super::{AppriseError, AppriseOptions, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS};
+use crate::canon::Canon;
 use crate::caseload::{
-    ApprisalStatus, CanonApprisalAssessment, Caseload, CaseloadApprisal, HeuristicNode,
-    normalize_unit_score,
+    ApprisalStatus, CanonApprisalAssessment, Caseload, CaseloadApprisal, CaseloadDiscovery,
+    CaseloadIntake, HeuristicNode, normalize_unit_score,
 };
 use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
@@ -36,6 +36,85 @@ jurisdiction over the planned design intent and target scope in `state`?\n\
 - Answer YES when the planned work touches, introduces, or modifies the domain construct, \
 layer, workflow, or documentation requirement governed by this canon (even if the design already complies).\n\
 - Answer NO ONLY when the canon's specific domain construct is absent from and orthogonal to the planned work.";
+
+fn build_apprise_intent_prefix(intake: &CaseloadIntake, discovery: &CaseloadDiscovery) -> String {
+    let mut out = String::new();
+    let intent = intake.intent.as_deref().unwrap_or_default().trim();
+
+    let _ = writeln!(out, "## Prospective Design Intent\n\n{intent}\n");
+    append_scope_section(&mut out, intake, discovery);
+    out
+}
+
+fn append_scope_section(out: &mut String, intake: &CaseloadIntake, discovery: &CaseloadDiscovery) {
+    let _ = writeln!(out, "## Target & Discovery Scope");
+    let _ = writeln!(out, "- Intake Scope: {}", intake.scope.as_str());
+    let _ = writeln!(out, "- Discovery Mode: {}", discovery.mode.as_str());
+    if !intake.target_paths.is_empty() {
+        let _ = writeln!(
+            out,
+            "- Target Directives: {}",
+            intake.target_paths.join(", ")
+        );
+    }
+    if !discovery.target_files.is_empty() {
+        let _ = writeln!(
+            out,
+            "- Materialized Target Files: {}",
+            discovery.target_files.join(", ")
+        );
+    }
+    if let Some(title) = intake.pr_title.as_deref().filter(|s| !s.trim().is_empty()) {
+        let _ = writeln!(out, "- PR Title: {}", title.trim());
+    }
+    if let Some(body) = intake.pr_body.as_deref().filter(|s| !s.trim().is_empty()) {
+        let _ = writeln!(out, "- PR Description: {}", body.trim());
+    }
+    out.push('\n');
+}
+
+fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matched: &[String]) {
+    let _ = writeln!(out, "### Canon: `{canon_ref}`");
+    let _ = writeln!(out, "- ID: `{}`", canon.id);
+    let _ = writeln!(out, "- Title: {}", canon.title);
+    if !canon.triggers.is_empty() {
+        let _ = writeln!(out, "- Triggers: {}", canon.triggers.join(", "));
+    }
+    if !canon.exists.is_empty() {
+        let _ = writeln!(out, "- Exists: {}", canon.exists.join(", "));
+    }
+    if !canon.inspect.is_empty() {
+        let inspect_list: Vec<String> = canon
+            .inspect
+            .iter()
+            .map(|p| {
+                if p.optional {
+                    format!("{}?", p.token.as_str())
+                } else {
+                    p.token.as_str().to_string()
+                }
+            })
+            .collect();
+        let _ = writeln!(out, "- Inspect: {}", inspect_list.join(", "));
+    }
+    if !canon.references.is_empty() {
+        let _ = writeln!(out, "- References: {}", canon.references.join(", "));
+    }
+    if !canon.tags.is_empty() {
+        let _ = writeln!(out, "- Tags: {}", canon.tags.join(", "));
+    }
+    if !matched.is_empty() {
+        let _ = writeln!(out, "- Triggered Exhibits: {}", matched.join(", "));
+    }
+    let body = canon.raw_body.trim();
+    let statute = if body.is_empty() {
+        canon.invariant.trim()
+    } else {
+        body
+    };
+    let _ = writeln!(out, "\n{statute}");
+    let _ = writeln!(out, "- Exact `canon_path`: `{canon_ref}`\n");
+}
 
 pub(super) fn execute_apprise_decisions(
     options: &AppriseOptions,

@@ -517,25 +517,62 @@ mod tests {
     impl StructuredModelProvider for StageRoutingProvider {
         fn generate_structured(
             &self,
-            request: &GenerationRequest,
+            _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("admit CLI must not invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            request: &crate::provider::DecisionRequest,
+        ) -> Result<crate::provider::DecisionResponse, ProviderError> {
             *self.calls.lock().expect("lock calls") += 1;
-            let payload = if request.system_instruction.contains("Macro Subject-Matter") {
-                self.docket_payload.clone()
-            } else {
-                self.admit_payload.clone()
-            };
-            Ok(GenerationResponse {
-                payload,
-                thoughts: vec!["Evaluating relevance...".to_string()],
+            let mut scores = BTreeMap::new();
+            if request.questions.keys().any(|k| k.contains("::")) {
+                if let Some(items) = self
+                    .admit_payload
+                    .get("exhibits")
+                    .and_then(|v| v.as_array())
+                {
+                    for key in request.questions.keys() {
+                        let score = items
+                            .iter()
+                            .find(|item| {
+                                item.get("file_path")
+                                    .and_then(|v| v.as_str())
+                                    .is_some_and(|fp| key.ends_with(&format!("::{fp}")))
+                            })
+                            .and_then(|item| {
+                                item.get("admissibility_score").and_then(|v| v.as_f64())
+                            })
+                            .unwrap_or(0.05);
+                        scores.insert(key.clone(), score);
+                    }
+                }
+            } else if let Some(items) = self.docket_payload.get("cases").and_then(|v| v.as_array())
+            {
+                for item in items {
+                    if let (Some(path), Some(score)) = (
+                        item.get("canon_path").and_then(|v| v.as_str()),
+                        item.get("colorability_score").and_then(|v| v.as_f64()),
+                    ) {
+                        scores.insert(path.to_string(), score);
+                    }
+                }
+            }
+            for key in request.questions.keys() {
+                scores.entry(key.clone()).or_insert(0.05);
+            }
+            Ok(crate::provider::DecisionResponse {
+                scores,
                 usage: TokenUsage {
                     prompt_tokens: 200,
-                    completion_tokens: 50,
+                    completion_tokens: 0,
                     reasoning_tokens: 0,
-                    total_tokens: 250,
+                    total_tokens: 200,
                 },
                 latency_ms: 35,
-                resolved_model: "gemini-2.5-flash-lite".to_string(),
+                resolved_model: "gemini-decision-1".to_string(),
             })
         }
     }
@@ -735,10 +772,6 @@ mod tests {
             let args = parse_admit(&[
                 "canon-clerk",
                 "admit",
-                "--docket-model",
-                "google:gemini-4-hydrogen",
-                "--admit-model",
-                "google:gemini-4-hydrogen",
                 "--pr-title",
                 "feat(cli): add admit",
                 "src/cli/admit.rs",
@@ -795,10 +828,6 @@ mod tests {
             let args = parse_admit(&[
                 "canon-clerk",
                 "admit",
-                "--docket-model",
-                "google:gemini-4-hydrogen",
-                "--admit-model",
-                "google:gemini-4-hydrogen",
                 "--pr-title",
                 "feat(cli): add admit",
                 "src/cli/admit.rs",

@@ -498,7 +498,6 @@ mod tests {
     use crate::provider::{GenerationRequest, GenerationResponse, ProviderError, TokenUsage};
     use crate::telemetry::SteppingTelemetryClock;
     use clap::CommandFactory;
-    use serde_json::json;
     use std::io::Cursor;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -519,35 +518,31 @@ mod tests {
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("apprise benchmark must not invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            _request: &crate::provider::DecisionRequest,
+        ) -> Result<crate::provider::DecisionResponse, ProviderError> {
             let call_idx = self.calls.fetch_add(1, Ordering::SeqCst);
             let flip_score = if call_idx.is_multiple_of(2) {
                 0.85
             } else {
                 0.15
             };
-            let payload = json!({
-                "assessments": [
-                    {
-                        "canon_path": ".canons/cli/flipper.md",
-                        "apprisal_summary": format!("Call {call_idx} rationale."),
-                        "apprisal_score": flip_score
-                    },
-                    {
-                        "canon_path": ".canons/cli/stable.md",
-                        "apprisal_summary": "Always applicable.",
-                        "apprisal_score": 0.95
-                    }
-                ]
-            });
-            Ok(GenerationResponse {
-                payload,
-                resolved_model: "gemini-2.5-flash-lite".to_string(),
-                thoughts: Vec::new(),
+            let scores = BTreeMap::from([
+                (".canons/cli/flipper.md".to_string(), flip_score),
+                (".canons/cli/stable.md".to_string(), 0.95),
+            ]);
+            Ok(crate::provider::DecisionResponse {
+                scores,
+                resolved_model: "gemini-decision-1".to_string(),
                 usage: TokenUsage {
                     prompt_tokens: 120,
-                    completion_tokens: 40,
+                    completion_tokens: 0,
                     reasoning_tokens: 0,
-                    total_tokens: 160,
+                    total_tokens: 120,
                 },
                 latency_ms: 95,
             })
@@ -659,7 +654,7 @@ mod tests {
                 "--trials",
                 "3",
                 "--model",
-                "google:gemini-4-hydrogen",
+                "google:gemini-decision-1",
                 "--intent",
                 "Add CLI flag",
                 "src/cli/mod.rs",
@@ -681,7 +676,7 @@ mod tests {
             .expect("run hermetic bench");
 
             assert_eq!(report.trials, 3);
-            assert_eq!(report.configs[0].model, "google:gemini-4-hydrogen");
+            assert_eq!(report.configs[0].model, "google:gemini-decision-1");
             assert_eq!(report.configs[0].flipper_count, 1);
 
             let stdout_text = String::from_utf8(stdout).expect("utf8 stdout");
@@ -692,7 +687,7 @@ mod tests {
             );
             assert!(stdout_text.contains(".canons/cli/flipper.md"));
             assert!(!stdout_text.contains("[bench]"));
-            assert!(stderr_text.contains("[bench] [batch=25,conc=4] trial 1/3:"));
+            assert!(stderr_text.contains("[bench] [unbounded] trial 1/3:"));
 
             let json_cli = ConsistencyBenchCli::try_parse_from([
                 "consistency_bench",
@@ -701,7 +696,7 @@ mod tests {
                 "-n",
                 "2",
                 "--apprise-model",
-                "google:gemini-4-hydrogen",
+                "google:gemini-decision-1",
                 "-q",
                 "--json",
                 "--intent",

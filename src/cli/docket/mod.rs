@@ -450,7 +450,6 @@ mod tests {
     struct StubProvider {
         calls: Mutex<usize>,
         response: Result<Value, ProviderError>,
-        thoughts: Vec<String>,
     }
 
     impl StubProvider {
@@ -458,15 +457,6 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 response: Ok(payload),
-                thoughts: Vec::new(),
-            }
-        }
-
-        fn succeeding_with_thoughts(payload: Value, thoughts: Vec<String>) -> Self {
-            Self {
-                calls: Mutex::new(0),
-                response: Ok(payload),
-                thoughts,
             }
         }
 
@@ -474,7 +464,6 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 response: Err(err),
-                thoughts: Vec::new(),
             }
         }
 
@@ -488,20 +477,42 @@ mod tests {
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("docket CLI must not invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            request: &crate::provider::DecisionRequest,
+        ) -> Result<crate::provider::DecisionResponse, ProviderError> {
             *self.calls.lock().expect("lock calls") += 1;
             match &self.response {
-                Ok(payload) => Ok(GenerationResponse {
-                    payload: payload.clone(),
-                    thoughts: self.thoughts.clone(),
-                    usage: TokenUsage {
-                        prompt_tokens: 240,
-                        completion_tokens: 60,
-                        reasoning_tokens: 0,
-                        total_tokens: 300,
-                    },
-                    latency_ms: 42,
-                    resolved_model: "gemini-2.5-flash-lite".to_string(),
-                }),
+                Ok(payload) => {
+                    let mut scores = BTreeMap::new();
+                    if let Some(items) = payload.get("cases").and_then(|v| v.as_array()) {
+                        for item in items {
+                            if let (Some(path), Some(score)) = (
+                                item.get("canon_path").and_then(|v| v.as_str()),
+                                item.get("colorability_score").and_then(|v| v.as_f64()),
+                            ) {
+                                scores.insert(path.to_string(), score);
+                            }
+                        }
+                    }
+                    for key in request.questions.keys() {
+                        scores.entry(key.clone()).or_insert(0.05);
+                    }
+                    Ok(crate::provider::DecisionResponse {
+                        scores,
+                        usage: TokenUsage {
+                            prompt_tokens: 240,
+                            completion_tokens: 0,
+                            reasoning_tokens: 0,
+                            total_tokens: 240,
+                        },
+                        latency_ms: 42,
+                        resolved_model: "gemini-decision-1".to_string(),
+                    })
+                }
                 Err(err) => Err(err.clone()),
             }
         }
@@ -520,10 +531,6 @@ mod tests {
         env.insert(
             ENV_GEMINI_API_KEY.to_string(),
             "test-hermetic-gemini-key".to_string(),
-        );
-        env.insert(
-            crate::configure::ENV_DOCKET_MODEL.to_string(),
-            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL.to_string(),
         );
         env.insert(
             "XDG_CONFIG_HOME".to_string(),
@@ -939,10 +946,7 @@ index 0000000..1111111
         #[test]
         fn test_stylish_funnel_receipt_and_telemetry_event_stream() {
             let ws = sample_workspace();
-            let provider = StubProvider::succeeding_with_thoughts(
-                two_canon_payload(),
-                vec!["Checking CLI flag canon against diff...".to_string()],
-            );
+            let provider = StubProvider::succeeding(two_canon_payload());
 
             let sink = RecordingTelemetrySink::new();
             let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
@@ -968,7 +972,7 @@ index 0000000..1111111
             assert!(
                 text.contains("✓ validate  : 2 candidate canon(s) valid (0 errors, 0 warnings)")
             );
-            assert!(text.contains("✓ configure : docket 'google:gemini-4-hydrogen'"));
+            assert!(text.contains("✓ configure : docket 'google:gemini-decision-1'"));
             assert!(
                 text.contains("✓ docket    : 1 case(s) colorable (1 dismissed, threshold 0.50)")
             );
@@ -997,17 +1001,10 @@ index 0000000..1111111
             );
             assert!(events.iter().any(|e| matches!(
                 e,
-                TelemetryEvent::Thought {
-                    stage: PipelineStage::Docket,
-                    ..
-                }
-            )));
-            assert!(events.iter().any(|e| matches!(
-                e,
                 TelemetryEvent::StageFinish {
                     stage: PipelineStage::Docket,
                     usage: Some(TokenUsage {
-                        total_tokens: 300,
+                        total_tokens: 240,
                         ..
                     }),
                     ..
@@ -1016,7 +1013,7 @@ index 0000000..1111111
             assert!(matches!(
                 events.last(),
                 Some(TelemetryEvent::PipelineFinish {
-                    total_tokens: 300,
+                    total_tokens: 240,
                     ..
                 })
             ));
@@ -1047,14 +1044,10 @@ index 0000000..1111111
             let compact_text = String::from_utf8(compact_out).expect("utf8");
             let lines: Vec<&str> = compact_text.lines().collect();
             assert_eq!(lines.len(), 2);
-            assert_eq!(
-                lines[0],
-                ".canons/cli/cli-flags-must-support-env-var-fallbacks.md\tdocketed\t0.94\tDiff introduces `docket_threshold` CLI option."
-            );
-            assert_eq!(
-                lines[1],
-                ".canons/db/migrations-rollback.md\tdismissed\t0.06\tDiff adds CLI arguments only; zero schema migrations."
-            );
+            assert!(lines[0].starts_with(
+                ".canons/cli/cli-flags-must-support-env-var-fallbacks.md\tdocketed\t0.94\t"
+            ));
+            assert!(lines[1].starts_with(".canons/db/migrations-rollback.md\tdismissed\t0.06\t"));
 
             // Fast-forward pre-populated completed `.docket` without API key or model call
             let prev_calls = provider.call_count();
@@ -1138,7 +1131,7 @@ index 0000000..1111111
                 .with_validation(CaseloadValidation::default())
                 .with_config(CaseloadConfig::default().with_node_model(
                     HeuristicNode::Docket,
-                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+                    crate::caseload::DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
                 ));
 
             let sink = RecordingTelemetrySink::new();
@@ -1258,32 +1251,31 @@ index 0000000..1111111
             impl StructuredModelProvider for PerBatchProvider {
                 fn generate_structured(
                     &self,
-                    request: &GenerationRequest,
+                    _request: &GenerationRequest,
                 ) -> Result<GenerationResponse, ProviderError> {
+                    panic!("docket must not invoke generate_structured")
+                }
+
+                fn evaluate_decisions(
+                    &self,
+                    request: &DecisionRequest,
+                ) -> Result<DecisionResponse, ProviderError> {
                     *self.calls.lock().expect("lock") += 1;
-                    let mut cases = Vec::new();
-                    for line in request.user_prompt.lines() {
-                        if let Some(rest) = line.strip_prefix("### Canon: `")
-                            && let Some(canon_ref) = rest.strip_suffix('`')
-                        {
-                            cases.push(json!({
-                                "canon_path": canon_ref,
-                                "colorability_summary": "Evaluated in batch.",
-                                "colorability_score": 0.85
-                            }));
-                        }
-                    }
-                    Ok(GenerationResponse {
-                        payload: json!({ "cases": cases }),
-                        thoughts: Vec::new(),
+                    let scores = request
+                        .questions
+                        .keys()
+                        .map(|k| (k.clone(), 0.85))
+                        .collect();
+                    Ok(DecisionResponse {
+                        scores,
                         usage: TokenUsage {
                             prompt_tokens: 150,
-                            completion_tokens: 50,
+                            completion_tokens: 0,
                             reasoning_tokens: 0,
-                            total_tokens: 200,
+                            total_tokens: 150,
                         },
                         latency_ms: 20,
-                        resolved_model: "gemini-2.5-flash-lite".to_string(),
+                        resolved_model: "gemini-decision-1".to_string(),
                     })
                 }
             }
@@ -1330,9 +1322,9 @@ index 0000000..1111111
                     stage: PipelineStage::Docket,
                     usage: Some(TokenUsage {
                         prompt_tokens: 300,
-                        completion_tokens: 100,
+                        completion_tokens: 0,
                         reasoning_tokens: 0,
-                        total_tokens: 400,
+                        total_tokens: 300,
                     }),
                     ..
                 }
@@ -1340,7 +1332,7 @@ index 0000000..1111111
             assert!(events.iter().any(|e| matches!(
                 e,
                 TelemetryEvent::PipelineFinish {
-                    total_tokens: 400,
+                    total_tokens: 300,
                     ..
                 }
             )));
@@ -1422,20 +1414,6 @@ index 0000000..1111111
 
             let base_args =
                 parse_docket_args(&["canon-clerk", "docket", "src/cli/docket.rs", "--json"]);
-            run_docket_with_snapshot_and_provider(
-                &base_args,
-                &mut Cursor::new(b""),
-                &mut Vec::new(),
-                &ws,
-                &env_with_key(),
-                &probe,
-            )
-            .expect("generative docket on 60 canons");
-            assert_eq!(
-                *probe.gen_batch_sizes.lock().expect("lock"),
-                vec![20, 20, 20],
-                "60 canons must partition into 3 balanced batches of 20 on generative model"
-            );
 
             // Unpinned GEMINI_API_KEY selects google:gemini-decision-1 and packs 60 canons in 1 call
             let unpinned_google_env = BTreeMap::from([
@@ -1514,18 +1492,28 @@ index 0000000..1111111
             .expect_err("missing key must fail with exit 2");
             assert_eq!(no_key_err.exit_code(), 2);
 
-            // Schema decode error (incomplete response)
-            let incomplete_provider = StubProvider::succeeding(json!({ "cases": [] }));
-            let schema_err = run_docket_with_snapshot_and_provider(
-                &args,
+            // Generative model on docket fails fast with exit 2 and discriminator guidance
+            let gen_args = parse_docket_args(&[
+                "canon-clerk",
+                "docket",
+                "--docket-model",
+                "google:gemini-4-hydrogen",
+                "src/cli/docket.rs",
+            ]);
+            let gen_err = run_docket_with_snapshot_and_provider(
+                &gen_args,
                 &mut Cursor::new(b""),
                 &mut Vec::new(),
                 &ws,
                 &env_with_key(),
-                &incomplete_provider,
+                &ok_provider,
             )
-            .expect_err("incomplete response must fail with exit 2");
-            assert_eq!(schema_err.exit_code(), 2);
+            .expect_err("generative model on docket must fail with exit 2");
+            assert_eq!(gen_err.exit_code(), 2);
+            let gen_msg = gen_err.to_string();
+            assert!(gen_msg.contains("google:gemini-decision-1"));
+            assert!(gen_msg.contains("typesafe:jev-latest"));
+            assert!(gen_msg.contains("local:kev-4b"));
 
             // Provider HTTP auth error
             let auth_provider = StubProvider::failing(ProviderError::HttpStatus {

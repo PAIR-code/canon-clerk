@@ -533,21 +533,11 @@ mod tests {
     impl StructuredModelProvider for FullCascadeProvider {
         fn generate_structured(
             &self,
-            request: &GenerationRequest,
+            _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
             *self.calls.lock().expect("lock calls") += 1;
-            let payload = if request.system_instruction.contains("Macro Subject-Matter") {
-                self.docket_payload.clone()
-            } else if request
-                .system_instruction
-                .contains("Micro Evidentiary Admissibility")
-            {
-                self.admit_payload.clone()
-            } else {
-                self.audit_payload.clone()
-            };
             Ok(GenerationResponse {
-                payload,
+                payload: self.audit_payload.clone(),
                 thoughts: vec!["Deliberating on canon compliance...".to_string()],
                 usage: TokenUsage {
                     prompt_tokens: 250,
@@ -557,6 +547,65 @@ mod tests {
                 },
                 latency_ms: 80,
                 resolved_model: "gemini-2.5-pro".to_string(),
+            })
+        }
+
+        fn evaluate_decisions(
+            &self,
+            request: &crate::provider::DecisionRequest,
+        ) -> Result<crate::provider::DecisionResponse, ProviderError> {
+            *self.calls.lock().expect("lock calls") += 1;
+            let mut scores = BTreeMap::new();
+            if request.questions.contains_key("compliant") {
+                // Force contested so downstream `audit` trial executes
+                for key in request.questions.keys() {
+                    scores.insert(key.clone(), 0.25);
+                }
+            } else if request.questions.keys().any(|k| k.contains("::")) {
+                if let Some(items) = self
+                    .admit_payload
+                    .get("exhibits")
+                    .and_then(|v| v.as_array())
+                {
+                    for key in request.questions.keys() {
+                        let score = items
+                            .iter()
+                            .find(|item| {
+                                item.get("file_path")
+                                    .and_then(|v| v.as_str())
+                                    .is_some_and(|fp| key.ends_with(&format!("::{fp}")))
+                            })
+                            .and_then(|item| {
+                                item.get("admissibility_score").and_then(|v| v.as_f64())
+                            })
+                            .unwrap_or(0.05);
+                        scores.insert(key.clone(), score);
+                    }
+                }
+            } else if let Some(items) = self.docket_payload.get("cases").and_then(|v| v.as_array())
+            {
+                for item in items {
+                    if let (Some(path), Some(score)) = (
+                        item.get("canon_path").and_then(|v| v.as_str()),
+                        item.get("colorability_score").and_then(|v| v.as_f64()),
+                    ) {
+                        scores.insert(path.to_string(), score);
+                    }
+                }
+            }
+            for key in request.questions.keys() {
+                scores.entry(key.clone()).or_insert(0.05);
+            }
+            Ok(crate::provider::DecisionResponse {
+                scores,
+                usage: TokenUsage {
+                    prompt_tokens: 250,
+                    completion_tokens: 0,
+                    reasoning_tokens: 0,
+                    total_tokens: 250,
+                },
+                latency_ms: 40,
+                resolved_model: "gemini-decision-1".to_string(),
             })
         }
     }
@@ -865,21 +914,7 @@ mod tests {
             let ws = sample_workspace();
             let provider = passing_cascade_provider();
             let args = parse_audit(&["canon-clerk", "audit", "src/cli/audit.rs"]);
-            let env = BTreeMap::from([
-                (ENV_GEMINI_API_KEY.to_string(), "test-key".to_string()),
-                (
-                    crate::configure::ENV_DOCKET_MODEL.to_string(),
-                    "google:gemini-4-hydrogen".to_string(),
-                ),
-                (
-                    crate::configure::ENV_ADMIT_MODEL.to_string(),
-                    "google:gemini-4-hydrogen".to_string(),
-                ),
-                (
-                    crate::configure::ENV_VET_MODEL.to_string(),
-                    "google:gemini-4-hydrogen".to_string(),
-                ),
-            ]);
+            let env = BTreeMap::from([(ENV_GEMINI_API_KEY.to_string(), "test-key".to_string())]);
             let mut stdout = Vec::new();
             let sink = RecordingTelemetrySink::new();
             let clock = SteppingTelemetryClock::new(1_767_225_600_000, 30);
@@ -893,9 +928,9 @@ mod tests {
                 &provider,
                 &session,
             )
-            .expect("passing 7-stage audit cascade");
+            .expect("passing 8-stage audit cascade");
 
-            assert_eq!(provider.call_count(), 3);
+            assert_eq!(provider.call_count(), 4);
             let text = String::from_utf8(stdout).expect("utf8");
             assert!(text.contains("✓ audit     : 1 passed, 0 failed across 1 trial(s)"));
             assert!(text.contains("Verdict: PASS"));
@@ -918,6 +953,7 @@ mod tests {
                     PipelineStage::Configure,
                     PipelineStage::Docket,
                     PipelineStage::Admit,
+                    PipelineStage::Vet,
                     PipelineStage::Audit,
                 ]
             );
@@ -958,7 +994,7 @@ mod tests {
                 &provider,
             )
             .expect("fast-forward completed audit");
-            assert_eq!(provider.call_count(), 3);
+            assert_eq!(provider.call_count(), 4);
             assert!(compact_out.is_empty());
         }
 
@@ -1134,12 +1170,6 @@ mod tests {
             let args = parse_audit(&[
                 "canon-clerk",
                 "audit",
-                "--docket-model",
-                "google:gemini-4-hydrogen",
-                "--admit-model",
-                "google:gemini-4-hydrogen",
-                "--vet-model",
-                "google:gemini-4-hydrogen",
                 "src/cli/audit.rs",
                 "--output-caseload",
                 &archived_str,

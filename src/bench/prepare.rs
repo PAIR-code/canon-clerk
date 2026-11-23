@@ -21,7 +21,6 @@ use super::{
 use crate::admit::{DEFAULT_ADMIT_MAX_CONCURRENT_CALLS, ENV_ADMIT_CONCURRENCY};
 use crate::apprise::{
     DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, ENV_APPRISE_BATCH_SIZE, ENV_APPRISE_CONCURRENCY,
-    effective_apprise_batch_size,
 };
 use crate::audit::{DEFAULT_AUDIT_MAX_CONCURRENT_CALLS, ENV_AUDIT_CONCURRENCY};
 use crate::caseload::{Caseload, HeuristicNode, IntakeScope, normalize_unit_score};
@@ -34,7 +33,6 @@ use crate::configure::{
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::docket::{
     DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY,
-    effective_docket_batch_size,
 };
 use crate::intake::{IntakeOptions, execute_intake};
 use crate::validate::{ValidateOptions, execute_validate};
@@ -80,7 +78,6 @@ pub fn resolve_config_specs(
 
     let batch_values = resolve_batch_sweep_values(
         inputs.stage,
-        inputs.stage_model.unwrap_or_default(),
         inputs.raw_batch_specs,
         inputs.env,
         inputs.stored_config,
@@ -167,7 +164,6 @@ fn resolve_effective_concurrency(
 
 fn resolve_batch_sweep_values(
     stage: BenchmarkStage,
-    stage_model: &str,
     raw_specs: &[String],
     env: &BTreeMap<String, String>,
     stored: Option<&StoredConfig>,
@@ -207,12 +203,7 @@ fn resolve_batch_sweep_values(
         return Ok(vec![Some(val)]);
     }
 
-    let default_batch = match stage {
-        BenchmarkStage::Apprise => effective_apprise_batch_size(None, stage_model),
-        BenchmarkStage::Docket => effective_docket_batch_size(None, stage_model),
-        BenchmarkStage::Admit | BenchmarkStage::Vet | BenchmarkStage::Audit => None,
-    };
-    Ok(vec![default_batch])
+    Ok(vec![None])
 }
 
 /// Parses one or more comma-delimited batch-size specifiers (`"unbounded"`, `"0"`, or positive integers).
@@ -493,9 +484,8 @@ fn resolve_upstream_configure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apprise::{DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_THRESHOLD};
+    use crate::apprise::DEFAULT_APPRISE_THRESHOLD;
     use crate::canon::ParseCanonOptions;
-    use crate::docket::DEFAULT_DOCKET_BATCH_SIZE;
     use crate::provider::DEFAULT_GENERATION_TIMEOUT_MS;
 
     mod batch_sweep_parsing {
@@ -538,11 +528,8 @@ mod tests {
             })
             .expect("resolve default apprise specs");
             assert_eq!(default_apprise_specs.len(), 1);
-            assert_eq!(default_apprise_specs[0].label, "batch=25,conc=4");
-            assert_eq!(
-                default_apprise_specs[0].max_canons_per_call,
-                Some(DEFAULT_APPRISE_BATCH_SIZE)
-            );
+            assert_eq!(default_apprise_specs[0].label, "unbounded");
+            assert_eq!(default_apprise_specs[0].max_canons_per_call, None);
 
             let default_docket_specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Docket,
@@ -556,11 +543,8 @@ mod tests {
             })
             .expect("resolve default docket specs");
             assert_eq!(default_docket_specs.len(), 1);
-            assert_eq!(default_docket_specs[0].label, "batch=25,conc=4");
-            assert_eq!(
-                default_docket_specs[0].max_canons_per_call,
-                Some(DEFAULT_DOCKET_BATCH_SIZE)
-            );
+            assert_eq!(default_docket_specs[0].label, "unbounded");
+            assert_eq!(default_docket_specs[0].max_canons_per_call, None);
         }
 
         #[test]

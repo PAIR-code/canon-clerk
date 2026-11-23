@@ -22,8 +22,8 @@ use crate::cli::closure::has_provider_overrides;
 use crate::cli::node_args::check_retired_tuning_env_vars;
 use crate::configure::StoredConfig;
 use crate::docket::{
-    DEFAULT_DOCKET_BATCH_SIZE, DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD,
-    ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD,
+    DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD, ENV_DOCKET_BATCH_SIZE,
+    ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD,
 };
 use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
@@ -125,7 +125,7 @@ pub(crate) fn resolve_docket_batch_size(
         if val == 0 {
             return Err(CliError::usage(format!(
                 "Invalid `--docket-batch-size` value `0`: batch size must be at least 1.\n  \
-                 Hint: Pass a positive integer (`>= 1`) via `--docket-batch-size <COUNT>` or `{ENV_DOCKET_BATCH_SIZE}` (default: `{DEFAULT_DOCKET_BATCH_SIZE}`)."
+                 Hint: Pass a positive integer (`>= 1`) via `--docket-batch-size <COUNT>` or `{ENV_DOCKET_BATCH_SIZE}`."
             )));
         }
         return Ok(Some(val));
@@ -139,7 +139,7 @@ pub(crate) fn resolve_docket_batch_size(
         let parsed = raw_env.parse::<usize>().ok().filter(|v| *v >= 1).ok_or_else(|| {
             CliError::usage(format!(
                 "Invalid batch size `{raw_env}` in `{ENV_DOCKET_BATCH_SIZE}`: expected a positive integer (`>= 1`).\n  \
-                 Hint: Pass `--docket-batch-size <COUNT>` or set `{ENV_DOCKET_BATCH_SIZE}={DEFAULT_DOCKET_BATCH_SIZE}`."
+                 Hint: Pass `--docket-batch-size <COUNT>` or set `{ENV_DOCKET_BATCH_SIZE}=<COUNT>`."
             ))
         })?;
         return Ok(Some(parsed));
@@ -149,7 +149,7 @@ pub(crate) fn resolve_docket_batch_size(
         if stored_val == 0 {
             return Err(CliError::usage(format!(
                 "Invalid `nodes.docket.batchSize` value `0` in user configuration: batch size must be at least 1.\n  \
-                 Hint: Configure a positive integer (`>= 1`) for `nodes.docket.batchSize` or override with `--docket-batch-size <COUNT>` / `{ENV_DOCKET_BATCH_SIZE}` (default: `{DEFAULT_DOCKET_BATCH_SIZE}`)."
+                 Hint: Configure a positive integer (`>= 1`) for `nodes.docket.batchSize` or override with `--docket-batch-size <COUNT>` / `{ENV_DOCKET_BATCH_SIZE}`."
             )));
         }
         return Ok(Some(stored_val));

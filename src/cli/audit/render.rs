@@ -68,7 +68,7 @@ impl AuditWatermarks {
             vet: if vet_was_present {
                 StageDisposition::PrePopulated
             } else {
-                StageDisposition::SkippedGeneratorVet
+                StageDisposition::SkippedAbsentVetting
             },
             audit: StageDisposition::PrePopulated,
             total_workspace_canons: None,

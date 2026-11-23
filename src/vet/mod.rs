@@ -17,12 +17,12 @@
 mod decision;
 mod prompts;
 mod slices;
-mod structured;
 
-use crate::audit::build_audit_case_user_prompt;
 use crate::canon::Canon;
 use crate::caseload::{
-    Caseload, CaseloadDiscovery, CaseloadIntake, CaseloadVetting, ExhibitAssessment, HeuristicNode,
+    Caseload, CaseloadDiscovery, CaseloadIntake, CaseloadVetting,
+    DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_LOCAL_DISCRIMINATOR_MODEL,
+    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, ExhibitAssessment, HeuristicNode,
     normalize_vetting_score,
 };
 use crate::configure::is_discriminative_model;
@@ -90,6 +90,8 @@ pub enum VetError {
     MissingEvidence,
     /// Prerequisite `.config` namespace is missing when active cases require vetting.
     MissingConfig,
+    /// A generative model was configured on `vet` instead of a discriminative `Noul` model.
+    UnsupportedGenerativeModel { specifier: String },
     /// An active canon listed in `.evidence.active_cases` is absent from the workspace snapshot.
     MissingActiveCanon { canon_ref: String },
     /// Model provider returned a transport, HTTP, block, or schema decoding error.
@@ -137,6 +139,14 @@ impl fmt::Display for VetError {
                 "Cannot execute `vet` without a resolved `.config` namespace on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk vet` directly to resolve configuration JIT."
             ),
+            Self::UnsupportedGenerativeModel { specifier } => write!(
+                f,
+                "Generative model `{specifier}` cannot be used for `vet` \
+                 (`vet` requires a discriminative `Noul` decision model).\n  \
+                 Hint: Configure a discriminator on `--vet-model` such as `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}` \
+                 (Google Decisions), `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}` (TypeSafe Jev), \
+                 or `{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}` (local `/v1/systemone`)."
+            ),
             Self::MissingActiveCanon { canon_ref } => write!(
                 f,
                 "Active case canon `{canon_ref}` referenced in `.evidence.active_cases` was not found in the workspace snapshot.\n  \
@@ -157,7 +167,6 @@ impl From<ProviderError> for VetError {
 
 struct PreparedVettingCase {
     canon_ref: String,
-    user_prompt: String,
     discriminative_plan: DiscriminativeCasePlan,
 }
 
@@ -236,11 +245,14 @@ pub fn execute_vet(
         .as_ref()
         .and_then(|c| c.node(HeuristicNode::Vet))
         .ok_or(VetError::MissingConfig)?;
-    let is_discriminative = is_discriminative_model(&node_cfg.model);
+    if !is_discriminative_model(&node_cfg.model) {
+        return Err(VetError::UnsupportedGenerativeModel {
+            specifier: node_cfg.model.clone(),
+        });
+    }
     let prepared_cases = prepare_vetting_cases(
         active_entries,
         &node_cfg.model,
-        is_discriminative,
         intake,
         discovery,
         workspace,
@@ -250,30 +262,17 @@ pub fn execute_vet(
         default_concurrency_for_model(&node_cfg.model, DEFAULT_VET_MAX_CONCURRENT_CALLS)
     });
 
-    let cases = if is_discriminative {
-        decision::execute_discriminative_vetting(
-            &prepared_cases,
-            &decision::DiscriminativeVetParams {
-                vet_model: &node_cfg.model,
-                threshold,
-                exception_threshold,
-                concurrency_limit,
-                timeout_ms: options.timeout_ms,
-            },
-            provider,
-        )?
-    } else {
-        structured::execute_generative_vetting(
-            &prepared_cases,
-            &structured::GenerativeVetParams {
-                vet_node: node_cfg,
-                threshold,
-                concurrency_limit,
-                timeout_ms: options.timeout_ms,
-            },
-            provider,
-        )?
-    };
+    let cases = decision::execute_discriminative_vetting(
+        &prepared_cases,
+        &decision::DiscriminativeVetParams {
+            vet_model: &node_cfg.model,
+            threshold,
+            exception_threshold,
+            concurrency_limit,
+            timeout_ms: options.timeout_ms,
+        },
+        provider,
+    )?;
 
     Ok(caseload.with_vetting(CaseloadVetting::from_cases(cases)))
 }
@@ -281,7 +280,6 @@ pub fn execute_vet(
 fn prepare_vetting_cases<'a>(
     active_entries: Vec<(String, &'a Canon, Vec<&'a ExhibitAssessment>)>,
     vet_model: &str,
-    is_discriminative: bool,
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
@@ -290,19 +288,11 @@ fn prepare_vetting_cases<'a>(
     active_entries
         .into_iter()
         .map(|(canon_ref, canon, admitted)| {
-            let (user_prompt, _) = build_audit_case_user_prompt(
-                &canon_ref, canon, &admitted, intake, discovery, workspace,
+            let discriminative_plan = build_discriminative_case_plan(
+                &canon_ref, canon, &admitted, intake, discovery, workspace, profile,
             );
-            let discriminative_plan = if is_discriminative {
-                build_discriminative_case_plan(
-                    &canon_ref, canon, &admitted, intake, discovery, workspace, profile,
-                )
-            } else {
-                DiscriminativeCasePlan::Slices(Vec::new())
-            };
             PreparedVettingCase {
                 canon_ref,
-                user_prompt,
                 discriminative_plan,
             }
         })
@@ -316,14 +306,14 @@ mod tests {
     use crate::caseload::{
         AdmissibilityStatus, CanonDocketAssessment, CaseloadConfig, CaseloadDiscovery,
         CaseloadDocket, CaseloadEvidence, CaseloadIntake, CaseloadValidation, ColorabilityStatus,
-        DEFAULT_GENERATIVE_SCREENING_MODEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
-        DEFAULT_SCREENING_REASONING_BUDGET, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
-        ExhibitAssessment, FileArtifact, FileChangeStatus, VettingStatus,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
+        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode, ExhibitAssessment, FileArtifact,
+        FileChangeStatus, VettingStatus,
     };
     use crate::provider::{
         DecisionRequest, DecisionResponse, GenerationRequest, GenerationResponse, TokenUsage,
     };
-    use serde_json::{Value, json};
+    use serde_json::Value;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
@@ -795,36 +785,19 @@ mod tests {
         }
 
         #[test]
-        fn test_standalone_generative_vetting_omits_reasoning_budget_and_decodes_scores() {
-            let (ws, caseload) = sample_fixture(DEFAULT_GENERATIVE_SCREENING_MODEL);
-            let mut provider = MockVetProvider::empty();
-            provider.structured_routes.insert(
-                ".canons/cli/clean-rule.md".to_string(),
-                json!({
-                    "vetting_summary": "Flags use kebab-case.",
-                    "vetting_score": 0.92
-                }),
-            );
-            provider.structured_routes.insert(
-                ".canons/cli/contested-rule.md".to_string(),
-                json!({
-                    "vetting_summary": "Error lacks Hint remediation.",
-                    "vetting_score": 0.12
-                }),
-            );
+        fn test_generative_model_on_vet_fails_fast_with_actionable_guidance() {
+            let (ws, caseload) = sample_fixture(DEFAULT_GOOGLE_GENERATOR_MODEL);
+            let provider = MockVetProvider::empty();
 
-            let out = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
-                .expect("generative vet");
-            let reqs = provider.structured_requests.lock().unwrap();
-            assert_eq!(reqs.len(), 2);
-            assert!(
-                reqs.iter()
-                    .all(|r| r.reasoning_budget == DEFAULT_SCREENING_REASONING_BUDGET)
-            );
-
-            let vetting = out.vetting.expect("vetting");
-            assert_eq!(vetting.vetted_count(), 1);
-            assert_eq!(vetting.contested_count(), 1);
+            let err = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
+                .expect_err("generator model on vet must be rejected");
+            assert!(matches!(err, VetError::UnsupportedGenerativeModel { .. }));
+            let msg = err.to_string();
+            assert!(msg.contains("google:gemini-decision-1"));
+            assert!(msg.contains("typesafe:jev-latest"));
+            assert!(msg.contains("local:kev-4b"));
+            assert!(provider.structured_requests.lock().unwrap().is_empty());
+            assert!(provider.decision_requests.lock().unwrap().is_empty());
         }
 
         #[test]
