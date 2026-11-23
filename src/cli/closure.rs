@@ -24,6 +24,8 @@ use crate::intake::{IntakeError, IntakeOptions, execute_intake};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::validate::{ValidateError, ValidateOptions, execute_validate};
+use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::Path;
 
 /// Execution backend for converged CLI closures (`apprise`, `docket`, `admit`, `audit`).
@@ -120,25 +122,35 @@ pub(crate) fn merge_metadata_onto_intake(
 }
 
 /// Materializes an in-memory [`WorkspaceSnapshot`] from `backend`, backfilling any pre-populated
-/// candidate canons referenced in `caseload.discovery`.
+/// candidate canons (including `inline:*`) referenced in `caseload.discovery` and resolving any
+/// explicitly supplied CLI inline canons.
 pub(crate) fn materialize_closure_snapshot(
     backend: &ClosureBackend<'_>,
-    canon_patterns: &[String],
+    canons: &CanonSelectionArgs,
+    stdin: &mut dyn Read,
     caseload: &Caseload,
-) -> Result<WorkspaceSnapshot, CliError> {
-    match backend {
-        ClosureBackend::Hermetic { workspace, .. } => Ok((*workspace).clone()),
+) -> Result<(WorkspaceSnapshot, BTreeMap<String, String>), CliError> {
+    let inline_canons = canons.resolve_inline_canons(stdin)?;
+    let mut snapshot = match backend {
+        ClosureBackend::Hermetic { workspace, .. } => (*workspace).clone(),
         ClosureBackend::LiveDisk { workspace_root } => {
-            let mut snapshot = WorkspaceSnapshot::from_disk(workspace_root, canon_patterns)
+            let mut snapshot = WorkspaceSnapshot::from_disk(workspace_root, &canons.canon)
                 .map_err(map_discover_error)?;
             if let Some(disc) = &caseload.discovery {
                 for canon_ref in &disc.candidate_canons {
                     snapshot.backfill_canon_ref(workspace_root, canon_ref);
                 }
             }
-            Ok(snapshot)
+            snapshot
         }
+    };
+    if let Some(disc) = &caseload.discovery {
+        snapshot.backfill_inline_canons(&disc.inline_canons);
     }
+    for (source_ref, raw_markdown) in &inline_canons {
+        snapshot.insert_inline_canon(source_ref.clone(), raw_markdown);
+    }
+    Ok((snapshot, inline_canons))
 }
 
 /// Executes `intake` within a contentious cascade (`vet`, `audit`), fast-forwarding if `.intake` is pre-populated.
@@ -210,6 +222,7 @@ fn execute_cascade_intake_body(
 /// Executes `discover` within a contentious cascade (`vet`, `audit`), fast-forwarding if `.discovery` is pre-populated.
 pub(crate) fn resolve_cascade_discover(
     canons: &CanonSelectionArgs,
+    inline_canons: &BTreeMap<String, String>,
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     intake_changed: bool,
@@ -230,6 +243,8 @@ pub(crate) fn resolve_cascade_discover(
         all_canons: canons.all_canons,
         canon_patterns: canons.canon.clone(),
         include_builtins: canons.include_builtins(),
+        include_workspace_canons: canons.include_workspace_canons(),
+        inline_canons: inline_canons.clone(),
     };
 
     let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {

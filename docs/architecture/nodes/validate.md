@@ -85,6 +85,9 @@ The CLI exposes `validate` as an imperative subcommand:
 # Validate full repository canon corpus (Codex Audit):
 canon-clerk validate --all-canons
 
+# Validate an ephemeral inline canon directly (no target files required):
+canon-clerk validate --canon-name no-eval --canon-body "Code MUST avoid dynamic eval()."
+
 # Validate candidate canons triggered by in-flight diff stream:
 git diff origin/main | canon-clerk validate --diff -
 

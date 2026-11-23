@@ -33,6 +33,7 @@ pub(super) fn materialize_disk_snapshot(
     let mut snapshot =
         WorkspaceSnapshot::from_disk(workspace_root, canon_patterns).map_err(map_discover_error)?;
     if let Some(disc) = incoming.and_then(|c| c.discovery.as_ref()) {
+        snapshot.backfill_inline_canons(&disc.inline_canons);
         for canon_ref in &disc.candidate_canons {
             snapshot.backfill_canon_ref(workspace_root, canon_ref);
         }

@@ -17,7 +17,7 @@
 use crate::caseload::{Caseload, CaseloadDiscovery};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
-use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::io::ensure_single_stdin_source_with_canons;
 use crate::cli::runners::run_branch_a_discover;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
@@ -99,7 +99,11 @@ pub fn run_discover_with_telemetry(
     workspace_root: &Path,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
-    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    ensure_single_stdin_source_with_canons(
+        &args.filing,
+        Some(&args.canons),
+        args.io.caseload.as_deref(),
+    )?;
 
     let incoming_caseload = args.io.read_caseload(stdin)?;
     let caseload = run_branch_a_discover(

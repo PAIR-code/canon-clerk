@@ -58,7 +58,7 @@ A nominal canon file that fails to embody these attributes SHOULD still be enfor
 ## 3. Sourcing, Discovery & Scoping
 
 ### 3.1 Sourcing Categories
-Canons evaluate from three primary sourcing tiers:
+Canons evaluate from four sourcing tiers:
 
 1. **Local Workspace Canons:**  
    Authored directly in the subject repository (e.g. `.canons/agent-orientation/agents-md-must-be-unconditional.canon.md` or `packages/ui/.canons/prs-must-verify-accessibility.canon.md`). Identified by workspace-relative file paths, preserving native IDE link clickability and terminal editor jumps.
@@ -66,9 +66,11 @@ Canons evaluate from three primary sourcing tiers:
    Core standard canons bundled directly into the `canon-clerk` binary (e.g. `builtin:canon-authoring/canons-must-be-atomic`). Provided out-of-the-box for instant codex validation without requiring downstream repositories to re-author baseline engineering rules.
 3. **Library Canons (Rule Packs):**  
    External canon rule packs imported or linked via workspace configuration under a unique pack namespace alias (e.g. `security:auth/tokens-must-expire`).
+4. **Ephemeral Inline Canons:**  
+   Ad-hoc canons supplied directly via CLI invocation without creating files on disk (e.g. `inline:no-eval` or `inline:security/no-eval`). Isolated from the workspace file tree (`exists:` preconditions and `--all-targets`) while still participating in standard frontmatter defaults, static `validate` linting, and `Caseload` archival.
 
 > [!NOTE]
-> **Design Precedent:** The source-qualified identifier syntax (`builtin:<path>` and `<pack-alias>:<path>`) follows standard precedent established by tools such as Bazel repository labels (`@repo//pkg:target`) and ESLint rule plugins (`@scope/plugin/rule-name`). Local rules preserve workspace-relative file paths to guarantee native IDE link clickability and terminal editor jumps.
+> **Design Precedent:** The source-qualified identifier syntax (`builtin:<path>`, `inline:<path>`, and `<pack-alias>:<path>`) follows standard precedent established by tools such as Bazel repository labels (`@repo//pkg:target`) and ESLint rule plugins (`@scope/plugin/rule-name`). Local rules preserve workspace-relative file paths to guarantee native IDE link clickability and terminal editor jumps.
 
 ### 3.2 Workspace Discovery & Scoping
 Within the local workspace, discovery locates repository canons:
@@ -121,6 +123,7 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * *Example (Local Implicit):* `.canons/prs-must-include-tests.canon.md` -> `prs-must-include-tests`
    * *Example (Nested Local Implicit):* `.canons/auth/tokens-must-expire.canon.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
    * *Example (Builtin Implicit):* `builtin:canon-authoring/canons-must-be-atomic` -> `canons-must-be-atomic` (diagnostic path: `canon-authoring/canons-must-be-atomic`)
+   * *Example (Inline Implicit):* `inline:security/no-eval` -> `no-eval` (diagnostic path: `security/no-eval`)
    * *Example (Pack Implicit):* `security:auth/tokens-must-expire` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
    * *Example (Explicit):* `id: "Auth: Token Expiry (v2)"` -> `auth-token-expiry-v2`
 

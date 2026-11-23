@@ -261,6 +261,7 @@ pub fn execute_validate_on_disk(
         .ok_or(ValidateError::MissingDiscovery)?;
 
     let mut snapshot = WorkspaceSnapshot::from_disk(workspace_root, &[])?;
+    snapshot.backfill_inline_canons(&discovery.inline_canons);
 
     // Ensure any explicit candidate canon ref (builtin:* or workspace path) is loaded
     for canon_ref in &discovery.candidate_canons {
@@ -564,6 +565,7 @@ Rationale: Two rules in one canon.";
                 ],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
+                ..CaseloadDiscovery::default()
             });
 
             let enriched =
@@ -593,6 +595,7 @@ Rationale: Two rules in one canon.";
                 candidate_canons: vec![".canons/rule-must-hold.md".to_string()],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
+                ..CaseloadDiscovery::default()
             });
 
             let pass_caseload = execute_validate(
@@ -646,6 +649,7 @@ Rationale: Two rules in one canon.";
                 ],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
+                ..CaseloadDiscovery::default()
             });
 
             let validated =

@@ -24,7 +24,7 @@ use crate::cli::args::{
     CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
 };
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
-use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::io::ensure_stage_stdin;
 use crate::cli::node_args::{AppriseNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::load_optional_host_stored_config;
@@ -244,7 +244,7 @@ fn run_apprise_core(
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
-    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    ensure_stage_stdin(&args.filing, &args.canons, &args.io)?;
     let stored_config = load_optional_host_stored_config(env)?;
     let threshold = resolve_apprise_threshold(args.apprise_threshold, env, stored_config.as_ref())?;
     let _validated_batch_size =
@@ -276,12 +276,13 @@ fn run_apprise_core(
     let (caseload_after_intake, intake_disp, target_changed) =
         resolve_apprise_intake(&intake_opts, incoming, telemetry)?;
 
-    let snapshot =
-        materialize_closure_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
+    let (snapshot, inline_canons) =
+        materialize_closure_snapshot(&backend, &args.canons, stdin, &caseload_after_intake)?;
     let total_workspace_canons = Some(snapshot.canons.len());
 
     let (caseload_after_discover, discover_disp) = resolve_apprise_discover(
         &args.canons,
+        &inline_canons,
         caseload_after_intake,
         &snapshot,
         target_changed,

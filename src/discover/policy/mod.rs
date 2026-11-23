@@ -192,7 +192,7 @@ impl WorkspacePolicySet {
         canon: &Canon,
         file_path: &str,
     ) -> bool {
-        if self.configs_by_scope.is_empty() {
+        if is_inline_canon(canon_ref, canon) || self.configs_by_scope.is_empty() {
             return true;
         }
         let scopes = file_scope_chain(file_path);
@@ -224,7 +224,7 @@ impl WorkspacePolicySet {
     /// (`[<canon-scope>/.canons/config.yaml -> ancestor ... -> root .canons/config.yaml -> implicit allow]`),
     /// used for metadata-only filings and `--all-canons` (`SPEC.md` §7.3).
     pub(super) fn allows_unconditional(&self, canon_ref: &str, canon: &Canon) -> bool {
-        if self.configs_by_scope.is_empty() {
+        if is_inline_canon(canon_ref, canon) || self.configs_by_scope.is_empty() {
             return true;
         }
         let anchor = canon_scope(canon_ref, canon);
@@ -250,10 +250,16 @@ fn is_builtin_canon(canon_ref: &str, canon: &Canon) -> bool {
     canon.source_kind == Some(CanonSourceKind::Builtin) || canon_ref.starts_with("builtin:")
 }
 
+fn is_inline_canon(canon_ref: &str, canon: &Canon) -> bool {
+    canon.source_kind == Some(CanonSourceKind::Inline) || canon_ref.starts_with("inline:")
+}
+
 fn is_workspace_canon(canon_ref: &str, canon: &Canon) -> bool {
     match canon.source_kind {
         Some(CanonSourceKind::Workspace) => true,
-        Some(CanonSourceKind::Builtin | CanonSourceKind::Pack(_)) => false,
+        Some(CanonSourceKind::Builtin | CanonSourceKind::Inline | CanonSourceKind::Pack(_)) => {
+            false
+        }
         None => resolve_source_info(canon_ref)
             .is_some_and(|info| info.source_kind == CanonSourceKind::Workspace),
     }

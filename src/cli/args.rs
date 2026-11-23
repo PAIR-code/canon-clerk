@@ -14,9 +14,11 @@
 
 //! Composable Clap argument groups for Caseload DAG stage subcommands.
 
+use crate::canon::normalize_inline_canon_name;
 use crate::caseload::{ThinkingLevel, WorkspaceState};
 use crate::cli::CliError;
 use crate::cli::github_args::{resolve_filing_source, resolve_filing_source_with_fetcher};
+use crate::cli::io::read_operand_source;
 use crate::configure::{ConfigureError, StoredConfig, parse_thinking_level};
 use crate::github::GithubPullRequestFetcher;
 use crate::intake::IntakeOptions;
@@ -219,6 +221,38 @@ pub struct CanonSelectionArgs {
     )]
     pub canon: Vec<String>,
 
+    /// Ephemeral inline canon name (`inline:<name>`, optional `.canon.md` suffix stripped).
+    #[arg(
+        long = "canon-name",
+        value_name = "NAME",
+        help_heading = "Canon Selection",
+        help = "Evaluate an ephemeral inline canon by name without creating a file on disk"
+    )]
+    pub canon_name: Option<String>,
+
+    /// Optional inline canon Markdown body (with optional YAML frontmatter); requires `--canon-name`.
+    #[arg(
+        long = "canon-body",
+        value_name = "TEXT",
+        allow_hyphen_values = true,
+        requires = "canon_name",
+        conflicts_with = "canon_body_file",
+        help_heading = "Canon Selection",
+        help = "Inline Markdown body (with optional YAML frontmatter) for --canon-name"
+    )]
+    pub canon_body: Option<String>,
+
+    /// Read inline canon Markdown body from a file path or `-` for stdin; requires `--canon-name`.
+    #[arg(
+        long = "canon-body-file",
+        value_name = "PATH|-",
+        requires = "canon_name",
+        conflicts_with = "canon_body",
+        help_heading = "Canon Selection",
+        help = "Read inline canon Markdown body from a file or '-' for stdin (requires --canon-name)"
+    )]
+    pub canon_body_file: Option<String>,
+
     /// Include compile-time embedded `builtin:*` standard canons during discovery (default).
     #[arg(
         long = "builtins",
@@ -239,14 +273,91 @@ pub struct CanonSelectionArgs {
 }
 
 impl CanonSelectionArgs {
-    /// Returns `true` if embedded `builtin:*` standard canons should be included (default: `true`).
-    pub fn include_builtins(&self) -> bool {
-        !self.no_builtins
+    /// Returns `true` if an ephemeral inline canon (`--canon-name`) was supplied.
+    pub fn has_inline_canon(&self) -> bool {
+        self.canon_name.is_some()
     }
 
-    /// Returns `true` if canon selection is unconstrained (no explicit `--all-canons`, `--canon`, `--builtins`, or `--no-builtins`).
+    /// Returns `true` if embedded `builtin:*` standard canons should be included.
+    ///
+    /// Defaults to `true`, except when `--no-builtins` is passed or when `--canon-name` is
+    /// supplied without explicit `--builtins`, `--canon`, or `--all-canons`.
+    pub fn include_builtins(&self) -> bool {
+        if self.no_builtins {
+            return false;
+        }
+        if self.canon_name.is_some() && !self.builtins && !self.all_canons && self.canon.is_empty()
+        {
+            return false;
+        }
+        true
+    }
+
+    /// Returns `true` if local workspace `.canons/**` canons should be included during discovery.
+    ///
+    /// Defaults to `true`, except when `--canon-name` is supplied without explicit `--canon`
+    /// or `--all-canons`.
+    pub fn include_workspace_canons(&self) -> bool {
+        if self.canon_name.is_some() {
+            return self.all_canons || !self.canon.is_empty();
+        }
+        true
+    }
+
+    /// Returns `true` if canon selection is unconstrained (no explicit selection flags).
     pub fn is_empty(&self) -> bool {
-        !self.all_canons && self.canon.is_empty() && !self.builtins && !self.no_builtins
+        !self.all_canons
+            && self.canon.is_empty()
+            && !self.builtins
+            && !self.no_builtins
+            && self.canon_name.is_none()
+            && self.canon_body.is_none()
+            && self.canon_body_file.is_none()
+    }
+
+    /// Resolves any `--canon-name` + optional `--canon-body` / `--canon-body-file` flags into a
+    /// canonical `inline:<name> -> raw Markdown` map.
+    pub fn resolve_inline_canons(
+        &self,
+        stdin: &mut dyn Read,
+    ) -> Result<BTreeMap<String, String>, CliError> {
+        if self.canon_body.is_some() && self.canon_body_file.is_some() {
+            return Err(CliError::usage(
+                "Conflicting inline canon body flags: `--canon-body` and `--canon-body-file` are mutually exclusive.\n  \
+                 Hint: Supply either `--canon-body <TEXT>` or `--canon-body-file <PATH|->`, not both."
+                    .to_string(),
+            ));
+        }
+
+        let Some(raw_name) = self.canon_name.as_deref() else {
+            if self.canon_body.is_some() || self.canon_body_file.is_some() {
+                return Err(CliError::usage(
+                    "`--canon-body` / `--canon-body-file` requires `--canon-name <NAME>`.\n  \
+                     Hint: Provide a kebab-case canon name such as `--canon-name no-eval`."
+                        .to_string(),
+                ));
+            }
+            return Ok(BTreeMap::new());
+        };
+
+        let source_ref = normalize_inline_canon_name(raw_name).map_err(|msg| {
+            CliError::usage(format!(
+                "Invalid `--canon-name`: {msg}\n  \
+                 Hint: Provide a kebab-case rule name (e.g. `no-eval` or `security/no-eval`, with or without `.canon.md`)."
+            ))
+        })?;
+
+        let raw_markdown = if let Some(body) = &self.canon_body {
+            body.clone()
+        } else if let Some(path) = &self.canon_body_file {
+            read_operand_source(path, "--canon-body-file", stdin)?
+        } else {
+            String::new()
+        };
+
+        let mut map = BTreeMap::new();
+        map.insert(source_ref, raw_markdown);
+        Ok(map)
     }
 }
 
@@ -573,5 +684,28 @@ mod tests {
             .expect_err("invalid CANON_CLERK_MAX_BACKOFF_MS must fail");
         assert_eq!(bad_env_err.exit_code(), 2);
         assert!(bad_env_err.to_string().contains("Hint:"));
+    }
+
+    #[test]
+    fn test_canon_body_accepts_leading_frontmatter_hyphens() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            canons: CanonSelectionArgs,
+        }
+
+        let body = "---\ntriggers:\n  - \"**/*.rs\"\n---\nCode MUST avoid eval().";
+        let parsed = TestCli::try_parse_from([
+            "canon-clerk",
+            "--canon-name",
+            "avoid-eval",
+            "--canon-body",
+            body,
+        ])
+        .expect("clap must accept YAML frontmatter starting with ---");
+        assert_eq!(parsed.canons.canon_name.as_deref(), Some("avoid-eval"));
+        assert_eq!(parsed.canons.canon_body.as_deref(), Some(body));
     }
 }

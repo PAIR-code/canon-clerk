@@ -25,6 +25,8 @@ pub enum CanonSourceKind {
     Workspace,
     /// Built-in standard canon bundled in the binary (`builtin:<path>`).
     Builtin,
+    /// Ephemeral inline canon supplied directly via CLI invocation (`inline:<path>`).
+    Inline,
     /// External library canon pack (`<pack-alias>:<path>`).
     Pack(String),
 }
@@ -114,6 +116,14 @@ pub fn resolve_source_info(raw_ref: &str) -> Option<CanonSourceInfo> {
                 None,
                 clean_rest.to_string(),
             )
+        } else if let Some(rest) = normalized.strip_prefix("inline:") {
+            let clean_rest = rest.trim_start_matches('/');
+            (
+                CanonSourceKind::Inline,
+                format!("inline:{clean_rest}"),
+                None,
+                clean_rest.to_string(),
+            )
         } else if let Some((prefix, rest)) = normalized.split_once(':')
             && is_valid_pack_namespace(prefix)
         {
@@ -140,7 +150,7 @@ pub fn resolve_source_info(raw_ref: &str) -> Option<CanonSourceInfo> {
     let (raw_scope, rel_path) = extract_relative_to_canons(&internal_path);
     let scope = match source_kind {
         CanonSourceKind::Workspace => raw_scope,
-        CanonSourceKind::Builtin | CanonSourceKind::Pack(_) => None,
+        CanonSourceKind::Builtin | CanonSourceKind::Inline | CanonSourceKind::Pack(_) => None,
     };
 
     let diagnostic_path = strip_canon_ext(&rel_path).trim_matches('/').to_string();
@@ -155,6 +165,49 @@ pub fn resolve_source_info(raw_ref: &str) -> Option<CanonSourceInfo> {
         file_stem,
         scope,
     })
+}
+
+/// Normalizes a raw `--canon-name` input into a canonical `inline:<path>` source reference.
+///
+/// Strips an optional `inline:` prefix and optional `.canon.md` suffix, while rejecting empty
+/// names, leading/trailing slashes, empty path segments, `.` / `..` traversal, or colons.
+pub fn normalize_inline_canon_name(raw_name: &str) -> Result<String, String> {
+    let trimmed = raw_name.trim();
+    if trimmed.is_empty() {
+        return Err("Inline canon name must not be empty.".to_string());
+    }
+
+    let normalized = trimmed.replace('\\', "/");
+    let without_prefix = normalized.strip_prefix("inline:").unwrap_or(&normalized);
+
+    if without_prefix.starts_with('/') || without_prefix.ends_with('/') {
+        return Err(format!(
+            "Inline canon name `{raw_name}` must not start or end with `/`."
+        ));
+    }
+
+    if without_prefix.contains(':') {
+        return Err(format!(
+            "Inline canon name `{raw_name}` must not contain `:` outside an optional leading `inline:` prefix."
+        ));
+    }
+
+    let stripped = strip_canon_ext(without_prefix);
+    if stripped.is_empty() {
+        return Err(format!(
+            "Inline canon name `{raw_name}` must include a rule stem before `.canon.md`."
+        ));
+    }
+
+    for segment in stripped.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(format!(
+                "Inline canon name `{raw_name}` contains an invalid path segment (`{segment}`)."
+            ));
+        }
+    }
+
+    Ok(format!("inline:{stripped}"))
 }
 
 /// Derives the monorepo scope prefix (`<scope>`) when a workspace path is under `<scope>/.canons/`.
