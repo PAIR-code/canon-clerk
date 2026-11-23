@@ -17,7 +17,7 @@
 use crate::caseload::{AnnotationLevel, Caseload, CaseloadValidation, CodeAnnotation};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
-use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::io::ensure_single_stdin_source_with_canons;
 use crate::cli::runners::run_branch_a_validate;
 use crate::cli::telemetry::resolve_verbose_flag;
 use crate::telemetry::TelemetrySession;
@@ -130,7 +130,11 @@ pub(crate) fn run_validate_with_env_and_telemetry(
     env: &BTreeMap<String, String>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
-    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    ensure_single_stdin_source_with_canons(
+        &args.filing,
+        Some(&args.canons),
+        args.io.caseload.as_deref(),
+    )?;
     let verbose = resolve_verbose_flag(args.verbose, env)?;
 
     let incoming_caseload = args.io.read_caseload(stdin)?;
@@ -772,6 +776,80 @@ mod tests {
             assert!(quiet_text.contains(".canons/cli/broken-rule.md"));
             assert!(!quiet_text.contains(".canons/cli/warn-rule.md"));
             assert!(!quiet_text.contains(".canons/cli/clean-rule.md"));
+        }
+
+        #[test]
+        fn test_validate_standalone_inline_canon_and_caseload_resumption() {
+            let dir = TempDir::new("inline-canon");
+            dir.write_file("src/lib.rs", "pub fn ok() {}\n");
+
+            // 1. Standalone inline canon validation (no targets, no --all-canons)
+            let valid_args = ValidateArgs {
+                canons: CanonSelectionArgs {
+                    canon_name: Some("avoid-eval.canon.md".to_string()),
+                    canon_body: Some("Source code MUST avoid dynamic eval().".to_string()),
+                    ..CanonSelectionArgs::default()
+                },
+                ..ValidateArgs::default()
+            };
+            let mut out = Vec::new();
+            let caseload =
+                run_validate_in_workspace(&valid_args, &mut Cursor::new(""), &mut out, dir.path())
+                    .expect("standalone inline canon should pass validate");
+            let disc = caseload.discovery.as_ref().expect("discovery");
+            assert_eq!(disc.candidate_canons, vec!["inline:avoid-eval".to_string()]);
+            assert_eq!(
+                disc.inline_canons
+                    .get("inline:avoid-eval")
+                    .map(String::as_str),
+                Some("Source code MUST avoid dynamic eval().")
+            );
+            assert!(!caseload.validation.as_ref().expect("validation").has_errors);
+
+            // 2. Inline canon via stdin (`--canon-body-file -`) with negated-modal stem triggers lint warning
+            let bad_stem_args = ValidateArgs {
+                canons: CanonSelectionArgs {
+                    canon_name: Some("code-must-not-use-eval".to_string()),
+                    canon_body_file: Some("-".to_string()),
+                    ..CanonSelectionArgs::default()
+                },
+                max_warnings: Some(0),
+                ..ValidateArgs::default()
+            };
+            let mut bad_out = Vec::new();
+            let err = run_validate_in_workspace(
+                &bad_stem_args,
+                &mut Cursor::new("Code MUST avoid eval()."),
+                &mut bad_out,
+                dir.path(),
+            )
+            .expect_err("negated modal stem warning should trip --max-warnings 0");
+            assert_eq!(err.exit_code(), 1);
+            let bad_text = String::from_utf8(bad_out).expect("utf8");
+            assert!(bad_text.contains("inline:code-must-not-use-eval"));
+            assert!(bad_text.contains("no-negated-file-stems"));
+
+            // 3. `--caseload` resumption rehydrates `inline:avoid-eval` without re-passing CLI flags
+            let discovery_only = Caseload::new().with_discovery(disc.clone());
+            let encoded = serde_json::to_vec(&discovery_only).expect("serialize discovery");
+            let resume_args = ValidateArgs {
+                io: CaseloadIoArgs {
+                    caseload: Some("-".to_string()),
+                    ..CaseloadIoArgs::default()
+                },
+                ..ValidateArgs::default()
+            };
+            let mut resume_out = Vec::new();
+            let resumed = run_validate_in_workspace(
+                &resume_args,
+                &mut Cursor::new(encoded),
+                &mut resume_out,
+                dir.path(),
+            )
+            .expect("resumed validate from caseload with inline_canons should succeed");
+            let val = resumed.validation.expect("validation");
+            assert!(!val.has_errors);
+            assert!(val.results.contains_key("inline:avoid-eval"));
         }
     }
 }

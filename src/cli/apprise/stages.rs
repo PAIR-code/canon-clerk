@@ -91,6 +91,7 @@ fn execute_apprise_intake_body(
 
 pub(super) fn resolve_apprise_discover(
     canons: &CanonSelectionArgs,
+    inline_canons: &BTreeMap<String, String>,
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     target_changed: bool,
@@ -108,9 +109,12 @@ pub(super) fn resolve_apprise_discover(
         i.scope == IntakeScope::AllTargets || !i.target_paths.is_empty() || !i.diffs.is_empty()
     });
     let discover_opts = DiscoverOptions {
-        all_canons: canons.all_canons || (!intake_has_targets && !canons.canon.is_empty()),
+        all_canons: canons.all_canons
+            || (!intake_has_targets && (!canons.canon.is_empty() || canons.has_inline_canon())),
         canon_patterns: canons.canon.clone(),
         include_builtins: canons.include_builtins(),
+        include_workspace_canons: canons.include_workspace_canons(),
+        inline_canons: inline_canons.clone(),
     };
 
     let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {

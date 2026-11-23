@@ -30,7 +30,7 @@ use crate::cli::node_args::AllNodeModelArgs;
 use crate::cli::runners::load_optional_host_stored_config;
 use crate::cli::{
     CanonSelectionArgs, CliError, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
-    build_live_model_provider, ensure_single_stdin_source, read_caseload_operand,
+    build_live_model_provider, ensure_single_stdin_source_with_canons, read_caseload_operand,
     write_caseload_file,
 };
 use crate::discover::WorkspaceSnapshot;
@@ -251,12 +251,17 @@ pub fn run_consistency_bench_cli(
         ))
     })?;
     let env_map: BTreeMap<String, String> = env::vars().collect();
-    ensure_single_stdin_source(&cli.filing, cli.caseload.as_deref())?;
+    ensure_single_stdin_source_with_canons(
+        &cli.filing,
+        Some(&cli.canons),
+        cli.caseload.as_deref(),
+    )?;
 
     let stored_config = load_optional_host_stored_config(&env_map)?;
     let resolved = resolve_cli_parameters(cli, &env_map, stored_config.as_ref())?;
     let incoming = read_caseload_operand(cli.caseload.as_deref(), streams.stdin)?;
     let intake_opts = cli.filing.resolve_intake_options(streams.stdin)?;
+    let inline_canons = cli.canons.resolve_inline_canons(streams.stdin)?;
     let configure_opts = resolve_bench_configure_options(
         cli,
         resolved.stage,
@@ -266,6 +271,9 @@ pub fn run_consistency_bench_cli(
     )?;
 
     let mut snapshot = materialize_disk_snapshot(&cwd, &cli.canons.canon, incoming.as_ref())?;
+    for (source_ref, raw_markdown) in &inline_canons {
+        snapshot.insert_inline_canon(source_ref.clone(), raw_markdown);
+    }
     let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
         stage: resolved.stage,
         intake_opts: &intake_opts,
@@ -336,11 +344,16 @@ pub fn run_consistency_bench_hermetic(
     deps: &HermeticBenchDeps<'_>,
     streams: &mut BenchIoStreams<'_>,
 ) -> Result<ConsistencyBenchReport, CliError> {
-    ensure_single_stdin_source(&cli.filing, cli.caseload.as_deref())?;
+    ensure_single_stdin_source_with_canons(
+        &cli.filing,
+        Some(&cli.canons),
+        cli.caseload.as_deref(),
+    )?;
     let stored_config = load_optional_host_stored_config(deps.env)?;
     let resolved = resolve_cli_parameters(cli, deps.env, stored_config.as_ref())?;
     let incoming = read_caseload_operand(cli.caseload.as_deref(), streams.stdin)?;
     let intake_opts = cli.filing.resolve_intake_options(streams.stdin)?;
+    let inline_canons = cli.canons.resolve_inline_canons(streams.stdin)?;
     let configure_opts = resolve_bench_configure_options(
         cli,
         resolved.stage,
@@ -349,13 +362,21 @@ pub fn run_consistency_bench_hermetic(
         deps.env,
     )?;
 
+    let mut snapshot = deps.workspace.clone();
+    if let Some(disc) = incoming.as_ref().and_then(|c| c.discovery.as_ref()) {
+        snapshot.backfill_inline_canons(&disc.inline_canons);
+    }
+    for (source_ref, raw_markdown) in &inline_canons {
+        snapshot.insert_inline_canon(source_ref.clone(), raw_markdown);
+    }
+
     let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
         stage: resolved.stage,
         intake_opts: &intake_opts,
         canons: &cli.canons,
         configure_opts: &configure_opts,
         incoming,
-        workspace: deps.workspace,
+        workspace: &snapshot,
     })
     .map_err(map_bench_error)?;
 
@@ -386,7 +407,7 @@ pub fn run_consistency_bench_hermetic(
         &resolved,
         &bench_opts,
         &caseload,
-        deps.workspace,
+        &snapshot,
         deps.provider,
         deps.clock,
         streams,

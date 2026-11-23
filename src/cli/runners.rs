@@ -89,6 +89,7 @@ pub fn run_branch_a_discover(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let intake_opts = filing.resolve_intake_options(stdin)?;
+    let inline_canons = canons.resolve_inline_canons(stdin)?;
 
     let caseload_after_intake = if intake_opts.has_designated_source() {
         execute_intake_step(&intake_opts, incoming, telemetry)?
@@ -109,6 +110,8 @@ pub fn run_branch_a_discover(
             all_canons: canons.all_canons,
             canon_patterns: canons.canon.clone(),
             include_builtins: canons.include_builtins(),
+            include_workspace_canons: canons.include_workspace_canons(),
+            inline_canons,
         };
         telemetry.run_stage(PipelineStage::Discover, |_scope| {
             execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)
@@ -128,12 +131,13 @@ pub fn run_branch_a_validate(
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     let intake_opts = filing.resolve_intake_options(stdin)?;
+    let inline_canons = canons.resolve_inline_canons(stdin)?;
 
     let caseload_after_intake = if intake_opts.has_designated_source() {
         execute_intake_step(&intake_opts, incoming, telemetry)?
     } else if let Some(existing) = incoming {
         existing
-    } else if canons.all_canons || !canons.canon.is_empty() {
+    } else if canons.all_canons || !canons.canon.is_empty() || canons.has_inline_canon() {
         Caseload::new()
     } else {
         return Err(CliError::usage(ValidateError::MissingDiscovery.to_string()));
@@ -145,9 +149,12 @@ pub fn run_branch_a_validate(
     } else {
         let discover_opts = DiscoverOptions {
             all_canons: canons.all_canons
-                || (caseload_after_intake.intake.is_none() && !canons.canon.is_empty()),
+                || (caseload_after_intake.intake.is_none()
+                    && (!canons.canon.is_empty() || canons.has_inline_canon())),
             canon_patterns: canons.canon.clone(),
             include_builtins: canons.include_builtins(),
+            include_workspace_canons: canons.include_workspace_canons(),
+            inline_canons,
         };
         telemetry.run_stage(PipelineStage::Discover, |_scope| {
             execute_discover_on_disk(&discover_opts, caseload_after_intake, workspace_root)

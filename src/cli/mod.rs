@@ -18,6 +18,7 @@ pub mod admit;
 pub mod apprise;
 pub mod args;
 pub mod audit;
+pub mod canon_args;
 pub(crate) mod closure;
 mod commit_messages;
 pub mod configure;
@@ -65,8 +66,8 @@ pub use docket::{
 };
 pub use intake::{IntakeArgs, run_intake, run_intake_with_telemetry};
 pub use io::{
-    ensure_single_stdin_source, read_caseload_operand, read_operand_source,
-    resolve_target_operands, write_caseload_file,
+    ensure_single_stdin_source, ensure_single_stdin_source_with_canons, ensure_stage_stdin,
+    read_caseload_operand, read_operand_source, resolve_target_operands, write_caseload_file,
 };
 pub use node_args::{
     AdmitNodeModelArgs, AllNodeModelArgs, AppriseNodeModelArgs, AuditNodeModelArgs,

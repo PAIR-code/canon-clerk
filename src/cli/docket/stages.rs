@@ -88,6 +88,7 @@ fn execute_docket_intake_body(
 
 pub(super) fn resolve_docket_discover(
     canons: &CanonSelectionArgs,
+    inline_canons: &BTreeMap<String, String>,
     mut caseload: Caseload,
     snapshot: &WorkspaceSnapshot,
     intake_changed: bool,
@@ -105,6 +106,8 @@ pub(super) fn resolve_docket_discover(
         all_canons: canons.all_canons,
         canon_patterns: canons.canon.clone(),
         include_builtins: canons.include_builtins(),
+        include_workspace_canons: canons.include_workspace_canons(),
+        inline_canons: inline_canons.clone(),
     };
 
     let updated = telemetry.run_stage(PipelineStage::Discover, |_scope| {

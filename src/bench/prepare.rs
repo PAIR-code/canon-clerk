@@ -412,7 +412,8 @@ fn resolve_upstream_discover(
     });
     let all_canons = match stage {
         BenchmarkStage::Apprise => {
-            canons.all_canons || (!intake_has_targets && !canons.canon.is_empty())
+            canons.all_canons
+                || (!intake_has_targets && (!canons.canon.is_empty() || canons.has_inline_canon()))
         }
         BenchmarkStage::Docket
         | BenchmarkStage::Admit
@@ -420,10 +421,26 @@ fn resolve_upstream_discover(
         | BenchmarkStage::Audit => canons.all_canons,
     };
 
+    let inline_canons: BTreeMap<String, String> = if canons.has_inline_canon() {
+        workspace
+            .canons
+            .iter()
+            .filter(|(k, c)| {
+                c.source_kind == Some(crate::canon::CanonSourceKind::Inline)
+                    || k.starts_with("inline:")
+            })
+            .map(|(k, c)| (k.clone(), c.raw_content.clone()))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+
     let discover_opts = DiscoverOptions {
         all_canons,
         canon_patterns: canons.canon.clone(),
         include_builtins: canons.include_builtins(),
+        include_workspace_canons: canons.include_workspace_canons(),
+        inline_canons,
     };
     execute_discover(&discover_opts, caseload, workspace).map_err(|err| {
         ConsistencyBenchError::Setup {

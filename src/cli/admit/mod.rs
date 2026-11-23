@@ -27,7 +27,7 @@ use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_
 use crate::cli::docket::guards::{
     resolve_docket_batch_size, resolve_docket_concurrency, resolve_docket_threshold,
 };
-use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::io::ensure_stage_stdin;
 use crate::cli::node_args::{AdmitNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::load_optional_host_stored_config;
@@ -282,7 +282,7 @@ fn run_admit_core(
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
-    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    ensure_stage_stdin(&args.filing, &args.canons, &args.io)?;
     let (thresholds, stored_config) = resolve_admit_cli_params(args, env)?;
     let docket_threshold = thresholds.docket_threshold;
     let admit_threshold = thresholds.admit_threshold;
@@ -308,12 +308,13 @@ fn run_admit_core(
     let (caseload_after_intake, intake_disp, intake_changed) =
         resolve_admit_intake(&intake_opts, incoming, telemetry)?;
 
-    let mut snapshot =
-        materialize_closure_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
+    let (mut snapshot, inline_canons) =
+        materialize_closure_snapshot(&backend, &args.canons, stdin, &caseload_after_intake)?;
     let total_workspace_canons = Some(snapshot.canons.len());
 
     let (caseload_after_discover, discover_disp) = resolve_admit_discover(
         &args.canons,
+        &inline_canons,
         caseload_after_intake,
         &snapshot,
         intake_changed,

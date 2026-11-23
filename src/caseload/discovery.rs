@@ -75,6 +75,9 @@ pub struct CaseloadDiscovery {
     /// Stably sorted discovered canon file paths or qualified realm references matching the filing (or full corpus).
     #[serde(default)]
     pub candidate_canons: Vec<String>,
+    /// Optional ephemeral inline canon sources keyed by `inline:<name>` for `--caseload` resumption and archival.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inline_canons: BTreeMap<String, String>,
     /// Pruned subset of materialized exhibits triggered or inspected by at least one surviving candidate canon.
     #[serde(default)]
     pub active_exhibits: ActiveExhibits,
@@ -108,6 +111,7 @@ mod tests {
                 ".canons/api-design/no-dup-literals.md".to_string(),
                 ".canons/git-workflow/precursor-contracts.md".to_string(),
             ],
+            inline_canons: BTreeMap::new(),
             active_exhibits: ActiveExhibits {
                 files: vec!["src/caseload/mod.rs".to_string(), "src/lib.rs".to_string()],
                 pr_title: Some(true),
@@ -144,6 +148,19 @@ mod tests {
         let decoded_with_configs: CaseloadDiscovery =
             serde_json::from_str(&encoded_with_configs).expect("deserialize config_files");
         assert_eq!(decoded_with_configs.config_files, with_configs.config_files);
+        assert!(!encoded.contains("inline_canons"));
+
+        let mut with_inline = decoded_with_configs;
+        with_inline.inline_canons.insert(
+            "inline:no-eval".to_string(),
+            "Code MUST avoid dynamic eval().".to_string(),
+        );
+        let encoded_with_inline =
+            serde_json::to_string(&with_inline).expect("serialize inline_canons");
+        assert!(encoded_with_inline.contains(r#""inline_canons""#));
+        let decoded_with_inline: CaseloadDiscovery =
+            serde_json::from_str(&encoded_with_inline).expect("deserialize inline_canons");
+        assert_eq!(decoded_with_inline.inline_canons, with_inline.inline_canons);
     }
 
     #[test]

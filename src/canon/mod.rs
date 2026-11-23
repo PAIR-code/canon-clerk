@@ -37,7 +37,8 @@ pub use lexer::{
 };
 pub use sourcing::{
     CANON_FILE_EXT, CanonScope, CanonSourceInfo, CanonSourceKind, derive_diagnostic_path,
-    derive_scope, has_directory_traversal, resolve_source_info, scope_pattern,
+    derive_scope, has_directory_traversal, normalize_inline_canon_name, resolve_source_info,
+    scope_pattern,
 };
 
 use serde::{Deserialize, Serialize};
@@ -539,6 +540,51 @@ Body text.";
             assert_eq!(pack.file_path, None);
             assert_eq!(pack.diagnostic_path, "auth/tokens-must-expire");
             assert_eq!(derive_id(None, Some(&pack)), "tokens-must-expire");
+
+            let inline = resolve_source_info("inline:security/no-eval.canon.md").unwrap();
+            assert_eq!(inline.source_kind, CanonSourceKind::Inline);
+            assert_eq!(inline.file_path, None);
+            assert_eq!(inline.scope, None);
+            assert_eq!(inline.diagnostic_path, "security/no-eval");
+            assert_eq!(derive_id(None, Some(&inline)), "no-eval");
+        }
+
+        #[test]
+        fn test_normalize_inline_canon_name() {
+            assert_eq!(
+                normalize_inline_canon_name("no-eval").unwrap(),
+                "inline:no-eval"
+            );
+            assert_eq!(
+                normalize_inline_canon_name("no-eval.canon.md").unwrap(),
+                "inline:no-eval"
+            );
+            assert_eq!(
+                normalize_inline_canon_name("security/no-eval.canon.md").unwrap(),
+                "inline:security/no-eval"
+            );
+            assert_eq!(
+                normalize_inline_canon_name("inline:no-eval").unwrap(),
+                "inline:no-eval"
+            );
+
+            for invalid in [
+                "",
+                "   ",
+                ".canon.md",
+                "/no-eval",
+                "no-eval/",
+                "../escape",
+                "security/../escape",
+                "security/./rule",
+                "security//rule",
+                "other:rule",
+            ] {
+                assert!(
+                    normalize_inline_canon_name(invalid).is_err(),
+                    "expected `{invalid}` to be rejected"
+                );
+            }
         }
 
         #[test]

@@ -30,7 +30,7 @@ use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
     resolve_closure_validate,
 };
-use crate::cli::io::ensure_single_stdin_source;
+use crate::cli::io::ensure_stage_stdin;
 use crate::cli::node_args::{AuditNodeModelArgs, RejectedUnqualifiedTuningArgs};
 use crate::discover::WorkspaceSnapshot;
 use crate::github::detect_github_bypass_label;
@@ -383,7 +383,7 @@ fn run_audit_core(
 ) -> Result<Caseload, CliError> {
     ensure_stage_prefixed_threshold_flags(args)?;
     args.provider.validate_thinking_flags()?;
-    ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
+    ensure_stage_stdin(&args.filing, &args.canons, &args.io)?;
     let (thresholds, stored_config) = resolve_and_validate_audit_cli_params(args, env)?;
     let bypass_label = args.github_check.resolve_bypass_label(env)?;
     let mut incoming = args.io.read_caseload(stdin)?;
@@ -418,12 +418,13 @@ fn run_audit_core(
     let (caseload_after_intake, intake_disp, intake_changed) =
         resolve_cascade_intake("audit", &intake_opts, incoming, telemetry)?;
 
-    let mut snapshot =
-        materialize_closure_snapshot(&backend, &args.canons.canon, &caseload_after_intake)?;
+    let (mut snapshot, inline_canons) =
+        materialize_closure_snapshot(&backend, &args.canons, stdin, &caseload_after_intake)?;
     let total_workspace_canons = Some(snapshot.canons.len());
 
     let (caseload_after_discover, discover_disp) = resolve_cascade_discover(
         &args.canons,
+        &inline_canons,
         caseload_after_intake,
         &snapshot,
         intake_changed,

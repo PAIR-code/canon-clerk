@@ -583,6 +583,7 @@ mod tests {
                     linked_issues: Some(true),
                 },
                 triggers_join,
+                ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
             .with_config(CaseloadConfig::default().with_node_model(
@@ -1143,6 +1144,7 @@ mod tests {
                         linked_issues: Some(true),
                     },
                     triggers_join,
+                    ..CaseloadDiscovery::default()
                 })
                 .with_validation(CaseloadValidation::default())
                 .with_config(CaseloadConfig::default().with_node_model(

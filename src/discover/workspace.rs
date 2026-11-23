@@ -161,6 +161,31 @@ impl WorkspaceSnapshot {
         self
     }
 
+    /// Parses an ephemeral inline canon (`inline:<name>`) and inserts it into `self.canons`
+    /// without polluting `self.existing_files`.
+    pub fn insert_inline_canon(&mut self, source_ref: impl Into<String>, raw_markdown: &str) {
+        let key = source_ref.into();
+        let opts = ParseCanonOptions::with_source_ref(key.clone());
+        let canon = parse_canon_or_fallback(raw_markdown, &opts);
+        self.canons.insert(key, canon);
+    }
+
+    /// Builder variant of [`Self::insert_inline_canon`].
+    pub fn with_inline_canon(mut self, source_ref: impl Into<String>, raw_markdown: &str) -> Self {
+        self.insert_inline_canon(source_ref, raw_markdown);
+        self
+    }
+
+    /// Backfills ephemeral `inline:*` canons recorded on `caseload.discovery.inline_canons`
+    /// into `self.canons` when not already present.
+    pub fn backfill_inline_canons(&mut self, inline_canons: &BTreeMap<String, String>) {
+        for (source_ref, raw_markdown) in inline_canons {
+            if !self.canons.contains_key(source_ref) {
+                self.insert_inline_canon(source_ref.clone(), raw_markdown);
+            }
+        }
+    }
+
     /// Backfills a single candidate canon reference into `self.canons` when not already loaded,
     /// resolving `builtin:*` references from the embedded registry and workspace paths from disk.
     pub fn backfill_canon_ref(&mut self, workspace_root: &Path, canon_ref: &str) {
@@ -312,6 +337,33 @@ pub(crate) fn compile_canon_filter_globs(
             if !is_wildcard_pattern(normalized_rest) && !normalized_rest.contains('/') {
                 compiled.push(GlobPattern::parse(&format!("{canonical}/**"))?);
             }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("inline:") {
+            let clean_rest = rest.trim_start_matches('/').trim_end_matches('/');
+            if clean_rest.is_empty() || clean_rest == "**" || clean_rest == "*" {
+                compiled.push(GlobPattern::parse("inline:**")?);
+                continue;
+            }
+            if clean_rest
+                .replace('\\', "/")
+                .split('/')
+                .any(|seg| seg == "..")
+            {
+                return Err(DiscoverError::PathEscapesWorkspace { path: raw.clone() });
+            }
+            let normalized_rest = if !is_wildcard_pattern(clean_rest)
+                && clean_rest.len() >= CANON_FILE_EXT.len()
+                && clean_rest[clean_rest.len() - CANON_FILE_EXT.len()..]
+                    .eq_ignore_ascii_case(CANON_FILE_EXT)
+            {
+                &clean_rest[..clean_rest.len() - CANON_FILE_EXT.len()]
+            } else {
+                clean_rest
+            };
+            let canonical = format!("inline:{normalized_rest}");
+            compiled.push(GlobPattern::parse(&canonical)?);
             continue;
         }
 

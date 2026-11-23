@@ -16,7 +16,7 @@
 
 use crate::caseload::Caseload;
 use crate::cli::CliError;
-use crate::cli::args::FilingSourceArgs;
+use crate::cli::args::{CanonSelectionArgs, FilingSourceArgs};
 use clap::Args;
 use std::fs;
 use std::io::Read;
@@ -25,6 +25,24 @@ use std::path::{Path, PathBuf};
 /// Enforces the single-stdin guard: at most one operand may consume standard input (`-`).
 pub fn ensure_single_stdin_source(
     filing: &FilingSourceArgs,
+    caseload: Option<&str>,
+) -> Result<(), CliError> {
+    ensure_single_stdin_source_with_canons(filing, None, caseload)
+}
+
+/// Enforces the single-stdin guard for a standard stage combining filing, canon selection, and caseload I/O args.
+pub fn ensure_stage_stdin(
+    filing: &FilingSourceArgs,
+    canons: &CanonSelectionArgs,
+    io: &CaseloadIoArgs,
+) -> Result<(), CliError> {
+    ensure_single_stdin_source_with_canons(filing, Some(canons), io.caseload.as_deref())
+}
+
+/// Enforces the single-stdin guard across filing sources, canon selection (`--canon-body-file -`), and `--caseload -`.
+pub fn ensure_single_stdin_source_with_canons(
+    filing: &FilingSourceArgs,
+    canons: Option<&CanonSelectionArgs>,
     caseload: Option<&str>,
 ) -> Result<(), CliError> {
     let mut stdin_consumers = Vec::new();
@@ -78,6 +96,9 @@ pub fn ensure_single_stdin_source(
     }
     if caseload == Some("-") {
         stdin_consumers.push("`--caseload -`");
+    }
+    if canons.and_then(|c| c.canon_body_file.as_deref()) == Some("-") {
+        stdin_consumers.push("`--canon-body-file -`");
     }
 
     if stdin_consumers.len() > 1 {
@@ -287,6 +308,18 @@ mod tests {
             .expect_err("diff and linked-issue stdin conflict");
         assert_eq!(err.exit_code(), 2);
         assert!(err.to_string().contains("Conflicting standard input"));
+
+        // Invalid: `--canon-body-file -` combined with `--diff -`
+        let canons_stdin = CanonSelectionArgs {
+            canon_name: Some("no-eval".to_string()),
+            canon_body_file: Some("-".to_string()),
+            ..CanonSelectionArgs::default()
+        };
+        let err =
+            ensure_single_stdin_source_with_canons(&filing_conflict, Some(&canons_stdin), None)
+                .expect_err("diff and canon-body-file stdin conflict");
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("--canon-body-file -"));
     }
 
     #[test]

@@ -25,7 +25,7 @@ pub use glob_matcher::{
 };
 pub use workspace::{WorkspaceSnapshot, parse_canon_or_fallback};
 
-use crate::canon::{Canon, CanonSourceKind};
+use crate::canon::{Canon, CanonSourceKind, ParseCanonOptions};
 use crate::caseload::{
     ActiveExhibits, Caseload, CaseloadDiscovery, CaseloadIntake, DiscoveryMode, FileChangeStatus,
     IntakeScope,
@@ -48,6 +48,12 @@ pub struct DiscoverOptions {
 
     /// Whether compile-time embedded `builtin:*` standard canons are included during discovery (`--builtins` / `--no-builtins`; default: `true`).
     pub include_builtins: bool,
+
+    /// Whether local workspace `.canons/**` canons are included during discovery (default: `true`; set to `false` when evaluating an isolated `--canon-name`).
+    pub include_workspace_canons: bool,
+
+    /// Optional ephemeral inline canons (`inline:<name>` -> raw Markdown) supplied directly via CLI/API.
+    pub inline_canons: BTreeMap<String, String>,
 }
 
 impl Default for DiscoverOptions {
@@ -56,6 +62,8 @@ impl Default for DiscoverOptions {
             all_canons: false,
             canon_patterns: Vec::new(),
             include_builtins: true,
+            include_workspace_canons: true,
+            inline_canons: BTreeMap::new(),
         }
     }
 }
@@ -124,6 +132,7 @@ pub fn execute_discover(
     if caseload.discovery.is_some()
         && !options.all_canons
         && options.canon_patterns.is_empty()
+        && options.inline_canons.is_empty()
         && options.include_builtins
     {
         return Ok(caseload);
@@ -144,10 +153,14 @@ pub fn execute_discover(
     let config_files = policy_set.config_files().to_vec();
     let active_policy = options.canon_patterns.is_empty().then_some(&policy_set);
 
+    let parsed_inline_canons = parse_inline_canons(&options.inline_canons);
+
     let filtered_canons = filter_canons(
         &workspace.canons,
+        &parsed_inline_canons,
         &options.canon_patterns,
         options.include_builtins,
+        options.include_workspace_canons,
     )?;
     let target_files = match &caseload.intake {
         Some(intake) => materialize_target_files(intake, workspace)?,
@@ -155,28 +168,8 @@ pub fn execute_discover(
     };
 
     if options.all_canons {
-        let candidate_canons: Vec<String> = filtered_canons
-            .iter()
-            .filter(|(canon_ref, canon)| {
-                active_policy.is_none_or(|p| p.allows_unconditional(canon_ref, canon))
-            })
-            .map(|(canon_ref, _)| canon_ref.clone())
-            .collect();
-        let mut triggers_join = BTreeMap::new();
-        for canon_ref in &candidate_canons {
-            triggers_join.insert(canon_ref.clone(), Vec::new());
-        }
-        let discovery = CaseloadDiscovery {
-            mode: DiscoveryMode::AllCanons,
-            target_files: target_files.clone(),
-            config_files,
-            candidate_canons,
-            active_exhibits: ActiveExhibits {
-                files: target_files,
-                ..ActiveExhibits::default()
-            },
-            triggers_join,
-        };
+        let discovery =
+            build_all_canons_discovery(&filtered_canons, active_policy, target_files, config_files);
         return Ok(caseload.with_discovery(discovery));
     }
 
@@ -191,9 +184,9 @@ pub fn execute_discover(
     let mut active_linked_issues = false;
     let mut triggers_join = BTreeMap::new();
 
-    for (canon_ref, canon) in filtered_canons {
+    for (canon_ref, canon) in &filtered_canons {
         if let Some(eval) = evaluate_candidate_canon(
-            &canon_ref,
+            canon_ref,
             canon,
             &intake,
             &target_files,
@@ -211,9 +204,11 @@ pub fn execute_discover(
 
             let mut join_items = eval.matched_files;
             join_items.extend(eval.inspected_metadata);
-            triggers_join.insert(canon_ref, join_items);
+            triggers_join.insert(canon_ref.clone(), join_items);
         }
     }
+
+    let inline_canons = collect_inline_canons(&candidate_canons, &filtered_canons);
 
     let active_exhibits = ActiveExhibits {
         files: active_files_set.into_iter().collect(),
@@ -228,6 +223,7 @@ pub fn execute_discover(
         target_files,
         config_files,
         candidate_canons,
+        inline_canons,
         active_exhibits,
         triggers_join,
     };
@@ -244,6 +240,7 @@ pub fn execute_discover_on_disk(
     if caseload.discovery.is_some()
         && !options.all_canons
         && options.canon_patterns.is_empty()
+        && options.inline_canons.is_empty()
         && options.include_builtins
     {
         return Ok(caseload);
@@ -251,29 +248,105 @@ pub fn execute_discover_on_disk(
     if caseload.intake.is_none() && !options.all_canons {
         return Err(DiscoverError::MissingInputSource);
     }
-    let snapshot = WorkspaceSnapshot::from_disk_with_builtins(
+    let mut snapshot = WorkspaceSnapshot::from_disk_with_builtins(
         workspace_root,
         &options.canon_patterns,
         options.include_builtins,
     )?;
+    snapshot.backfill_inline_canons(&options.inline_canons);
     execute_discover(options, caseload, &snapshot)
 }
 
+fn parse_inline_canons(raw_inline_canons: &BTreeMap<String, String>) -> BTreeMap<String, Canon> {
+    raw_inline_canons
+        .iter()
+        .map(|(source_ref, raw_markdown)| {
+            let opts = ParseCanonOptions::with_source_ref(source_ref.clone());
+            (
+                source_ref.clone(),
+                parse_canon_or_fallback(raw_markdown, &opts),
+            )
+        })
+        .collect()
+}
+
+fn build_all_canons_discovery(
+    filtered_canons: &BTreeMap<String, &Canon>,
+    active_policy: Option<&WorkspacePolicySet>,
+    target_files: Vec<String>,
+    config_files: Vec<String>,
+) -> CaseloadDiscovery {
+    let candidate_canons: Vec<String> = filtered_canons
+        .iter()
+        .filter(|(canon_ref, canon)| {
+            active_policy.is_none_or(|p| p.allows_unconditional(canon_ref, canon))
+        })
+        .map(|(canon_ref, _)| canon_ref.clone())
+        .collect();
+    let inline_canons = collect_inline_canons(&candidate_canons, filtered_canons);
+    let mut triggers_join = BTreeMap::new();
+    for canon_ref in &candidate_canons {
+        triggers_join.insert(canon_ref.clone(), Vec::new());
+    }
+    CaseloadDiscovery {
+        mode: DiscoveryMode::AllCanons,
+        target_files: target_files.clone(),
+        config_files,
+        candidate_canons,
+        inline_canons,
+        active_exhibits: ActiveExhibits {
+            files: target_files,
+            ..ActiveExhibits::default()
+        },
+        triggers_join,
+    }
+}
+
+fn collect_inline_canons(
+    candidate_canons: &[String],
+    filtered_canons: &BTreeMap<String, &Canon>,
+) -> BTreeMap<String, String> {
+    candidate_canons
+        .iter()
+        .filter_map(|canon_ref| {
+            let canon = filtered_canons.get(canon_ref)?;
+            (canon.source_kind == Some(CanonSourceKind::Inline) || canon_ref.starts_with("inline:"))
+                .then(|| (canon_ref.clone(), canon.raw_content.clone()))
+        })
+        .collect()
+}
+
 fn filter_canons<'a>(
-    canons: &'a BTreeMap<String, Canon>,
+    workspace_canons: &'a BTreeMap<String, Canon>,
+    inline_canons: &'a BTreeMap<String, Canon>,
     canon_patterns: &[String],
     include_builtins: bool,
+    include_workspace_canons: bool,
 ) -> Result<BTreeMap<String, &'a Canon>, DiscoverError> {
     let matchers = compile_canon_filter_globs(canon_patterns)?;
     let mut out = BTreeMap::new();
-    for (key, canon) in canons {
+
+    for (key, canon) in workspace_canons {
         if !include_builtins && canon.source_kind == Some(CanonSourceKind::Builtin) {
+            continue;
+        }
+        if !include_workspace_canons
+            && !matches!(
+                canon.source_kind,
+                Some(CanonSourceKind::Builtin | CanonSourceKind::Inline)
+            )
+        {
             continue;
         }
         if matchers.is_empty() || matchers.iter().any(|m| m.is_match(key)) {
             out.insert(key.clone(), canon);
         }
     }
+
+    for (key, canon) in inline_canons {
+        out.insert(key.clone(), canon);
+    }
+
     Ok(out)
 }
 
@@ -409,6 +482,7 @@ mod tests {
                 candidate_canons: vec![".canons/rust/rust-code-rule.md".to_string()],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
+                ..CaseloadDiscovery::default()
             });
 
             let result = execute_discover(&DiscoverOptions::default(), existing.clone(), &ws)
@@ -662,6 +736,7 @@ mod tests {
                         "builtin:cli/cli-flags-must-use-positive-polarity".to_string(),
                     ],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -680,6 +755,7 @@ mod tests {
                         "builtin:cli/cli-flags-must-use-positive-polarity.canon.md".to_string(),
                     ],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -698,6 +774,7 @@ mod tests {
                         "builtin:cli/cli-flags-must-use-positive-polarity.md".to_string(),
                     ],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -717,6 +794,7 @@ mod tests {
                     all_canons: true,
                     canon_patterns: vec!["builtin:cli".to_string()],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -732,6 +810,7 @@ mod tests {
                     all_canons: true,
                     canon_patterns: vec!["builtin:security/**".to_string()],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -751,6 +830,7 @@ mod tests {
                     all_canons: true,
                     canon_patterns: vec!["builtin:**".to_string()],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -1209,6 +1289,7 @@ mod tests {
                         "builtin:canon-authoring/canons-must-be-atomic".to_string(),
                     ],
                     include_builtins: true,
+                    ..DiscoverOptions::default()
                 },
                 Caseload::new(),
                 &ws,
@@ -1345,6 +1426,123 @@ mod tests {
                     .unwrap()
                     .contains(&"commit_messages".to_string())
             );
+        }
+
+        #[test]
+        fn test_inline_canon_isolation_policy_bypass_and_composition() {
+            let ws = WorkspaceSnapshot::new()
+                .with_file("src/lib.rs")
+                .with_file("scripts/run.py")
+                .with_policy_config(
+                    ".canons/config.yaml",
+                    "canon-policy-chain:\n  - deny: all\n",
+                )
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"**/*.rs\"\n---\nWorkspace rule MUST hold.",
+                    &ParseCanonOptions::with_source_ref(".canons/ws-rule.canon.md"),
+                )
+                .with_builtins();
+
+            let intake = CaseloadIntake {
+                target_paths: vec!["src/lib.rs".to_string()],
+                ..CaseloadIntake::default()
+            };
+
+            // 1. Isolated inline canon (filename-only, empty body): excludes workspace & builtins,
+            //    bypasses `deny: all` policy, and records raw source in `inline_canons`.
+            let mut inline_map = BTreeMap::new();
+            inline_map.insert("inline:avoid-eval".to_string(), String::new());
+            let isolated = execute_discover(
+                &DiscoverOptions {
+                    all_canons: false,
+                    canon_patterns: Vec::new(),
+                    include_builtins: false,
+                    include_workspace_canons: false,
+                    inline_canons: inline_map.clone(),
+                },
+                Caseload::new().with_intake(intake.clone()),
+                &ws,
+            )
+            .expect("isolated inline discover")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                isolated.candidate_canons,
+                vec!["inline:avoid-eval".to_string()]
+            );
+            assert_eq!(isolated.inline_canons, inline_map);
+            assert!(!ws.existing_files.contains("inline:avoid-eval"));
+
+            // 2. Additive composition with explicit `--canon` selector
+            let composed = execute_discover(
+                &DiscoverOptions {
+                    all_canons: false,
+                    canon_patterns: vec![".canons/ws-rule.canon.md".to_string()],
+                    include_builtins: false,
+                    include_workspace_canons: true,
+                    inline_canons: inline_map,
+                },
+                Caseload::new().with_intake(intake.clone()),
+                &ws,
+            )
+            .expect("composed inline + workspace discover")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                composed.candidate_canons,
+                vec![
+                    ".canons/ws-rule.canon.md".to_string(),
+                    "inline:avoid-eval".to_string(),
+                ]
+            );
+
+            // 3. Inline canon with frontmatter `triggers:` respects glob matching
+            let mut py_inline = BTreeMap::new();
+            py_inline.insert(
+                "inline:py-only".to_string(),
+                "---\ntriggers:\n  - \"**/*.py\"\n---\nPython scripts MUST declare types."
+                    .to_string(),
+            );
+            let rs_only = execute_discover(
+                &DiscoverOptions {
+                    all_canons: false,
+                    canon_patterns: Vec::new(),
+                    include_builtins: false,
+                    include_workspace_canons: false,
+                    inline_canons: py_inline.clone(),
+                },
+                Caseload::new().with_intake(intake),
+                &ws,
+            )
+            .expect("py inline on rs file")
+            .discovery
+            .expect("discovery");
+            assert!(rs_only.candidate_canons.is_empty());
+            assert!(rs_only.inline_canons.is_empty());
+
+            let py_intake = CaseloadIntake {
+                target_paths: vec!["scripts/run.py".to_string()],
+                ..CaseloadIntake::default()
+            };
+            let py_matched = execute_discover(
+                &DiscoverOptions {
+                    all_canons: false,
+                    canon_patterns: Vec::new(),
+                    include_builtins: false,
+                    include_workspace_canons: false,
+                    inline_canons: py_inline,
+                },
+                Caseload::new().with_intake(py_intake),
+                &ws,
+            )
+            .expect("py inline on py file")
+            .discovery
+            .expect("discovery");
+            assert_eq!(
+                py_matched.candidate_canons,
+                vec!["inline:py-only".to_string()]
+            );
+            assert!(py_matched.inline_canons.contains_key("inline:py-only"));
         }
     }
 }
