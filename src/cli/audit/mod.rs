@@ -18,6 +18,7 @@ mod finalize;
 mod github_check;
 pub mod guards;
 mod render;
+mod stage_options;
 mod stages;
 
 use crate::caseload::Caseload;

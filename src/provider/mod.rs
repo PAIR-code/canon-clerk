@@ -23,6 +23,7 @@ mod retry;
 mod retry_delay;
 mod runtime;
 mod typesafe;
+mod typesafe_wire;
 
 pub(crate) use runtime::{HttpAuth, build_pooled_http_client, http_reactor_handle};
 
@@ -53,10 +54,11 @@ pub use retry::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
     ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryNotification, RetryPolicy,
 };
+pub(crate) use typesafe::post_typesafe_json;
 pub use typesafe::{DEFAULT_TYPESAFE_BASE_URL, build_systemone_url};
-pub(crate) use typesafe::{
+pub(crate) use typesafe_wire::{
     TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
-    classify_typesafe_http_error, extract_typesafe_error_detail, post_typesafe_json,
+    classify_typesafe_http_error, extract_typesafe_error_detail,
 };
 
 use crate::caseload::{
