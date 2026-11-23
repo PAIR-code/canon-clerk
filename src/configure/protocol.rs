@@ -16,10 +16,12 @@
 //! and resolved [`ProviderConnection`] transport descriptors (`docs/architecture/nodes/configure.md` §3–4).
 
 use crate::caseload::{
-    DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_PROVIDER, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL,
-    TYPESAFE_PROVIDER,
+    DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_PROVIDER,
+    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, LOCAL_PROVIDER, TYPESAFE_PROVIDER,
 };
-use crate::configure::{ENV_GEMINI_API_KEY, ENV_TYPESAFE_API_KEY, ModelCapability};
+use crate::configure::{
+    ENV_GEMINI_API_KEY, ENV_LOCAL_API_KEY, ENV_TYPESAFE_API_KEY, ModelCapability,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -29,6 +31,9 @@ pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis
 
 /// Default TypeSafe AI v1 REST API base URL.
 pub const DEFAULT_TYPESAFE_BASE_URL: &str = "https://api.typesafe.ai/v1";
+
+/// Default built-in local System One daemon base URL (`llama-server` loopback endpoint).
+pub const DEFAULT_LOCAL_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 
 /// Standardized wire-protocol driver spoken by a provider profile (`configure.md` §4.1).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -113,11 +118,16 @@ impl ProtocolDriver {
                 if is_valid_custom_systemone_model_name(model_id) {
                     Ok(())
                 } else {
+                    let example = if slug == LOCAL_PROVIDER {
+                        DEFAULT_LOCAL_DISCRIMINATOR_MODEL.to_string()
+                    } else {
+                        format!("{slug}:kev-4b")
+                    };
                     Err((
                         format!(
-                            "invalid `systemone` model identifier `{model_id}` on `{slug}` (expected a non-empty `[A-Za-z0-9._/-]+` model ID such as `kev-0.8b` or `clef-flash`)."
+                            "invalid `systemone` model identifier `{model_id}` on `{slug}` (expected a non-empty `[A-Za-z0-9._/-]+` model ID such as `kev-4b` or `kev-0.8b`)."
                         ),
-                        format!("{slug}:kev-0.8b"),
+                        example,
                     ))
                 }
             }
@@ -237,6 +247,13 @@ impl MissingCredentialSpec {
                 prefixed_env: None,
                 config_key_path: "providers.typesafe.apiKey".to_string(),
                 cli_flag: Some("--typesafe-api-key"),
+            },
+            LOCAL_PROVIDER => Self {
+                display_name: "Local System One".to_string(),
+                primary_env: ENV_LOCAL_API_KEY.to_string(),
+                prefixed_env: Some("CANON_CLERK_LOCAL_API_KEY".to_string()),
+                config_key_path: "providers.local.apiKey".to_string(),
+                cli_flag: Some("--local-api-key"),
             },
             custom => {
                 let stem = slug_to_upper_env_stem(custom);

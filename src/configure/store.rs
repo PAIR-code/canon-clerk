@@ -94,6 +94,15 @@ pub struct StoredDefaultsConfig {
     )]
     pub reasoning_budget: Option<u32>,
 
+    /// Default per-attempt wire timeout in milliseconds for heuristic evaluation calls (`>= 1`).
+    #[serde(
+        default,
+        rename = "timeoutMs",
+        alias = "timeout_ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout_ms: Option<u64>,
+
     /// Default maximum retry attempts per heuristic provider call (`>= 0`).
     #[serde(
         default,
@@ -241,6 +250,14 @@ impl StoredConfig {
     pub(crate) fn validate_schema(&self, source_path: Option<&str>) -> Result<(), ConfigureError> {
         let path = source_path.unwrap_or("~/.config/canon-clerk/config.json");
         ProviderRegistry::from_stored_with_path(Some(self), Some(path))?;
+        if self.defaults.timeout_ms == Some(0) {
+            return Err(ConfigureError::MalformedConfigFile {
+                path: path.to_string(),
+                message:
+                    "`defaults.timeoutMs` must be a positive integer in milliseconds (`>= 1`)."
+                        .to_string(),
+            });
+        }
         for (node, cfg) in &self.nodes {
             if cfg.batch_size.is_some() && !node.supports_batch_size() {
                 return Err(ConfigureError::MalformedConfigFile {

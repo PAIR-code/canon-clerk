@@ -83,13 +83,14 @@ pub use caseload::{
     CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason, ContestedSpan,
     DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GENERATIVE_SCREENING_MODEL,
     DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
-    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_SCREENING_REASONING_BUDGET,
-    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode, ExhibitAssessment, FileArtifact,
-    FileChangeStatus, HeuristicNode, IntakeScope, LinkedIssueContext, PatchOmissionReason,
-    ProbeStatus, ProbeTargetResult, ResolvedNodeConfig, TYPESAFE_PROVIDER, ThinkingLevel,
-    ValidatedCanonMetadata, ValidationOutcome, VerdictStatus, VettingStatus, WorkspaceState,
-    canonicalize_contested_spans, normalize_admissibility_score, normalize_colorability_score,
-    normalize_compliance_score, normalize_unit_score, normalize_vetting_score, sort_annotations,
+    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER,
+    DEFAULT_SCREENING_REASONING_BUDGET, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
+    ExhibitAssessment, FileArtifact, FileChangeStatus, HeuristicNode, IntakeScope, LOCAL_PROVIDER,
+    LinkedIssueContext, PatchOmissionReason, ProbeStatus, ProbeTargetResult, ResolvedNodeConfig,
+    TYPESAFE_PROVIDER, ThinkingLevel, ValidatedCanonMetadata, ValidationOutcome, VerdictStatus,
+    VettingStatus, WorkspaceState, canonicalize_contested_spans, normalize_admissibility_score,
+    normalize_colorability_score, normalize_compliance_score, normalize_unit_score,
+    normalize_vetting_score, sort_annotations,
 };
 pub use cli::{
     AdmitArgs, AdmitFormat, AdmitNodeModelArgs, AllNodeModelArgs, AppriseArgs, AppriseFormat,
@@ -114,14 +115,15 @@ pub use cli::{
     run_vet_with_snapshot_and_provider, run_vet_with_telemetry,
 };
 pub use configure::{
-    AuthPolicy, ConfigureError, ConfigureOptions, ConfigureScope, ENV_ADMIT_MODEL,
-    ENV_APPRISE_MODEL, ENV_AUDIT_MODEL, ENV_DOCKET_MODEL, ENV_GEMINI_API_KEY, ENV_GEMINI_BASE_URL,
-    ENV_PROVIDER, ENV_REASONING_BUDGET, ENV_THINKING_LEVEL, ENV_TYPESAFE_API_KEY,
-    ENV_TYPESAFE_BASE_URL, ENV_VET_MODEL, ModelCapability, PROVIDER_CAPABILITIES, ProtocolDriver,
-    ProviderAuth, ProviderCapability, ProviderConnection, ProviderProfile, ProviderRegistry,
-    StoredConfig, StoredDefaultsConfig, StoredNodeConfig, StoredProviderConfig, execute_configure,
-    is_discriminative_model, load_host_config_file, model_capability, normalize_model_specifier,
-    parse_thinking_level, provider_capability, resolve_default_config_path, resolve_gemini_api_key,
+    AuthPolicy, ConfigureError, ConfigureOptions, ConfigureScope, DEFAULT_LOCAL_BASE_URL,
+    ENV_ADMIT_MODEL, ENV_APPRISE_MODEL, ENV_AUDIT_MODEL, ENV_DOCKET_MODEL, ENV_GEMINI_API_KEY,
+    ENV_GEMINI_BASE_URL, ENV_LOCAL_API_KEY, ENV_LOCAL_BASE_URL, ENV_PROVIDER, ENV_REASONING_BUDGET,
+    ENV_THINKING_LEVEL, ENV_TYPESAFE_API_KEY, ENV_TYPESAFE_BASE_URL, ENV_VET_MODEL,
+    ModelCapability, PROVIDER_CAPABILITIES, ProtocolDriver, ProviderAuth, ProviderCapability,
+    ProviderConnection, ProviderProfile, ProviderRegistry, StoredConfig, StoredDefaultsConfig,
+    StoredNodeConfig, StoredProviderConfig, execute_configure, is_discriminative_model,
+    load_host_config_file, model_capability, normalize_model_specifier, parse_thinking_level,
+    provider_capability, resolve_default_config_path, resolve_gemini_api_key,
     resolve_provider_connections,
 };
 pub use discover::{
@@ -156,14 +158,16 @@ pub use probe::{
 };
 pub use provider::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_GEMINI_BASE_URL,
-    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
+    DEFAULT_GENERATION_TIMEOUT_MS, DEFAULT_LOCAL_GENERATION_TIMEOUT_MS,
+    DEFAULT_LOCAL_MAX_CONCURRENT_CALLS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
     DEFAULT_TYPESAFE_BASE_URL, DecisionBudgetProfile, DecisionModelProvider, DecisionRequest,
-    DecisionResponse, ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, GeminiDecisionProvider,
+    DecisionResponse, ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, ENV_TIMEOUT_MS, GeminiDecisionProvider,
     GeminiModelProvider, GenerationRequest, GenerationResponse, MultiModelProvider, ProviderError,
     RetryNotification, RetryObserver, RetryPolicy, SharedHttpRequester, StructuredModelProvider,
     TokenUsage, TypesafeDecisionProvider, build_decisions_url, build_generate_content_url,
     build_systemone_url, classify_gemini_decisions_http_error, classify_gemini_http_error,
-    extract_gemini_error_detail, strip_provider_prefix,
+    default_concurrency_for_model, default_timeout_ms_for_model, extract_gemini_error_detail,
+    strip_provider_prefix,
 };
 pub use telemetry::{
     CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,

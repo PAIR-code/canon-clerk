@@ -24,8 +24,8 @@ mod thinking;
 pub use error::ConfigureError;
 pub(crate) use error::check_retired_env_vars;
 pub use protocol::{
-    AuthPolicy, DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, ProtocolDriver, ProviderAuth,
-    ProviderConnection,
+    AuthPolicy, DEFAULT_GEMINI_BASE_URL, DEFAULT_LOCAL_BASE_URL, DEFAULT_TYPESAFE_BASE_URL,
+    ProtocolDriver, ProviderAuth, ProviderConnection,
 };
 pub(crate) use protocol::{
     MissingCredentialSpec, credential_verification_hint_for_slug, is_gemini_decision_model_name,
@@ -43,7 +43,7 @@ pub use store::{
 pub use thinking::parse_thinking_level;
 
 use crate::caseload::{
-    Caseload, CaseloadConfig, DEFAULT_PROVIDER, HeuristicNode, ResolvedNodeConfig,
+    Caseload, CaseloadConfig, DEFAULT_PROVIDER, HeuristicNode, LOCAL_PROVIDER, ResolvedNodeConfig,
     TYPESAFE_PROVIDER, ThinkingLevel,
 };
 use protocol::validate_http_base_url;
@@ -74,11 +74,17 @@ pub const ENV_GEMINI_API_KEY: &str = "GEMINI_API_KEY";
 /// Environment variable name for the TypeSafe AI (Jev) API key.
 pub const ENV_TYPESAFE_API_KEY: &str = "TYPESAFE_API_KEY";
 
+/// Environment variable name for the optional built-in local System One API key.
+pub const ENV_LOCAL_API_KEY: &str = "LOCAL_API_KEY";
+
 /// Environment variable name for overriding the Google Generative Language API base URL.
 pub const ENV_GEMINI_BASE_URL: &str = "GEMINI_BASE_URL";
 
 /// Environment variable name for overriding the TypeSafe AI System One API base URL.
 pub const ENV_TYPESAFE_BASE_URL: &str = "TYPESAFE_BASE_URL";
+
+/// Environment variable name for overriding the built-in local System One daemon base URL.
+pub const ENV_LOCAL_BASE_URL: &str = "LOCAL_BASE_URL";
 
 /// Environment variable name for overriding the qualitative thinking level (`minimal|low|medium|high`).
 pub const ENV_THINKING_LEVEL: &str = "CANON_CLERK_THINKING_LEVEL";
@@ -118,10 +124,14 @@ pub struct ConfigureOptions {
     pub gemini_api_key: Option<String>,
     /// Explicit TypeSafe AI API key override (`--typesafe-api-key`).
     pub typesafe_api_key: Option<String>,
+    /// Explicit built-in local System One API key override (`--local-api-key`).
+    pub local_api_key: Option<String>,
     /// Explicit Google Generative Language API base URL override (`--gemini-base-url`).
     pub gemini_base_url: Option<String>,
     /// Explicit TypeSafe AI System One API base URL override (`--typesafe-base-url`).
     pub typesafe_base_url: Option<String>,
+    /// Explicit built-in local System One daemon base URL override (`--local-base-url`).
+    pub local_base_url: Option<String>,
     /// Target heuristic node resolution and credential verification scope.
     pub scope: ConfigureScope,
     /// Snapshot of runtime environment variables injected by the driving adapter.
@@ -139,8 +149,23 @@ impl ConfigureOptions {
             || self.reasoning_budget.is_some()
             || self.gemini_api_key.is_some()
             || self.typesafe_api_key.is_some()
+            || self.local_api_key.is_some()
             || self.gemini_base_url.is_some()
             || self.typesafe_base_url.is_some()
+            || self.local_base_url.is_some()
+    }
+
+    /// Returns `true` when any non-provider explicit CLI or programmatic override flag was supplied.
+    fn has_non_provider_explicit_overrides(&self) -> bool {
+        !self.node_models.is_empty()
+            || self.thinking_level.is_some()
+            || self.reasoning_budget.is_some()
+            || self.gemini_api_key.is_some()
+            || self.typesafe_api_key.is_some()
+            || self.local_api_key.is_some()
+            || self.gemini_base_url.is_some()
+            || self.typesafe_base_url.is_some()
+            || self.local_base_url.is_some()
     }
 
     /// Inserts an explicit CLI model override for `node`.
@@ -153,6 +178,7 @@ impl ConfigureOptions {
         match provider_slug {
             DEFAULT_PROVIDER => self.gemini_api_key.as_deref(),
             TYPESAFE_PROVIDER => self.typesafe_api_key.as_deref(),
+            LOCAL_PROVIDER => self.local_api_key.as_deref(),
             _ => None,
         }
     }
@@ -167,6 +193,10 @@ impl ConfigureOptions {
                 .typesafe_base_url
                 .as_deref()
                 .map(|v| ("--typesafe-base-url", v)),
+            LOCAL_PROVIDER => self
+                .local_base_url
+                .as_deref()
+                .map(|v| ("--local-base-url", v)),
             _ => None,
         }
     }
@@ -179,6 +209,7 @@ impl ConfigureOptions {
                 "--typesafe-base-url",
                 &self.typesafe_base_url,
             ),
+            (LOCAL_PROVIDER, "--local-base-url", &self.local_base_url),
         ] {
             if let Some(raw) = raw_opt {
                 validate_http_base_url(raw).map_err(|reason| ConfigureError::InvalidBaseUrl {
@@ -257,17 +288,23 @@ pub fn resolve_provider_connections(
     registry.resolve_closure_connections(active_models, options)
 }
 
-/// Returns `true` when `existing` already satisfies `options.scope` with zero explicit CLI/programmatic overrides.
+/// Returns `true` when `existing` already satisfies `options.scope` with zero non-idempotent CLI/programmatic overrides
+/// (an explicit `--provider <slug>` matching `existing.provider` is idempotent).
 pub(crate) fn can_fast_forward_existing_config(
     options: &ConfigureOptions,
     existing: Option<&CaseloadConfig>,
 ) -> bool {
-    if options.has_explicit_overrides() {
-        return false;
-    }
     let Some(cfg) = existing else {
         return false;
     };
+    if options.has_non_provider_explicit_overrides() {
+        return false;
+    }
+    if let Some(raw_provider) = options.provider.as_deref()
+        && raw_provider.trim() != cfg.provider.trim()
+    {
+        return false;
+    }
     match &options.scope {
         ConfigureScope::AllProvisioned => !cfg.nodes.is_empty(),
         ConfigureScope::Closure(required) => {

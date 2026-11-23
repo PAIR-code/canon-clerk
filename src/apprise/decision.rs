@@ -25,7 +25,7 @@ use crate::discover::WorkspaceSnapshot;
 use crate::docket::format_canon_batch_label;
 use crate::provider::{
     DecisionBudgetProfile, DecisionRequest, DecisionResponse, ProviderError,
-    StructuredModelProvider, partition_decision_items,
+    StructuredModelProvider, default_concurrency_for_model, partition_decision_items,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -83,7 +83,7 @@ pub(super) fn execute_apprise_decisions(
     let budget = DecisionBudgetProfile::for_model(&apprise_model);
     let max_per_call = options
         .max_canons_per_call
-        .map_or(budget.max_nouls_per_call, |n| {
+        .map_or(budget.default_screening_batch_size, |n| {
             n.min(budget.max_nouls_per_call)
         });
     let batches = partition_decision_items(
@@ -116,9 +116,9 @@ pub(super) fn execute_apprise_decisions(
         ));
     }
 
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_APPRISE_MAX_CONCURRENT_CALLS);
+    let concurrency_limit = options.max_concurrent_calls.unwrap_or_else(|| {
+        default_concurrency_for_model(&apprise_model, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS)
+    });
     let assessments = run_apprise_decision_batches(
         &prepared,
         concurrency_limit,

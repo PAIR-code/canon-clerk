@@ -26,7 +26,7 @@ use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DecisionBudgetProfile, DecisionRequest, DecisionResponse, ProviderError,
-    StructuredModelProvider, partition_decision_items,
+    StructuredModelProvider, default_concurrency_for_model, partition_decision_items,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -85,7 +85,7 @@ pub(super) fn execute_docket_decisions(
 
     let max_per_call = options
         .max_canons_per_call
-        .map_or(budget.max_nouls_per_call, |n| {
+        .map_or(budget.default_screening_batch_size, |n| {
             n.min(budget.max_nouls_per_call)
         });
     let batches = partition_decision_items(
@@ -118,9 +118,9 @@ pub(super) fn execute_docket_decisions(
         ));
     }
 
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_DOCKET_MAX_CONCURRENT_CALLS);
+    let concurrency_limit = options.max_concurrent_calls.unwrap_or_else(|| {
+        default_concurrency_for_model(&docket_model, DEFAULT_DOCKET_MAX_CONCURRENT_CALLS)
+    });
     let cases = run_decision_batches(
         &prepared,
         concurrency_limit,
@@ -327,6 +327,7 @@ mod tests {
                 max_state_chars: 240_000,
                 max_batch_chars: 480_000,
                 max_nouls_per_call: 256,
+                default_screening_batch_size: 256,
             }
         );
         assert_eq!(
@@ -335,6 +336,16 @@ mod tests {
                 max_state_chars: 36_000,
                 max_batch_chars: 64_000,
                 max_nouls_per_call: 48,
+                default_screening_batch_size: 48,
+            }
+        );
+        assert_eq!(
+            DecisionBudgetProfile::for_model(crate::caseload::DEFAULT_LOCAL_DISCRIMINATOR_MODEL),
+            DecisionBudgetProfile {
+                max_state_chars: 24_000,
+                max_batch_chars: 32_000,
+                max_nouls_per_call: 16,
+                default_screening_batch_size: 4,
             }
         );
     }

@@ -254,6 +254,9 @@ fn run_apprise_core(
     let _validated_retry = args
         .transport
         .resolve_retry_policy(env, stored_config.as_ref())?;
+    let _validated_timeout = args
+        .transport
+        .resolve_explicit_timeout_ms(env, stored_config.as_ref())?;
 
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args

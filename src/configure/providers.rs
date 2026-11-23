@@ -17,19 +17,21 @@
 
 use crate::caseload::{
     CaseloadConfig, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
-    DEFAULT_PROVIDER, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode, TYPESAFE_PROVIDER,
+    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_PROVIDER, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL,
+    HeuristicNode, LOCAL_PROVIDER, TYPESAFE_PROVIDER,
 };
 use crate::configure::profile_schema::{
     build_custom_profile, merge_builtin_profile, split_and_check_specifier_syntax,
 };
 use crate::configure::protocol::{
-    AuthPolicy, DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, MissingCredentialSpec,
-    ProtocolDriver, ProviderAuth, ProviderConnection, is_valid_provider_slug,
-    slug_to_upper_env_stem, validate_http_base_url,
+    AuthPolicy, DEFAULT_GEMINI_BASE_URL, DEFAULT_LOCAL_BASE_URL, DEFAULT_TYPESAFE_BASE_URL,
+    MissingCredentialSpec, ProtocolDriver, ProviderAuth, ProviderConnection,
+    is_valid_provider_slug, slug_to_upper_env_stem, validate_http_base_url,
 };
 use crate::configure::{
-    ConfigureError, ConfigureOptions, ENV_GEMINI_API_KEY, ENV_GEMINI_BASE_URL, ENV_PROVIDER,
-    ENV_TYPESAFE_API_KEY, ENV_TYPESAFE_BASE_URL, StoredConfig, model_provider, resolve_non_empty,
+    ConfigureError, ConfigureOptions, ENV_GEMINI_API_KEY, ENV_GEMINI_BASE_URL, ENV_LOCAL_API_KEY,
+    ENV_LOCAL_BASE_URL, ENV_PROVIDER, ENV_TYPESAFE_API_KEY, ENV_TYPESAFE_BASE_URL, StoredConfig,
+    model_provider, resolve_non_empty,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -115,6 +117,20 @@ pub const PROVIDER_CAPABILITIES: &[ProviderCapability] = &[
         base_url_env_var: ENV_TYPESAFE_BASE_URL,
         config_key_path: "providers.typesafe.apiKey",
         default_discriminator: Some(DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+        default_generator: None,
+    },
+    ProviderCapability {
+        slug: LOCAL_PROVIDER,
+        display_name: "Local System One",
+        protocol: ProtocolDriver::SystemOne,
+        auth_policy: AuthPolicy::OptionalApiKey,
+        default_base_url: DEFAULT_LOCAL_BASE_URL,
+        cli_flag: "--local-api-key",
+        env_var: ENV_LOCAL_API_KEY,
+        cli_base_url_flag: "--local-base-url",
+        base_url_env_var: ENV_LOCAL_BASE_URL,
+        config_key_path: "providers.local.apiKey",
+        default_discriminator: Some(DEFAULT_LOCAL_DISCRIMINATOR_MODEL),
         default_generator: None,
     },
 ];
@@ -583,6 +599,42 @@ mod tests {
             assert_eq!(
                 overridden.auth,
                 ProviderAuth::Bearer("lan-token".to_string())
+            );
+        }
+
+        #[test]
+        fn test_builtin_local_profile_is_keyless_and_honors_base_url_and_api_key_overrides() {
+            let reg = ProviderRegistry::builtin();
+            let local_profile = reg.get(LOCAL_PROVIDER).expect("built-in local profile");
+            assert_eq!(local_profile.protocol, ProtocolDriver::SystemOne);
+            assert_eq!(local_profile.auth_policy, AuthPolicy::OptionalApiKey);
+            assert_eq!(local_profile.base_url, DEFAULT_LOCAL_BASE_URL);
+            assert_eq!(
+                local_profile.default_discriminator.as_deref(),
+                Some(DEFAULT_LOCAL_DISCRIMINATOR_MODEL)
+            );
+            assert_eq!(local_profile.default_generator, None);
+
+            let keyless = reg
+                .resolve_connection(LOCAL_PROVIDER, &ConfigureOptions::default())
+                .expect("built-in local connects keyless by default");
+            assert_eq!(keyless.base_url, "http://127.0.0.1:8080/v1");
+            assert_eq!(keyless.auth, ProviderAuth::None);
+
+            let cli_overridden = reg
+                .resolve_connection(
+                    LOCAL_PROVIDER,
+                    &ConfigureOptions {
+                        local_base_url: Some("http://127.0.0.1:18080/v1/".to_string()),
+                        local_api_key: Some("local-bearer".to_string()),
+                        ..ConfigureOptions::default()
+                    },
+                )
+                .expect("built-in local honors CLI overrides");
+            assert_eq!(cli_overridden.base_url, "http://127.0.0.1:18080/v1");
+            assert_eq!(
+                cli_overridden.auth,
+                ProviderAuth::Bearer("local-bearer".to_string())
             );
         }
     }

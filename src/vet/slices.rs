@@ -363,7 +363,7 @@ fn assemble_slice_refs(
     max_state_chars: usize,
 ) -> VettingExhibitSlice {
     let span_count: usize = items.iter().map(|i| i.span_noul_count()).sum();
-    if span_count > 0 && 1 + items.len() + span_count <= profile.max_nouls_per_call {
+    if span_count > 0 && 2 * (1 + items.len() + span_count) <= profile.max_nouls_per_call {
         let fenced = render_slice_refs(shared_header, items, slice_idx, total_slices, true);
         if fenced.state.len() <= max_state_chars && slice_fits_single_batch(&fenced, profile) {
             return fenced;

@@ -16,10 +16,11 @@
 
 use super::decision::{DecisionModelProvider, DecisionRequest, DecisionResponse};
 use super::gemini::strip_provider_prefix;
+use super::gemini_decisions::is_decision_context_limit_error;
 use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester};
 use super::retry::RetryPolicy;
 use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
-use crate::caseload::TYPESAFE_PROVIDER;
+use crate::caseload::{LOCAL_PROVIDER, TYPESAFE_PROVIDER};
 pub use crate::configure::DEFAULT_TYPESAFE_BASE_URL;
 use crate::configure::{
     AuthPolicy, ProviderAuth, ProviderConnection, credential_verification_hint_for_slug,
@@ -155,40 +156,97 @@ pub(crate) fn extract_typesafe_error_detail(body: &str) -> String {
     }
 }
 
-/// Formats an HTTP error status code from the TypeSafe AI API into an actionable diagnostic with remediation hints.
+/// Formats an HTTP error status code from a System One (`/v1/systemone`) endpoint into an actionable,
+/// profile-aware diagnostic with remediation hints (`docs/architecture/transport.md` §4).
 pub(crate) fn classify_typesafe_http_error(
     status_code: u16,
     model_specifier: &str,
     detail: &str,
 ) -> String {
+    let slug = model_provider(model_specifier);
+    let is_typesafe = slug == TYPESAFE_PROVIDER;
+    let is_local = slug == LOCAL_PROVIDER;
+
     match status_code {
-        400 if detail.contains("max_tokens_exceeded") => format!(
-            "HTTP 400: Input context exceeded TypeSafe Jev token limit for `{model_specifier}` ({detail}). \
-             Hint: Pair `--provider typesafe` with `--audit-model google:gemini-4-carbon` or narrow target scope."
-        ),
+        400 if is_decision_context_limit_error(detail) => {
+            if is_typesafe {
+                format!(
+                    "HTTP 400: Input context or question batch exceeded TypeSafe Jev token limit for `{model_specifier}` ({detail}). \
+                     Hint: Pair `--provider typesafe` with `--audit-model google:gemini-4-carbon`, narrow target scope, or reduce `--docket-batch-size` / `--apprise-batch-size`."
+                )
+            } else {
+                format!(
+                    "HTTP 400: Input context or question batch exceeded System One context limit for `{model_specifier}` ({detail}). \
+                     Hint: Increase the server context size (e.g. `llama-server --ctx-size 32768 --kv-unified`), narrow target scope, or reduce `--docket-batch-size` / `--apprise-batch-size`."
+                )
+            }
+        }
         401 | 403 => {
-            let key_hint = credential_verification_hint_for_slug(model_provider(model_specifier));
+            let key_hint = credential_verification_hint_for_slug(slug);
             format!(
                 "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
                  Hint: {key_hint}"
             )
         }
-        404 => format!(
-            "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
-             Hint: Specify a valid TypeSafe Jev model via `--provider typesafe` or `--<node>-model` (e.g. `typesafe:jev-latest`)."
+        404 => {
+            if is_typesafe {
+                format!(
+                    "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
+                     Hint: Specify a valid TypeSafe Jev model via `--provider typesafe` or `--<node>-model` (e.g. `typesafe:jev-latest`)."
+                )
+            } else if is_local {
+                format!(
+                    "HTTP 404: System One endpoint or model for `{model_specifier}` was not found ({detail}). \
+                     Hint: Verify your local server supports `POST /v1/systemone` and check `--local-base-url` (default: `http://127.0.0.1:8080/v1`)."
+                )
+            } else {
+                format!(
+                    "HTTP 404: System One endpoint or model for `{model_specifier}` was not found ({detail}). \
+                     Hint: Verify `providers.{slug}.baseUrl` supports `POST /v1/systemone` and check the configured model ID."
+                )
+            }
+        }
+        429 => {
+            if is_typesafe {
+                format!(
+                    "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \
+                     Hint: Check your TypeSafe AI quota tier or wait before retrying."
+                )
+            } else {
+                format!(
+                    "HTTP 429: Rate or concurrency limit exceeded for `{model_specifier}` ({detail}). \
+                     Hint: Reduce stage concurrency (`--<node>-concurrency 1`) or wait before retrying."
+                )
+            }
+        }
+        501 => format!(
+            "HTTP 501: Endpoint rejected `/v1/systemone` for `{model_specifier}` ({detail}). \
+             Hint: Ensure the target server is running a System One decision model (for `llama-server`, load a decision GGUF such as `ggml-org/Kev-4B-GGUF` rather than a standard chat model)."
         ),
-        429 => format!(
-            "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \
-             Hint: Check your TypeSafe AI quota tier or wait before retrying."
-        ),
-        500..=599 => format!(
-            "HTTP {status_code}: Upstream TypeSafe AI server error for `{model_specifier}` ({detail}). \
-             Hint: Retry after a brief backoff or increase `--timeout <MS>`."
-        ),
-        _ => format!(
-            "HTTP {status_code}: Request rejected for `{model_specifier}` ({detail}). \
-             Hint: Check Jev model compatibility and TypeSafe AI configuration."
-        ),
+        500..=599 => {
+            let label = if is_typesafe {
+                "Upstream TypeSafe AI server error"
+            } else {
+                "Upstream System One server error"
+            };
+            format!(
+                "HTTP {status_code}: {label} for `{model_specifier}` ({detail}). \
+                 Hint: Retry after a brief backoff or increase `--timeout <MS>`."
+            )
+        }
+        _ => {
+            if is_typesafe {
+                format!(
+                    "HTTP {status_code}: Request rejected for `{model_specifier}` ({detail}). \
+                     Hint: Check Jev model compatibility and TypeSafe AI configuration."
+                )
+            } else {
+                format!(
+                    "HTTP {status_code}: Request rejected for `{model_specifier}` ({detail}). \
+                     Hint: Check `/v1/systemone` model compatibility and `providers.{slug}` configuration."
+                )
+            }
+        }
     }
 }
 
@@ -444,7 +502,7 @@ fn decode_systemone_response(
     let parsed: TypesafeSystemOneResponse =
         serde_json::from_str(body).map_err(|err| ProviderError::MalformedResponse {
             model_specifier: model_specifier.to_string(),
-            reason: format!("invalid TypeSafe `/v1/systemone` JSON envelope ({err})"),
+            reason: format!("invalid `/v1/systemone` JSON envelope ({err})"),
         })?;
 
     let mut scores = BTreeMap::new();
@@ -533,6 +591,29 @@ mod tests {
         assert!(diag401.contains("HTTP 401"));
         assert!(diag401.contains("TYPESAFE_API_KEY"));
         assert!(diag401.contains("Hint:"));
+    }
+
+    #[test]
+    fn test_protocol_neutral_systemone_http_error_classification() {
+        let diag501 =
+            classify_typesafe_http_error(501, "local:kev-4b", "This model is not a decision model");
+        assert!(diag501.contains("HTTP 501"));
+        assert!(diag501.contains("decision GGUF"));
+        assert!(!diag501.contains("TypeSafe AI"));
+
+        let diag400_local = classify_typesafe_http_error(
+            400,
+            "local:kev-4b",
+            "request (40000 tokens) exceeds the available context size (32768 tokens)",
+        );
+        assert!(diag400_local.contains("System One context limit"));
+        assert!(diag400_local.contains("--ctx-size"));
+        assert!(!diag400_local.contains("TypeSafe"));
+
+        let diag503_local =
+            classify_typesafe_http_error(503, "local:kev-4b", "Service Unavailable");
+        assert!(diag503_local.contains("Upstream System One server error"));
+        assert!(!diag503_local.contains("TypeSafe AI"));
     }
 
     #[test]

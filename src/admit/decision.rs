@@ -26,7 +26,7 @@ use crate::concurrency::execute_bounded_stage_work;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DecisionBudgetProfile, DecisionRequest, DecisionResponse, ProviderError,
-    StructuredModelProvider,
+    StructuredModelProvider, default_concurrency_for_model,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -87,9 +87,9 @@ pub(super) fn execute_admit_decisions(
         options.timeout_ms,
     );
 
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_ADMIT_MAX_CONCURRENT_CALLS);
+    let concurrency_limit = options.max_concurrent_calls.unwrap_or_else(|| {
+        default_concurrency_for_model(&admit_model, DEFAULT_ADMIT_MAX_CONCURRENT_CALLS)
+    });
     let pair_assessments = run_pair_batches(
         &prepared,
         concurrency_limit,
@@ -157,7 +157,7 @@ fn pack_exhibit_grouped_batches(
         };
         let q_cost = item.question_text.len() + 32;
         if !cur_pairs.is_empty()
-            && (cur_pairs.len() >= budget.max_nouls_per_call
+            && (cur_pairs.len() >= budget.default_screening_batch_size
                 || cur_chars + ex_cost + q_cost > budget.max_batch_chars)
         {
             prepared.push(finalize_admit_batch(

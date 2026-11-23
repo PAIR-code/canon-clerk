@@ -29,6 +29,7 @@ use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, DecisionBudgetProfile, ProviderError, StructuredModelProvider,
+    default_concurrency_for_model,
 };
 use slices::{DiscriminativeCasePlan, build_discriminative_case_plan};
 use std::fmt;
@@ -245,9 +246,9 @@ pub fn execute_vet(
         workspace,
     );
 
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_VET_MAX_CONCURRENT_CALLS);
+    let concurrency_limit = options.max_concurrent_calls.unwrap_or_else(|| {
+        default_concurrency_for_model(&node_cfg.model, DEFAULT_VET_MAX_CONCURRENT_CALLS)
+    });
 
     let cases = if is_discriminative {
         decision::execute_discriminative_vetting(

@@ -20,7 +20,7 @@ use super::{
 };
 use crate::caseload::{
     DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
-    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode,
+    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode,
 };
 use std::collections::BTreeMap;
 use std::fmt;
@@ -101,7 +101,7 @@ impl fmt::Display for ConfigureError {
             Self::UnsupportedProviderSelector { provider } => write!(
                 f,
                 "Unsupported provider `{provider}`.\n  \
-                 Hint: Pass `--provider google` or `--provider typesafe` (or set `{ENV_PROVIDER}` / `defaults.provider`), \
+                 Hint: Pass `--provider google`, `--provider typesafe`, or `--provider local` (or set `{ENV_PROVIDER}` / `defaults.provider`), \
                  or declare `providers.{provider}` (`{{ \"protocol\": \"systemone\" | \"gemini\", \"baseUrl\": \"...\" }}`) in `~/.config/canon-clerk/config.json`."
             ),
             Self::UnsupportedProvider {
@@ -110,8 +110,9 @@ impl fmt::Display for ConfigureError {
             } => write!(
                 f,
                 "Unsupported model provider `{provider}` in specifier `{specifier}`.\n  \
-                 Hint: Built-in providers are `google` (e.g. `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, `{DEFAULT_GOOGLE_GENERATOR_MODEL}`) \
-                 and `typesafe` (e.g. `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`), or declare a custom `providers.{provider}` profile in `~/.config/canon-clerk/config.json`."
+                 Hint: Built-in providers are `google` (e.g. `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, `{DEFAULT_GOOGLE_GENERATOR_MODEL}`), \
+                 `typesafe` (e.g. `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`), and `local` (e.g. `{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}`), \
+                 or declare a custom `providers.{provider}` profile in `~/.config/canon-clerk/config.json`."
             ),
             Self::InvalidModelSpecifier {
                 specifier,

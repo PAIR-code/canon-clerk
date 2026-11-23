@@ -90,7 +90,10 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<AuditCascadeResult, CliError> {
-    let provider_changed = args.provider.provider.is_some();
+    let provider_changed = crate::cli::closure::is_provider_changed(
+        args.provider.provider.as_deref(),
+        caseload.config.as_ref(),
+    );
     let docket_pre_populated =
         caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_changed;
     let evidence_pre_populated = caseload.evidence.is_some()
@@ -128,6 +131,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     let stored = configure_options.stored_config.as_ref();
     let stage_opts = build_stage_options(args, env, stored, thresholds)?;
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
+    let explicit_timeout_ms = args.transport.resolve_explicit_timeout_ms(env, stored)?;
 
     let config_was_present =
         can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
@@ -143,7 +147,14 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         Err(skipped) => return Ok(skipped),
     };
     let cfg_snapshot = configured.config.clone().unwrap_or_default();
-    let docket_opts = stage_opts.docket_opts(&cfg_snapshot, thresholds.docket_threshold);
+    let docket_opts = stage_opts.docket_opts(
+        &cfg_snapshot,
+        thresholds.docket_threshold,
+        explicit_timeout_ms,
+    );
+    let admit_opts = stage_opts.admit_opts(&cfg_snapshot, explicit_timeout_ms);
+    let vet_opts = stage_opts.vet_opts(&cfg_snapshot, explicit_timeout_ms);
+    let audit_opts = stage_opts.audit_opts(&cfg_snapshot, explicit_timeout_ms);
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {
         ClosureBackend::Hermetic { provider, .. } => *provider,
@@ -179,12 +190,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
             evidence: evidence_pre_populated,
             vetting: vetting_pre_populated,
         },
-        (
-            &docket_opts,
-            &stage_opts.admit_opts,
-            &stage_opts.vet_opts,
-            &stage_opts.audit_opts,
-        ),
+        (&docket_opts, &admit_opts, &vet_opts, &audit_opts),
         snapshot,
         backend,
         active_provider,
@@ -206,18 +212,65 @@ impl ResolvedStageOptions {
         &self,
         cfg_snapshot: &crate::caseload::CaseloadConfig,
         docket_threshold: f64,
+        explicit_timeout_ms: Option<u64>,
     ) -> DocketOptions {
         let docket_model = cfg_snapshot
             .model_for(HeuristicNode::Docket)
             .unwrap_or_default();
         DocketOptions {
             threshold: docket_threshold,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+            timeout_ms: explicit_timeout_ms
+                .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(docket_model)),
             max_canons_per_call: effective_docket_batch_size(
                 self.explicit_docket_batch_size,
                 docket_model,
             ),
             max_concurrent_calls: self.docket_concurrency,
+        }
+    }
+
+    fn admit_opts(
+        &self,
+        cfg_snapshot: &crate::caseload::CaseloadConfig,
+        explicit_timeout_ms: Option<u64>,
+    ) -> AdmitOptions {
+        let admit_model = cfg_snapshot
+            .model_for(HeuristicNode::Admit)
+            .unwrap_or_default();
+        AdmitOptions {
+            timeout_ms: explicit_timeout_ms
+                .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(admit_model)),
+            ..self.admit_opts.clone()
+        }
+    }
+
+    fn vet_opts(
+        &self,
+        cfg_snapshot: &crate::caseload::CaseloadConfig,
+        explicit_timeout_ms: Option<u64>,
+    ) -> VetOptions {
+        let vet_model = cfg_snapshot
+            .model_for(HeuristicNode::Vet)
+            .unwrap_or_default();
+        VetOptions {
+            timeout_ms: explicit_timeout_ms
+                .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(vet_model)),
+            ..self.vet_opts.clone()
+        }
+    }
+
+    fn audit_opts(
+        &self,
+        cfg_snapshot: &crate::caseload::CaseloadConfig,
+        explicit_timeout_ms: Option<u64>,
+    ) -> AuditOptions {
+        let audit_model = cfg_snapshot
+            .model_for(HeuristicNode::Audit)
+            .unwrap_or_default();
+        AuditOptions {
+            timeout_ms: explicit_timeout_ms
+                .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(audit_model)),
+            ..self.audit_opts.clone()
         }
     }
 }
