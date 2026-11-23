@@ -175,8 +175,8 @@ pub use validate::{
     ValidateError, ValidateOptions, execute_validate, execute_validate_on_disk, lint_canon_source,
 };
 pub use vet::{
-    DEFAULT_VET_MAX_CONCURRENT_CALLS, DEFAULT_VET_THRESHOLD, ENV_VET_CONCURRENCY,
-    ENV_VET_THRESHOLD, VetError, VetOptions, execute_vet,
+    DEFAULT_VET_EXCEPTION_THRESHOLD, DEFAULT_VET_MAX_CONCURRENT_CALLS, DEFAULT_VET_THRESHOLD,
+    ENV_VET_CONCURRENCY, ENV_VET_THRESHOLD, VetError, VetOptions, execute_vet,
 };
 
 #[cfg(test)]

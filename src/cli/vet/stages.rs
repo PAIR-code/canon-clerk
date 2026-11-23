@@ -168,6 +168,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
         threshold: thresholds.vet_threshold,
         timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
         max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
+        ..VetOptions::default()
     };
 
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;

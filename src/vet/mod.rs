@@ -15,6 +15,7 @@
 //! Core domain execution engine for the `vet` Caseload DAG stage (`docs/architecture/nodes/vet.md`).
 
 mod decision;
+mod prompts;
 mod slices;
 mod structured;
 
@@ -32,8 +33,11 @@ use crate::provider::{
 use slices::{DiscriminativeCasePlan, build_discriminative_case_plan};
 use std::fmt;
 
-/// Default high-confidence prima facie compliance threshold for `vet` (`docs/architecture/nodes/vet.md` §3).
+/// Default high-confidence prima facie direct-compliance threshold for `vet` (`docs/architecture/nodes/vet.md` §3).
 pub const DEFAULT_VET_THRESHOLD: f64 = 0.80;
+
+/// Default discriminative exception-claim escalation threshold for `vet` (`docs/architecture/nodes/vet.md` §3).
+pub const DEFAULT_VET_EXCEPTION_THRESHOLD: f64 = 0.50;
 
 /// Default maximum concurrent in-flight per-case vetting calls during `vet`.
 pub const DEFAULT_VET_MAX_CONCURRENT_CALLS: usize = 4;
@@ -47,8 +51,10 @@ pub const ENV_VET_CONCURRENCY: &str = "CANON_CLERK_VET_CONCURRENCY";
 /// Domain input parameters for executing the `vet` pipeline stage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VetOptions {
-    /// Prima facie compliance score threshold in `[0.0, 1.0]` (defaults to [`DEFAULT_VET_THRESHOLD`]).
+    /// Prima facie direct-compliance score threshold in `[0.0, 1.0]` (defaults to [`DEFAULT_VET_THRESHOLD`]).
     pub threshold: f64,
+    /// Discriminative exception-claim escalation threshold in `[0.0, 1.0]` (defaults to [`DEFAULT_VET_EXCEPTION_THRESHOLD`]).
+    pub exception_threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case vetting calls (`>= 1`; defaults to [`DEFAULT_VET_MAX_CONCURRENT_CALLS`]).
@@ -59,6 +65,7 @@ impl Default for VetOptions {
     fn default() -> Self {
         Self {
             threshold: DEFAULT_VET_THRESHOLD,
+            exception_threshold: DEFAULT_VET_EXCEPTION_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: None,
         }
@@ -153,8 +160,10 @@ struct PreparedVettingCase {
     discriminative_plan: DiscriminativeCasePlan,
 }
 
-fn validate_vet_options(options: &VetOptions) -> Result<f64, VetError> {
+fn validate_vet_options(options: &VetOptions) -> Result<(f64, f64), VetError> {
     let threshold = normalize_vetting_score(options.threshold)
+        .map_err(|detail| VetError::InvalidThreshold { detail })?;
+    let exception_threshold = normalize_vetting_score(options.exception_threshold)
         .map_err(|detail| VetError::InvalidThreshold { detail })?;
     if options.max_concurrent_calls == Some(0) {
         return Err(VetError::InvalidConcurrency {
@@ -163,7 +172,7 @@ fn validate_vet_options(options: &VetOptions) -> Result<f64, VetError> {
             ),
         });
     }
-    Ok(threshold)
+    Ok((threshold, exception_threshold))
 }
 
 /// Executes the pure `vet` domain stage against an in-memory [`WorkspaceSnapshot`] and
@@ -174,7 +183,7 @@ pub fn execute_vet(
     workspace: &WorkspaceSnapshot,
     provider: &dyn StructuredModelProvider,
 ) -> Result<Caseload, VetError> {
-    let threshold = validate_vet_options(options)?;
+    let (threshold, exception_threshold) = validate_vet_options(options)?;
 
     if caseload.vetting.is_some() {
         return Ok(caseload);
@@ -246,6 +255,7 @@ pub fn execute_vet(
             &decision::DiscriminativeVetParams {
                 vet_model: &node_cfg.model,
                 threshold,
+                exception_threshold,
                 concurrency_limit,
                 timeout_ms: options.timeout_ms,
             },
@@ -395,11 +405,15 @@ mod tests {
                 .unwrap_or(0.95);
             let mut scores = BTreeMap::new();
             for key in request.questions.keys() {
-                let s = self
-                    .question_scores
-                    .get(key)
-                    .copied()
-                    .unwrap_or(default_score);
+                let fallback = if key == "claims_exception"
+                    || key.starts_with("file_exception:")
+                    || key.starts_with("span_exception:")
+                {
+                    0.05
+                } else {
+                    default_score
+                };
+                let s = self.question_scores.get(key).copied().unwrap_or(fallback);
                 scores.insert(key.clone(), s);
             }
             Ok(DecisionResponse {
@@ -1059,8 +1073,8 @@ mod tests {
             );
             assert_eq!(
                 reqs[0].questions.len(),
-                1 + 8,
-                "fallback slice must retain whole-slice + per-file Noul questions"
+                2 * (1 + 8),
+                "fallback slice must retain paired whole-slice + per-file Noul questions"
             );
 
             let assessment = &out.vetting.unwrap().cases[canon_ref];
@@ -1079,7 +1093,7 @@ mod tests {
             // Build a single near-full file with 15 spans (1 + 2 + 15 = 18 <= 48 max_nouls_per_call
             // on typesafe:jev-*), sized so fenced state + 18 questions exceeds max_batch_chars (64k)
             // while unfenced file-level vetting (1 + 2 questions) fits in a single batch.
-            let padding = "x".repeat(110);
+            let padding = "x".repeat(100);
             let mut near_cap = String::new();
             for s in 1..=15 {
                 near_cap.push_str(&format!("fn sec_{s}() {{\n"));
@@ -1162,10 +1176,13 @@ mod tests {
                 "char-budget fallback slice must omit lexical span fences"
             );
             assert!(
-                !reqs[0].questions.keys().any(|k| k.starts_with("span:")),
+                !reqs[0]
+                    .questions
+                    .keys()
+                    .any(|k| k.starts_with("span:") || k.starts_with("span_exception:")),
                 "char-budget fallback slice must not emit per-span Noul questions"
             );
-            assert_eq!(reqs[0].questions.len(), 3);
+            assert_eq!(reqs[0].questions.len(), 2 * (1 + 2));
 
             let assessment = &out.vetting.unwrap().cases[canon_ref];
             assert_eq!(assessment.vetting_status, VettingStatus::Contested);
@@ -1174,6 +1191,133 @@ mod tests {
                 vec!["src/near_cap.rs".to_string()]
             );
             assert!(assessment.contested_spans.is_empty());
+        }
+
+        #[test]
+        fn test_bifurcated_exception_claim_contests_high_direct_compliance_and_localizes_span() {
+            let canon_ref = ".canons/architecture/no-reinvent.md";
+            let mut clock_src = String::new();
+            for i in 1..=14 {
+                clock_src.push_str(&format!(
+                    "pub fn helper_{i}(x: u64) -> u64 {{ x.saturating_add({i}) }}\n\n"
+                ));
+            }
+            clock_src.push_str(
+                "/// Architectural Exception (no-reinvent): approved.\n\
+                 pub fn bespoke_calendar(days: i64) -> i64 { days + 719_468 }\n",
+            );
+
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**\"\n---\nReinventing standard solutions is forbidden.\n",
+                    &ParseCanonOptions::with_source_ref(canon_ref),
+                )
+                .with_file_content("src/clock.rs", &clock_src)
+                .with_file_content("src/clean.rs", "pub fn ok() -> usize { 1 }\n");
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/clock.rs".to_string(), "src/clean.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Vet, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
+                )
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "docketed".to_string(),
+                        colorability_score: 0.95,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    vec![
+                        ExhibitAssessment {
+                            file_path: "src/clock.rs".to_string(),
+                            admissibility_summary: "clock".to_string(),
+                            admissibility_score: 0.95,
+                            admissibility_status: AdmissibilityStatus::Admitted,
+                        },
+                        ExhibitAssessment {
+                            file_path: "src/clean.rs".to_string(),
+                            admissibility_summary: "clean".to_string(),
+                            admissibility_score: 0.95,
+                            admissibility_status: AdmissibilityStatus::Admitted,
+                        },
+                    ],
+                )])));
+
+            // Simulate the exact #405 inline-waiver failure mode: direct compliance is falsely
+            // biased to >= 0.90, while `claims_exception` fires on `src/clock.rs` (span S1).
+            let mut provider = MockVetProvider::empty();
+            provider.decision_scores.insert(canon_ref.to_string(), 0.94);
+            provider
+                .question_scores
+                .insert("claims_exception".to_string(), 0.96);
+            provider
+                .question_scores
+                .insert("file_exception:src/clock.rs".to_string(), 0.97);
+            provider
+                .question_scores
+                .insert("file_exception:src/clean.rs".to_string(), 0.04);
+
+            let out = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
+                .expect("bifurcated vet");
+            let assessment = &out.vetting.expect("vetting").cases[canon_ref];
+            assert_eq!(
+                assessment.vetting_status,
+                VettingStatus::Contested,
+                "high claims_exception must contest the case even when direct compliance >= threshold"
+            );
+            assert!((assessment.vetting_score - 0.94).abs() < 1e-9);
+            assert_eq!(assessment.exception_claim_score, Some(0.97));
+            assert_eq!(
+                assessment.contested_exhibits,
+                vec!["src/clock.rs".to_string()],
+                "clean sibling file with low exception_claim must still be pruned"
+            );
+        }
+
+        #[test]
+        fn test_missing_exception_claim_noul_fails_closed() {
+            struct DirectOnlyProvider;
+            impl StructuredModelProvider for DirectOnlyProvider {
+                fn generate_structured(
+                    &self,
+                    _request: &GenerationRequest,
+                ) -> Result<GenerationResponse, ProviderError> {
+                    unreachable!("discriminative vet must not call generate_structured")
+                }
+
+                fn evaluate_decisions(
+                    &self,
+                    _request: &DecisionRequest,
+                ) -> Result<DecisionResponse, ProviderError> {
+                    Ok(DecisionResponse {
+                        scores: BTreeMap::from([("compliant".to_string(), 0.99)]),
+                        resolved_model: "gemini-decision-1".to_string(),
+                        latency_ms: 20,
+                        usage: TokenUsage::default(),
+                    })
+                }
+            }
+
+            let (ws, caseload) = sample_fixture(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL);
+            let err = execute_vet(&VetOptions::default(), caseload, &ws, &DirectOnlyProvider)
+                .expect_err("missing claims_exception must fail closed");
+            assert!(matches!(
+                err,
+                VetError::Provider(ProviderError::SchemaDecode { .. })
+            ));
         }
     }
 }

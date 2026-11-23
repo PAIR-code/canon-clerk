@@ -91,6 +91,7 @@ fn decode_vet_payload(
     Ok(CanonVettingAssessment {
         vetting_summary: summary.to_string(),
         vetting_score,
+        exception_claim_score: None,
         vetting_status,
         contested_exhibits: Vec::new(),
         contested_spans: Vec::new(),
