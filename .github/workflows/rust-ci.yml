@@ -1,4 +1,4 @@
-name: "Rust CI"
+name: "Rust"
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   ci:
-    name: "Rust CI"
+    name: "Lint, Test & Validate"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -33,6 +33,9 @@ jobs:
       - name: Check file size bounds
         run: ./scripts/check-file-size.sh
 
+      - name: Check canon corpus taxonomy
+        run: ./scripts/check-canons.sh
+
       - name: Check code formatting
         run: cargo fmt --check
 
@@ -41,4 +44,7 @@ jobs:
 
       - name: Run test suite
         run: cargo test
+
+      - name: Validate repository canons
+        run: cargo run --locked -- -v validate --all-canons --max-warnings 0
 
