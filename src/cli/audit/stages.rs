@@ -299,6 +299,7 @@ fn build_stage_options(
             threshold: thresholds.vet_threshold,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
+            ..VetOptions::default()
         },
         audit_opts: AuditOptions {
             threshold: thresholds.audit_threshold,

@@ -846,6 +846,7 @@ mod tests {
                     vetting_summary: "Prima facie compliant via discriminative vetting."
                         .to_string(),
                     vetting_score: 0.96,
+                    exception_claim_score: None,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: Vec::new(),
                     contested_spans: Vec::new(),
@@ -856,6 +857,7 @@ mod tests {
                 CanonVettingAssessment {
                     vetting_summary: "Contested: missing README update.".to_string(),
                     vetting_score: 0.14,
+                    exception_claim_score: None,
                     vetting_status: VettingStatus::Contested,
                     contested_exhibits: Vec::new(),
                     contested_spans: Vec::new(),
@@ -904,6 +906,7 @@ mod tests {
                     CanonVettingAssessment {
                         vetting_summary: "Vetted.".to_string(),
                         vetting_score: 0.95,
+                        exception_claim_score: None,
                         vetting_status: VettingStatus::Vetted,
                         contested_exhibits: Vec::new(),
                         contested_spans: Vec::new(),
@@ -938,7 +941,10 @@ mod tests {
                     0.94
                 };
                 Ok(DecisionResponse {
-                    scores: BTreeMap::from([("compliant".to_string(), score)]),
+                    scores: BTreeMap::from([
+                        ("compliant".to_string(), score),
+                        ("claims_exception".to_string(), 0.05),
+                    ]),
                     resolved_model: "jev-1.14.0".to_string(),
                     latency_ms: 40,
                     usage: TokenUsage {
@@ -1422,6 +1428,7 @@ mod tests {
                 CanonVettingAssessment {
                     vetting_summary: "Localized unwrap violation.".to_string(),
                     vetting_score: 0.12,
+                    exception_claim_score: None,
                     vetting_status: VettingStatus::Contested,
                     contested_exhibits: Vec::new(),
                     contested_spans: vec![ContestedSpan {

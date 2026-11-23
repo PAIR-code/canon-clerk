@@ -517,6 +517,11 @@ mod tests {
             for key in request.questions.keys() {
                 let s = if key == "compliant" {
                     self.compliance_score
+                } else if key == "claims_exception"
+                    || key.starts_with("file_exception:")
+                    || key.starts_with("span_exception:")
+                {
+                    0.05
                 } else {
                     0.95
                 };
@@ -787,6 +792,7 @@ mod tests {
                         CanonVettingAssessment {
                             vetting_summary: "Help headings grouped cleanly.".to_string(),
                             vetting_score: 0.94,
+                            exception_claim_score: None,
                             vetting_status: VettingStatus::Vetted,
                             contested_exhibits: Vec::new(),
                             contested_spans: Vec::new(),
@@ -797,6 +803,7 @@ mod tests {
                         CanonVettingAssessment {
                             vetting_summary: "CamelCase flag suspected.".to_string(),
                             vetting_score: 0.38,
+                            exception_claim_score: None,
                             vetting_status: VettingStatus::Contested,
                             contested_exhibits: Vec::new(),
                             contested_spans: Vec::new(),
@@ -893,6 +900,7 @@ mod tests {
                     CanonVettingAssessment {
                         vetting_summary: "CamelCase flag suspected.".to_string(),
                         vetting_score: 0.38,
+                        exception_claim_score: None,
                         vetting_status: VettingStatus::Contested,
                         contested_exhibits: Vec::new(),
                         contested_spans: vec![ContestedSpan {

@@ -44,6 +44,23 @@ impl VettingStatus {
             Self::Contested
         }
     }
+
+    /// Derives [`VettingStatus`] deterministically from direct compliance `score` (`>= threshold`)
+    /// and optional discriminative `exception_claim_score` (`< exception_threshold`).
+    pub fn from_scores(
+        score: f64,
+        threshold: f64,
+        exception_claim_score: Option<f64>,
+        exception_threshold: f64,
+    ) -> Self {
+        let direct_ok = score >= threshold;
+        let exception_ok = exception_claim_score.is_none_or(|exc| exc < exception_threshold);
+        if direct_ok && exception_ok {
+            Self::Vetted
+        } else {
+            Self::Contested
+        }
+    }
 }
 
 /// Validates that a vetting score or threshold is finite and within `[0.0, 1.0]`, normalizing `-0.0` to `0.0`.
@@ -73,6 +90,32 @@ where
 {
     let raw = f64::deserialize(deserializer)?;
     normalize_vetting_score(raw).map_err(serde::de::Error::custom)
+}
+
+fn serialize_optional_vetting_score<S>(
+    score: &Option<f64>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match score {
+        Some(value) => {
+            let normalized = normalize_vetting_score(*value).map_err(serde::ser::Error::custom)?;
+            serializer.serialize_some(&normalized)
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_optional_vetting_score<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<f64>::deserialize(deserializer)?;
+    raw.map(normalize_vetting_score)
+        .transpose()
+        .map_err(serde::de::Error::custom)
 }
 
 fn deserialize_sorted_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -195,12 +238,21 @@ where
 pub struct CanonVettingAssessment {
     /// Rationale or discriminative model score summary justifying the prima facie compliance posture.
     pub vetting_summary: String,
-    /// Continuous prima facie compliance score in `[0.0, 1.0]`.
+    /// Continuous prima facie direct-compliance score in `[0.0, 1.0]`.
     #[serde(
         serialize_with = "serialize_vetting_score",
         deserialize_with = "deserialize_vetting_score"
     )]
     pub vetting_score: f64,
+    /// Optional discriminative exception-claim/reliance score in `[0.0, 1.0]`; omitted when absent
+    /// (e.g., standalone generative `vet` or oversized contests).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_vetting_score",
+        deserialize_with = "deserialize_optional_vetting_score"
+    )]
+    pub exception_claim_score: Option<f64>,
     /// Deterministically derived prima facie compliance status (`"vetted"` or `"contested"`).
     pub vetting_status: VettingStatus,
     /// Stably sorted contested file exhibit paths when discriminative vetting cleared a proper subset of
@@ -227,6 +279,8 @@ impl PartialEq for CanonVettingAssessment {
     fn eq(&self, other: &Self) -> bool {
         self.vetting_summary == other.vetting_summary
             && canonical_score_bits(self.vetting_score) == canonical_score_bits(other.vetting_score)
+            && self.exception_claim_score.map(canonical_score_bits)
+                == other.exception_claim_score.map(canonical_score_bits)
             && self.vetting_status == other.vetting_status
             && self.contested_exhibits == other.contested_exhibits
             && self.contested_spans == other.contested_spans
@@ -316,6 +370,7 @@ mod tests {
                     vetting_summary: "Compliant via discriminative vetting (`jev`: 0.940 >= 0.80)."
                         .to_string(),
                     vetting_score: 0.94,
+                    exception_claim_score: Some(0.08),
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: Vec::new(),
                     contested_spans: Vec::new(),
@@ -328,6 +383,7 @@ mod tests {
                         "Contested via discriminative vetting (`jev`: 0.420 < 0.80); requires audit."
                             .to_string(),
                     vetting_score: 0.42,
+                    exception_claim_score: Some(0.12),
                     vetting_status: VettingStatus::Contested,
                     contested_exhibits: Vec::new(),
                     contested_spans: Vec::new(),
@@ -338,6 +394,7 @@ mod tests {
                 CanonVettingAssessment {
                     vetting_summary: "All flags follow kebab-case.".to_string(),
                     vetting_score: 0.98,
+                    exception_claim_score: None,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: Vec::new(),
                     contested_spans: Vec::new(),
@@ -404,6 +461,7 @@ mod tests {
             let neg_zero = CanonVettingAssessment {
                 vetting_summary: "Contested.".to_string(),
                 vetting_score: -0.0,
+                exception_claim_score: None,
                 vetting_status: VettingStatus::Contested,
                 contested_exhibits: Vec::new(),
                 contested_spans: Vec::new(),
@@ -411,6 +469,7 @@ mod tests {
             let pos_zero = CanonVettingAssessment {
                 vetting_summary: "Contested.".to_string(),
                 vetting_score: 0.0,
+                exception_claim_score: None,
                 vetting_status: VettingStatus::Contested,
                 contested_exhibits: Vec::new(),
                 contested_spans: Vec::new(),
@@ -419,6 +478,7 @@ mod tests {
             let json = serde_json::to_string(&neg_zero).expect("serialize -0.0");
             assert!(!json.contains("-0.0"));
             assert!(json.contains("\"vetting_score\":0.0"));
+            assert!(!json.contains("exception_claim_score"));
             assert!(!json.contains("contested_exhibits"));
             assert!(!json.contains("contested_spans"));
         }
@@ -431,6 +491,7 @@ mod tests {
                 CanonVettingAssessment {
                     vetting_summary: "All slices cleared.".to_string(),
                     vetting_score: 0.91,
+                    exception_claim_score: None,
                     vetting_status: VettingStatus::Vetted,
                     contested_exhibits: vec!["src/should_be_cleared.rs".to_string()],
                     contested_spans: vec![ContestedSpan {
@@ -446,6 +507,7 @@ mod tests {
                 CanonVettingAssessment {
                     vetting_summary: "1 of 3 slices contested.".to_string(),
                     vetting_score: 0.34,
+                    exception_claim_score: None,
                     vetting_status: VettingStatus::Contested,
                     contested_exhibits: vec![
                         "src/z_mod.rs".to_string(),

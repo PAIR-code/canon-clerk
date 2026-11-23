@@ -1246,6 +1246,7 @@ mod tests {
                     CanonVettingAssessment {
                         vetting_summary: "Contested in vet.".to_string(),
                         vetting_score: 0.35,
+                        exception_claim_score: None,
                         vetting_status: VettingStatus::Contested,
                         contested_exhibits: Vec::new(),
                         contested_spans: Vec::new(),
@@ -1256,6 +1257,7 @@ mod tests {
                     CanonVettingAssessment {
                         vetting_summary: "Contested in vet.".to_string(),
                         vetting_score: 0.40,
+                        exception_claim_score: None,
                         vetting_status: VettingStatus::Contested,
                         contested_exhibits: Vec::new(),
                         contested_spans: Vec::new(),
@@ -1410,6 +1412,11 @@ mod tests {
                 for key in request.questions.keys() {
                     let s = if key == "compliant" {
                         self.vet_score
+                    } else if key == "claims_exception"
+                        || key.starts_with("file_exception:")
+                        || key.starts_with("span_exception:")
+                    {
+                        0.05
                     } else {
                         0.95
                     };

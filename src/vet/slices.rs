@@ -237,7 +237,7 @@ pub(super) fn build_discriminative_case_plan(
         .map(PreparedFileExhibit::span_noul_count)
         .sum();
     let single_slice_body_est: usize =
-        if 1 + all_prepared.len() + total_all_spans <= profile.max_nouls_per_call {
+        if 2 * (1 + all_prepared.len() + total_all_spans) <= profile.max_nouls_per_call {
             all_prepared.iter().map(|p| p.estimated_chars).sum()
         } else {
             all_prepared

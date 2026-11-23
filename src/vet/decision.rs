@@ -15,7 +15,11 @@
 //! Discriminative `Noul` prima facie compliance vetting and span localization for `vet`
 //! (`google:gemini-decision-*`, `typesafe:jev-*`, `docs/architecture/nodes/vet.md` §4.3).
 
-use super::slices::{DiscriminativeCasePlan, VettingExhibitSlice, VettingSpanTarget};
+use super::prompts::{
+    COMPLIANCE_QUESTION_KEY, EXCEPTION_QUESTION_KEY, build_slice_noul_items,
+    file_exception_question_key, file_question_key, span_exception_question_key, span_question_key,
+};
+use super::slices::{DiscriminativeCasePlan, VettingExhibitSlice};
 use super::{PreparedVettingCase, VetError};
 use crate::caseload::{
     CanonVettingAssessment, ContestedSpan, VettingStatus, canonicalize_contested_spans,
@@ -28,20 +32,7 @@ use crate::provider::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) const COMPLIANCE_QUESTION_KEY: &str = "compliant";
-const QUESTION_RESERVE_CHARS: usize = 4_096;
-
-const VET_NOUL_INSTRUCTION: &str = "\
-Evaluate the Admitted Exhibits (and any Statutory Grounding References) in `state` strictly \
-against the Governing Canon Statute's Normative Invariant (`What`) and Declared `Exception` clauses:\n\
-- `Rationale` (`Why`) and `Remediation` (`How`) are non-normative; NEVER fail code that satisfies \
-  the Normative Invariant via a valid alternative mechanism.\n\
-- Do NOT invent extra requirements beyond the written Normative Invariant or speculate about un-admitted files \
-  (when `state` presents an exhibit slice, `## All Admitted File Exhibit Paths in Filing` lists all files admitted across the filing).\n\
-- If a prima facie violation satisfies the verifiable conditions of a declared `Exception`, treat the case as compliant.\n\n\
-Question: Do the Admitted Exhibits in `state` comply with the Governing Canon Statute with zero unexcused violations?\n\
-- Answer YES if the Admitted Exhibits comply, satisfy a declared `Exception`, OR if the canon's governed construct is absent/untouched in these exhibits (zero violation annotations required).\n\
-- Answer NO ONLY if an unexcused statute violation or missing required companion update is actually present in the exhibits.";
+const QUESTION_RESERVE_CHARS: usize = 6_144;
 
 pub(super) fn max_discriminative_state_chars_for_profile(profile: DecisionBudgetProfile) -> usize {
     profile
@@ -65,48 +56,10 @@ pub(super) fn slice_fits_single_batch(
         <= 1
 }
 
-pub(super) fn file_question_key(file_path: &str) -> String {
-    format!("file:{file_path}")
-}
-
-pub(super) fn span_question_key(span_id: &str) -> String {
-    format!("span:{span_id}")
-}
-
-fn file_noul_instruction(file_path: &str) -> String {
-    format!(
-        "Evaluate ONLY the admitted file exhibit `{file_path}` in `state` against the Governing Canon \
-         Statute's Normative Invariant (`What`) and Declared `Exception` clauses.\n\
-         Question: Does `{file_path}` comply with the Governing Canon Statute with zero unexcused violations?\n\
-         - Answer YES if `{file_path}` complies, satisfies a declared `Exception`, OR if the canon's governed \
-         construct is absent/untouched in `{file_path}`.\n\
-         - Answer NO ONLY if an unexcused statute violation or missing required companion update is present in `{file_path}`."
-    )
-}
-
-fn span_noul_instruction(span: &VettingSpanTarget) -> String {
-    format!(
-        "Evaluate ONLY `[SPAN {}]` (`{}` L{}..L{}) in `state` against the Governing Canon Statute's \
-         Normative Invariant (`What`) and Declared `Exception` clauses (considering enclosing scope and \
-         exceptions visible elsewhere in `state`).\n\
-         Question: Does `[SPAN {}]` comply with the Governing Canon Statute with zero unexcused violations?\n\
-         - Answer YES if `[SPAN {}]` complies, satisfies a declared `Exception`, OR if the canon's governed \
-         construct is absent/untouched in `[SPAN {}]`.\n\
-         - Answer NO ONLY if an unexcused statute violation is present in `[SPAN {}]`.",
-        span.span_id,
-        span.file_path,
-        span.start_line,
-        span.end_line,
-        span.span_id,
-        span.span_id,
-        span.span_id,
-        span.span_id
-    )
-}
-
 pub(super) struct DiscriminativeVetParams<'a> {
     pub(super) vet_model: &'a str,
     pub(super) threshold: f64,
+    pub(super) exception_threshold: f64,
     pub(super) concurrency_limit: usize,
     pub(super) timeout_ms: u64,
 }
@@ -140,6 +93,7 @@ fn oversized_contest_assessment() -> CanonVettingAssessment {
             "Admitted exhibits exceed discriminative context window; bound over for long-context generative `audit`."
                 .to_string(),
         vetting_score: 0.0,
+        exception_claim_score: None,
         vetting_status: VettingStatus::Contested,
         contested_exhibits: Vec::new(),
         contested_spans: Vec::new(),
@@ -159,6 +113,7 @@ fn evaluate_single_decision_case(
     }
 
     let mut min_score = 1.0_f64;
+    let mut max_exception_score = 0.0_f64;
     let mut resolved_model = params.vet_model.to_string();
     let mut contested_slices = 0usize;
     let mut all_sliceable_paths = BTreeSet::new();
@@ -172,9 +127,14 @@ fn evaluate_single_decision_case(
         match evaluate_slice(slice, &case.canon_ref, params, provider)? {
             SliceOutcome::Scored(scored) => {
                 min_score = min_score.min(scored.min_score);
+                max_exception_score = max_exception_score.max(scored.max_exception_score);
                 resolved_model = scored.model;
-                if VettingStatus::from_score(scored.min_score, params.threshold)
-                    == VettingStatus::Contested
+                if VettingStatus::from_scores(
+                    scored.min_score,
+                    params.threshold,
+                    Some(scored.max_exception_score),
+                    params.exception_threshold,
+                ) == VettingStatus::Contested
                 {
                     contested_slices += 1;
                 }
@@ -185,7 +145,12 @@ fn evaluate_single_decision_case(
         }
     }
 
-    let status = VettingStatus::from_score(min_score, params.threshold);
+    let status = VettingStatus::from_scores(
+        min_score,
+        params.threshold,
+        Some(max_exception_score),
+        params.exception_threshold,
+    );
     let contested_exhibits = if status == VettingStatus::Contested
         && !contested_file_paths.is_empty()
         && contested_file_paths.len() < all_sliceable_paths.len()
@@ -206,6 +171,8 @@ fn evaluate_single_decision_case(
         &resolved_model,
         min_score,
         params.threshold,
+        max_exception_score,
+        params.exception_threshold,
         slices.len(),
         contested_slices,
         &contested_exhibits,
@@ -215,6 +182,7 @@ fn evaluate_single_decision_case(
     Ok(CanonVettingAssessment {
         vetting_summary: summary,
         vetting_score: min_score,
+        exception_claim_score: Some(max_exception_score),
         vetting_status: status,
         contested_exhibits,
         contested_spans,
@@ -223,13 +191,15 @@ fn evaluate_single_decision_case(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "Deterministic summary formatter combining vetting status, score, slice counts, and localization counts"
+    reason = "Deterministic summary formatter combining vetting status, direct/exception scores, slice counts, and localization counts"
 )]
 fn format_vetting_summary(
     status: VettingStatus,
     resolved_model: &str,
     min_score: f64,
     threshold: f64,
+    max_exception_score: f64,
+    exception_threshold: f64,
     total_slices: usize,
     contested_slices: usize,
     contested_exhibits: &[String],
@@ -249,16 +219,17 @@ fn format_vetting_summary(
     };
     match status {
         VettingStatus::Vetted => format!(
-            "Prima facie compliant via discriminative vetting{slice_note} (`{resolved_model}`: {min_score:.3} >= {threshold:.2})."
+            "Prima facie compliant via discriminative vetting{slice_note} (`{resolved_model}`: direct {min_score:.3} >= {threshold:.2}, exception {max_exception_score:.3} < {exception_threshold:.2})."
         ),
         VettingStatus::Contested => format!(
-            "Contested via discriminative vetting{slice_note}{span_note} (`{resolved_model}`: {min_score:.3} < {threshold:.2}); bound over for substantive `audit`."
+            "Contested via discriminative vetting{slice_note}{span_note} (`{resolved_model}`: direct {min_score:.3} vs {threshold:.2}, exception {max_exception_score:.3} vs {exception_threshold:.2}); bound over for substantive `audit`."
         ),
     }
 }
 
 struct SliceEvaluation {
     min_score: f64,
+    max_exception_score: f64,
     model: String,
     contested_files: Vec<String>,
     contested_spans: Vec<ContestedSpan>,
@@ -267,27 +238,6 @@ struct SliceEvaluation {
 enum SliceOutcome {
     Scored(SliceEvaluation),
     OversizedContest,
-}
-
-fn build_slice_noul_items(slice: &VettingExhibitSlice) -> Vec<(String, String)> {
-    let mut items = Vec::with_capacity(1 + slice.file_paths.len() + slice.spans.len());
-    items.push((
-        COMPLIANCE_QUESTION_KEY.to_string(),
-        VET_NOUL_INSTRUCTION.to_string(),
-    ));
-    for file_path in &slice.file_paths {
-        items.push((
-            file_question_key(file_path),
-            file_noul_instruction(file_path),
-        ));
-    }
-    for span in &slice.spans {
-        items.push((
-            span_question_key(&span.span_id),
-            span_noul_instruction(span),
-        ));
-    }
-    items
 }
 
 fn evaluate_slice(
@@ -354,28 +304,49 @@ fn evaluate_slice(
                 message: format!("missing compliance `noul` score for active case `{canon_ref}`"),
             })
         })?;
+    let whole_exception_score =
+        all_scores
+            .get(EXCEPTION_QUESTION_KEY)
+            .copied()
+            .ok_or_else(|| {
+                VetError::Provider(ProviderError::SchemaDecode {
+                    model_specifier: params.vet_model.to_string(),
+                    message: format!(
+                        "missing exception-claim `noul` score for active case `{canon_ref}`"
+                    ),
+                })
+            })?;
 
     Ok(SliceOutcome::Scored(apply_hierarchical_fallback(
         slice,
         whole_score,
+        whole_exception_score,
         &all_scores,
         params.threshold,
+        params.exception_threshold,
         resolved_model,
     )))
 }
 
-/// Applies conjunctive min scoring and the 3-tier fail-safe localization fallback:
-/// 1. Hot span(s) `< threshold` -> record spans in `contested_spans` and file in `contested_files`.
-/// 2. `file_score < threshold` with 0 hot spans -> retain full file in `contested_files` (no span narrowing).
-/// 3. `whole_score < threshold` with 0 contested files/spans -> retain full slice in `contested_files`.
+/// Applies conjunctive min direct-compliance / disjunctive max exception-claim scoring and the
+/// 3-tier fail-safe localization fallback:
+/// 1. Hot span(s) (`direct < threshold || exception >= exception_threshold`) -> record spans in
+///    `contested_spans` and file in `contested_files`.
+/// 2. File contested (`file_direct < threshold || file_exception >= exception_threshold`) with 0
+///    hot spans -> retain full file in `contested_files` (no span narrowing).
+/// 3. Whole slice contested (`whole_direct < threshold || whole_exception >= exception_threshold`)
+///    with 0 contested files/spans -> retain full slice in `contested_files`.
 fn apply_hierarchical_fallback(
     slice: &VettingExhibitSlice,
     whole_score: f64,
+    whole_exception_score: f64,
     scores: &BTreeMap<String, f64>,
     threshold: f64,
+    exception_threshold: f64,
     model: String,
 ) -> SliceEvaluation {
     let mut min_score = whole_score;
+    let mut max_exception_score = whole_exception_score;
     let mut contested_files = Vec::new();
     let mut contested_spans = Vec::new();
 
@@ -384,39 +355,62 @@ fn apply_hierarchical_fallback(
             .get(&file_question_key(file_path))
             .copied()
             .unwrap_or(whole_score);
+        let file_exception_score = scores
+            .get(&file_exception_question_key(file_path))
+            .copied()
+            .unwrap_or(whole_exception_score);
         min_score = min_score.min(file_score);
+        max_exception_score = max_exception_score.max(file_exception_score);
 
         let mut hot_spans_for_file = Vec::new();
         for span in slice.spans.iter().filter(|s| &s.file_path == file_path) {
-            if let Some(span_score) = scores.get(&span_question_key(&span.span_id)).copied() {
-                min_score = min_score.min(span_score);
-                if span_score < threshold {
-                    hot_spans_for_file.push(ContestedSpan {
-                        path: span.file_path.clone(),
-                        start_line: span.start_line,
-                        end_line: span.end_line,
-                        score: span_score,
-                    });
-                }
+            let span_score = scores.get(&span_question_key(&span.span_id)).copied();
+            let span_exception_score = scores
+                .get(&span_exception_question_key(&span.span_id))
+                .copied();
+            if let Some(direct) = span_score {
+                min_score = min_score.min(direct);
+            }
+            if let Some(exc) = span_exception_score {
+                max_exception_score = max_exception_score.max(exc);
+            }
+            let direct_hot = span_score.is_some_and(|s| s < threshold);
+            let exception_hot = span_exception_score.is_some_and(|e| e >= exception_threshold);
+            if direct_hot || exception_hot {
+                let effective_direct = span_score.unwrap_or(file_score);
+                let effective_score = if let Some(exc) = span_exception_score {
+                    effective_direct.min((1.0 - exc).clamp(0.0, 1.0))
+                } else {
+                    effective_direct
+                };
+                hot_spans_for_file.push(ContestedSpan {
+                    path: span.file_path.clone(),
+                    start_line: span.start_line,
+                    end_line: span.end_line,
+                    score: effective_score,
+                });
             }
         }
 
         if !hot_spans_for_file.is_empty() {
             contested_files.push(file_path.clone());
             contested_spans.extend(hot_spans_for_file);
-        } else if file_score < threshold {
+        } else if file_score < threshold || file_exception_score >= exception_threshold {
             // Tier 2 fallback: file contested with 0 hot spans -> keep full file without span narrowing.
             contested_files.push(file_path.clone());
         }
     }
 
-    if whole_score < threshold && contested_files.is_empty() {
+    if (whole_score < threshold || whole_exception_score >= exception_threshold)
+        && contested_files.is_empty()
+    {
         // Tier 3 fallback: whole slice contested with 0 contested files/spans -> keep full slice.
         contested_files.extend(slice.file_paths.iter().cloned());
     }
 
     SliceEvaluation {
         min_score,
+        max_exception_score,
         model,
         contested_files,
         contested_spans,
