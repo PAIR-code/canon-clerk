@@ -92,13 +92,13 @@ canon-clerk probe --json
 ```
 
 ### CLI Flags & Options
-- `--timeout <MS>` (fallback env: `CANON_CLERK_PROBE_TIMEOUT_MS`): Per-target request timeout in milliseconds (default: `5000ms`; `0` is rejected with exit code `2`).
-- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider profile slug (`google`, `typesafe`, or any custom `providers.<slug>` profile in `config.json`; default: `google`).
+- `--timeout <MS>` (fallback env: `CANON_CLERK_PROBE_TIMEOUT_MS`): Per-target request timeout in milliseconds (default: `5000ms`; `0` is rejected with exit code `2`). Isolated from `CANON_CLERK_TIMEOUT_MS` / `defaults.timeoutMs` so long local evaluation timeouts do not stall diagnostic health checks.
+- `--provider <SLUG>` (fallback env: `CANON_CLERK_PROVIDER`; config key: `defaults.provider`): Active default provider profile slug (`google`, `typesafe`, `local`, or any custom `providers.<slug>` profile in `config.json`; default: `google`).
 - `--apprise-model <PROVIDER:MODEL>` (`CANON_CLERK_APPRISE_MODEL`), `--docket-model <PROVIDER:MODEL>` (`CANON_CLERK_DOCKET_MODEL`), `--admit-model <PROVIDER:MODEL>` (`CANON_CLERK_ADMIT_MODEL`), `--vet-model <PROVIDER:MODEL>` (`CANON_CLERK_VET_MODEL`), `--audit-model <PROVIDER:MODEL>` (`CANON_CLERK_AUDIT_MODEL`): Per-node canonical `<provider>:<model>` overrides.
 - `--thinking-level <minimal|low|medium|high>` (`CANON_CLERK_THINKING_LEVEL`): Qualitative reasoning effort tier for `Generator` targets (mutually exclusive with `--reasoning-budget`).
 - `--reasoning-budget <TOKENS>` (`CANON_CLERK_REASONING_BUDGET`): Maximum reasoning budget tokens for `Generator` targets (mutually exclusive with `--thinking-level`).
-- `--gemini-api-key <KEY>` (`CANON_CLERK_GOOGLE_API_KEY`, `GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`CANON_CLERK_TYPESAFE_API_KEY`, `TYPESAFE_API_KEY`): Provider API key overrides.
-- `--gemini-base-url <URL>` (`CANON_CLERK_GOOGLE_BASE_URL`, `GEMINI_BASE_URL`), `--typesafe-base-url <URL>` (`CANON_CLERK_TYPESAFE_BASE_URL`, `TYPESAFE_BASE_URL`): Provider endpoint base URL overrides.
+- `--gemini-api-key <KEY>` (`CANON_CLERK_GOOGLE_API_KEY`, `GEMINI_API_KEY`), `--typesafe-api-key <KEY>` (`CANON_CLERK_TYPESAFE_API_KEY`, `TYPESAFE_API_KEY`), `--local-api-key <KEY>` (`CANON_CLERK_LOCAL_API_KEY`, `LOCAL_API_KEY`): Provider API key overrides.
+- `--gemini-base-url <URL>` (`CANON_CLERK_GOOGLE_BASE_URL`, `GEMINI_BASE_URL`), `--typesafe-base-url <URL>` (`CANON_CLERK_TYPESAFE_BASE_URL`, `TYPESAFE_BASE_URL`), `--local-base-url <URL>` (`CANON_CLERK_LOCAL_BASE_URL`, `LOCAL_BASE_URL`): Provider endpoint base URL overrides.
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload`.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of `stdout`.

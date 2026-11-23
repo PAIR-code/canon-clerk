@@ -83,7 +83,7 @@ sequenceDiagram
 1. **Pre-Dispatch Cooldown Gate:** Before dispatching any heuristic stage attempt onto the wire, the worker checks the target origin's active cooldown deadline. If the origin is cooling down, queued work units wait cleanly at the gate *before* spending Attempt 1, preserving their full retry budget.
 2. **Monotonic Coalescing (Zero Multiplicative Stacking):** When multiple already-in-flight workers receive `HTTP 429` (or `HTTP 503` carrying an explicit retry delay) concurrently from the same origin, each worker updates the shared origin deadline monotonically (`cooldown_until = max(cooldown_until, now + advised_delay)`). Consequently, $K$ concurrent workers share a single cooldown window rather than stacking $K \times \text{delay}$.
 3. **Staggered Worker Release:** Workers releasing from an origin cooldown gate reserve staggered wakeup slots spaced by short intervals (`100ms–250ms`), smoothing burst re-entry into the provider's rolling token/request window and preventing wakeup thundering herds.
-4. **Wire-Only Per-Attempt Timeout Isolation:** Waiting on a pre-dispatch origin cooldown gate or inter-attempt retry backoff **never** consumes the request's per-attempt wire timeout budget (`timeout_ms`, default `60,000ms`). Each attempt's socket timeout clock starts strictly when the HTTP request dispatches onto the wire.
+4. **Wire-Only Per-Attempt Timeout Isolation:** Waiting on a pre-dispatch origin cooldown gate or inter-attempt retry backoff **never** consumes the request's per-attempt wire timeout budget (`timeout_ms`, default `60,000ms` on cloud profiles and `180,000ms` on built-in `local:*` nodes; overridable via `--timeout <MS>` / `CANON_CLERK_TIMEOUT_MS` / `defaults.timeoutMs`). Each attempt's socket timeout clock starts strictly when the HTTP request dispatches onto the wire.
 5. **Cross-Stage Continuity & Cooperative Abort Wakeup:** Within a telescoping CLI cascade (`docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`), the shared requester carries origin cooldown state across stage seams. If an unrecoverable failure triggers cooperative stage abort (`scheduling.md` §3) while sibling workers in that stage are parked on a cooldown or backoff timer, parked workers wake immediately rather than stalling terminal exit for the remainder of the cooldown window.
 
 ---
@@ -98,8 +98,9 @@ sequenceDiagram
 | **Transient Transport** | Connect timeout, connection reset, broken pipe, unexpected EOF | **Retryable** | Retries with jittered exponential backoff up to `--max-retries` |
 | **Recoverable Rate Limit** | `HTTP 429` without hard-quota exhaustion and advised wait $\le$ `--max-backoff-ms` | **Retryable + Origin Gate** | Updates per-origin cooldown gate and retries within `--max-retries` |
 | **Transient Server Error** | `HTTP 500`, `502`, `503`, `504` (with advised wait, if any, $\le$ `--max-backoff-ms`) | **Retryable** *(+ Origin Gate if `503` specifies delay)* | Honors explicit retry delay if present, else jittered exponential backoff |
+| **Unsupported Model / Not Implemented** | `HTTP 501` (e.g. non-decision GGUF loaded in `llama-server` on `/v1/systemone`) | **Fail Fast (Attempt 1)** | Zero sleep; excluded from transient `5xx` backoff and emits profile-aware remediation `Hint:` |
 | **Hard / Daily Quota Exhaustion** | `HTTP 429` signaling `limit: 0`, billing/plan lock, per-day quota exhaustion, or advised wait $>$ `--max-backoff-ms` | **Fail Fast (Attempt 1)** | Zero sleep; returns actionable quota/tier remediation `Hint:` immediately |
-| **Client / Context Rejection** | `HTTP 400` (malformed payload, unsupported parameter, or context/token limit overrun) | **Fail Fast (Attempt 1)** | Zero sleep; allows `vet` to bind oversized discriminative cases over to `contested` immediately |
+| **Client / Context Rejection** | `HTTP 400` (malformed payload, unsupported parameter, or context/token limit overrun including `max_tokens_exceeded` and `llama-server` `exceeds the available context size`) | **Fail Fast (Attempt 1)** | Zero sleep; allows `vet` to bind oversized discriminative cases over to `contested` immediately and emits profile-aware diagnostics |
 | **Auth / Endpoint Rejection** | `HTTP 401`, `403` (invalid/unauthorized key), `HTTP 404` (unknown model/endpoint), other `4xx` | **Fail Fast (Attempt 1)** | Zero sleep; returns credential or model specifier remediation `Hint:` |
 | **Content / Schema Failure** | Safety/recitation block, empty candidate, malformed `2xx` JSON envelope, or schema decode error | **Fail Fast (Attempt 1)** | Zero sleep; deterministic at `temperature: 0.0` so retrying wastes tokens |
 
@@ -138,13 +139,20 @@ Before sleeping on any pre-dispatch origin cooldown or inter-attempt retry backo
 - **Interactive TTY Liveness Without `-v`:** When `stderr` is attached to an interactive terminal (and neither `--quiet` nor `CI` is active), multi-second cooldown waits (`wait_ms >= 1000`) render a concise progress notice on `stderr` even without `--verbose` (`-v`) so a 56-second TPM window recovery never resembles a hung process. Under `-v`, all `ProviderRetry` events render on `stderr`, and `--log-file` records every event as structured JSONL.
 - **Substantive Determinism:** Retry waits and attempt counts are strictly operational telemetry; `stdout` and serialized `Caseload` JSON envelopes remain bit-for-bit identical whether an evaluation succeeds on Attempt 1 or recovers after transient retries.
 
-### Shared CLI Flags, Environment Fallbacks & `config.json` Keys
+### Domain-Classified Timeouts & Shared CLI Transport Controls
 
-All five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`) accept shared transport retry controls resolved via Canon Clerk's standard 4-level specificity cascade (explicit CLI flag $\succ$ environment variable $\succ$ `~/.config/canon-clerk/config.json` `defaults` $\succ$ built-in default):
+Canon Clerk partitions network timeouts into three orthogonal domains so long-running local CPU evaluations never cause health checks or dead sockets to stall:
+
+1. **TCP/TLS Connect Timeout (`10,000ms`, fixed):** Bounds initial socket/TLS handshake establishment across pooled connections.
+2. **Diagnostic `probe` Timeout (`5,000ms` default):** Controlled exclusively by `probe --timeout <MS>` / `CANON_CLERK_PROBE_TIMEOUT_MS` so `defaults.timeoutMs` or `CANON_CLERK_TIMEOUT_MS` never slows down reachability checks against a stopped local daemon.
+3. **Heuristic Evaluation Wire Timeout (`60,000ms` cloud / `180,000ms` `local:*` default):** Per-attempt wire timeout across all five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`).
+
+All five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`) accept shared transport timeout and retry controls resolved via Canon Clerk's standard 4-level specificity cascade (explicit CLI flag $\succ$ environment variable $\succ$ `~/.config/canon-clerk/config.json` `defaults` $\succ$ built-in/profile default):
 
 | CLI Flag | Environment Variable | `config.json` Key | Default | Domain & Validation Contract |
 | :--- | :--- | :--- | :--- | :--- |
+| `--timeout <MS>` | `CANON_CLERK_TIMEOUT_MS` | `defaults.timeoutMs` | `60000` *(cloud)* / `180000` *(`local:*`)* | Positive integer (`>= 1`) in milliseconds bounding each per-attempt wire call. `0`, negative, or non-integer values fail fast with exit code `2`. |
 | `--max-retries <COUNT>` | `CANON_CLERK_MAX_RETRIES` | `defaults.maxRetries` | `2` | Non-negative integer (`>= 0`) bounding retry attempts after Attempt 1 (`2` $\implies$ up to `3` total attempts; `0` disables retries). Negative or non-integer values fail fast with exit code `2`. |
 | `--max-backoff-ms <MS>` | `CANON_CLERK_MAX_BACKOFF_MS` | `defaults.maxBackoffMs` | `90000` | Non-negative integer (`>= 0`) in milliseconds bounding any single cooldown or retry wait (`0` fails fast immediately on any rate-limit delay). Negative or non-integer values fail fast with exit code `2`. |
 
-Like stage concurrency and batch-size settings, `--max-retries` and `--max-backoff-ms` govern live HTTP transport execution and are omitted from `Caseload.config`.
+Like stage concurrency and batch-size settings, `--timeout`, `--max-retries`, and `--max-backoff-ms` govern live HTTP transport execution and are omitted from `Caseload.config`.
