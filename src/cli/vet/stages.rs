@@ -32,7 +32,7 @@ use crate::cli::runners::{
 use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
-use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, StructuredModelProvider};
+use crate::provider::StructuredModelProvider;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::vet::{VetOptions, execute_vet};
 use std::collections::{BTreeMap, BTreeSet};
@@ -123,7 +123,10 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<VetCascadeOutcome, CliError> {
-    let provider_changed = args.provider.provider.is_some();
+    let provider_changed = crate::cli::closure::is_provider_changed(
+        args.provider.provider.as_deref(),
+        caseload.config.as_ref(),
+    );
     let docket_pre_populated =
         caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_changed;
     let evidence_pre_populated = caseload.evidence.is_some()
@@ -159,19 +162,11 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
     let explicit_docket_batch_size =
         resolve_docket_batch_size(args.docket_batch_size, env, stored)?;
     let docket_concurrency = resolve_docket_concurrency(args.docket_concurrency, env, stored)?;
-    let admit_opts = AdmitOptions {
-        threshold: thresholds.admit_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_concurrent_calls: resolve_admit_concurrency(args.admit_concurrency, env, stored)?,
-    };
-    let vet_opts = VetOptions {
-        threshold: thresholds.vet_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-        max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
-        ..VetOptions::default()
-    };
+    let admit_concurrency = resolve_admit_concurrency(args.admit_concurrency, env, stored)?;
+    let vet_concurrency = resolve_vet_concurrency(args.vet_concurrency, env, stored)?;
 
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
+    let explicit_timeout_ms = args.transport.resolve_explicit_timeout_ms(env, stored)?;
 
     let config_was_present =
         can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
@@ -183,11 +178,31 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
     let docket_model = cfg_snapshot
         .model_for(HeuristicNode::Docket)
         .unwrap_or_default();
+    let admit_model = cfg_snapshot
+        .model_for(HeuristicNode::Admit)
+        .unwrap_or_default();
+    let vet_model = cfg_snapshot
+        .model_for(HeuristicNode::Vet)
+        .unwrap_or_default();
     let docket_opts = DocketOptions {
         threshold: thresholds.docket_threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        timeout_ms: explicit_timeout_ms
+            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(docket_model)),
         max_canons_per_call: effective_docket_batch_size(explicit_docket_batch_size, docket_model),
         max_concurrent_calls: docket_concurrency,
+    };
+    let admit_opts = AdmitOptions {
+        threshold: thresholds.admit_threshold,
+        timeout_ms: explicit_timeout_ms
+            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(admit_model)),
+        max_concurrent_calls: admit_concurrency,
+    };
+    let vet_opts = VetOptions {
+        threshold: thresholds.vet_threshold,
+        timeout_ms: explicit_timeout_ms
+            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(vet_model)),
+        max_concurrent_calls: vet_concurrency,
+        ..VetOptions::default()
     };
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {

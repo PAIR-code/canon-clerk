@@ -15,21 +15,16 @@
 //! Guarded Branch A, JIT Branch B, and `docket` → `admit` → `vet` → `audit` execution steps for `canon-clerk audit`.
 
 use super::finalize::{fold_vetted_to_verdict, try_pre_populated_short_circuit};
-use super::guards::{
-    has_admit_cli_overrides, has_docket_cli_overrides, has_vet_cli_overrides,
-    resolve_audit_concurrency,
-};
+use super::guards::{has_admit_cli_overrides, has_docket_cli_overrides, has_vet_cli_overrides};
+use super::stage_options::{build_stage_options, compute_required_nodes};
 use super::{AuditArgs, OnMissingCredentials};
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::audit::{AuditOptions, DEFAULT_AUDIT_TIMEOUT_MS, execute_audit};
+use crate::audit::{AuditOptions, execute_audit};
 use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict, HeuristicNode};
 use crate::cli::CliError;
-use crate::cli::admit::guards::resolve_admit_concurrency;
 use crate::cli::closure::ClosureBackend;
-use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{resolve_closure_branch_b_options, run_branch_b_configure_checked};
-use crate::cli::vet::guards::resolve_vet_concurrency;
 use crate::cli::vet::stages::{
     materialize_base_workspace_references, populate_live_case_and_reference_snapshots,
     populate_live_target_snapshots,
@@ -39,8 +34,8 @@ use crate::configure::{
     is_discriminative_model, resolve_provider_connections,
 };
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
-use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, MultiModelProvider, StructuredModelProvider};
+use crate::docket::{DocketOptions, execute_docket};
+use crate::provider::{MultiModelProvider, StructuredModelProvider};
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::vet::{VetOptions, execute_vet};
 use std::collections::BTreeMap;
@@ -90,7 +85,10 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     backend: &ClosureBackend<'_>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<AuditCascadeResult, CliError> {
-    let provider_changed = args.provider.provider.is_some();
+    let provider_changed = crate::cli::closure::is_provider_changed(
+        args.provider.provider.as_deref(),
+        caseload.config.as_ref(),
+    );
     let docket_pre_populated =
         caseload.docket.is_some() && !has_docket_cli_overrides(args) && !provider_changed;
     let evidence_pre_populated = caseload.evidence.is_some()
@@ -128,6 +126,7 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
     let stored = configure_options.stored_config.as_ref();
     let stage_opts = build_stage_options(args, env, stored, thresholds)?;
     let retry_policy = args.transport.resolve_retry_policy(env, stored)?;
+    let explicit_timeout_ms = args.transport.resolve_explicit_timeout_ms(env, stored)?;
 
     let config_was_present =
         can_fast_forward_existing_config(&configure_options, caseload.config.as_ref());
@@ -143,7 +142,14 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
         Err(skipped) => return Ok(skipped),
     };
     let cfg_snapshot = configured.config.clone().unwrap_or_default();
-    let docket_opts = stage_opts.docket_opts(&cfg_snapshot, thresholds.docket_threshold);
+    let docket_opts = stage_opts.docket_opts(
+        &cfg_snapshot,
+        thresholds.docket_threshold,
+        explicit_timeout_ms,
+    );
+    let admit_opts = stage_opts.admit_opts(&cfg_snapshot, explicit_timeout_ms);
+    let vet_opts = stage_opts.vet_opts(&cfg_snapshot, explicit_timeout_ms);
+    let audit_opts = stage_opts.audit_opts(&cfg_snapshot, explicit_timeout_ms);
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {
         ClosureBackend::Hermetic { provider, .. } => *provider,
@@ -179,66 +185,13 @@ pub(super) fn execute_jit_configure_docket_admit_and_audit(
             evidence: evidence_pre_populated,
             vetting: vetting_pre_populated,
         },
-        (
-            &docket_opts,
-            &stage_opts.admit_opts,
-            &stage_opts.vet_opts,
-            &stage_opts.audit_opts,
-        ),
+        (&docket_opts, &admit_opts, &vet_opts, &audit_opts),
         snapshot,
         backend,
         active_provider,
         telemetry,
     )
     .map(AuditCascadeResult::Completed)
-}
-
-struct ResolvedStageOptions {
-    explicit_docket_batch_size: Option<usize>,
-    docket_concurrency: Option<usize>,
-    admit_opts: AdmitOptions,
-    vet_opts: VetOptions,
-    audit_opts: AuditOptions,
-}
-
-impl ResolvedStageOptions {
-    fn docket_opts(
-        &self,
-        cfg_snapshot: &crate::caseload::CaseloadConfig,
-        docket_threshold: f64,
-    ) -> DocketOptions {
-        let docket_model = cfg_snapshot
-            .model_for(HeuristicNode::Docket)
-            .unwrap_or_default();
-        DocketOptions {
-            threshold: docket_threshold,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_canons_per_call: effective_docket_batch_size(
-                self.explicit_docket_batch_size,
-                docket_model,
-            ),
-            max_concurrent_calls: self.docket_concurrency,
-        }
-    }
-}
-
-fn compute_required_nodes(
-    docket_pre_populated: bool,
-    evidence_pre_populated: bool,
-    vetting_pre_populated: bool,
-) -> Vec<HeuristicNode> {
-    let mut nodes = Vec::new();
-    if !docket_pre_populated && !evidence_pre_populated {
-        nodes.push(HeuristicNode::Docket);
-    }
-    if !evidence_pre_populated {
-        nodes.push(HeuristicNode::Admit);
-    }
-    if !vetting_pre_populated {
-        nodes.push(HeuristicNode::Vet);
-    }
-    nodes.push(HeuristicNode::Audit);
-    nodes
 }
 
 fn run_configure_or_skip(
@@ -279,34 +232,6 @@ fn build_live_provider_or_skip(
         }
         Err(err) => Err(CliError::usage(err.to_string())),
     }
-}
-
-fn build_stage_options(
-    args: &AuditArgs,
-    env: &BTreeMap<String, String>,
-    stored: Option<&StoredConfig>,
-    thresholds: AuditCascadeThresholds,
-) -> Result<ResolvedStageOptions, CliError> {
-    Ok(ResolvedStageOptions {
-        explicit_docket_batch_size: resolve_docket_batch_size(args.docket_batch_size, env, stored)?,
-        docket_concurrency: resolve_docket_concurrency(args.docket_concurrency, env, stored)?,
-        admit_opts: AdmitOptions {
-            threshold: thresholds.admit_threshold,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_concurrent_calls: resolve_admit_concurrency(args.admit_concurrency, env, stored)?,
-        },
-        vet_opts: VetOptions {
-            threshold: thresholds.vet_threshold,
-            timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
-            ..VetOptions::default()
-        },
-        audit_opts: AuditOptions {
-            threshold: thresholds.audit_threshold,
-            timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
-            max_concurrent_calls: resolve_audit_concurrency(args.audit_concurrency, env, stored)?,
-        },
-    })
 }
 
 #[allow(

@@ -485,6 +485,24 @@ mod tests {
                     reason: "HTTP 429 rate limit".to_string(),
                 }
             );
+
+            // HTTP 501 Not Implemented (e.g. non-decision GGUF loaded in llama-server) must fail fast without retry.
+            assert_eq!(
+                classify_http_retry_disposition(
+                    &HttpErrorSample {
+                        status_code: 501,
+                        retry_after_header: None,
+                        body: r#"{"error":{"code":501,"message":"This model is not a decision model"}}"#,
+                        completed_attempts: 1,
+                        now_unix_ms: 0,
+                        jitter_seed: 0,
+                    },
+                    &policy,
+                ),
+                HttpRetryDisposition::FailFast {
+                    diagnostic_suffix: None,
+                }
+            );
         }
 
         #[test]

@@ -23,6 +23,7 @@ mod retry;
 mod retry_delay;
 mod runtime;
 mod typesafe;
+mod typesafe_wire;
 
 pub(crate) use runtime::{HttpAuth, build_pooled_http_client, http_reactor_handle};
 
@@ -32,8 +33,9 @@ pub use crate::caseload::{
 };
 pub(crate) use decision::partition_decision_items;
 pub use decision::{
-    DecisionBudgetProfile, DecisionModelProvider, DecisionRequest, DecisionResponse,
-    MultiModelProvider, TypesafeDecisionProvider,
+    DEFAULT_LOCAL_MAX_CONCURRENT_CALLS, DecisionBudgetProfile, DecisionModelProvider,
+    DecisionRequest, DecisionResponse, MultiModelProvider, TypesafeDecisionProvider,
+    default_concurrency_for_model,
 };
 pub use gemini::{
     DEFAULT_GEMINI_BASE_URL, GeminiModelProvider, build_generate_content_url,
@@ -52,22 +54,39 @@ pub use retry::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
     ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryNotification, RetryPolicy,
 };
+pub(crate) use typesafe::post_typesafe_json;
 pub use typesafe::{DEFAULT_TYPESAFE_BASE_URL, build_systemone_url};
-pub(crate) use typesafe::{
+pub(crate) use typesafe_wire::{
     TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
-    classify_typesafe_http_error, extract_typesafe_error_detail, post_typesafe_json,
+    classify_typesafe_http_error, extract_typesafe_error_detail,
 };
 
 use crate::caseload::{
     DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
-    DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, TYPESAFE_PROVIDER,
+    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, LOCAL_PROVIDER,
+    TYPESAFE_PROVIDER,
 };
 use crate::configure::{MissingCredentialSpec, model_provider};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Default per-request timeout in milliseconds for structured model generation turns.
+/// Default per-request timeout in milliseconds for cloud heuristic evaluation turns (`transport.md` §6).
 pub const DEFAULT_GENERATION_TIMEOUT_MS: u64 = 60_000;
+
+/// Default per-request timeout in milliseconds for built-in `local:*` heuristic evaluation turns (`transport.md` §6).
+pub const DEFAULT_LOCAL_GENERATION_TIMEOUT_MS: u64 = 180_000;
+
+/// Environment variable name for overriding the heuristic evaluation per-attempt wire timeout (`--timeout <MS>`).
+pub const ENV_TIMEOUT_MS: &str = "CANON_CLERK_TIMEOUT_MS";
+
+/// Resolves the profile-calibrated default per-attempt wire timeout (`180,000ms` for built-in `local:*`, else `60,000ms`).
+pub fn default_timeout_ms_for_model(model_specifier: &str) -> u64 {
+    if model_provider(model_specifier) == LOCAL_PROVIDER {
+        DEFAULT_LOCAL_GENERATION_TIMEOUT_MS
+    } else {
+        DEFAULT_GENERATION_TIMEOUT_MS
+    }
+}
 
 /// Provider-neutral input specification for deterministic, schema-constrained model generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,7 +226,7 @@ impl fmt::Display for ProviderError {
                 f,
                 "Unsupported model provider `{provider}` in specifier `{model_specifier}`.\n  \
                  Hint: Built-in providers are `google` (`{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, `{DEFAULT_GOOGLE_GENERATOR_MODEL}`) \
-                 and `typesafe` (`{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`), or declare `providers.{provider}` in `~/.config/canon-clerk/config.json`."
+                 and `typesafe` (`{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`), or `local` (`{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}`), or declare `providers.{provider}` in `~/.config/canon-clerk/config.json`."
             ),
             Self::InvalidModelSpecifier {
                 model_specifier,
@@ -216,12 +235,12 @@ impl fmt::Display for ProviderError {
                 f,
                 "Invalid model specifier `{model_specifier}`: {reason}\n  \
                  Hint: Specify a canonical `<provider>:<model>` identifier such as `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}`, \
-                 `{DEFAULT_GOOGLE_GENERATOR_MODEL}`, or `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`."
+                 `{DEFAULT_GOOGLE_GENERATOR_MODEL}`, `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}`, or `{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}`."
             ),
             Self::InvalidTimeout { timeout_ms } => write!(
                 f,
                 "Invalid generation timeout `{timeout_ms}ms`: timeout must be greater than 0ms.\n  \
-                 Hint: Configure a positive millisecond timeout (default: `{DEFAULT_GENERATION_TIMEOUT_MS}`)."
+                 Hint: Configure a positive millisecond timeout via `--timeout <MS>` or `{ENV_TIMEOUT_MS}` (default: `{DEFAULT_GENERATION_TIMEOUT_MS}` cloud, `{DEFAULT_LOCAL_GENERATION_TIMEOUT_MS}` local)."
             ),
             Self::Timeout {
                 model_specifier,
@@ -229,7 +248,7 @@ impl fmt::Display for ProviderError {
             } => write!(
                 f,
                 "Request to `{model_specifier}` timed out after {timeout_ms}ms.\n  \
-                 Hint: Check network connectivity or increase the request timeout."
+                 Hint: Check network connectivity or increase `--timeout <MS>` (env: `{ENV_TIMEOUT_MS}`)."
             ),
             Self::Transport {
                 model_specifier,
@@ -237,10 +256,10 @@ impl fmt::Display for ProviderError {
                 message,
             } => {
                 let host = endpoint_host.as_deref().unwrap_or_else(|| {
-                    if model_provider(model_specifier) == TYPESAFE_PROVIDER {
-                        "api.typesafe.ai"
-                    } else {
-                        "generativelanguage.googleapis.com"
+                    match model_provider(model_specifier) {
+                        TYPESAFE_PROVIDER => "api.typesafe.ai",
+                        LOCAL_PROVIDER => "127.0.0.1:8080",
+                        _ => "generativelanguage.googleapis.com",
                     }
                 });
                 write!(

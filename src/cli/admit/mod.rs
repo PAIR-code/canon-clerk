@@ -267,6 +267,9 @@ fn resolve_admit_cli_params(
     };
     let _ = resolve_docket_batch_size(args.docket_batch_size, env, stored_ref)?;
     let _ = args.transport.resolve_retry_policy(env, stored_ref)?;
+    let _ = args
+        .transport
+        .resolve_explicit_timeout_ms(env, stored_ref)?;
     let _ = resolve_docket_concurrency(args.docket_concurrency, env, stored_ref)?;
     let _ = resolve_admit_concurrency(args.admit_concurrency, env, stored_ref)?;
     Ok((thresholds, stored))

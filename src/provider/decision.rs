@@ -19,7 +19,7 @@ use super::gemini_decisions::GeminiDecisionProvider;
 use super::requester::{RetryObserver, SharedHttpRequester};
 use super::retry::RetryPolicy;
 pub use super::typesafe::TypesafeDecisionProvider;
-use crate::caseload::{DEFAULT_PROVIDER, TYPESAFE_PROVIDER};
+use crate::caseload::{DEFAULT_PROVIDER, LOCAL_PROVIDER, TYPESAFE_PROVIDER};
 use crate::configure::{
     DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, ProtocolDriver, ProviderAuth,
     ProviderConnection, is_discriminative_model, is_gemini_decision_model_name, model_provider,
@@ -32,6 +32,18 @@ use crate::provider::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Default maximum concurrent in-flight heuristic calls on built-in `local:*` nodes (`configure.md` §4.3).
+pub const DEFAULT_LOCAL_MAX_CONCURRENT_CALLS: usize = 1;
+
+/// Resolves the profile-calibrated default stage concurrency (`1` for built-in `local:*`, else `cloud_default`).
+pub fn default_concurrency_for_model(model_specifier: &str, cloud_default: usize) -> usize {
+    if model_provider(model_specifier) == LOCAL_PROVIDER {
+        DEFAULT_LOCAL_MAX_CONCURRENT_CALLS
+    } else {
+        cloud_default
+    }
+}
+
 /// Per-protocol context character and `Noul` question-batching budget profile (`docs/architecture/nodes/docket.md` §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecisionBudgetProfile {
@@ -39,8 +51,10 @@ pub struct DecisionBudgetProfile {
     pub max_state_chars: usize,
     /// Maximum combined `state` + `questions` character budget per forward pass.
     pub max_batch_chars: usize,
-    /// Maximum `Noul` questions packed into a single forward pass by default.
+    /// Maximum `Noul` questions packed into a single forward pass (including bifurcated `vet` span localization).
     pub max_nouls_per_call: usize,
+    /// Default screening batch size for `apprise`, `docket`, and `admit` when no explicit batch size is configured.
+    pub default_screening_batch_size: usize,
 }
 
 impl DecisionBudgetProfile {
@@ -49,17 +63,31 @@ impl DecisionBudgetProfile {
         max_state_chars: 240_000,
         max_batch_chars: 480_000,
         max_nouls_per_call: 256,
+        default_screening_batch_size: 256,
     };
 
-    /// Calibrated profile for System One (`typesafe:jev-*` and custom `systemone` profiles).
+    /// Calibrated profile for cloud System One (`typesafe:jev-*` and custom `systemone` profiles).
     pub const TYPESAFE_JEV: Self = Self {
         max_state_chars: 36_000,
         max_batch_chars: 64_000,
         max_nouls_per_call: 48,
+        default_screening_batch_size: 48,
+    };
+
+    /// Calibrated profile for built-in local System One daemons (`local:*`, e.g. `llama-server` `Kev-4B` on `32k` ctx):
+    /// keeps screening batches small (`2` canons/pairs per call for reliable CPU prefill under `180s`) while preserving `16` nouls/call for single-batch `vet` span localization.
+    pub const LOCAL_SYSTEMONE: Self = Self {
+        max_state_chars: 24_000,
+        max_batch_chars: 32_000,
+        max_nouls_per_call: 16,
+        default_screening_batch_size: 2,
     };
 
     /// Resolves the deterministic [`DecisionBudgetProfile`] for a discriminative model specifier.
     pub fn for_model(specifier: &str) -> Self {
+        if model_provider(specifier) == LOCAL_PROVIDER {
+            return Self::LOCAL_SYSTEMONE;
+        }
         let model_id = strip_provider_prefix(specifier);
         if is_gemini_decision_model_name(model_id) {
             Self::GEMINI_DECISION
@@ -470,6 +498,16 @@ mod tests {
             assert_eq!(
                 DecisionBudgetProfile::for_model("local-dev:kev-0.8b"),
                 DecisionBudgetProfile::TYPESAFE_JEV
+            );
+            assert_eq!(
+                DecisionBudgetProfile::for_model("local:kev-4b"),
+                DecisionBudgetProfile::LOCAL_SYSTEMONE
+            );
+            assert_eq!(default_concurrency_for_model("local:kev-4b", 4), 1);
+            assert_eq!(default_concurrency_for_model("typesafe:jev-latest", 4), 4);
+            assert_eq!(
+                default_concurrency_for_model("google:gemini-decision-1", 4),
+                4
             );
 
             let items: Vec<(String, String)> = (0..5)

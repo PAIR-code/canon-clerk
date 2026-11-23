@@ -29,7 +29,6 @@ use crate::cli::runners::{
 use crate::configure::{ConfigureScope, StoredConfig, can_fast_forward_existing_config};
 use crate::discover::{DiscoverOptions, WorkspaceSnapshot, execute_discover};
 use crate::intake::{IntakeError, IntakeOptions, execute_intake};
-use crate::provider::DEFAULT_GENERATION_TIMEOUT_MS;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use std::collections::BTreeMap;
 
@@ -174,9 +173,14 @@ pub(super) fn execute_jit_configure_and_apprise(
     let apprise_model = cfg_snapshot
         .model_for(HeuristicNode::Apprise)
         .unwrap_or_default();
+    let timeout_ms = args.transport.resolve_timeout_ms_for_model(
+        env,
+        configure_options.stored_config.as_ref(),
+        apprise_model,
+    )?;
     let apprise_opts = AppriseOptions {
         threshold,
-        timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
+        timeout_ms,
         max_canons_per_call: effective_apprise_batch_size(max_canons_per_call, apprise_model),
         max_concurrent_calls,
     };

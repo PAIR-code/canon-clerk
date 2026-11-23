@@ -25,6 +25,9 @@ pub const DEFAULT_PROVIDER: &str = "google";
 /// Canonical provider slug for TypeSafe AI decision models (`typesafe:jev-*`).
 pub const TYPESAFE_PROVIDER: &str = "typesafe";
 
+/// Canonical provider slug for built-in local System One daemons (`local:kev-4b`, etc.).
+pub const LOCAL_PROVIDER: &str = "local";
+
 /// Default canonical Google `Discriminator` model specifier (`docs/architecture/nodes/configure.md` §4).
 pub const DEFAULT_GOOGLE_DISCRIMINATOR_MODEL: &str = "google:gemini-decision-1";
 
@@ -36,6 +39,9 @@ pub const DEFAULT_GENERATIVE_SCREENING_MODEL: &str = "google:gemini-4-hydrogen";
 
 /// Default canonical TypeSafe AI `Discriminator` model specifier (`docs/architecture/nodes/configure.md` §4).
 pub const DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL: &str = "typesafe:jev-latest";
+
+/// Default canonical built-in local `Discriminator` model specifier (`docs/architecture/nodes/configure.md` §4).
+pub const DEFAULT_LOCAL_DISCRIMINATOR_MODEL: &str = "local:kev-4b";
 
 /// Explicit minimal/zero reasoning budget signal for generative screening/vetting stages (`apprise`, `docket`, `admit`, `vet`).
 pub const DEFAULT_SCREENING_REASONING_BUDGET: Option<u32> = Some(0);

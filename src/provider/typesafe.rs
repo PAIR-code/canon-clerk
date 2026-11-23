@@ -19,14 +19,17 @@ use super::gemini::strip_provider_prefix;
 use super::requester::{RetryObserver, RetryablePostRequest, SharedHttpRequester};
 use super::retry::RetryPolicy;
 use super::runtime::{HttpAuth, JsonPostRequest, RawHttpOutcome, execute_json_post};
+use super::typesafe_wire::{
+    TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
+    build_typesafe_http_status_error,
+};
+#[cfg(test)]
+use super::typesafe_wire::{classify_typesafe_http_error, extract_typesafe_error_detail};
 use crate::caseload::TYPESAFE_PROVIDER;
 pub use crate::configure::DEFAULT_TYPESAFE_BASE_URL;
-use crate::configure::{
-    AuthPolicy, ProviderAuth, ProviderConnection, credential_verification_hint_for_slug,
-    model_provider,
-};
+use crate::configure::{AuthPolicy, ProviderAuth, ProviderConnection};
 use crate::provider::{ProviderError, TokenUsage};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -46,164 +49,6 @@ pub fn build_systemone_url(base_url: &str) -> String {
         base.to_string()
     } else {
         format!("{base}/systemone")
-    }
-}
-
-/// Typed `noul` binary decision question in a TypeSafe AI `/v1/systemone` request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TypesafeNoulQuestion {
-    /// Question primitive discriminator (always `"noul"` for binary probability questions).
-    #[serde(rename = "type")]
-    pub(crate) kind: String,
-    /// Closed yes/no instruction evaluated against `state`.
-    pub(crate) instructions: String,
-}
-
-impl TypesafeNoulQuestion {
-    /// Constructs a `"noul"` binary decision question with the given instructions.
-    pub(crate) fn new(instructions: impl Into<String>) -> Self {
-        Self {
-            kind: "noul".to_string(),
-            instructions: instructions.into(),
-        }
-    }
-}
-
-/// Request payload for `POST /v1/systemone`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TypesafeSystemOneRequest {
-    /// Unprefixed Jev model identifier (e.g. `"jev-latest"`).
-    pub(crate) model: String,
-    /// Shared text state evaluated across all questions in a single forward pass.
-    pub(crate) state: String,
-    /// Deterministic map of question keys to `Noul` definitions.
-    pub(crate) questions: BTreeMap<String, TypesafeNoulQuestion>,
-}
-
-/// Decoded answer entry for a single `noul` question in a `/v1/systemone` response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TypesafeNoulAnswer {
-    /// Question primitive discriminator (`"noul"`).
-    #[serde(rename = "type", default)]
-    pub(crate) kind: Option<String>,
-    /// Calibrated probability in `[0.0, 1.0]` that the answer is affirmative.
-    pub(crate) noul: f64,
-}
-
-/// Token usage telemetry returned by TypeSafe AI `/v1/systemone`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TypesafeUsage {
-    /// Prompt/input tokens billed for `state` and `questions`.
-    #[serde(default)]
-    pub(crate) input_tokens: u64,
-    /// Output tokens reported by the endpoint (typically `0` or minimal framing).
-    #[serde(default)]
-    pub(crate) output_tokens: u64,
-}
-
-/// Response envelope returned by `POST /v1/systemone`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TypesafeSystemOneResponse {
-    /// Concrete Jev model identifier reported by the upstream endpoint.
-    #[serde(default)]
-    pub(crate) model: Option<String>,
-    /// Keyed `noul` answers corresponding to `request.questions`.
-    #[serde(default)]
-    pub(crate) answers: BTreeMap<String, TypesafeNoulAnswer>,
-    /// Optional token accounting metadata.
-    #[serde(default)]
-    pub(crate) usage: Option<TypesafeUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum TypesafeErrorField {
-    Object { message: Option<String> },
-    Text(String),
-}
-
-#[derive(Debug, Deserialize)]
-struct TypesafeErrorEnvelope {
-    error: Option<TypesafeErrorField>,
-    detail: Option<String>,
-    message: Option<String>,
-}
-
-/// Extracts a human-readable upstream error detail from a TypeSafe AI JSON error body or raw text.
-pub(crate) fn extract_typesafe_error_detail(body: &str) -> String {
-    if let Ok(env) = serde_json::from_str::<TypesafeErrorEnvelope>(body) {
-        let extracted = match env.error {
-            Some(TypesafeErrorField::Object { message }) => message,
-            Some(TypesafeErrorField::Text(text)) => Some(text),
-            None => None,
-        }
-        .or(env.detail)
-        .or(env.message)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-
-        if let Some(msg) = extracted {
-            return msg;
-        }
-    }
-
-    let trimmed = body.trim();
-    if trimmed.is_empty() {
-        "empty error response".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// Formats an HTTP error status code from the TypeSafe AI API into an actionable diagnostic with remediation hints.
-pub(crate) fn classify_typesafe_http_error(
-    status_code: u16,
-    model_specifier: &str,
-    detail: &str,
-) -> String {
-    match status_code {
-        400 if detail.contains("max_tokens_exceeded") => format!(
-            "HTTP 400: Input context exceeded TypeSafe Jev token limit for `{model_specifier}` ({detail}). \
-             Hint: Pair `--provider typesafe` with `--audit-model google:gemini-4-carbon` or narrow target scope."
-        ),
-        401 | 403 => {
-            let key_hint = credential_verification_hint_for_slug(model_provider(model_specifier));
-            format!(
-                "HTTP {status_code}: Authentication or permission rejected for `{model_specifier}` ({detail}). \
-                 Hint: {key_hint}"
-            )
-        }
-        404 => format!(
-            "HTTP 404: Model or endpoint for `{model_specifier}` was not found ({detail}). \
-             Hint: Specify a valid TypeSafe Jev model via `--provider typesafe` or `--<node>-model` (e.g. `typesafe:jev-latest`)."
-        ),
-        429 => format!(
-            "HTTP 429: Quota or rate limit exceeded for `{model_specifier}` ({detail}). \
-             Hint: Check your TypeSafe AI quota tier or wait before retrying."
-        ),
-        500..=599 => format!(
-            "HTTP {status_code}: Upstream TypeSafe AI server error for `{model_specifier}` ({detail}). \
-             Hint: Retry after a brief backoff or increase `--timeout <MS>`."
-        ),
-        _ => format!(
-            "HTTP {status_code}: Request rejected for `{model_specifier}` ({detail}). \
-             Hint: Check Jev model compatibility and TypeSafe AI configuration."
-        ),
-    }
-}
-
-fn build_typesafe_http_status_error(
-    status_code: u16,
-    model_specifier: &str,
-    body: &str,
-) -> ProviderError {
-    let detail = extract_typesafe_error_detail(body);
-    let diagnostic = classify_typesafe_http_error(status_code, model_specifier, &detail);
-    ProviderError::HttpStatus {
-        status_code,
-        model_specifier: model_specifier.to_string(),
-        detail,
-        diagnostic,
     }
 }
 
@@ -444,7 +289,7 @@ fn decode_systemone_response(
     let parsed: TypesafeSystemOneResponse =
         serde_json::from_str(body).map_err(|err| ProviderError::MalformedResponse {
             model_specifier: model_specifier.to_string(),
-            reason: format!("invalid TypeSafe `/v1/systemone` JSON envelope ({err})"),
+            reason: format!("invalid `/v1/systemone` JSON envelope ({err})"),
         })?;
 
     let mut scores = BTreeMap::new();
@@ -533,6 +378,29 @@ mod tests {
         assert!(diag401.contains("HTTP 401"));
         assert!(diag401.contains("TYPESAFE_API_KEY"));
         assert!(diag401.contains("Hint:"));
+    }
+
+    #[test]
+    fn test_protocol_neutral_systemone_http_error_classification() {
+        let diag501 =
+            classify_typesafe_http_error(501, "local:kev-4b", "This model is not a decision model");
+        assert!(diag501.contains("HTTP 501"));
+        assert!(diag501.contains("decision GGUF"));
+        assert!(!diag501.contains("TypeSafe AI"));
+
+        let diag400_local = classify_typesafe_http_error(
+            400,
+            "local:kev-4b",
+            "request (40000 tokens) exceeds the available context size (32768 tokens)",
+        );
+        assert!(diag400_local.contains("System One context limit"));
+        assert!(diag400_local.contains("--ctx-size"));
+        assert!(!diag400_local.contains("TypeSafe"));
+
+        let diag503_local =
+            classify_typesafe_http_error(503, "local:kev-4b", "Service Unavailable");
+        assert!(diag503_local.contains("Upstream System One server error"));
+        assert!(!diag503_local.contains("TypeSafe AI"));
     }
 
     #[test]

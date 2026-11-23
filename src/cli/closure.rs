@@ -14,7 +14,7 @@
 
 //! Shared closure workspace materialization, metadata merging, and `validate` resolution helpers.
 
-use crate::caseload::{Caseload, CaseloadIntake, normalize_commit_messages};
+use crate::caseload::{Caseload, CaseloadConfig, CaseloadIntake, normalize_commit_messages};
 use crate::cli::CliError;
 use crate::cli::args::{CanonSelectionArgs, ProviderConfigArgs};
 use crate::cli::provenance::StageDisposition;
@@ -46,8 +46,22 @@ pub(crate) fn has_provider_overrides(provider: &ProviderConfigArgs) -> bool {
         || provider.reasoning_budget.is_some()
         || provider.gemini_api_key.is_some()
         || provider.typesafe_api_key.is_some()
+        || provider.local_api_key.is_some()
         || provider.gemini_base_url.is_some()
         || provider.typesafe_base_url.is_some()
+        || provider.local_base_url.is_some()
+}
+
+/// Returns `true` when an explicit CLI `--provider <slug>` selects a provider different from `existing.provider`
+/// (or when no `.config` is present yet). Passing `--provider` matching `.config.provider` is idempotent.
+pub(crate) fn is_provider_changed(
+    provider_flag: Option<&str>,
+    existing: Option<&CaseloadConfig>,
+) -> bool {
+    let Some(raw) = provider_flag.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    existing.is_none_or(|cfg| cfg.provider.trim() != raw)
 }
 
 /// Returns `true` if `opts` specifies any inspectable filing metadata plane override
@@ -392,5 +406,49 @@ mod tests {
             .expect("existing linked_issues preserved");
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].number, 383);
+    }
+
+    #[test]
+    fn test_matching_provider_flag_is_idempotent_on_pre_populated_caseload() {
+        use crate::caseload::{
+            DEFAULT_LOCAL_DISCRIMINATOR_MODEL, HeuristicNode, LOCAL_PROVIDER, ResolvedNodeConfig,
+        };
+        use crate::configure::{
+            ConfigureOptions, ConfigureScope, can_fast_forward_existing_config,
+        };
+
+        let existing = CaseloadConfig::single_node(
+            LOCAL_PROVIDER,
+            HeuristicNode::Docket,
+            ResolvedNodeConfig::new(DEFAULT_LOCAL_DISCRIMINATOR_MODEL),
+        )
+        .with_node_model(HeuristicNode::Admit, DEFAULT_LOCAL_DISCRIMINATOR_MODEL)
+        .with_node_model(HeuristicNode::Vet, DEFAULT_LOCAL_DISCRIMINATOR_MODEL);
+
+        assert!(!is_provider_changed(None, Some(&existing)));
+        assert!(!is_provider_changed(Some("local"), Some(&existing)));
+        assert!(!is_provider_changed(Some(" local "), Some(&existing)));
+        assert!(is_provider_changed(Some("google"), Some(&existing)));
+        assert!(is_provider_changed(Some("local"), None));
+
+        let matching_opts = ConfigureOptions {
+            provider: Some("local".to_string()),
+            scope: ConfigureScope::closure([HeuristicNode::Vet]),
+            ..ConfigureOptions::default()
+        };
+        assert!(can_fast_forward_existing_config(
+            &matching_opts,
+            Some(&existing)
+        ));
+
+        let differing_opts = ConfigureOptions {
+            provider: Some("google".to_string()),
+            scope: ConfigureScope::closure([HeuristicNode::Vet]),
+            ..ConfigureOptions::default()
+        };
+        assert!(!can_fast_forward_existing_config(
+            &differing_opts,
+            Some(&existing)
+        ));
     }
 }
