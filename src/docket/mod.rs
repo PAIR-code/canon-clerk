@@ -208,33 +208,6 @@ fn validate_batching_options(options: &DocketOptions) -> Result<(), DocketError>
     Ok(())
 }
 
-/// Partitions `candidate_canons` into deterministic, balanced contiguous batches of at most `max_canons_per_call`.
-pub fn partition_candidate_canons(
-    candidate_canons: &[String],
-    max_canons_per_call: Option<usize>,
-) -> Vec<Vec<String>> {
-    let total = candidate_canons.len();
-    if total == 0 {
-        return Vec::new();
-    }
-    match max_canons_per_call {
-        Some(batch_size) if batch_size >= 1 && batch_size < total => {
-            let num_batches = total.div_ceil(batch_size);
-            let base_len = total / num_batches;
-            let remainder = total % num_batches;
-            let mut batches = Vec::with_capacity(num_batches);
-            let mut offset = 0;
-            for idx in 0..num_batches {
-                let len = base_len + usize::from(idx < remainder);
-                batches.push(candidate_canons[offset..offset + len].to_vec());
-                offset += len;
-            }
-            batches
-        }
-        _ => vec![candidate_canons.to_vec()],
-    }
-}
-
 /// Executes the pure `docket` domain stage against an in-memory [`WorkspaceSnapshot`] and
 /// hexagonal [`StructuredModelProvider`] (`docs/architecture/nodes/docket.md` §4).
 pub fn execute_docket(
@@ -650,20 +623,5 @@ mod tests {
             err,
             DocketError::BatchProvider { batch_count: 2, .. }
         ));
-    }
-
-    #[test]
-    fn test_partition_candidate_canons_handles_empty_unbounded_and_remainder_slices() {
-        assert!(partition_candidate_canons(&[], Some(25)).is_empty());
-        let five: Vec<String> = (1..=5).map(|i| format!("c{i}")).collect();
-        assert_eq!(partition_candidate_canons(&five, None), vec![five.clone()]);
-        assert_eq!(
-            partition_candidate_canons(&five, Some(2)),
-            vec![
-                vec!["c1".to_string(), "c2".to_string()],
-                vec!["c3".to_string(), "c4".to_string()],
-                vec!["c5".to_string()],
-            ]
-        );
     }
 }

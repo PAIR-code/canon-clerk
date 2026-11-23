@@ -132,7 +132,6 @@ pub use discover::{
 pub use docket::{
     DEFAULT_DOCKET_MAX_CONCURRENT_CALLS, DEFAULT_DOCKET_THRESHOLD, DocketError, DocketOptions,
     ENV_DOCKET_BATCH_SIZE, ENV_DOCKET_CONCURRENCY, ENV_DOCKET_THRESHOLD, execute_docket,
-    partition_candidate_canons,
 };
 pub use github::{
     CheckRunConclusion, CheckRunPublisher, CheckRunReport, DEFAULT_GITHUB_API_TIMEOUT_MS,
