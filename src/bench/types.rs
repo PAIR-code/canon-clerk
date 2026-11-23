@@ -15,20 +15,18 @@
 //! Core configuration and report data structures for the consistency benchmark harness (`docs/architecture/benchmarking.md`).
 
 use super::{BenchmarkStage, DEFAULT_BENCHMARK_TRIALS};
-use crate::apprise::{
-    DEFAULT_APPRISE_BATCH_SIZE, DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD,
-};
+use crate::apprise::{DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD};
 use crate::provider::DEFAULT_GENERATION_TIMEOUT_MS;
 use serde::{Deserialize, Serialize};
 
-/// Execution parameters for a single benchmark configuration (e.g. `"unbounded"` vs. `"batch=25,conc=4"`).
+/// Execution parameters for a single benchmark configuration (e.g. `"default"` vs. `"batch=25,conc=4"`).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ConsistencyConfigSpec {
-    /// Human-readable configuration label (`"unbounded"`, `"batch=25,conc=4"`, etc.).
+    /// Human-readable configuration label (`"default"`, `"batch=25,conc=4"`, etc.).
     pub label: String,
     /// Classification score threshold in `[0.0, 1.0]`.
     pub threshold: f64,
-    /// Optional maximum candidate canons per screener model call (`None` = single-turn unbounded).
+    /// Optional maximum candidate canons per screener model call (`None` = model `DecisionBudgetProfile` default).
     pub max_canons_per_call: Option<usize>,
     /// Optional maximum concurrent in-flight model calls when batched.
     pub max_concurrent_calls: Option<usize>,
@@ -39,11 +37,9 @@ pub struct ConsistencyConfigSpec {
 impl Default for ConsistencyConfigSpec {
     fn default() -> Self {
         Self {
-            label: format!(
-                "batch={DEFAULT_APPRISE_BATCH_SIZE},conc={DEFAULT_APPRISE_MAX_CONCURRENT_CALLS}"
-            ),
+            label: format!("default,conc={DEFAULT_APPRISE_MAX_CONCURRENT_CALLS}"),
             threshold: DEFAULT_APPRISE_THRESHOLD,
-            max_canons_per_call: Some(DEFAULT_APPRISE_BATCH_SIZE),
+            max_canons_per_call: None,
             max_concurrent_calls: Some(DEFAULT_APPRISE_MAX_CONCURRENT_CALLS),
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
         }

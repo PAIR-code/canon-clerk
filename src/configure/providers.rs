@@ -175,10 +175,7 @@ impl ProviderProfile {
             HeuristicNode::Apprise
             | HeuristicNode::Docket
             | HeuristicNode::Admit
-            | HeuristicNode::Vet => self
-                .default_discriminator
-                .as_deref()
-                .or(self.default_generator.as_deref()),
+            | HeuristicNode::Vet => self.default_discriminator.as_deref(),
             HeuristicNode::Audit => self.default_generator.as_deref(),
         }
     }

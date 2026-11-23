@@ -20,7 +20,7 @@ use super::stage_options::{build_stage_options, compute_required_nodes};
 use super::{AuditArgs, OnMissingCredentials};
 use crate::admit::{AdmitOptions, execute_admit};
 use crate::audit::{AuditOptions, execute_audit};
-use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict, HeuristicNode};
+use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict};
 use crate::cli::CliError;
 use crate::cli::closure::ClosureBackend;
 use crate::cli::provenance::StageDisposition;
@@ -31,7 +31,7 @@ use crate::cli::vet::stages::{
 };
 use crate::configure::{
     ConfigureError, ConfigureScope, StoredConfig, can_fast_forward_existing_config,
-    is_discriminative_model, resolve_provider_connections,
+    resolve_provider_connections,
 };
 use crate::discover::WorkspaceSnapshot;
 use crate::docket::{DocketOptions, execute_docket};
@@ -389,16 +389,8 @@ fn execute_vet_step(
     if vetting_pre_populated {
         return Ok((after_admit, StageDisposition::PrePopulated));
     }
-    let uses_discriminative_vet = after_admit
-        .config
-        .as_ref()
-        .and_then(|c| c.model_for(HeuristicNode::Vet))
-        .is_some_and(is_discriminative_model);
     let mut cleared = after_admit;
     cleared.vetting = None;
-    if !uses_discriminative_vet {
-        return Ok((cleared, StageDisposition::SkippedGeneratorVet));
-    }
     let vetted = telemetry
         .run_stage(PipelineStage::Vet, |scope| {
             let instrumented = scope.instrument_provider(provider);

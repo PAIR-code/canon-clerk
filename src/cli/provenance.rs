@@ -39,8 +39,8 @@ pub enum StageDisposition {
     SkippedEmptyDocket,
     /// Downstream stage skipped because upstream `admit` admitted zero exhibits (`active_cases` empty).
     SkippedZeroEvidence,
-    /// `vet` deterministically skipped in `audit` because the `vet` node resolved to a `Generator` model.
-    SkippedGeneratorVet,
+    /// `vet` was absent on a pre-populated `.verdict` Caseload replay.
+    SkippedAbsentVetting,
     /// Downstream `audit` skipped because upstream `vet` cleared all active cases (`contested_cases` empty).
     SkippedAllVetted,
 }
@@ -54,7 +54,7 @@ pub(crate) fn glyph_for(disp: StageDisposition) -> &'static str {
         | StageDisposition::SkippedValidationFailed
         | StageDisposition::SkippedEmptyDocket
         | StageDisposition::SkippedZeroEvidence
-        | StageDisposition::SkippedGeneratorVet
+        | StageDisposition::SkippedAbsentVetting
         | StageDisposition::SkippedAllVetted => "⊘",
         StageDisposition::ValidationFailed => "✗",
     }
@@ -340,7 +340,7 @@ pub(crate) fn write_vet_provenance(
     if let Some(reason) = skipped_fast_forward_reason(disp) {
         return writeln!(stdout, "  ⊘ vet       : (fast-forward: {reason})");
     }
-    if disp == StageDisposition::SkippedGeneratorVet {
+    if disp == StageDisposition::SkippedAbsentVetting {
         let active = evidence.map_or(0, |ev| ev.active_cases.len());
         return writeln!(
             stdout,

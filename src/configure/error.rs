@@ -56,6 +56,11 @@ pub enum ConfigureError {
     UnprovisionedAuditModel { provider: String },
     /// Discriminative decision model (`<slug>:gemini-decision-*` or `systemone` `<slug>:<model>`) was configured on `audit`.
     DiscriminativeAuditUnsupported { specifier: String },
+    /// Generative model was configured on a discriminative screening/vetting node (`apprise`, `docket`, `admit`, `vet`).
+    GenerativeScreeningUnsupported {
+        node: HeuristicNode,
+        specifier: String,
+    },
     /// Per-node extended thinking was configured in `config.json` on a `Discriminator`-bound node.
     DiscriminativeNodeThinkingUnsupported {
         node: HeuristicNode,
@@ -154,6 +159,16 @@ impl fmt::Display for ConfigureError {
                  (`audit` requires structured generative output for exception rulings, remediation guidance, and line annotations).\n  \
                  Hint: Configure `{specifier}` on screening/vetting nodes (`--docket-model`, `--admit-model`, `--vet-model`, or `--provider <slug>`) \
                  and keep a generative model such as `{DEFAULT_GOOGLE_GENERATOR_MODEL}` on `--audit-model`."
+            ),
+            Self::GenerativeScreeningUnsupported { node, specifier } => write!(
+                f,
+                "Generative model `{specifier}` cannot be configured on `{node}` \
+                 (`{node}` requires a discriminative `Noul` decision model).\n  \
+                 Hint: Configure a discriminator on `{}` such as `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}` \
+                 (Google Decisions), `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}` (TypeSafe Jev), \
+                 or `{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}` (local `/v1/systemone`), \
+                 and reserve `{specifier}` for `--audit-model`.",
+                node.cli_model_flag()
             ),
             Self::DiscriminativeNodeThinkingUnsupported { node, specifier } => write!(
                 f,

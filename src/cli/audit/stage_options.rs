@@ -25,7 +25,7 @@ use crate::cli::admit::guards::resolve_admit_concurrency;
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
 use crate::cli::vet::guards::resolve_vet_concurrency;
 use crate::configure::StoredConfig;
-use crate::docket::{DocketOptions, effective_docket_batch_size};
+use crate::docket::DocketOptions;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, default_timeout_ms_for_model};
 use crate::vet::VetOptions;
 use std::collections::BTreeMap;
@@ -52,10 +52,7 @@ impl ResolvedStageOptions {
             threshold: docket_threshold,
             timeout_ms: explicit_timeout_ms
                 .unwrap_or_else(|| default_timeout_ms_for_model(docket_model)),
-            max_canons_per_call: effective_docket_batch_size(
-                self.explicit_docket_batch_size,
-                docket_model,
-            ),
+            max_canons_per_call: self.explicit_docket_batch_size,
             max_concurrent_calls: self.docket_concurrency,
         }
     }

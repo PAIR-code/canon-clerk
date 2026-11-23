@@ -112,17 +112,6 @@ pub(super) fn resolve_case_candidate_exhibits(
     unique.into_iter().collect()
 }
 
-/// Renders a single candidate exhibit (`file_path` or metadata plane) into a standalone Markdown block.
-pub(super) fn render_candidate_exhibit(
-    exhibit_id: &str,
-    intake: &CaseloadIntake,
-    workspace: &WorkspaceSnapshot,
-) -> String {
-    let mut out = String::with_capacity(512);
-    append_candidate_exhibit_section(&mut out, exhibit_id, intake, workspace);
-    out
-}
-
 /// Appends the formatted representation of a single candidate exhibit (`file_path` or metadata plane).
 pub(super) fn append_candidate_exhibit_section(
     out: &mut String,
@@ -350,8 +339,13 @@ mod tests {
         ));
         assert!(is_metadata_id_present("commit_messages", &intake));
 
-        let rendered =
-            render_candidate_exhibit("commit_messages", &intake, &WorkspaceSnapshot::default());
+        let mut rendered = String::new();
+        append_candidate_exhibit_section(
+            &mut rendered,
+            "commit_messages",
+            &intake,
+            &WorkspaceSnapshot::default(),
+        );
         assert!(rendered.contains("### Candidate Exhibit: `commit_messages`"));
         assert!(rendered.contains("1. [deadbee] feat(cli): support commit_messages"));
         assert!(rendered.contains("- Exact `file_path`: `commit_messages`"));

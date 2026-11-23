@@ -51,7 +51,7 @@ use crate::caseload::{
     normalize_unit_score,
 };
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{DocketOptions, effective_docket_batch_size, execute_docket};
+use crate::docket::{DocketOptions, execute_docket};
 use crate::provider::{StructuredModelProvider, TokenUsage};
 use crate::telemetry::{
     PipelineStage, RecordingTelemetrySink, SystemTelemetryClock, TelemetryClock, TelemetryEvent,
@@ -104,16 +104,7 @@ pub fn execute_consistency_bench_observed(
     ) && base_caseload.docket.is_none()
         && !(needs_upstream_evidence && base_caseload.evidence.is_some())
     {
-        let docket_model = base_caseload
-            .config
-            .as_ref()
-            .and_then(|c| c.model_for(HeuristicNode::Docket))
-            .unwrap_or_default()
-            .to_string();
-        let docket_opts = DocketOptions {
-            max_canons_per_call: effective_docket_batch_size(None, &docket_model),
-            ..DocketOptions::default()
-        };
+        let docket_opts = DocketOptions::default();
         base_caseload = execute_docket(&docket_opts, base_caseload, workspace, provider)
             .map_err(ConsistencyBenchError::Docket)?;
     }
@@ -331,10 +322,12 @@ mod tests {
     use crate::docket::DEFAULT_DOCKET_THRESHOLD;
     use crate::intake::IntakeOptions;
     use crate::provider::{
-        DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, GenerationResponse, ProviderError,
+        DEFAULT_GENERATION_TIMEOUT_MS, DecisionRequest, DecisionResponse, GenerationRequest,
+        GenerationResponse, ProviderError,
     };
     use crate::telemetry::SteppingTelemetryClock;
     use serde_json::json;
+    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct ScriptedDocketProvider {
@@ -354,31 +347,27 @@ mod tests {
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("docket benchmark must not invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            _request: &DecisionRequest,
+        ) -> Result<DecisionResponse, ProviderError> {
             let idx = self.turn.fetch_add(1, Ordering::SeqCst);
             let flip_score = if idx == 2 { 0.20 } else { 0.88 };
-            let payload = json!({
-                "cases": [
-                    {
-                        "canon_path": ".canons/cli/flipper.md",
-                        "colorability_summary": format!("Docket turn {idx} summary."),
-                        "colorability_score": flip_score
-                    },
-                    {
-                        "canon_path": ".canons/cli/steady.md",
-                        "colorability_summary": "Orthogonal to diff.",
-                        "colorability_score": 0.05
-                    }
-                ]
-            });
-            Ok(GenerationResponse {
-                payload,
-                resolved_model: "gemini-2.5-flash-lite".to_string(),
-                thoughts: Vec::new(),
+            let scores = BTreeMap::from([
+                (".canons/cli/flipper.md".to_string(), flip_score),
+                (".canons/cli/steady.md".to_string(), 0.05),
+            ]);
+            Ok(DecisionResponse {
+                scores,
+                resolved_model: "gemini-decision-1".to_string(),
                 usage: TokenUsage {
                     prompt_tokens: 200,
-                    completion_tokens: 50,
+                    completion_tokens: 0,
                     reasoning_tokens: 0,
-                    total_tokens: 250,
+                    total_tokens: 200,
                 },
                 latency_ms: 110,
             })
@@ -404,14 +393,8 @@ mod tests {
             gemini_api_key: Some("test-key".to_string()),
             ..ConfigureOptions::default()
         }
-        .with_node_model(
-            HeuristicNode::Docket,
-            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
-        )
-        .with_node_model(
-            HeuristicNode::Admit,
-            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
-        );
+        .with_node_model(HeuristicNode::Docket, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL)
+        .with_node_model(HeuristicNode::Admit, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL);
         let caseload = prepare_upstream_caseload(&UpstreamCaseloadInputs {
             stage: BenchmarkStage::Docket,
             intake_opts: &intake_opts,
@@ -460,7 +443,7 @@ mod tests {
             let cfg = &report.configs[0];
             assert_eq!(cfg.positive_counts, vec![1, 1, 0, 1, 1]);
             assert_eq!(cfg.flipper_count, 1);
-            assert_eq!(cfg.total_tokens, 1250);
+            assert_eq!(cfg.total_tokens, 1000);
             assert_eq!(cfg.latency_median_ms, 125);
 
             let flippers = cfg.flippers();
@@ -548,35 +531,7 @@ mod tests {
                 &self,
                 request: &GenerationRequest,
             ) -> Result<GenerationResponse, ProviderError> {
-                let payload = if request.system_instruction.contains("Macro Subject-Matter") {
-                    self.docket_calls.fetch_add(1, Ordering::SeqCst);
-                    json!({
-                        "cases": [
-                            {
-                                "canon_path": ".canons/cli/flipper.md",
-                                "colorability_summary": "Docketed CLI case.",
-                                "colorability_score": 0.92
-                            },
-                            {
-                                "canon_path": ".canons/cli/steady.md",
-                                "colorability_summary": "Docketed CLI remediation case.",
-                                "colorability_score": 0.90
-                            }
-                        ]
-                    })
-                } else if request
-                    .system_instruction
-                    .contains("Micro Evidentiary Admissibility")
-                {
-                    self.admit_calls.fetch_add(1, Ordering::SeqCst);
-                    json!({
-                        "exhibits": [{
-                            "file_path": "src/cli/mod.rs",
-                            "admissibility_summary": "Admitted CLI exhibit.",
-                            "admissibility_score": 0.94
-                        }]
-                    })
-                } else if request.user_prompt.contains(".canons/cli/steady.md") {
+                let payload = if request.user_prompt.contains(".canons/cli/steady.md") {
                     // Steady `fail` across all 3 trials, even though remediation prose and line spans vary!
                     let turn = self.audit_steady_calls.fetch_add(1, Ordering::SeqCst);
                     json!({
@@ -613,6 +568,35 @@ mod tests {
                     latency_ms: 210,
                 })
             }
+
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                let mut scores = BTreeMap::new();
+                if request.questions.keys().any(|k| k.contains("::")) {
+                    self.admit_calls.fetch_add(1, Ordering::SeqCst);
+                    for key in request.questions.keys() {
+                        scores.insert(key.clone(), 0.94);
+                    }
+                } else {
+                    self.docket_calls.fetch_add(1, Ordering::SeqCst);
+                    for key in request.questions.keys() {
+                        scores.insert(key.clone(), 0.92);
+                    }
+                }
+                Ok(DecisionResponse {
+                    scores,
+                    resolved_model: "gemini-decision-1".to_string(),
+                    usage: TokenUsage {
+                        prompt_tokens: 150,
+                        completion_tokens: 0,
+                        reasoning_tokens: 0,
+                        total_tokens: 150,
+                    },
+                    latency_ms: 60,
+                })
+            }
         }
 
         #[test]
@@ -639,7 +623,7 @@ mod tests {
             .expect("run 3-trial audit bench");
 
             assert_eq!(provider.docket_calls.load(Ordering::SeqCst), 1);
-            assert_eq!(provider.admit_calls.load(Ordering::SeqCst), 2);
+            assert_eq!(provider.admit_calls.load(Ordering::SeqCst), 1);
             assert_eq!(provider.audit_steady_calls.load(Ordering::SeqCst), 3);
             assert_eq!(provider.audit_flip_calls.load(Ordering::SeqCst), 3);
 
@@ -683,44 +667,35 @@ mod tests {
         impl StructuredModelProvider for ScriptedAdmitProvider {
             fn generate_structured(
                 &self,
-                request: &GenerationRequest,
+                _request: &GenerationRequest,
             ) -> Result<GenerationResponse, ProviderError> {
-                let payload = if request.system_instruction.contains("Macro Subject-Matter") {
-                    self.docket_calls.fetch_add(1, Ordering::SeqCst);
-                    json!({
-                        "cases": [
-                            {
-                                "canon_path": ".canons/cli/flipper.md",
-                                "colorability_summary": "Docketed CLI case.",
-                                "colorability_score": 0.90
-                            },
-                            {
-                                "canon_path": ".canons/cli/steady.md",
-                                "colorability_summary": "Dismissed.",
-                                "colorability_score": 0.05
-                            }
-                        ]
-                    })
-                } else {
+                panic!("admit benchmark must not invoke generate_structured")
+            }
+
+            fn evaluate_decisions(
+                &self,
+                request: &DecisionRequest,
+            ) -> Result<DecisionResponse, ProviderError> {
+                let mut scores = BTreeMap::new();
+                if request.questions.keys().any(|k| k.contains("::")) {
                     let idx = self.admit_calls.fetch_add(1, Ordering::SeqCst);
                     let score = if idx == 1 { 0.30 } else { 0.85 };
-                    json!({
-                        "exhibits": [{
-                            "file_path": "src/cli/mod.rs",
-                            "admissibility_summary": format!("Admit turn {idx}."),
-                            "admissibility_score": score
-                        }]
-                    })
-                };
-                Ok(GenerationResponse {
-                    payload,
-                    resolved_model: "gemini-2.5-flash-lite".to_string(),
-                    thoughts: Vec::new(),
+                    for key in request.questions.keys() {
+                        scores.insert(key.clone(), score);
+                    }
+                } else {
+                    self.docket_calls.fetch_add(1, Ordering::SeqCst);
+                    scores.insert(".canons/cli/flipper.md".to_string(), 0.90);
+                    scores.insert(".canons/cli/steady.md".to_string(), 0.05);
+                }
+                Ok(DecisionResponse {
+                    scores,
+                    resolved_model: "gemini-decision-1".to_string(),
                     usage: TokenUsage {
                         prompt_tokens: 150,
-                        completion_tokens: 40,
+                        completion_tokens: 0,
                         reasoning_tokens: 0,
-                        total_tokens: 190,
+                        total_tokens: 150,
                     },
                     latency_ms: 80,
                 })

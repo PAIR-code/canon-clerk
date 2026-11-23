@@ -213,8 +213,7 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
-        DEFAULT_GENERATIVE_SCREENING_MODEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
-        DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
     };
     use crate::docket::execute_docket;
     use crate::provider::{GenerationRequest, GenerationResponse, TokenUsage};
@@ -302,25 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_docket_batch_size_and_per_model_budget_profiles() {
-        use crate::docket::{DEFAULT_DOCKET_BATCH_SIZE, effective_docket_batch_size};
-
-        assert_eq!(
-            effective_docket_batch_size(None, DEFAULT_GENERATIVE_SCREENING_MODEL),
-            Some(DEFAULT_DOCKET_BATCH_SIZE)
-        );
-        assert_eq!(
-            effective_docket_batch_size(None, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
-            None
-        );
-        assert_eq!(
-            effective_docket_batch_size(None, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
-            None
-        );
-        assert_eq!(
-            effective_docket_batch_size(Some(12), DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
-            Some(12)
-        );
+    fn test_per_model_decision_budget_profiles() {
         assert_eq!(
             DecisionBudgetProfile::for_model(DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
             DecisionBudgetProfile {

@@ -15,32 +15,19 @@
 //! Core domain execution engine for the `apprise` Caseload DAG stage (`docs/architecture/nodes/apprise.md`).
 
 mod decision;
-mod decode;
-mod prompt;
 
 use crate::caseload::{
-    CanonApprisalAssessment, Caseload, CaseloadApprisal, HeuristicNode, normalize_unit_score,
+    Caseload, CaseloadApprisal, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, HeuristicNode,
+    normalize_unit_score,
 };
-use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
-use crate::docket::{format_canon_batch_label, partition_candidate_canons};
-use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
-};
-use decode::decode_apprise_assessments;
-use prompt::{
-    APPRISE_SYSTEM_INSTRUCTION, build_apprise_batch_user_prompt, build_apprise_intent_prefix,
-    build_apprise_schema,
-};
-use std::collections::BTreeMap;
+use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
 use std::fmt;
 
-/// Default prospective applicability score threshold for `apprise` (`docs/architecture/nodes/apprise.md` §4.4).
+/// Default prospective applicability score threshold for `apprise` (`docs/architecture/nodes/apprise.md` §4.3).
 pub const DEFAULT_APPRISE_THRESHOLD: f64 = 0.5;
-
-/// Default maximum candidate canons evaluated per generative `apprise` model call (`docs/architecture/nodes/apprise.md` §4.2).
-pub const DEFAULT_APPRISE_BATCH_SIZE: usize = 25;
 
 /// Default maximum concurrent in-flight `apprise` model calls when executing multiple batches.
 pub const DEFAULT_APPRISE_MAX_CONCURRENT_CALLS: usize = 4;
@@ -61,7 +48,7 @@ pub struct AppriseOptions {
     pub threshold: f64,
     /// Per-request timeout ceiling in milliseconds (defaults to [`DEFAULT_GENERATION_TIMEOUT_MS`]).
     pub timeout_ms: u64,
-    /// Optional maximum candidate canons evaluated per `apprise` model call (`>= 1`; defaults to `Some(DEFAULT_APPRISE_BATCH_SIZE)`, while `None` evaluates all in a single unbounded turn).
+    /// Optional maximum candidate canons evaluated per `apprise` model call (`>= 1`; `None` defers to the model's `DecisionBudgetProfile`).
     pub max_canons_per_call: Option<usize>,
     /// Optional maximum concurrent in-flight `apprise` model calls when batched (`>= 1`; defaults to [`DEFAULT_APPRISE_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
@@ -72,25 +59,9 @@ impl Default for AppriseOptions {
         Self {
             threshold: DEFAULT_APPRISE_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
-            max_canons_per_call: Some(DEFAULT_APPRISE_BATCH_SIZE),
+            max_canons_per_call: None,
             max_concurrent_calls: None,
         }
-    }
-}
-
-/// Resolves the effective `max_canons_per_call` for `apprise` given an optional explicit override
-/// and the configured `apprise_model` (`None` on discriminative models so their `DecisionBudgetProfile`
-/// governs batching, `Some(DEFAULT_APPRISE_BATCH_SIZE)` on generative models).
-pub(crate) fn effective_apprise_batch_size(
-    explicit: Option<usize>,
-    apprise_model: &str,
-) -> Option<usize> {
-    if explicit.is_some() {
-        explicit
-    } else if is_discriminative_model(apprise_model) {
-        None
-    } else {
-        Some(DEFAULT_APPRISE_BATCH_SIZE)
     }
 }
 
@@ -111,6 +82,8 @@ pub enum AppriseError {
     ValidationFailed,
     /// Prerequisite `.config` namespace is missing when non-empty candidate canons require model screening.
     MissingConfig,
+    /// A generative model was configured on `apprise` instead of a discriminative `Noul` model.
+    UnsupportedGenerativeModel { specifier: String },
     /// A candidate canon listed in `.discovery.candidate_canons` is absent from the workspace snapshot.
     MissingCandidateCanon { canon_ref: String },
     /// Multi-batch model call or response decoding failed with 1-based batch coordinates.
@@ -157,7 +130,7 @@ impl fmt::Display for AppriseError {
                 f,
                 "Invalid apprise batch size: {detail}.\n  \
                  Hint: Pass a positive integer (`>= 1`) via `--apprise-batch-size <COUNT>` \
-                 or `{ENV_APPRISE_BATCH_SIZE}` (default: `{DEFAULT_APPRISE_BATCH_SIZE}`)."
+                 or `{ENV_APPRISE_BATCH_SIZE}`."
             ),
             Self::InvalidConcurrency { detail } => write!(
                 f,
@@ -186,6 +159,14 @@ impl fmt::Display for AppriseError {
                 f,
                 "Cannot execute `apprise` screening without a resolved `.config` namespace on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk apprise` directly to resolve configuration JIT."
+            ),
+            Self::UnsupportedGenerativeModel { specifier } => write!(
+                f,
+                "Generative model `{specifier}` cannot be used for `apprise` \
+                 (`apprise` requires a discriminative `Noul` decision model).\n  \
+                 Hint: Configure a discriminator on `--apprise-model` such as `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}` \
+                 (Google Decisions), `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}` (TypeSafe Jev), \
+                 or `{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}` (local `/v1/systemone`)."
             ),
             Self::MissingCandidateCanon { canon_ref } => write!(
                 f,
@@ -277,89 +258,13 @@ pub fn execute_apprise(
         .as_ref()
         .and_then(|c| c.node(HeuristicNode::Apprise))
         .ok_or(AppriseError::MissingConfig)?;
-    if is_discriminative_model(&node_cfg.model) {
-        return decision::execute_apprise_decisions(
-            options, caseload, threshold, workspace, provider,
-        );
+    if !is_discriminative_model(&node_cfg.model) {
+        return Err(AppriseError::UnsupportedGenerativeModel {
+            specifier: node_cfg.model.clone(),
+        });
     }
 
-    let apprise_model = node_cfg.model.clone();
-    let (thinking_level, reasoning_budget) = node_cfg.effective_screening_thinking();
-    let intent_prefix = build_apprise_intent_prefix(intake, discovery);
-    let response_schema = build_apprise_schema();
-    let batches =
-        partition_candidate_canons(&discovery.candidate_canons, options.max_canons_per_call);
-
-    let total_batches = batches.len();
-    let mut prepared_batches = Vec::with_capacity(total_batches);
-    for (idx, batch_canons) in batches.into_iter().enumerate() {
-        let user_prompt =
-            build_apprise_batch_user_prompt(&intent_prefix, &batch_canons, discovery, workspace)
-                .map_err(|canon_ref| AppriseError::MissingCandidateCanon { canon_ref })?;
-        let call_label = (total_batches > 1).then(|| format!("batch {}/{total_batches}", idx + 1));
-        let request = GenerationRequest {
-            model_specifier: apprise_model.clone(),
-            system_instruction: APPRISE_SYSTEM_INSTRUCTION.to_string(),
-            user_prompt,
-            response_schema: response_schema.clone(),
-            thinking_level,
-            reasoning_budget,
-            timeout_ms: options.timeout_ms,
-            call_label,
-        };
-        prepared_batches.push((batch_canons, request));
-    }
-
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_APPRISE_MAX_CONCURRENT_CALLS);
-    let assessments = execute_apprise_batches(
-        &prepared_batches,
-        concurrency_limit,
-        threshold,
-        &apprise_model,
-        provider,
-    )?;
-
-    Ok(caseload.with_apprisal(CaseloadApprisal { assessments }))
-}
-
-type BatchAssessmentsResult = Result<BTreeMap<String, CanonApprisalAssessment>, AppriseError>;
-
-fn execute_apprise_batches(
-    prepared_batches: &[(Vec<String>, GenerationRequest)],
-    concurrency_limit: usize,
-    threshold: f64,
-    model_specifier: &str,
-    provider: &dyn StructuredModelProvider,
-) -> BatchAssessmentsResult {
-    let total = prepared_batches.len();
-    let batch_maps = execute_bounded_stage_work(
-        prepared_batches,
-        concurrency_limit,
-        provider,
-        |idx, (batch_canons, request)| {
-            let batch_assessments = provider
-                .generate_structured(request)
-                .and_then(|response| {
-                    decode_apprise_assessments(
-                        &response.payload,
-                        batch_canons,
-                        threshold,
-                        model_specifier,
-                    )
-                })
-                .map_err(|err| AppriseError::from_batch_call(idx + 1, total, err))?;
-            let label = format_canon_batch_label(idx, total, batch_canons.len());
-            Ok::<_, AppriseError>((batch_assessments, label))
-        },
-    )?;
-
-    let mut combined = BTreeMap::new();
-    for batch_assessments in batch_maps {
-        combined.extend(batch_assessments);
-    }
-    Ok(combined)
+    decision::execute_apprise_decisions(options, caseload, threshold, workspace, provider)
 }
 
 #[cfg(test)]
@@ -368,61 +273,76 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         ApprisalStatus, CaseloadConfig, CaseloadDiscovery, CaseloadIntake, CaseloadValidation,
-        DEFAULT_GENERATIVE_SCREENING_MODEL,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL,
     };
-    use crate::provider::{DEFAULT_SCREENING_REASONING_BUDGET, GenerationResponse, TokenUsage};
-    use serde_json::{Value, json};
+    use crate::provider::{
+        DecisionRequest, DecisionResponse, GenerationRequest, GenerationResponse, TokenUsage,
+    };
+    use std::collections::BTreeMap;
     use std::sync::Mutex;
 
-    struct RecordingMockProvider {
-        requests: Mutex<Vec<GenerationRequest>>,
-        outcome: Result<Value, ProviderError>,
+    struct RecordingDecisionProvider {
+        requests: Mutex<Vec<DecisionRequest>>,
+        scores: BTreeMap<String, f64>,
+        error: Option<ProviderError>,
     }
 
-    impl RecordingMockProvider {
-        fn with_payload(payload: Value) -> Self {
+    impl RecordingDecisionProvider {
+        fn with_scores(scores: BTreeMap<String, f64>) -> Self {
             Self {
                 requests: Mutex::new(Vec::new()),
-                outcome: Ok(payload),
+                scores,
+                error: None,
             }
         }
 
         fn with_error(err: ProviderError) -> Self {
             Self {
                 requests: Mutex::new(Vec::new()),
-                outcome: Err(err),
+                scores: BTreeMap::new(),
+                error: Some(err),
             }
         }
 
-        fn recorded_requests(&self) -> Vec<GenerationRequest> {
+        fn recorded_requests(&self) -> Vec<DecisionRequest> {
             self.requests.lock().expect("lock requests").clone()
         }
     }
 
-    impl StructuredModelProvider for RecordingMockProvider {
+    impl StructuredModelProvider for RecordingDecisionProvider {
         fn generate_structured(
             &self,
-            request: &GenerationRequest,
+            _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("apprise must never invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            request: &DecisionRequest,
+        ) -> Result<DecisionResponse, ProviderError> {
             self.requests
                 .lock()
                 .expect("lock requests")
                 .push(request.clone());
-            match &self.outcome {
-                Ok(payload) => Ok(GenerationResponse {
-                    payload: payload.clone(),
-                    resolved_model: "gemini-2.5-flash-lite".to_string(),
-                    latency_ms: 95,
-                    usage: TokenUsage {
-                        prompt_tokens: 410,
-                        completion_tokens: 90,
-                        reasoning_tokens: 0,
-                        total_tokens: 500,
-                    },
-                    thoughts: Vec::new(),
-                }),
-                Err(err) => Err(err.clone()),
+            if let Some(err) = &self.error {
+                return Err(err.clone());
             }
+            let mut out = BTreeMap::new();
+            for key in request.questions.keys() {
+                out.insert(key.clone(), self.scores.get(key).copied().unwrap_or(0.05));
+            }
+            Ok(DecisionResponse {
+                scores: out,
+                resolved_model: "gemini-decision-1".to_string(),
+                latency_ms: 95,
+                usage: TokenUsage {
+                    prompt_tokens: 410,
+                    completion_tokens: 0,
+                    reasoning_tokens: 0,
+                    total_tokens: 410,
+                },
+            })
         }
     }
 
@@ -458,967 +378,155 @@ mod tests {
             .with_validation(CaseloadValidation::default())
             .with_config(
                 CaseloadConfig::default()
-                    .with_node_model(HeuristicNode::Apprise, DEFAULT_GENERATIVE_SCREENING_MODEL),
+                    .with_node_model(HeuristicNode::Apprise, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
             )
     }
 
-    mod zero_candidate_and_prerequisite_guards {
-        use super::*;
-
-        #[test]
-        fn test_empty_candidate_canons_short_circuits_with_zero_model_calls_and_no_config_needed() {
-            let caseload = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    intent: Some("Update docs".to_string()),
-                    target_paths: vec!["docs/faq.md".to_string()],
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery {
-                    candidate_canons: Vec::new(),
-                    ..CaseloadDiscovery::default()
-                });
-            let provider = RecordingMockProvider::with_error(
-                ProviderError::missing_api_key_for_slug("google"),
-            );
-
-            let enriched = execute_apprise(
-                &AppriseOptions::default(),
-                caseload,
-                &WorkspaceSnapshot::new(),
-                &provider,
-            )
-            .expect("zero candidate canons must short-circuit cleanly");
-
-            assert!(provider.recorded_requests().is_empty());
-            assert_eq!(
-                enriched.apprisal,
-                Some(CaseloadApprisal {
-                    assessments: BTreeMap::new()
-                })
-            );
-        }
-
-        #[test]
-        fn test_rejects_missing_intent_discovery_config_validation_failure_and_bad_threshold() {
-            let snapshot = fixture_snapshot();
-            let provider = RecordingMockProvider::with_payload(json!({"assessments": []}));
-
-            let bad_threshold_err = execute_apprise(
-                &AppriseOptions {
-                    threshold: 1.25,
-                    ..AppriseOptions::default()
-                },
-                fixture_caseload(Vec::new()),
-                &snapshot,
-                &provider,
-            )
-            .expect_err("threshold > 1.0 must fail");
-            assert!(matches!(
-                bad_threshold_err,
-                AppriseError::InvalidThreshold { .. }
-            ));
-            assert!(bad_threshold_err.to_string().contains("Hint:"));
-
-            let no_intent_err = execute_apprise(
-                &AppriseOptions::default(),
-                Caseload::new().with_discovery(CaseloadDiscovery::default()),
-                &snapshot,
-                &provider,
-            )
-            .expect_err("missing intent must fail");
-            assert_eq!(no_intent_err, AppriseError::MissingIntent);
-
-            let no_disc_err = execute_apprise(
-                &AppriseOptions::default(),
-                Caseload::new().with_intake(CaseloadIntake {
-                    intent: Some("Add cache".to_string()),
-                    ..CaseloadIntake::default()
-                }),
-                &snapshot,
-                &provider,
-            )
-            .expect_err("missing discovery must fail");
-            assert_eq!(no_disc_err, AppriseError::MissingDiscovery);
-
-            let invalid_val = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    intent: Some("Add cache".to_string()),
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery {
-                    candidate_canons: vec![".canons/auth/cache-expiry.md".to_string()],
-                    ..CaseloadDiscovery::default()
-                })
-                .with_validation(CaseloadValidation {
-                    has_errors: true,
-                    results: BTreeMap::new(),
-                });
-            let val_err = execute_apprise(
-                &AppriseOptions::default(),
-                invalid_val,
-                &snapshot,
-                &provider,
-            )
-            .expect_err("validation failure must abort before provider call");
-            assert_eq!(val_err, AppriseError::ValidationFailed);
-
-            let no_cfg = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    intent: Some("Add cache".to_string()),
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery {
-                    candidate_canons: vec![".canons/auth/cache-expiry.md".to_string()],
-                    ..CaseloadDiscovery::default()
-                });
-            let cfg_err = execute_apprise(&AppriseOptions::default(), no_cfg, &snapshot, &provider)
-                .expect_err("missing config must fail when candidates exist");
-            assert_eq!(cfg_err, AppriseError::MissingConfig);
-        }
-    }
-
-    mod aggregate_screening_and_threshold_gating {
-        use super::*;
-
-        fn assert_domain_indirected_array_schema(response_schema: &Value) {
-            let assessments_schema = &response_schema["properties"]["assessments"];
-            assert_eq!(assessments_schema["type"], json!("array"));
-            let item_schema = &assessments_schema["items"];
-            assert_eq!(
-                item_schema["propertyOrdering"],
-                json!(["canon_path", "apprisal_summary", "apprisal_score"]),
-                "schema must enforce domain-indirected, reason-first ordering"
-            );
-            assert_eq!(
-                item_schema["required"],
-                json!(["canon_path", "apprisal_summary", "apprisal_score"])
-            );
-            assert!(
-                item_schema["properties"]["canon_path"]
-                    .get("enum")
-                    .is_none(),
-                "canon_path schema must omit dynamic enum lists for O(1) scaling"
-            );
-        }
-
-        #[test]
-        fn test_single_turn_domain_indirected_reason_first_schema_and_deterministic_threshold_derivation()
-         {
-            let snapshot = fixture_snapshot();
-            let candidates = vec![
-                ".canons/auth/cache-expiry.md".to_string(),
-                ".canons/auth/db-rollback.md".to_string(),
-            ];
-            let caseload = fixture_caseload(candidates);
-            // Return items in reverse order to verify deterministic BTreeMap folding
-            let provider = RecordingMockProvider::with_payload(json!({
-                "assessments": [
-                    {
-                        "canon_path": ".canons/auth/db-rollback.md",
-                        "apprisal_summary": "No SQL migrations or schema modifications are planned.",
-                        "apprisal_score": 0.49
-                    },
-                    {
-                        "canon_path": ".canons/auth/cache-expiry.md",
-                        "apprisal_summary": "In-memory TTL cache directly requires explicit expiration rules.",
-                        "apprisal_score": 0.91
-                    }
-                ]
-            }));
-
-            let result =
-                execute_apprise(&AppriseOptions::default(), caseload, &snapshot, &provider)
-                    .expect("apprise screening must succeed");
-
-            let requests = provider.recorded_requests();
-            assert_eq!(
-                requests.len(),
-                1,
-                "must screen all candidates in a single turn"
-            );
-            let req = &requests[0];
-            assert_eq!(req.model_specifier, DEFAULT_GENERATIVE_SCREENING_MODEL);
-            assert_eq!(req.reasoning_budget, DEFAULT_SCREENING_REASONING_BUDGET);
-            assert!(req.user_prompt.contains("Refactor auth provider dispatch"));
-            assert!(req.user_prompt.contains(".canons/auth/cache-expiry.md"));
-            assert!(req.user_prompt.contains(".canons/auth/db-rollback.md"));
-            assert_domain_indirected_array_schema(&req.response_schema);
-
-            let apprisal = result.apprisal.expect("apprisal populated");
-            let keys: Vec<&String> = apprisal.assessments.keys().collect();
-            assert_eq!(
-                keys,
-                vec![
-                    ".canons/auth/cache-expiry.md",
-                    ".canons/auth/db-rollback.md"
-                ],
-                "folded CaseloadApprisal.assessments must maintain deterministic lexicographical order"
-            );
-            assert_eq!(apprisal.applicable_count(), 1);
-            assert_eq!(apprisal.dismissed_count(), 1);
-            assert_eq!(
-                apprisal.assessments[".canons/auth/cache-expiry.md"].apprisal_status,
-                ApprisalStatus::Applicable
-            );
-            assert_eq!(
-                apprisal.assessments[".canons/auth/db-rollback.md"].apprisal_status,
-                ApprisalStatus::Dismissed
-            );
-        }
-
-        struct PerBatchAppriseProvider {
-            requests: Mutex<Vec<GenerationRequest>>,
-            scores: BTreeMap<String, f64>,
-        }
-
-        impl StructuredModelProvider for PerBatchAppriseProvider {
-            fn generate_structured(
-                &self,
-                request: &GenerationRequest,
-            ) -> Result<GenerationResponse, ProviderError> {
-                self.requests
-                    .lock()
-                    .expect("lock requests")
-                    .push(request.clone());
-                let mut assessments = Vec::new();
-                for line in request.user_prompt.lines() {
-                    if let Some(rest) = line.strip_prefix("### Canon: `")
-                        && let Some(canon_ref) = rest.strip_suffix('`')
-                    {
-                        let score = self.scores.get(canon_ref).copied().unwrap_or(0.10);
-                        assessments.push(json!({
-                            "canon_path": canon_ref,
-                            "apprisal_summary": format!("Scale rationale for {canon_ref}."),
-                            "apprisal_score": score
-                        }));
-                    }
-                }
-                Ok(GenerationResponse {
-                    payload: json!({ "assessments": assessments }),
-                    resolved_model: "gemini-4-hydrogen".to_string(),
-                    latency_ms: 95,
-                    usage: TokenUsage {
-                        prompt_tokens: 410,
-                        completion_tokens: 90,
-                        reasoning_tokens: 0,
-                        total_tokens: 500,
-                    },
-                    thoughts: Vec::new(),
-                })
-            }
-        }
-
-        #[test]
-        fn test_constant_size_schema_and_default_batching_scale_across_60_candidate_canons() {
-            let mut snapshot = WorkspaceSnapshot::new().with_file("src/auth/provider.rs");
-            let mut candidates = Vec::new();
-            let mut scores = BTreeMap::new();
-
-            for idx in 0..60 {
-                let canon_ref = format!(".canons/scale/canon-{idx:03}.md");
-                let md = format!(
-                    "---\ntriggers:\n  - \"src/**\"\n---\nScale test invariant number {idx} MUST hold.\n"
-                );
-                snapshot = snapshot
-                    .with_canon_markdown(&md, &ParseCanonOptions::with_source_ref(&canon_ref));
-                let score = if idx % 10 == 0 { 0.85 } else { 0.10 };
-                scores.insert(canon_ref.clone(), score);
-                candidates.push(canon_ref);
-            }
-
-            let one_canon_provider = RecordingMockProvider::with_payload(json!({
-                "assessments": [
-                    {
-                        "canon_path": candidates[0],
-                        "apprisal_summary": "Single canon run.",
-                        "apprisal_score": 0.85
-                    }
-                ]
-            }));
-            execute_apprise(
-                &AppriseOptions::default(),
-                fixture_caseload(vec![candidates[0].clone()]),
-                &snapshot,
-                &one_canon_provider,
-            )
-            .expect("1-canon execution");
-
-            let sixty_canon_provider = PerBatchAppriseProvider {
-                requests: Mutex::new(Vec::new()),
-                scores: scores.clone(),
-            };
-            let result = execute_apprise(
-                &AppriseOptions::default(),
-                fixture_caseload(candidates.clone()),
-                &snapshot,
-                &sixty_canon_provider,
-            )
-            .expect("60-canon execution across default bounded batches");
-
-            let mut requests = sixty_canon_provider
-                .requests
-                .lock()
-                .expect("lock requests")
-                .clone();
-            requests.sort_by(|a, b| a.call_label.cmp(&b.call_label));
-            assert_eq!(
-                requests.len(),
-                3,
-                "60 canons must partition into 3 balanced batches of 20 under DEFAULT_APPRISE_BATCH_SIZE=25"
-            );
-            let labels: Vec<Option<&str>> =
-                requests.iter().map(|r| r.call_label.as_deref()).collect();
-            assert_eq!(
-                labels,
-                vec![Some("batch 1/3"), Some("batch 2/3"), Some("batch 3/3")]
-            );
-            for req in &requests {
-                assert_eq!(
-                    one_canon_provider.recorded_requests()[0].response_schema,
-                    req.response_schema,
-                    "response_schema must remain O(1) constant-size independent of candidate canon count"
-                );
-            }
-
-            let apprisal = result.apprisal.as_ref().expect("apprisal populated");
-            assert_eq!(apprisal.assessments.len(), 60);
-            assert_eq!(apprisal.applicable_count(), 6);
-            assert_eq!(apprisal.dismissed_count(), 54);
-
-            // Explicit `None` preserves single-turn unbounded execution
-            let unbounded_provider = PerBatchAppriseProvider {
-                requests: Mutex::new(Vec::new()),
-                scores,
-            };
-            let unbounded = execute_apprise(
-                &AppriseOptions {
-                    max_canons_per_call: None,
-                    ..AppriseOptions::default()
-                },
-                fixture_caseload(candidates),
-                &snapshot,
-                &unbounded_provider,
-            )
-            .expect("explicit unbounded 60-canon apprise");
-            assert_eq!(
-                unbounded_provider
-                    .requests
-                    .lock()
-                    .expect("lock requests")
-                    .len(),
-                1
-            );
-            assert_eq!(unbounded, result);
-        }
-
-        #[test]
-        fn test_custom_threshold_boundary_inclusivity() {
-            let snapshot = fixture_snapshot();
-            let candidates = vec![
-                ".canons/auth/cache-expiry.md".to_string(),
-                ".canons/auth/db-rollback.md".to_string(),
-            ];
-            let provider = RecordingMockProvider::with_payload(json!({
-                "assessments": [
-                    {
-                        "canon_path": ".canons/auth/cache-expiry.md",
-                        "apprisal_summary": "Exact threshold match.",
-                        "apprisal_score": 0.75
-                    },
-                    {
-                        "canon_path": ".canons/auth/db-rollback.md",
-                        "apprisal_summary": "Below custom threshold.",
-                        "apprisal_score": 0.74
-                    }
-                ]
-            }));
-
-            let result = execute_apprise(
-                &AppriseOptions {
-                    threshold: 0.75,
-                    ..AppriseOptions::default()
-                },
-                fixture_caseload(candidates),
-                &snapshot,
-                &provider,
-            )
-            .expect("custom threshold execution");
-
-            let apprisal = result.apprisal.expect("apprisal populated");
-            assert_eq!(
-                apprisal.assessments[".canons/auth/cache-expiry.md"].apprisal_status,
-                ApprisalStatus::Applicable
-            );
-            assert_eq!(
-                apprisal.assessments[".canons/auth/db-rollback.md"].apprisal_status,
-                ApprisalStatus::Dismissed
-            );
-        }
-
-        fn multi_realm_snapshot(
-            local_ref: &str,
-            builtin_ref: &str,
-            pack_ref: &str,
-        ) -> WorkspaceSnapshot {
-            let local_md = "\
----
-triggers:
-  - \"src/**\"
-exists:
-  - \"README.md\"
-inspect:
-  - diff
-  - pr_title
-  - linked_issues?
-references:
-  - \"README.md\"
-tags:
-  - documentation
-  - features
----
-# README Must Reflect Developed Features
-
-Feature changes MUST update `README.md` when introducing user-facing capabilities.
-";
-            let builtin_md = "\
----
-triggers:
-  - \"src/**\"
-inspect:
-  - diff
-tags:
-  - security
----
-# No Hardcoded Secrets
-
-Source files MUST NOT embed raw API keys or credentials.
-";
-            let pack_md = "\
----
-triggers:
-  - \"**/*.tsx\"
----
-# Accessible Buttons
-
-Interactive UI controls MUST provide accessible labels.
-";
-
-            WorkspaceSnapshot::new()
-                .with_file("src/cli/apprise.rs")
-                .with_file("README.md")
-                .with_canon_markdown(local_md, &ParseCanonOptions::with_source_ref(local_ref))
-                .with_canon_markdown(builtin_md, &ParseCanonOptions::with_source_ref(builtin_ref))
-                .with_canon_markdown(pack_md, &ParseCanonOptions::with_source_ref(pack_ref))
-        }
-
-        fn assert_multi_realm_prompt_grounding(req: &GenerationRequest) {
-            assert!(req.system_instruction.contains("0.75 - 0.95"));
-            assert!(req.system_instruction.contains("0.05 - 0.25"));
-            assert!(
-                req.system_instruction
-                    .contains("candidate canon identifier")
-            );
-
-            let prompt = &req.user_prompt;
-            for expected in [
-                "- Triggers: src/**",
-                "- Exists: README.md",
-                "- Inspect: diff, pr_title, linked_issues?",
-                "- References: README.md",
-                "- Tags: documentation, features",
-                "- Triggered Exhibits: src/cli/apprise.rs",
-                "- Exact `canon_path`: `.canons/docs/readme-must-reflect-developed-features.md`",
-                "- Exact `canon_path`: `acme-corp:packages/ui/.canons/accessibility.md`",
-                "- Exact `canon_path`: `builtin:security/no-hardcoded-secrets`",
-                "## Required `canon_path` Identifiers (3)\n\
-                 1. `.canons/docs/readme-must-reflect-developed-features.md`\n\
-                 2. `acme-corp:packages/ui/.canons/accessibility.md`\n\
-                 3. `builtin:security/no-hardcoded-secrets`\n",
-            ] {
-                assert!(
-                    prompt.contains(expected),
-                    "prompt missing `{expected}`:\n{prompt}"
-                );
-            }
-            assert!(!prompt.contains("- Triggered Scope:"));
-            assert!(!prompt.contains("- Scope:"));
-        }
-
-        #[test]
-        fn test_prompt_renders_normalized_frontmatter_triggered_exhibits_and_realm_neutral_identifiers()
-         {
-            let local_ref = ".canons/docs/readme-must-reflect-developed-features.md";
-            let builtin_ref = "builtin:security/no-hardcoded-secrets";
-            let pack_ref = "acme-corp:packages/ui/.canons/accessibility.md";
-            let snapshot = multi_realm_snapshot(local_ref, builtin_ref, pack_ref);
-
-            let candidates = vec![
-                local_ref.to_string(),
-                pack_ref.to_string(),
-                builtin_ref.to_string(),
-            ];
-            let mut triggers_join = BTreeMap::new();
-            triggers_join.insert(
-                local_ref.to_string(),
-                vec!["src/cli/apprise.rs".to_string()],
-            );
-            triggers_join.insert(
-                builtin_ref.to_string(),
-                vec!["src/cli/apprise.rs".to_string()],
-            );
-
-            let caseload =
-                Caseload::new()
-                    .with_intake(CaseloadIntake {
-                        intent: Some("Add new CLI subcommand flag for apprise".to_string()),
-                        target_paths: vec!["src/cli".to_string()],
-                        ..CaseloadIntake::default()
-                    })
-                    .with_discovery(CaseloadDiscovery {
-                        target_files: vec!["src/cli/apprise.rs".to_string()],
-                        candidate_canons: candidates,
-                        triggers_join,
-                        ..CaseloadDiscovery::default()
-                    })
-                    .with_validation(CaseloadValidation::default())
-                    .with_config(CaseloadConfig::default().with_node_model(
-                        HeuristicNode::Apprise,
-                        DEFAULT_GENERATIVE_SCREENING_MODEL,
-                    ));
-
-            let provider = RecordingMockProvider::with_payload(json!({
-                "assessments": [
-                    {
-                        "canon_path": local_ref,
-                        "apprisal_summary": "New CLI subcommand flag requires updating README.md.",
-                        "apprisal_score": 0.90
-                    },
-                    {
-                        "canon_path": pack_ref,
-                        "apprisal_summary": "No TSX UI components are touched.",
-                        "apprisal_score": 0.10
-                    },
-                    {
-                        "canon_path": builtin_ref,
-                        "apprisal_summary": "CLI flag parsing touches credential flags.",
-                        "apprisal_score": 0.80
-                    }
-                ]
-            }));
-
-            execute_apprise(&AppriseOptions::default(), caseload, &snapshot, &provider)
-                .expect("execute apprise across multi-realm canons");
-
-            assert_multi_realm_prompt_grounding(&provider.recorded_requests()[0]);
-        }
-    }
-
-    mod malformed_and_failed_provider_responses {
-        use super::*;
-
-        #[test]
-        fn test_propagates_provider_errors_and_rejects_incomplete_or_out_of_range_payloads() {
-            let snapshot = fixture_snapshot();
-            let candidates = vec![".canons/auth/cache-expiry.md".to_string()];
-
-            let auth_fail_provider = RecordingMockProvider::with_error(ProviderError::HttpStatus {
-                status_code: 401,
-                model_specifier: DEFAULT_GENERATIVE_SCREENING_MODEL.to_string(),
-                detail: "API key not valid".to_string(),
-                diagnostic: "HTTP 401: Invalid API key.\n  Hint: Check GEMINI_API_KEY.".to_string(),
+    #[test]
+    fn test_empty_candidate_canons_short_circuits_with_zero_model_calls_and_no_config_needed() {
+        let caseload = Caseload::new()
+            .with_intake(CaseloadIntake {
+                intent: Some("Update docs".to_string()),
+                target_paths: vec!["docs/faq.md".to_string()],
+                ..CaseloadIntake::default()
+            })
+            .with_discovery(CaseloadDiscovery {
+                candidate_canons: Vec::new(),
+                ..CaseloadDiscovery::default()
             });
-            let err = execute_apprise(
-                &AppriseOptions::default(),
-                fixture_caseload(candidates.clone()),
-                &snapshot,
-                &auth_fail_provider,
-            )
-            .expect_err("HTTP 401 must fail");
-            assert!(err.to_string().contains("HTTP 401"));
+        let provider = RecordingDecisionProvider::with_error(
+            ProviderError::missing_api_key_for_slug("google"),
+        );
 
-            let out_of_range_provider = RecordingMockProvider::with_payload(json!({
-                "assessments": [
-                    {
-                        "canon_path": ".canons/auth/cache-expiry.md",
-                        "apprisal_summary": "Score exceeds 1.0",
-                        "apprisal_score": 1.4
-                    }
-                ]
-            }));
-            let score_err = execute_apprise(
-                &AppriseOptions::default(),
-                fixture_caseload(candidates),
-                &snapshot,
-                &out_of_range_provider,
-            )
-            .expect_err("score > 1.0 in model response must fail schema decode");
-            assert!(matches!(
-                score_err,
-                AppriseError::Provider(ProviderError::SchemaDecode { .. })
-            ));
-        }
+        let enriched = execute_apprise(
+            &AppriseOptions::default(),
+            caseload,
+            &WorkspaceSnapshot::new(),
+            &provider,
+        )
+        .expect("zero candidate canons must short-circuit cleanly");
 
-        #[test]
-        fn test_rejects_non_array_missing_unknown_and_duplicate_canon_path_entries() {
-            let snapshot = fixture_snapshot();
-            let two_candidates = vec![
-                ".canons/auth/cache-expiry.md".to_string(),
-                ".canons/auth/db-rollback.md".to_string(),
-            ];
-
-            let bad_payloads = [
-                (
-                    "non-array assessments object",
-                    json!({
-                        "assessments": {
-                            ".canons/auth/cache-expiry.md": {
-                                "apprisal_summary": "Legacy object wire shape.",
-                                "apprisal_score": 0.8
-                            }
-                        }
-                    }),
-                ),
-                (
-                    "missing second candidate canon",
-                    json!({
-                        "assessments": [
-                            {
-                                "canon_path": ".canons/auth/cache-expiry.md",
-                                "apprisal_summary": "Only one returned.",
-                                "apprisal_score": 0.8
-                            }
-                        ]
-                    }),
-                ),
-                (
-                    "unknown canon_path entry",
-                    json!({
-                        "assessments": [
-                            {
-                                "canon_path": ".canons/auth/cache-expiry.md",
-                                "apprisal_summary": "Valid.",
-                                "apprisal_score": 0.8
-                            },
-                            {
-                                "canon_path": ".canons/unknown/hallucinated-canon.md",
-                                "apprisal_summary": "Hallucinated identifier.",
-                                "apprisal_score": 0.2
-                            }
-                        ]
-                    }),
-                ),
-                (
-                    "duplicate canon_path entry",
-                    json!({
-                        "assessments": [
-                            {
-                                "canon_path": ".canons/auth/cache-expiry.md",
-                                "apprisal_summary": "First copy.",
-                                "apprisal_score": 0.8
-                            },
-                            {
-                                "canon_path": ".canons/auth/cache-expiry.md",
-                                "apprisal_summary": "Duplicate copy.",
-                                "apprisal_score": 0.8
-                            },
-                            {
-                                "canon_path": ".canons/auth/db-rollback.md",
-                                "apprisal_summary": "Valid second canon.",
-                                "apprisal_score": 0.1
-                            }
-                        ]
-                    }),
-                ),
-            ];
-
-            for (case_label, payload) in bad_payloads {
-                let provider = RecordingMockProvider::with_payload(payload);
-                let err = execute_apprise(
-                    &AppriseOptions::default(),
-                    fixture_caseload(two_candidates.clone()),
-                    &snapshot,
-                    &provider,
-                )
-                .expect_err(case_label);
-                assert!(
-                    matches!(
-                        err,
-                        AppriseError::Provider(ProviderError::SchemaDecode { .. })
-                    ),
-                    "case `{case_label}` must return ProviderError::SchemaDecode, got: {err:?}"
-                );
-            }
-        }
+        assert!(provider.recorded_requests().is_empty());
+        assert_eq!(
+            enriched.apprisal,
+            Some(CaseloadApprisal {
+                assessments: BTreeMap::new()
+            })
+        );
     }
 
-    mod batching_and_concurrency {
-        use super::*;
-        use crate::telemetry::{
-            PipelineStage, RecordingTelemetrySink, SteppingTelemetryClock, TelemetryEvent,
-            TelemetrySession,
-        };
-        use std::time::Duration;
+    #[test]
+    fn test_rejects_prerequisite_and_generator_model_guards() {
+        let snapshot = fixture_snapshot();
+        let provider = RecordingDecisionProvider::with_scores(BTreeMap::new());
 
-        struct OutOfOrderAppriseProvider {
-            call_order: Mutex<Vec<String>>,
-            fail_on_canon: Option<String>,
-        }
+        let bad_threshold_err = execute_apprise(
+            &AppriseOptions {
+                threshold: 1.25,
+                ..AppriseOptions::default()
+            },
+            fixture_caseload(Vec::new()),
+            &snapshot,
+            &provider,
+        )
+        .expect_err("threshold > 1.0 must fail");
+        assert!(matches!(
+            bad_threshold_err,
+            AppriseError::InvalidThreshold { .. }
+        ));
 
-        impl StructuredModelProvider for OutOfOrderAppriseProvider {
-            fn generate_structured(
-                &self,
-                request: &GenerationRequest,
-            ) -> Result<GenerationResponse, ProviderError> {
-                let mut batch_canons = Vec::new();
-                for line in request.user_prompt.lines() {
-                    if let Some(rest) = line.strip_prefix("### Canon: `")
-                        && let Some(canon_ref) = rest.strip_suffix('`')
-                    {
-                        batch_canons.push(canon_ref.to_string());
-                    }
-                }
+        let no_intent_err = execute_apprise(
+            &AppriseOptions::default(),
+            Caseload::new().with_discovery(CaseloadDiscovery::default()),
+            &snapshot,
+            &provider,
+        )
+        .expect_err("missing intent must fail");
+        assert_eq!(no_intent_err, AppriseError::MissingIntent);
 
-                // Force early batches to sleep longer so later batches complete first out of order
-                if batch_canons.iter().any(|c| c.contains("rule-000")) {
-                    std::thread::sleep(Duration::from_millis(35));
-                } else if batch_canons.iter().any(|c| c.contains("rule-002")) {
-                    std::thread::sleep(Duration::from_millis(15));
-                }
+        let no_disc_err = execute_apprise(
+            &AppriseOptions::default(),
+            Caseload::new().with_intake(CaseloadIntake {
+                intent: Some("Add cache".to_string()),
+                ..CaseloadIntake::default()
+            }),
+            &snapshot,
+            &provider,
+        )
+        .expect_err("missing discovery must fail");
+        assert_eq!(no_disc_err, AppriseError::MissingDiscovery);
 
-                if let Some(fail_target) = &self.fail_on_canon
-                    && batch_canons.iter().any(|c| c == fail_target)
-                {
-                    return Err(ProviderError::Timeout {
-                        model_specifier: request.model_specifier.clone(),
-                        timeout_ms: request.timeout_ms,
-                    });
-                }
+        let mut gen_cfg = fixture_caseload(vec![".canons/auth/cache-expiry.md".to_string()]);
+        gen_cfg.config = Some(
+            CaseloadConfig::default()
+                .with_node_model(HeuristicNode::Apprise, DEFAULT_GOOGLE_GENERATOR_MODEL),
+        );
+        let gen_err = execute_apprise(&AppriseOptions::default(), gen_cfg, &snapshot, &provider)
+            .expect_err("generator model on apprise must be rejected");
+        assert!(matches!(
+            gen_err,
+            AppriseError::UnsupportedGenerativeModel { .. }
+        ));
+        let msg = gen_err.to_string();
+        assert!(msg.contains("google:gemini-decision-1"));
+        assert!(msg.contains("typesafe:jev-latest"));
+        assert!(msg.contains("local:kev-4b"));
+    }
 
-                self.call_order
-                    .lock()
-                    .expect("lock call_order")
-                    .push(batch_canons.first().cloned().unwrap_or_default());
+    #[test]
+    fn test_discriminative_apprise_screens_and_gates_threshold() {
+        let snapshot = fixture_snapshot();
+        let cache = ".canons/auth/cache-expiry.md";
+        let db = ".canons/auth/db-rollback.md";
+        let caseload = fixture_caseload(vec![cache.to_string(), db.to_string()]);
+        let provider = RecordingDecisionProvider::with_scores(BTreeMap::from([
+            (cache.to_string(), 0.91),
+            (db.to_string(), 0.09),
+        ]));
 
-                let mut assessments = Vec::new();
-                for canon_ref in batch_canons.into_iter().rev() {
-                    let is_even = canon_ref
-                        .chars()
-                        .rfind(|c| c.is_ascii_digit())
-                        .is_some_and(|d| (d as u8).is_multiple_of(2));
-                    let score = if is_even { 0.85 } else { 0.15 };
-                    assessments.push(json!({
-                        "canon_path": canon_ref,
-                        "apprisal_summary": format!("Assessed {canon_ref}."),
-                        "apprisal_score": score
-                    }));
-                }
+        let out = execute_apprise(&AppriseOptions::default(), caseload, &snapshot, &provider)
+            .expect("apprise succeeds");
+        let apprisal = out.apprisal.expect("apprisal populated");
+        assert_eq!(
+            apprisal.assessments[cache].apprisal_status,
+            ApprisalStatus::Applicable
+        );
+        assert_eq!(
+            apprisal.assessments[db].apprisal_status,
+            ApprisalStatus::Dismissed
+        );
+    }
 
-                Ok(GenerationResponse {
-                    payload: json!({ "assessments": assessments }),
-                    thoughts: vec!["Apprise batch thought chunk.".to_string()],
-                    usage: TokenUsage {
-                        prompt_tokens: 100,
-                        completion_tokens: 25,
-                        reasoning_tokens: 0,
-                        total_tokens: 125,
-                    },
-                    latency_ms: 15,
-                    resolved_model: "gemini-2.5-flash-lite".to_string(),
-                })
-            }
-        }
+    #[test]
+    fn test_rejects_zero_batch_size_and_zero_concurrency_with_hints() {
+        let snapshot = fixture_snapshot();
+        let provider = RecordingDecisionProvider::with_scores(BTreeMap::new());
+        let caseload = fixture_caseload(vec![".canons/auth/cache-expiry.md".to_string()]);
 
-        #[test]
-        fn test_rejects_zero_batch_size_and_zero_concurrency_with_hints() {
-            let snapshot = fixture_snapshot();
-            let provider = RecordingMockProvider::with_payload(json!({"assessments": []}));
+        let batch_err = execute_apprise(
+            &AppriseOptions {
+                max_canons_per_call: Some(0),
+                ..AppriseOptions::default()
+            },
+            caseload.clone(),
+            &snapshot,
+            &provider,
+        )
+        .expect_err("zero batch size must fail");
+        assert!(matches!(batch_err, AppriseError::InvalidBatchSize { .. }));
+        assert!(batch_err.to_string().contains("--apprise-batch-size"));
 
-            let zero_batch = execute_apprise(
-                &AppriseOptions {
-                    max_canons_per_call: Some(0),
-                    ..AppriseOptions::default()
-                },
-                Caseload::new(),
-                &snapshot,
-                &provider,
-            )
-            .expect_err("zero batch size must fail");
-            assert!(matches!(zero_batch, AppriseError::InvalidBatchSize { .. }));
-            assert!(zero_batch.to_string().contains("Hint:"));
-
-            let zero_conc = execute_apprise(
-                &AppriseOptions {
-                    max_concurrent_calls: Some(0),
-                    ..AppriseOptions::default()
-                },
-                Caseload::new(),
-                &snapshot,
-                &provider,
-            )
-            .expect_err("zero concurrency must fail");
-            assert!(matches!(zero_conc, AppriseError::InvalidConcurrency { .. }));
-            assert!(zero_conc.to_string().contains("Hint:"));
-        }
-
-        #[test]
-        fn test_out_of_order_concurrent_batches_fold_deterministically_and_aggregate_telemetry() {
-            let mut snapshot = WorkspaceSnapshot::new().with_file("src/auth/provider.rs");
-            let mut candidates = Vec::new();
-            for i in 0..5 {
-                let path = format!(".canons/pack/rule-{i:03}.md");
-                snapshot = snapshot.with_canon_markdown(
-                    &format!("# Rule {i}\n\nRule {i} MUST hold.\n"),
-                    &ParseCanonOptions::with_source_ref(path.clone()),
-                );
-                candidates.push(path);
-            }
-            let caseload = fixture_caseload(candidates);
-
-            // 1. Unbounded single-turn baseline
-            let single_provider = OutOfOrderAppriseProvider {
-                call_order: Mutex::new(Vec::new()),
-                fail_on_canon: None,
-            };
-            let single_res = execute_apprise(
-                &AppriseOptions::default(),
-                caseload.clone(),
-                &snapshot,
-                &single_provider,
-            )
-            .expect("single-turn baseline");
-
-            // 2. Batched (batch size 2 => 3 batches: [0,1], [2,3], [4]) with concurrency 3 + telemetry
-            let batched_provider = OutOfOrderAppriseProvider {
-                call_order: Mutex::new(Vec::new()),
-                fail_on_canon: None,
-            };
-            let sink = RecordingTelemetrySink::new();
-            let clock = SteppingTelemetryClock::new(1_767_225_600_000, 10);
-            let session = TelemetrySession::new(&sink, &clock);
-
-            let batched_res = session
-                .run_stage(PipelineStage::Apprise, |scope| {
-                    let instrumented = scope.instrument_provider(&batched_provider);
-                    execute_apprise(
-                        &AppriseOptions {
-                            max_canons_per_call: Some(2),
-                            max_concurrent_calls: Some(3),
-                            ..AppriseOptions::default()
-                        },
-                        caseload.clone(),
-                        &snapshot,
-                        &instrumented,
-                    )
-                })
-                .expect("concurrent batched apprise");
-
-            // Completion order was out-of-order (batch 2 finished before batch 0), yet Caseload is byte-for-byte identical
-            let completion_order = batched_provider.call_order.lock().expect("lock").clone();
-            assert_eq!(completion_order.len(), 3);
-            assert_ne!(
-                completion_order[0], ".canons/pack/rule-000.md",
-                "batch 0 slept longest and must not finish first"
-            );
-            assert_eq!(batched_res, single_res);
-            assert_eq!(
-                serde_json::to_string(&batched_res).expect("json"),
-                serde_json::to_string(&single_res).expect("json")
-            );
-
-            // Verify telemetry accumulated all 3 batch calls (3 * 125 = 375 total_tokens) and 3 Thought events
-            let events = sink.events();
-            let thought_count = events
-                .iter()
-                .filter(|e| matches!(e, TelemetryEvent::Thought { .. }))
-                .count();
-            assert_eq!(thought_count, 3);
-            let stage_finish = events
-                .iter()
-                .find_map(|e| match e {
-                    TelemetryEvent::StageFinish {
-                        stage: PipelineStage::Apprise,
-                        usage,
-                        ..
-                    } => *usage,
-                    _ => None,
-                })
-                .expect("Apprise StageFinish usage");
-            assert_eq!(
-                stage_finish,
-                TokenUsage {
-                    prompt_tokens: 300,
-                    completion_tokens: 75,
-                    reasoning_tokens: 0,
-                    total_tokens: 375,
-                }
-            );
-        }
-
-        #[test]
-        fn test_concurrent_batch_error_annotates_batch_coordinates_on_timeout_and_decode_failure() {
-            let mut snapshot = WorkspaceSnapshot::new().with_file("src/auth/provider.rs");
-            let mut candidates = Vec::new();
-            for i in 0..4 {
-                let path = format!(".canons/pack/rule-{i:03}.md");
-                snapshot = snapshot.with_canon_markdown(
-                    &format!("# Rule {i}\n\nRule {i} MUST hold.\n"),
-                    &ParseCanonOptions::with_source_ref(path.clone()),
-                );
-                candidates.push(path);
-            }
-            let caseload = fixture_caseload(candidates);
-            let failing_provider = OutOfOrderAppriseProvider {
-                call_order: Mutex::new(Vec::new()),
-                fail_on_canon: Some(".canons/pack/rule-002.md".to_string()),
-            };
-
-            let err = execute_apprise(
-                &AppriseOptions {
-                    max_canons_per_call: Some(2),
-                    max_concurrent_calls: Some(2),
-                    ..AppriseOptions::default()
-                },
-                caseload.clone(),
-                &snapshot,
-                &failing_provider,
-            )
-            .expect_err("failing second batch must fail execute_apprise");
-            assert!(matches!(
-                err,
-                AppriseError::BatchProvider {
-                    batch_index: 2,
-                    batch_count: 2,
-                    source: ProviderError::Timeout { .. },
-                }
-            ));
-            assert!(
-                err.to_string()
-                    .contains("Apprise screening failed (batch 2/2):"),
-                "expected contextual batch 2/2 prefix, got: {err}"
-            );
-
-            let malformed_provider =
-                RecordingMockProvider::with_payload(json!({ "assessments": [] }));
-            let decode_err = execute_apprise(
-                &AppriseOptions {
-                    max_canons_per_call: Some(2),
-                    max_concurrent_calls: Some(1),
-                    ..AppriseOptions::default()
-                },
-                caseload,
-                &snapshot,
-                &malformed_provider,
-            )
-            .expect_err("malformed multi-batch payload must fail");
-            assert!(matches!(
-                decode_err,
-                AppriseError::BatchProvider {
-                    batch_index: 1,
-                    batch_count: 2,
-                    source: ProviderError::SchemaDecode { .. },
-                }
-            ));
-            assert!(decode_err.to_string().contains("(batch 1/2):"));
-        }
+        let conc_err = execute_apprise(
+            &AppriseOptions {
+                max_concurrent_calls: Some(0),
+                ..AppriseOptions::default()
+            },
+            caseload,
+            &snapshot,
+            &provider,
+        )
+        .expect_err("zero concurrency must fail");
+        assert!(matches!(conc_err, AppriseError::InvalidConcurrency { .. }));
+        assert!(conc_err.to_string().contains("--apprise-concurrency"));
     }
 }

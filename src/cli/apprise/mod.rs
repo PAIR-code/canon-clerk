@@ -98,7 +98,7 @@ pub struct AppriseArgs {
         long = "apprise-batch-size",
         value_name = "COUNT",
         help_heading = "Apprisal Options",
-        help = "Maximum candidate canons per apprise model call (default: 25; fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
+        help = "Maximum candidate canons per apprise model call (fallback env: CANON_CLERK_APPRISE_BATCH_SIZE)"
     )]
     pub apprise_batch_size: Option<usize>,
 
@@ -442,7 +442,6 @@ mod tests {
     struct StubProvider {
         calls: Mutex<usize>,
         response: Result<Value, ProviderError>,
-        thoughts: Vec<String>,
     }
 
     impl StubProvider {
@@ -450,15 +449,6 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 response: Ok(payload),
-                thoughts: Vec::new(),
-            }
-        }
-
-        fn succeeding_with_thoughts(payload: Value, thoughts: Vec<String>) -> Self {
-            Self {
-                calls: Mutex::new(0),
-                response: Ok(payload),
-                thoughts,
             }
         }
 
@@ -466,7 +456,6 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 response: Err(err),
-                thoughts: Vec::new(),
             }
         }
 
@@ -480,20 +469,42 @@ mod tests {
             &self,
             _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("apprise CLI must not invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            request: &crate::provider::DecisionRequest,
+        ) -> Result<crate::provider::DecisionResponse, ProviderError> {
             *self.calls.lock().expect("lock calls") += 1;
             match &self.response {
-                Ok(payload) => Ok(GenerationResponse {
-                    payload: payload.clone(),
-                    resolved_model: "gemini-2.5-flash-lite".to_string(),
-                    latency_ms: 82,
-                    usage: TokenUsage {
-                        prompt_tokens: 320,
-                        completion_tokens: 74,
-                        reasoning_tokens: 0,
-                        total_tokens: 394,
-                    },
-                    thoughts: self.thoughts.clone(),
-                }),
+                Ok(payload) => {
+                    let mut scores = BTreeMap::new();
+                    if let Some(items) = payload.get("assessments").and_then(|v| v.as_array()) {
+                        for item in items {
+                            if let (Some(path), Some(score)) = (
+                                item.get("canon_path").and_then(|v| v.as_str()),
+                                item.get("apprisal_score").and_then(|v| v.as_f64()),
+                            ) {
+                                scores.insert(path.to_string(), score);
+                            }
+                        }
+                    }
+                    for key in request.questions.keys() {
+                        scores.entry(key.clone()).or_insert(0.05);
+                    }
+                    Ok(crate::provider::DecisionResponse {
+                        scores,
+                        resolved_model: "gemini-decision-1".to_string(),
+                        latency_ms: 82,
+                        usage: TokenUsage {
+                            prompt_tokens: 320,
+                            completion_tokens: 0,
+                            reasoning_tokens: 0,
+                            total_tokens: 320,
+                        },
+                    })
+                }
                 Err(err) => Err(err.clone()),
             }
         }
@@ -504,10 +515,6 @@ mod tests {
         env.insert(
             ENV_GEMINI_API_KEY.to_string(),
             "synthetic-apprise-cli-test-key".to_string(),
-        );
-        env.insert(
-            crate::configure::ENV_APPRISE_MODEL.to_string(),
-            crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL.to_string(),
         );
         env.insert(
             "XDG_CONFIG_HOME".to_string(),
@@ -1007,14 +1014,12 @@ mod tests {
             let compact_text = String::from_utf8(compact_out).expect("utf8");
             let lines: Vec<&str> = compact_text.lines().collect();
             assert_eq!(lines.len(), 2);
-            assert_eq!(
-                lines[0],
-                ".canons/auth/auth-caches-must-define-ttl-window.md\tapplicable\t0.93\tPlanned provider cache requires an explicit TTL window."
-            );
-            assert_eq!(
-                lines[1],
-                ".canons/cli/cli-flags-must-use-positive-polarity.md\tdismissed\t0.12\tNo CLI flags are introduced or modified."
-            );
+            assert!(lines[0].starts_with(
+                ".canons/auth/auth-caches-must-define-ttl-window.md\tapplicable\t0.93\t"
+            ));
+            assert!(lines[1].starts_with(
+                ".canons/cli/cli-flags-must-use-positive-polarity.md\tdismissed\t0.12\t"
+            ));
 
             // 3. JSON output via `--json`
             let json_args = AppriseArgs {
@@ -1130,9 +1135,9 @@ mod tests {
         }
 
         #[test]
-        fn test_schema_decode_wire_errors_map_to_exit_code_2() {
+        fn test_generative_model_on_apprise_cli_exits_2_with_discriminator_hint() {
             let snapshot = valid_snapshot();
-            let active_args = AppriseArgs {
+            let mut active_args = AppriseArgs {
                 filing: FilingSourceArgs {
                     intent: Some("Rotate auth provider".to_string()),
                     targets: vec!["src/auth".to_string()],
@@ -1140,32 +1145,24 @@ mod tests {
                 },
                 ..AppriseArgs::default()
             };
+            active_args.models.apprise_model = Some("google:gemini-4-hydrogen".to_string());
 
-            let dup_wire_provider = StubProvider::succeeding(json!({
-                "assessments": [
-                    {
-                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
-                        "apprisal_summary": "First copy.",
-                        "apprisal_score": 0.9
-                    },
-                    {
-                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
-                        "apprisal_summary": "Duplicate copy.",
-                        "apprisal_score": 0.9
-                    }
-                ]
-            }));
-            let dup_err = run_apprise_with_snapshot_and_provider(
+            let provider = StubProvider::succeeding(json!({ "assessments": [] }));
+            let err = run_apprise_with_snapshot_and_provider(
                 &active_args,
                 &mut Cursor::new(b""),
                 &mut Vec::new(),
                 &snapshot,
                 &test_env_with_key(),
-                &dup_wire_provider,
+                &provider,
             )
-            .expect_err("duplicate canon_path wire payload must map to exit 2");
-            assert_eq!(dup_err.exit_code(), 2);
-            assert!(dup_err.to_string().contains("duplicate `canon_path`"));
+            .expect_err("generator model on apprise must exit 2");
+            assert_eq!(err.exit_code(), 2);
+            let msg = err.to_string();
+            assert!(msg.contains("google:gemini-decision-1"));
+            assert!(msg.contains("typesafe:jev-latest"));
+            assert!(msg.contains("local:kev-4b"));
+            assert_eq!(provider.call_count(), 0);
         }
     }
 
@@ -1189,13 +1186,7 @@ mod tests {
                     }
                 ]
             });
-            let provider = StubProvider::succeeding_with_thoughts(
-                payload,
-                vec![
-                    "Inspecting auth cache TTL canon.".to_string(),
-                    "Jurisdiction confirmed.".to_string(),
-                ],
-            );
+            let provider = StubProvider::succeeding(payload);
 
             let args = AppriseArgs {
                 filing: FilingSourceArgs {
@@ -1261,12 +1252,10 @@ mod tests {
                     "start:configure",
                     "finish:configure:0",
                     "start:apprise",
-                    "thought:apprise:Inspecting auth cache TTL canon.",
-                    "thought:apprise:Jurisdiction confirmed.",
-                    "call:apprise:394",
+                    "call:apprise:320",
                     "progress:apprise:1/1",
-                    "finish:apprise:394",
-                    "pipeline:394",
+                    "finish:apprise:320",
+                    "pipeline:320",
                 ]
             );
         }
@@ -1328,7 +1317,7 @@ mod tests {
                 .with_validation(CaseloadValidation::default())
                 .with_config(CaseloadConfig::default().with_node_model(
                     crate::caseload::HeuristicNode::Apprise,
-                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
+                    crate::caseload::DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
                 ));
             let raw_upstream = serde_json::to_vec(&upstream).expect("serialize upstream");
 
@@ -1369,7 +1358,7 @@ mod tests {
                     stage: PipelineStage::Apprise,
                     usage,
                     ..
-                } if usage.total_tokens == 394
+                } if usage.total_tokens == 320
             ));
             assert!(matches!(
                 ff_events[2],
@@ -1386,12 +1375,12 @@ mod tests {
                     stage: PipelineStage::Apprise,
                     usage: Some(u),
                     ..
-                } if u.total_tokens == 394
+                } if u.total_tokens == 320
             ));
             assert!(matches!(
                 ff_events[4],
                 TelemetryEvent::PipelineFinish {
-                    total_tokens: 394,
+                    total_tokens: 320,
                     ..
                 }
             ));
@@ -1514,7 +1503,6 @@ mod tests {
                 dec_batch_sizes: Mutex::new(Vec::new()),
             };
 
-            // 1. Generative model (google:gemini-4-hydrogen via test_env_with_key) partitions 60 into 3x20
             let base_args = AppriseArgs {
                 filing: FilingSourceArgs {
                     intent: Some("Refactor auth login".to_string()),
@@ -1527,22 +1515,8 @@ mod tests {
                 },
                 ..AppriseArgs::default()
             };
-            run_apprise_with_snapshot_and_provider(
-                &base_args,
-                &mut Cursor::new(b""),
-                &mut Vec::new(),
-                &ws,
-                &test_env_with_key(),
-                &probe,
-            )
-            .expect("generative apprise on 60 canons");
-            assert_eq!(
-                *probe.gen_batch_sizes.lock().expect("lock"),
-                vec![20, 20, 20],
-                "60 canons must partition into 3 balanced batches of 20 on generative model"
-            );
 
-            // 2. Unpinned GEMINI_API_KEY selects google:gemini-decision-1 and evaluates all 60 in 1 pass (256-noul budget)
+            // 1. Unpinned GEMINI_API_KEY selects google:gemini-decision-1 and evaluates all 60 in 1 pass (256-noul budget)
             let unpinned_google_env = BTreeMap::from([
                 (
                     ENV_GEMINI_API_KEY.to_string(),

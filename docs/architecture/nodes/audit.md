@@ -41,7 +41,7 @@ flowchart LR
 ```
 
 - **Direct Prerequisites:**
-  - `vet` (prima facie compliance partition in `caseload.vetting`, or `admit` in `caseload.evidence` when `vet` is deterministically skipped because `vet` resolves to a `Generator` model).
+  - `vet` (prima facie compliance partition in `caseload.vetting`, or `admit` in `caseload.evidence` when chaining a pre-populated `--caseload` directly from `admit`).
   - `configure` (Branch B: resolved `Generator` binding in `caseload.config.nodes.audit`, optional reasoning controls, and verified provider credentials across executed closure nodes, evaluated JIT only when heuristic evaluation is required).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `docket`, `admit`.
 - **Generative `audit` Model Requirement:** Because `audit` synthesizes natural-language `Exception` rulings, contributor `Remediation` prose, and 1-based `CodeAnnotation` spans, the `audit` node strictly requires a `Generator` model (such as `google:gemini-4-carbon`) and rejects any `Discriminator` classifier (`google:gemini-decision-*` or `typesafe:jev-*`) with exit code `2`. Selecting a discriminator-only provider (`--provider typesafe`) without pinning `audit` (`--audit-model` / `CANON_CLERK_AUDIT_MODEL` / `nodes.audit.model`) fails fast in `configure` with exit code `2` and an actionable remediation hint whenever `audit` execution is required (unless `--caseload` already carries a pre-populated `.vetting` with zero `contested_cases`).
@@ -74,7 +74,7 @@ flowchart LR
 ## 4. Process & Domain Logic (`core`)
 
 1. **Prerequisite Verification & Short-Circuit Checks:**  
-   Verifies that `.intake`, `.discovery`, and `.evidence` are present and that static canon validation succeeded (`.validation.has_errors` is `false`). If `.evidence.active_cases` is empty, attaches an empty passing `.verdict` and returns immediately. If `.vetting` is present, partitions active cases into carried-forward `vetted_cases` and trial-bound `contested_cases` (returning immediately if `contested_cases` is empty); if `.vetting` is absent (e.g., `Generator`-on-`vet` pass-through or direct `--caseload` from `admit`), binds all `.evidence.active_cases` for trial.
+   Verifies that `.intake`, `.discovery`, and `.evidence` are present and that static canon validation succeeded (`.validation.has_errors` is `false`). If `.evidence.active_cases` is empty, attaches an empty passing `.verdict` and returns immediately. If `.vetting` is present, partitions active cases into carried-forward `vetted_cases` and trial-bound `contested_cases` (returning immediately if `contested_cases` is empty); if `.vetting` is absent (e.g., direct `--caseload` from `admit`), binds all `.evidence.active_cases` for trial.
 2. **Contested Exhibit Projection, Reference Pinning & Context-Budgeted Trial Slicing:**  
    For each trial-bound canon:
    - Projects strictly its `"admitted"` exhibits from `.evidence.exhibits[canon_path]`—and when `.vetting.cases[canon_path].contested_exhibits` is non-empty, prunes summarily vetted sliceable file exhibits so only un-cleared contested file exhibits enter substantive adjudication.

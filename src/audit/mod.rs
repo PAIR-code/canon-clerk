@@ -29,7 +29,6 @@ pub use exhibits::resolve_canon_reference_paths;
 pub(crate) use exhibits::{
     extract_file_exhibit_lines, format_file_exhibit_heading, is_metadata_plane_id,
 };
-pub(crate) use prompt::build_audit_case_user_prompt;
 pub(crate) use reference_overlay::{
     apply_base_diff_to_references, collect_base_reference_disk_paths,
 };

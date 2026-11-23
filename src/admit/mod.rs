@@ -15,27 +15,17 @@
 //! Core domain execution engine for the `admit` Caseload DAG stage (`docs/architecture/nodes/admit.md`).
 
 mod decision;
-mod decode;
 mod exhibits;
-mod prompt;
-mod slices;
 
-use crate::canon::Canon;
 use crate::caseload::{
-    Caseload, CaseloadDiscovery, CaseloadEvidence, CaseloadIntake, ExhibitAssessment,
-    HeuristicNode, ResolvedNodeConfig, normalize_admissibility_score,
+    Caseload, CaseloadEvidence, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+    DEFAULT_LOCAL_DISCRIMINATOR_MODEL, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, ExhibitAssessment,
+    HeuristicNode, normalize_admissibility_score,
 };
-use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
-use crate::provider::{
-    DEFAULT_GENERATION_TIMEOUT_MS, GenerationRequest, ProviderError, StructuredModelProvider,
-};
-use decode::decode_case_exhibits;
+use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
 use exhibits::resolve_case_candidate_exhibits;
-use prompt::{ADMIT_SYSTEM_INSTRUCTION, build_admit_schema};
-use slices::ExhibitSlicePlanner;
-pub use slices::{MAX_ADMIT_EXHIBITS_PER_SLICE, MAX_ADMIT_SLICE_CHARS};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -89,37 +79,12 @@ pub enum AdmitError {
     MissingDocket,
     /// Prerequisite `.config` namespace is missing when active cases require model screening.
     MissingConfig,
+    /// A generative model was configured on `admit` instead of a discriminative `Noul` model.
+    UnsupportedGenerativeModel { specifier: String },
     /// An active canon listed in `.docket.active_docket` is absent from the workspace snapshot.
     MissingActiveCanon { canon_ref: String },
-    /// Per-case or per-slice screening call failed with contextual `canon_ref` and 1-based slice coordinates.
-    CaseProvider {
-        /// Governing canon identifier whose micro-triage call failed.
-        canon_ref: String,
-        /// 1-based slice index (`1..=slice_count`).
-        slice_index: usize,
-        /// Total slices prepared for this case (`>= 1`).
-        slice_count: usize,
-        /// Underlying provider timeout, transport, HTTP, block, or schema decoding error.
-        source: ProviderError,
-    },
     /// Structured model provider returned a transport, HTTP, block, or schema decoding error.
     Provider(ProviderError),
-}
-
-impl AdmitError {
-    pub(super) fn from_case_call(
-        canon_ref: &str,
-        slice_index: usize,
-        slice_count: usize,
-        source: ProviderError,
-    ) -> Self {
-        Self::CaseProvider {
-            canon_ref: canon_ref.to_string(),
-            slice_index,
-            slice_count,
-            source,
-        }
-    }
 }
 
 impl fmt::Display for AdmitError {
@@ -163,29 +128,19 @@ impl fmt::Display for AdmitError {
                 "Cannot execute `admit` screening without a resolved `.config` namespace on the Caseload.\n  \
                  Hint: Run `canon-clerk configure` first or invoke `canon-clerk admit` directly to resolve configuration JIT."
             ),
+            Self::UnsupportedGenerativeModel { specifier } => write!(
+                f,
+                "Generative model `{specifier}` cannot be used for `admit` \
+                 (`admit` requires a discriminative `Noul` decision model).\n  \
+                 Hint: Configure a discriminator on `--admit-model` such as `{DEFAULT_GOOGLE_DISCRIMINATOR_MODEL}` \
+                 (Google Decisions), `{DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL}` (TypeSafe Jev), \
+                 or `{DEFAULT_LOCAL_DISCRIMINATOR_MODEL}` (local `/v1/systemone`)."
+            ),
             Self::MissingActiveCanon { canon_ref } => write!(
                 f,
                 "Active docket canon `{canon_ref}` referenced in `.docket.active_docket` was not found in the workspace snapshot.\n  \
                  Hint: Re-run `canon-clerk docket` or `canon-clerk admit` against the current workspace."
             ),
-            Self::CaseProvider {
-                canon_ref,
-                slice_index,
-                slice_count,
-                source,
-            } => {
-                if *slice_count > 1 {
-                    write!(
-                        f,
-                        "Admit screening failed for canon `{canon_ref}` (slice {slice_index}/{slice_count}): {source}"
-                    )
-                } else {
-                    write!(
-                        f,
-                        "Admit screening failed for canon `{canon_ref}`: {source}"
-                    )
-                }
-            }
             Self::Provider(err) => write!(f, "{err}"),
         }
     }
@@ -197,15 +152,6 @@ impl From<ProviderError> for AdmitError {
     fn from(err: ProviderError) -> Self {
         Self::Provider(err)
     }
-}
-
-struct PreparedCaseCall {
-    canon_ref: String,
-    slice_index: usize,
-    slice_count: usize,
-    progress_label: String,
-    candidate_exhibits: Vec<String>,
-    request: GenerationRequest,
 }
 
 /// Executes the pure `admit` domain stage against an in-memory [`WorkspaceSnapshot`] and
@@ -277,209 +223,109 @@ pub fn execute_admit(
         .as_ref()
         .and_then(|c| c.node(HeuristicNode::Admit))
         .ok_or(AdmitError::MissingConfig)?;
-    if is_discriminative_model(&node_cfg.model) {
-        return decision::execute_admit_decisions(
-            options,
-            caseload,
-            threshold,
-            empty_cases,
-            non_empty_cases,
-            workspace,
-            provider,
-        );
+    if !is_discriminative_model(&node_cfg.model) {
+        return Err(AdmitError::UnsupportedGenerativeModel {
+            specifier: node_cfg.model.clone(),
+        });
     }
-    let admit_model = node_cfg.model.clone();
-    let prepared_calls = prepare_generative_case_calls(
+
+    decision::execute_admit_decisions(
+        options,
+        caseload,
+        threshold,
+        empty_cases,
         non_empty_cases,
-        node_cfg,
-        options.timeout_ms,
-        intake,
-        discovery,
         workspace,
-    );
-
-    let concurrency_limit = options
-        .max_concurrent_calls
-        .unwrap_or(DEFAULT_ADMIT_MAX_CONCURRENT_CALLS);
-    let mut all_exhibits = execute_case_calls(
-        &prepared_calls,
-        concurrency_limit,
-        threshold,
-        &admit_model,
         provider,
-    )?;
-    all_exhibits.extend(empty_cases);
-
-    Ok(caseload.with_evidence(CaseloadEvidence::from_exhibits(all_exhibits)))
-}
-
-fn prepare_generative_case_calls(
-    non_empty_cases: Vec<(String, &Canon, Vec<String>)>,
-    node_cfg: &ResolvedNodeConfig,
-    timeout_ms: u64,
-    intake: &CaseloadIntake,
-    discovery: &CaseloadDiscovery,
-    workspace: &WorkspaceSnapshot,
-) -> Vec<PreparedCaseCall> {
-    let response_schema = build_admit_schema();
-    let (thinking_level, reasoning_budget) = node_cfg.effective_screening_thinking();
-    let mut planner = ExhibitSlicePlanner::new(
-        intake,
-        discovery,
-        workspace,
-        MAX_ADMIT_SLICE_CHARS,
-        MAX_ADMIT_EXHIBITS_PER_SLICE,
-    );
-    let mut prepared_calls = Vec::with_capacity(non_empty_cases.len());
-
-    for (canon_ref, canon, candidate_exhibits) in non_empty_cases {
-        let slices = planner.build_case_slices(&canon_ref, canon, candidate_exhibits);
-        let slice_count = slices.len();
-        for (idx, slice) in slices.into_iter().enumerate() {
-            let slice_index = idx + 1;
-            let call_label = if slice_count > 1 {
-                format!("{canon_ref} [slice {slice_index}/{slice_count}]")
-            } else {
-                canon_ref.clone()
-            };
-            let request = GenerationRequest {
-                model_specifier: node_cfg.model.clone(),
-                system_instruction: ADMIT_SYSTEM_INSTRUCTION.to_string(),
-                user_prompt: slice.user_prompt,
-                response_schema: response_schema.clone(),
-                thinking_level,
-                reasoning_budget,
-                timeout_ms,
-                call_label: Some(call_label.clone()),
-            };
-            prepared_calls.push(PreparedCaseCall {
-                canon_ref: canon_ref.clone(),
-                slice_index,
-                slice_count,
-                progress_label: call_label,
-                candidate_exhibits: slice.candidate_exhibits,
-                request,
-            });
-        }
-    }
-
-    prepared_calls
-}
-
-type CaseResult = Result<(String, Vec<ExhibitAssessment>), AdmitError>;
-
-fn evaluate_single_case_call(
-    call: &PreparedCaseCall,
-    threshold: f64,
-    model_specifier: &str,
-    provider: &dyn StructuredModelProvider,
-) -> CaseResult {
-    let response = provider.generate_structured(&call.request).map_err(|err| {
-        AdmitError::from_case_call(&call.canon_ref, call.slice_index, call.slice_count, err)
-    })?;
-    let decoded = decode_case_exhibits(
-        &response.payload,
-        &call.canon_ref,
-        &call.candidate_exhibits,
-        threshold,
-        model_specifier,
     )
-    .map_err(|err| {
-        AdmitError::from_case_call(&call.canon_ref, call.slice_index, call.slice_count, err)
-    })?;
-    Ok((call.canon_ref.clone(), decoded))
-}
-
-fn execute_case_calls(
-    prepared_calls: &[PreparedCaseCall],
-    concurrency_limit: usize,
-    threshold: f64,
-    model_specifier: &str,
-    provider: &dyn StructuredModelProvider,
-) -> Result<BTreeMap<String, Vec<ExhibitAssessment>>, AdmitError> {
-    let slice_outcomes =
-        execute_bounded_stage_work(prepared_calls, concurrency_limit, provider, |_idx, call| {
-            let outcome = evaluate_single_case_call(call, threshold, model_specifier, provider)?;
-            Ok::<_, AdmitError>((outcome, call.progress_label.clone()))
-        })?;
-
-    let mut combined: BTreeMap<String, Vec<ExhibitAssessment>> = BTreeMap::new();
-    for (canon_ref, items) in slice_outcomes {
-        combined.entry(canon_ref).or_default().extend(items);
-    }
-    for items in combined.values_mut() {
-        items.sort_by(|a, b| a.file_path.cmp(&b.file_path));
-    }
-    Ok(combined)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::prompt::build_admit_case_user_prompt;
     use super::*;
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
-        ActiveExhibits, CanonDocketAssessment, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
-        CaseloadIntake, CaseloadValidation, ColorabilityStatus, DiscoveryMode, FileArtifact,
-        FileChangeStatus, LinkedIssueContext,
+        ActiveExhibits, AdmissibilityStatus, CanonDocketAssessment, CaseloadConfig,
+        CaseloadDiscovery, CaseloadDocket, CaseloadIntake, CaseloadValidation, ColorabilityStatus,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DEFAULT_GOOGLE_GENERATOR_MODEL, DiscoveryMode,
+        FileArtifact, FileChangeStatus, LinkedIssueContext,
     };
-    use crate::provider::{GenerationResponse, TokenUsage};
-    use serde_json::{Value, json};
+    use crate::provider::{
+        DecisionRequest, DecisionResponse, GenerationRequest, GenerationResponse, TokenUsage,
+    };
     use std::sync::Mutex;
 
-    struct RoutingMockProvider {
-        requests: Mutex<Vec<GenerationRequest>>,
-        routes: BTreeMap<String, Result<Value, ProviderError>>,
+    struct RecordingDecisionProvider {
+        requests: Mutex<Vec<DecisionRequest>>,
+        scores: BTreeMap<String, f64>,
+        error: Option<ProviderError>,
     }
 
-    impl RoutingMockProvider {
-        fn new(routes: BTreeMap<String, Result<Value, ProviderError>>) -> Self {
+    impl RecordingDecisionProvider {
+        fn with_scores(scores: BTreeMap<String, f64>) -> Self {
             Self {
                 requests: Mutex::new(Vec::new()),
-                routes,
+                scores,
+                error: None,
             }
         }
 
         fn empty() -> Self {
-            Self::new(BTreeMap::new())
+            Self::with_scores(BTreeMap::new())
         }
 
-        fn captured_requests(&self) -> Vec<GenerationRequest> {
+        fn with_error(err: ProviderError) -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+                scores: BTreeMap::new(),
+                error: Some(err),
+            }
+        }
+
+        fn captured_requests(&self) -> Vec<DecisionRequest> {
             self.requests.lock().expect("lock requests").clone()
         }
     }
 
-    impl StructuredModelProvider for RoutingMockProvider {
+    impl StructuredModelProvider for RecordingDecisionProvider {
         fn generate_structured(
             &self,
-            request: &GenerationRequest,
+            _request: &GenerationRequest,
         ) -> Result<GenerationResponse, ProviderError> {
+            panic!("admit must never invoke generate_structured")
+        }
+
+        fn evaluate_decisions(
+            &self,
+            request: &DecisionRequest,
+        ) -> Result<DecisionResponse, ProviderError> {
             self.requests
                 .lock()
                 .expect("lock requests")
                 .push(request.clone());
-            for (needle, outcome) in &self.routes {
-                if request.user_prompt.contains(needle) {
-                    return match outcome {
-                        Ok(payload) => Ok(GenerationResponse {
-                            payload: payload.clone(),
-                            thoughts: Vec::new(),
-                            usage: TokenUsage {
-                                prompt_tokens: 240,
-                                completion_tokens: 60,
-                                reasoning_tokens: 0,
-                                total_tokens: 300,
-                            },
-                            latency_ms: 42,
-                            resolved_model: "gemini-2.5-flash-lite".to_string(),
-                        }),
-                        Err(err) => Err(err.clone()),
-                    };
-                }
+            if let Some(err) = &self.error {
+                return Err(err.clone());
             }
-            Err(ProviderError::SchemaDecode {
-                model_specifier: request.model_specifier.clone(),
-                message: "no mock route matched prompt".to_string(),
+            let mut out = BTreeMap::new();
+            for key in request.questions.keys() {
+                let score = self
+                    .scores
+                    .iter()
+                    .find(|(needle, _)| key.contains(needle.as_str()))
+                    .map(|(_, s)| *s)
+                    .unwrap_or(0.1);
+                out.insert(key.clone(), score);
+            }
+            Ok(DecisionResponse {
+                scores: out,
+                resolved_model: "gemini-decision-1".to_string(),
+                latency_ms: 42,
+                usage: TokenUsage {
+                    prompt_tokens: 240,
+                    completion_tokens: 0,
+                    reasoning_tokens: 0,
+                    total_tokens: 240,
+                },
             })
         }
     }
@@ -586,799 +432,145 @@ mod tests {
                 ..CaseloadDiscovery::default()
             })
             .with_validation(CaseloadValidation::default())
-            .with_config(CaseloadConfig::default().with_node_model(
-                HeuristicNode::Admit,
-                crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
-            ))
+            .with_config(
+                CaseloadConfig::default()
+                    .with_node_model(HeuristicNode::Admit, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL),
+            )
             .with_docket(CaseloadDocket::from_cases(cases))
     }
 
-    mod guards_and_short_circuits {
-        use super::*;
+    #[test]
+    fn test_empty_active_docket_short_circuits_with_zero_model_calls_and_no_config_needed() {
+        let ws = sample_workspace();
+        let provider = RecordingDecisionProvider::empty();
+        let mut caseload = sample_docketed_caseload(vec![]);
+        caseload.config = None;
 
-        #[test]
-        fn test_empty_active_docket_short_circuits_with_zero_model_calls_and_no_config_needed() {
-            let ws = sample_workspace();
-            let provider = RoutingMockProvider::empty();
-            let mut caseload = sample_docketed_caseload(vec![]);
-            caseload.config = None;
+        let enriched = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
+            .expect("empty docket must short-circuit cleanly");
 
-            let enriched = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
-                .expect("empty docket must short-circuit cleanly");
+        assert!(provider.captured_requests().is_empty());
+        let evidence = enriched.evidence.expect("evidence populated");
+        assert!(evidence.exhibits.is_empty());
+        assert!(evidence.active_cases.is_empty());
+    }
 
-            assert!(provider.captured_requests().is_empty());
-            let evidence = enriched.evidence.expect("evidence populated");
-            assert!(evidence.exhibits.is_empty());
-            assert!(evidence.active_cases.is_empty());
-        }
+    #[test]
+    fn test_fast_forwards_when_evidence_already_populated() {
+        let ws = sample_workspace();
+        let provider = RecordingDecisionProvider::empty();
+        let pre_populated = Caseload::new()
+            .with_intake(CaseloadIntake::default())
+            .with_evidence(CaseloadEvidence::default());
 
-        #[test]
-        fn test_fast_forwards_when_evidence_already_populated() {
-            let ws = sample_workspace();
-            let provider = RoutingMockProvider::empty();
-            let pre_populated = Caseload::new()
-                .with_intake(CaseloadIntake::default())
-                .with_evidence(CaseloadEvidence::default());
+        let out = execute_admit(
+            &AdmitOptions::default(),
+            pre_populated.clone(),
+            &ws,
+            &provider,
+        )
+        .expect("fast-forward completed evidence");
+        assert_eq!(out, pre_populated);
+        assert!(provider.captured_requests().is_empty());
+    }
 
-            let out = execute_admit(
+    #[test]
+    fn test_enforces_prerequisite_and_generator_rejection_guards() {
+        let ws = sample_workspace();
+        let provider = RecordingDecisionProvider::empty();
+
+        assert_eq!(
+            execute_admit(&AdmitOptions::default(), Caseload::new(), &ws, &provider).unwrap_err(),
+            AdmitError::MissingIntake
+        );
+        assert_eq!(
+            execute_admit(
                 &AdmitOptions::default(),
-                pre_populated.clone(),
+                Caseload::new().with_intake(CaseloadIntake::default()),
                 &ws,
                 &provider,
             )
-            .expect("fast-forward completed evidence");
-            assert_eq!(out, pre_populated);
-            assert!(provider.captured_requests().is_empty());
-        }
+            .unwrap_err(),
+            AdmitError::MissingDiscovery
+        );
+        let no_docket = Caseload::new()
+            .with_intake(CaseloadIntake::default())
+            .with_discovery(CaseloadDiscovery::default())
+            .with_validation(CaseloadValidation::default());
+        assert_eq!(
+            execute_admit(&AdmitOptions::default(), no_docket, &ws, &provider).unwrap_err(),
+            AdmitError::MissingDocket
+        );
 
-        #[test]
-        fn test_enforces_prerequisite_threshold_and_concurrency_guards() {
-            let ws = sample_workspace();
-            let provider = RoutingMockProvider::empty();
+        let mut gen_cfg = sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
+        gen_cfg.config = Some(
+            CaseloadConfig::default()
+                .with_node_model(HeuristicNode::Admit, DEFAULT_GOOGLE_GENERATOR_MODEL),
+        );
+        let gen_err = execute_admit(&AdmitOptions::default(), gen_cfg, &ws, &provider)
+            .expect_err("generator model on admit must be rejected");
+        assert!(matches!(
+            gen_err,
+            AdmitError::UnsupportedGenerativeModel { .. }
+        ));
+        let msg = gen_err.to_string();
+        assert!(msg.contains("google:gemini-decision-1"));
+        assert!(msg.contains("typesafe:jev-latest"));
+        assert!(msg.contains("local:kev-4b"));
 
-            assert!(matches!(
-                execute_admit(
-                    &AdmitOptions {
-                        threshold: 1.2,
-                        ..AdmitOptions::default()
-                    },
-                    Caseload::new(),
-                    &ws,
-                    &provider
-                )
-                .unwrap_err(),
-                AdmitError::InvalidThreshold { .. }
-            ));
-            assert!(matches!(
-                execute_admit(
-                    &AdmitOptions {
-                        max_concurrent_calls: Some(0),
-                        ..AdmitOptions::default()
-                    },
-                    Caseload::new(),
-                    &ws,
-                    &provider
-                )
-                .unwrap_err(),
-                AdmitError::InvalidConcurrency { .. }
-            ));
-
-            assert_eq!(
-                execute_admit(&AdmitOptions::default(), Caseload::new(), &ws, &provider)
-                    .unwrap_err(),
-                AdmitError::MissingIntake
-            );
-
-            let with_intake = Caseload::new().with_intake(CaseloadIntake::default());
-            assert_eq!(
-                execute_admit(&AdmitOptions::default(), with_intake, &ws, &provider).unwrap_err(),
-                AdmitError::MissingDiscovery
-            );
-
-            let mut failed_val =
-                sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
-            failed_val.validation = Some(CaseloadValidation {
-                has_errors: true,
-                results: BTreeMap::new(),
-            });
-            assert_eq!(
-                execute_admit(&AdmitOptions::default(), failed_val, &ws, &provider).unwrap_err(),
-                AdmitError::ValidationFailed
-            );
-
-            let mut no_docket =
-                sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
-            no_docket.docket = None;
-            assert_eq!(
-                execute_admit(&AdmitOptions::default(), no_docket, &ws, &provider).unwrap_err(),
-                AdmitError::MissingDocket
-            );
-
-            let mut no_cfg = sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
-            no_cfg.config = None;
-            assert_eq!(
-                execute_admit(&AdmitOptions::default(), no_cfg, &ws, &provider).unwrap_err(),
-                AdmitError::MissingConfig
-            );
-        }
+        let zero_conc = execute_admit(
+            &AdmitOptions {
+                max_concurrent_calls: Some(0),
+                ..AdmitOptions::default()
+            },
+            Caseload::new(),
+            &ws,
+            &provider,
+        )
+        .expect_err("zero concurrency must fail");
+        assert!(matches!(zero_conc, AdmitError::InvalidConcurrency { .. }));
     }
 
-    mod unified_file_and_metadata_screening {
-        use super::*;
+    #[test]
+    fn test_discriminative_admit_screens_exhibits_and_isolates_admitted_cases() {
+        let ws = sample_workspace();
+        let caseload = sample_docketed_caseload(vec![
+            ".canons/cli/cli-flags-kebab-case.md",
+            ".canons/readme/feat-updates-readme.md",
+        ]);
+        let provider = RecordingDecisionProvider::with_scores(BTreeMap::from([(
+            "src/cli/admit.rs".to_string(),
+            0.92,
+        )]));
 
-        #[test]
-        fn test_screens_files_and_metadata_planes_concurrently_and_isolates_admitted_exhibits() {
-            let ws = sample_workspace();
-            let mut routes = BTreeMap::new();
-            routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "pr_body",
-                            "admissibility_summary": "PR body only links #291 and has no flag syntax.",
-                            "admissibility_score": 0.10
-                        },
-                        {
-                            "file_path": "pr_title",
-                            "admissibility_summary": "Conventional Commit title is orthogonal to flag naming.",
-                            "admissibility_score": 0.12
-                        },
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Introduces `--admit-threshold` CLI flag attribute.",
-                            "admissibility_score": 0.96
-                        }
-                    ]
-                })),
-            );
-            routes.insert(
-                ".canons/readme/feat-updates-readme.md".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "linked_issues",
-                            "admissibility_summary": "Confirms #291 is a user-facing feature (`type: feat`).",
-                            "admissibility_score": 0.88
-                        },
-                        {
-                            "file_path": "pr_title",
-                            "admissibility_summary": "`feat(cli):` prefix triggers README synchronization requirement despite README.md omission.",
-                            "admissibility_score": 0.94
-                        },
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Adds new user-facing CLI subcommand without accompanying README update.",
-                            "admissibility_score": 0.91
-                        }
-                    ]
-                })),
-            );
-
-            let provider = RoutingMockProvider::new(routes);
-            let caseload = sample_docketed_caseload(vec![
-                ".canons/cli/cli-flags-kebab-case.md",
-                ".canons/readme/feat-updates-readme.md",
-            ]);
-
-            let enriched = execute_admit(
-                &AdmitOptions {
-                    max_concurrent_calls: Some(2),
-                    ..AdmitOptions::default()
-                },
-                caseload,
-                &ws,
-                &provider,
-            )
-            .expect("concurrent admit screening");
-
-            assert_eq!(provider.captured_requests().len(), 2);
-            let evidence = enriched.evidence.expect("evidence populated");
-            assert_eq!(
-                evidence.active_cases,
-                vec![
-                    ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                    ".canons/readme/feat-updates-readme.md".to_string()
-                ]
-            );
-            assert_eq!(evidence.admitted_exhibit_count(), 4);
-            assert_eq!(evidence.excluded_exhibit_count(), 2);
-
-            // Excluded metadata planes are retained in `.evidence` for provenance,
-            // yet strictly excluded from `admitted_exhibits_for` (zero leakage into `audit`).
-            let cli_admitted =
-                evidence.admitted_exhibits_for(".canons/cli/cli-flags-kebab-case.md");
-            assert_eq!(cli_admitted.len(), 1);
-            assert_eq!(cli_admitted[0].file_path, "src/cli/admit.rs");
-
-            let readme_admitted =
-                evidence.admitted_exhibits_for(".canons/readme/feat-updates-readme.md");
-            assert_eq!(readme_admitted.len(), 3);
-        }
-
-        #[test]
-        fn test_zero_admitted_exhibits_leaves_active_cases_empty_and_rejects_malformed_schema() {
-            let ws = sample_workspace();
-            let mut routes = BTreeMap::new();
-            routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "pr_body",
-                            "admissibility_summary": "Irrelevant.",
-                            "admissibility_score": 0.05
-                        },
-                        {
-                            "file_path": "pr_title",
-                            "admissibility_summary": "Irrelevant.",
-                            "admissibility_score": 0.08
-                        },
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Contains no flags.",
-                            "admissibility_score": 0.15
-                        }
-                    ]
-                })),
-            );
-            let provider = RoutingMockProvider::new(routes);
-            let caseload = sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
-
-            let enriched =
-                execute_admit(&AdmitOptions::default(), caseload.clone(), &ws, &provider)
-                    .expect("zero-admitted-exhibits short-circuit");
-            let evidence = enriched.evidence.expect("evidence attached");
-            assert!(evidence.active_cases.is_empty());
-            assert_eq!(evidence.excluded_exhibit_count(), 3);
-
-            // Missing candidate exhibit in model response fails with SchemaDecode
-            let mut incomplete_routes = BTreeMap::new();
-            incomplete_routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Only returned one item.",
-                            "admissibility_score": 0.9
-                        }
-                    ]
-                })),
-            );
-            let bad_provider = RoutingMockProvider::new(incomplete_routes);
-            let err = execute_admit(&AdmitOptions::default(), caseload, &ws, &bad_provider)
-                .expect_err("incomplete exhibit response must fail");
-            assert!(matches!(
-                err,
-                AdmitError::CaseProvider {
-                    ref canon_ref,
-                    slice_index: 1,
-                    slice_count: 1,
-                    source: ProviderError::SchemaDecode { .. },
-                } if canon_ref == ".canons/cli/cli-flags-kebab-case.md"
-            ));
-            let rendered_err = err.to_string();
-            assert!(rendered_err.contains(".canons/cli/cli-flags-kebab-case.md"));
-            assert!(!rendered_err.contains("(slice "));
-        }
-
-        #[test]
-        fn test_all_canons_path_only_sweep_renders_workspace_file_snapshot() {
-            let ws = sample_workspace();
-            let mut routes = BTreeMap::new();
-            routes.insert(
-                "pub struct AdmitArgs".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Materialized target file defines CLI struct.",
-                            "admissibility_score": 0.85
-                        }
-                    ]
-                })),
-            );
-            let provider = RoutingMockProvider::new(routes);
-
-            let mut cases = BTreeMap::new();
-            cases.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                CanonDocketAssessment {
-                    colorability_summary: "CLI target file.".to_string(),
-                    colorability_score: 0.9,
-                    colorability_status: ColorabilityStatus::Docketed,
-                },
-            );
-
-            let caseload = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    target_paths: vec!["src/cli/admit.rs".to_string()],
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery {
-                    mode: DiscoveryMode::AllCanons,
-                    target_files: vec!["src/cli/admit.rs".to_string()],
-                    candidate_canons: vec![".canons/cli/cli-flags-kebab-case.md".to_string()],
-                    ..CaseloadDiscovery::default()
-                })
-                .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default().with_node_model(
-                    HeuristicNode::Admit,
-                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
-                ))
-                .with_docket(CaseloadDocket::from_cases(cases));
-
-            let enriched = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
-                .expect("all-canons path-only admit");
-            assert_eq!(
-                enriched.evidence.expect("evidence").active_cases,
-                vec![".canons/cli/cli-flags-kebab-case.md".to_string()]
-            );
-
-            let reqs = provider.captured_requests();
-            assert_eq!(reqs.len(), 1);
-            assert_eq!(
-                reqs[0].reasoning_budget,
-                crate::provider::DEFAULT_SCREENING_REASONING_BUDGET
-            );
-            let overview_pos = reqs[0]
-                .user_prompt
-                .find("## Filing Overview")
-                .expect("overview section present");
-            let exhibits_pos = reqs[0]
-                .user_prompt
-                .find("## Candidate Exhibits")
-                .expect("exhibits section present");
-            let canon_pos = reqs[0]
-                .user_prompt
-                .find("## Active Case Governing Canon:")
-                .expect("canon section present");
-            let required_pos = reqs[0]
-                .user_prompt
-                .find("## Required `file_path` Identifiers")
-                .expect("required identifiers section present");
-            assert!(
-                overview_pos < exhibits_pos && exhibits_pos < canon_pos && canon_pos < required_pos,
-                "shared exhibits must lead for prefix caching while governing canon sits at peak recency before generation"
-            );
-            assert!(reqs[0].user_prompt.contains("- Governing Invariant:"));
-            assert!(
-                reqs[0]
-                    .system_instruction
-                    .contains("Code Stratum vs. Documentation Stratum")
-            );
-            assert!(
-                !reqs[0].user_prompt.contains("Modified Files in Filing ("),
-                "filing overview must not prime comma-joined filename lists"
-            );
-        }
-
-        #[test]
-        fn test_shared_candidate_exhibits_produce_byte_identical_prompt_prefixes() {
-            let ws = sample_workspace();
-            let cli_canon = ws
-                .canons
-                .get(".canons/cli/cli-flags-kebab-case.md")
-                .expect("cli canon");
-            let readme_canon = ws
-                .canons
-                .get(".canons/readme/feat-updates-readme.md")
-                .expect("readme canon");
-            let shared_exhibits = vec!["src/cli/admit.rs".to_string(), "pr_title".to_string()];
-            let p1 = build_admit_case_user_prompt(
-                ".canons/cli/cli-flags-kebab-case.md",
-                cli_canon,
-                &shared_exhibits,
-                &CaseloadIntake::default(),
-                &CaseloadDiscovery::default(),
-                &ws,
-            );
-            let p2 = build_admit_case_user_prompt(
-                ".canons/readme/feat-updates-readme.md",
-                readme_canon,
-                &shared_exhibits,
-                &CaseloadIntake::default(),
-                &CaseloadDiscovery::default(),
-                &ws,
-            );
-            let p1_split = p1.find("## Active Case Governing Canon:").expect("split 1");
-            let p2_split = p2.find("## Active Case Governing Canon:").expect("split 2");
-            assert_eq!(&p1[..p1_split], &p2[..p2_split]);
-        }
-
-        #[test]
-        fn test_recovers_exact_comma_grouped_file_paths_while_rejecting_unknown_segments() {
-            let ws = sample_workspace();
-            let mut ok_routes = BTreeMap::new();
-            ok_routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "pr_body, pr_title",
-                            "admissibility_summary": "Metadata planes do not define CLI option flags.",
-                            "admissibility_score": 0.10
-                        },
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Defines `--admit-threshold` CLI flag.",
-                            "admissibility_score": 0.94
-                        }
-                    ]
-                })),
-            );
-            let caseload = sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
-            let enriched = execute_admit(
-                &AdmitOptions::default(),
-                caseload.clone(),
-                &ws,
-                &RoutingMockProvider::new(ok_routes),
-            )
-            .expect("exact comma-grouped exhibits must expand cleanly");
-            let ev = enriched.evidence.expect("evidence");
-            assert_eq!(ev.admitted_exhibit_count(), 1);
-            assert_eq!(ev.excluded_exhibit_count(), 2);
-
-            let mut bad_routes = BTreeMap::new();
-            bad_routes.insert(
-                ".canons/cli/cli-flags-kebab-case.md".to_string(),
-                Ok(json!({
-                    "exhibits": [
-                        {
-                            "file_path": "pr_body, src/unknown.rs",
-                            "admissibility_summary": "Contains unknown path.",
-                            "admissibility_score": 0.10
-                        },
-                        {
-                            "file_path": "pr_title",
-                            "admissibility_summary": "Irrelevant.",
-                            "admissibility_score": 0.10
-                        },
-                        {
-                            "file_path": "src/cli/admit.rs",
-                            "admissibility_summary": "Defines CLI flag.",
-                            "admissibility_score": 0.94
-                        }
-                    ]
-                })),
-            );
-            let err = execute_admit(
-                &AdmitOptions::default(),
-                caseload,
-                &ws,
-                &RoutingMockProvider::new(bad_routes),
-            )
-            .expect_err("unknown segment inside comma-grouped file_path must fail");
-            assert!(matches!(
-                err,
-                AdmitError::CaseProvider {
-                    source: ProviderError::SchemaDecode { .. },
-                    ..
-                }
-            ));
-        }
+        let out = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
+            .expect("admit succeeds");
+        let evidence = out.evidence.expect("evidence populated");
+        assert_eq!(evidence.active_cases.len(), 2);
+        let cli_exhibits = &evidence.exhibits[".canons/cli/cli-flags-kebab-case.md"];
+        assert!(cli_exhibits.iter().any(|e| {
+            e.file_path == "src/cli/admit.rs"
+                && e.admissibility_status == AdmissibilityStatus::Admitted
+        }));
+        assert!(cli_exhibits.iter().any(|e| {
+            e.file_path == "pr_title" && e.admissibility_status == AdmissibilityStatus::Excluded
+        }));
     }
 
-    mod exhibit_slicing_and_map_reduce_folding {
-        use super::*;
-        use crate::caseload::AdmissibilityStatus;
-        use std::time::Duration;
+    #[test]
+    fn test_propagates_provider_error() {
+        let ws = sample_workspace();
+        let caseload = sample_docketed_caseload(vec![".canons/cli/cli-flags-kebab-case.md"]);
+        let provider = RecordingDecisionProvider::with_error(ProviderError::Timeout {
+            model_specifier: DEFAULT_GOOGLE_DISCRIMINATOR_MODEL.to_string(),
+            timeout_ms: 500,
+        });
 
-        fn multi_file_docketed_fixture(file_count: usize) -> (WorkspaceSnapshot, Caseload) {
-            let cli_ref = ".canons/cli/cli-flags-kebab-case.md";
-            let readme_ref = ".canons/readme/feat-updates-readme.md";
-            let ws = sample_workspace();
-
-            let mut diffs = BTreeMap::new();
-            let mut target_files = Vec::new();
-            let mut joined = vec![
-                "linked_issues".to_string(),
-                "pr_body".to_string(),
-                "pr_title".to_string(),
-            ];
-            for idx in 0..file_count {
-                let path = format!("src/cli/subcmd_{idx:02}.rs");
-                diffs.insert(
-                    path.clone(),
-                    FileArtifact {
-                        path: path.clone(),
-                        status: FileChangeStatus::Added,
-                        previous_path: None,
-                        lines_added: 18,
-                        lines_deleted: 0,
-                        patch: Some(format!(
-                            "@@ -0,0 +1,18 @@\n+#[arg(long = \"flag-{idx:02}\")]\n+pub struct Args{idx:02} {{}}\n"
-                        )),
-                        patch_omission_reason: None,
-                        content: None,
-                        content_omission_reason: None,
-                    },
-                );
-                target_files.push(path.clone());
-                joined.push(path);
-            }
-            joined.sort();
-
-            let mut triggers_join = BTreeMap::new();
-            triggers_join.insert(cli_ref.to_string(), joined.clone());
-            triggers_join.insert(readme_ref.to_string(), joined);
-
-            let mut cases = BTreeMap::new();
-            for canon_ref in [cli_ref, readme_ref] {
-                cases.insert(
-                    canon_ref.to_string(),
-                    CanonDocketAssessment {
-                        colorability_summary: "Active in docket.".to_string(),
-                        colorability_score: 0.92,
-                        colorability_status: ColorabilityStatus::Docketed,
-                    },
-                );
-            }
-
-            let caseload = Caseload::new()
-                .with_intake(CaseloadIntake {
-                    pr_title: Some("feat(cli): add 20 subcommand modules".to_string()),
-                    pr_body: Some("Closes #313".to_string()),
-                    diffs,
-                    linked_issues: Some(vec![LinkedIssueContext {
-                        number: 313,
-                        title: Some("Slice admit exhibits".to_string()),
-                        author: None,
-                        labels: Vec::new(),
-                        body: Some("Prevent 60s request timeouts.".to_string()),
-                        url: None,
-                    }]),
-                    ..CaseloadIntake::default()
-                })
-                .with_discovery(CaseloadDiscovery {
-                    mode: DiscoveryMode::Triggered,
-                    target_files: target_files.clone(),
-                    config_files: Vec::new(),
-                    candidate_canons: vec![cli_ref.to_string(), readme_ref.to_string()],
-                    active_exhibits: ActiveExhibits {
-                        files: target_files,
-                        pr_title: Some(true),
-                        pr_body: Some(true),
-                        commit_messages: None,
-                        linked_issues: Some(true),
-                    },
-                    triggers_join,
-                    ..CaseloadDiscovery::default()
-                })
-                .with_validation(CaseloadValidation::default())
-                .with_config(CaseloadConfig::default().with_node_model(
-                    HeuristicNode::Admit,
-                    crate::caseload::DEFAULT_GENERATIVE_SCREENING_MODEL,
-                ))
-                .with_docket(CaseloadDocket::from_cases(cases));
-
-            (ws, caseload)
-        }
-
-        fn parse_required_identifiers(prompt: &str) -> Vec<String> {
-            let marker = "## Required `file_path` Identifiers (";
-            let start = prompt.find(marker).expect("required identifiers marker");
-            prompt[start..]
-                .lines()
-                .skip(1)
-                .filter_map(|line| {
-                    let tick_start = line.find('`')? + 1;
-                    let tick_end = line[tick_start..].find('`')? + tick_start;
-                    Some(line[tick_start..tick_end].to_string())
-                })
-                .collect()
-        }
-
-        struct OutOfOrderSliceProvider {
-            requests: Mutex<Vec<GenerationRequest>>,
-            progress: Mutex<Vec<String>>,
-            fail_slice_needle: Option<String>,
-        }
-
-        impl OutOfOrderSliceProvider {
-            fn new(fail_slice_needle: Option<&str>) -> Self {
-                Self {
-                    requests: Mutex::new(Vec::new()),
-                    progress: Mutex::new(Vec::new()),
-                    fail_slice_needle: fail_slice_needle.map(ToString::to_string),
-                }
-            }
-        }
-
-        impl StructuredModelProvider for OutOfOrderSliceProvider {
-            fn generate_structured(
-                &self,
-                request: &GenerationRequest,
-            ) -> Result<GenerationResponse, ProviderError> {
-                self.requests
-                    .lock()
-                    .expect("lock requests")
-                    .push(request.clone());
-
-                if let Some(ref needle) = self.fail_slice_needle
-                    && request
-                        .call_label
-                        .as_deref()
-                        .unwrap_or_default()
-                        .contains(needle)
-                {
-                    return Err(ProviderError::Timeout {
-                        model_specifier: request.model_specifier.clone(),
-                        timeout_ms: request.timeout_ms,
-                    });
-                }
-
-                // Delay slice 1 so slice 2 finishes first under concurrent execution.
-                if request
-                    .call_label
-                    .as_deref()
-                    .unwrap_or_default()
-                    .contains("[slice 1/")
-                {
-                    std::thread::sleep(Duration::from_millis(15));
-                }
-
-                let required_ids = parse_required_identifiers(&request.user_prompt);
-                let items: Vec<Value> = required_ids
-                    .into_iter()
-                    .map(|id| {
-                        let score = if id.ends_with("_00.rs") || id.ends_with("_18.rs") {
-                            0.93
-                        } else {
-                            0.11
-                        };
-                        json!({
-                            "file_path": id,
-                            "admissibility_summary": format!("Evaluated `{id}` in isolated slice."),
-                            "admissibility_score": score
-                        })
-                    })
-                    .collect();
-
-                Ok(GenerationResponse {
-                    payload: json!({ "exhibits": items }),
-                    thoughts: Vec::new(),
-                    usage: TokenUsage {
-                        prompt_tokens: 400,
-                        completion_tokens: 120,
-                        reasoning_tokens: 20,
-                        total_tokens: 540,
-                    },
-                    latency_ms: 35,
-                    resolved_model: "gemini-4-hydrogen".to_string(),
-                })
-            }
-
-            fn record_progress(&self, completed: usize, total: usize, label: &str) {
-                self.progress
-                    .lock()
-                    .expect("lock progress")
-                    .push(format!("{completed}/{total}:{label}"));
-            }
-        }
-
-        fn assert_folded_case_evidence(evidence: &CaseloadEvidence, canon_ref: &str) {
-            let items = &evidence.exhibits[canon_ref];
-            assert_eq!(items.len(), 23);
-            let sorted_paths: Vec<&str> = items.iter().map(|e| e.file_path.as_str()).collect();
-            let mut check = sorted_paths.clone();
-            check.sort_unstable();
-            assert_eq!(sorted_paths, check);
-
-            let admitted: Vec<&str> = evidence
-                .admitted_exhibits_for(canon_ref)
-                .into_iter()
-                .map(|e| e.file_path.as_str())
-                .collect();
-            assert_eq!(
-                admitted,
-                vec!["src/cli/subcmd_00.rs", "src/cli/subcmd_18.rs"]
-            );
-            assert!(items.iter().any(|e| {
-                e.file_path == "pr_title" && e.admissibility_status == AdmissibilityStatus::Excluded
-            }));
-        }
-
-        #[test]
-        fn test_concurrent_out_of_order_slices_fold_into_byte_identical_evidence_and_record_slice_labels()
-         {
-            let (ws, caseload) = multi_file_docketed_fixture(20);
-
-            let sequential_provider = OutOfOrderSliceProvider::new(None);
-            let seq_out = execute_admit(
-                &AdmitOptions {
-                    max_concurrent_calls: Some(1),
-                    ..AdmitOptions::default()
-                },
-                caseload.clone(),
-                &ws,
-                &sequential_provider,
-            )
-            .expect("sequential sliced admit");
-
-            let concurrent_provider = OutOfOrderSliceProvider::new(None);
-            let conc_out = execute_admit(
-                &AdmitOptions {
-                    max_concurrent_calls: Some(4),
-                    ..AdmitOptions::default()
-                },
-                caseload,
-                &ws,
-                &concurrent_provider,
-            )
-            .expect("concurrent out-of-order sliced admit");
-
-            let seq_json =
-                serde_json::to_string(&seq_out.evidence).expect("serialize sequential evidence");
-            let conc_json =
-                serde_json::to_string(&conc_out.evidence).expect("serialize concurrent evidence");
-            assert_eq!(
-                seq_json, conc_json,
-                "out-of-order slice completions must fold into byte-for-byte identical .evidence"
-            );
-
-            let evidence = conc_out.evidence.expect("evidence populated");
-            assert_eq!(evidence.exhibits.len(), 2);
-            assert_folded_case_evidence(&evidence, ".canons/cli/cli-flags-kebab-case.md");
-            assert_folded_case_evidence(&evidence, ".canons/readme/feat-updates-readme.md");
-
-            let captured = sequential_provider.requests.lock().expect("requests");
-            assert_eq!(captured.len(), 4);
-            let labels: Vec<&str> = captured
-                .iter()
-                .filter_map(|r| r.call_label.as_deref())
-                .collect();
-            assert_eq!(
-                labels,
-                vec![
-                    ".canons/cli/cli-flags-kebab-case.md [slice 1/2]",
-                    ".canons/cli/cli-flags-kebab-case.md [slice 2/2]",
-                    ".canons/readme/feat-updates-readme.md [slice 1/2]",
-                    ".canons/readme/feat-updates-readme.md [slice 2/2]",
-                ]
-            );
-        }
-
-        #[test]
-        fn test_multi_slice_timeout_error_annotates_canon_ref_and_slice_coordinates() {
-            let (ws, caseload) = multi_file_docketed_fixture(20);
-            let failing_provider = OutOfOrderSliceProvider::new(Some(
-                ".canons/cli/cli-flags-kebab-case.md [slice 2/2]",
-            ));
-
-            let err = execute_admit(
-                &AdmitOptions {
-                    max_concurrent_calls: Some(2),
-                    timeout_ms: 60_000,
-                    ..AdmitOptions::default()
-                },
-                caseload,
-                &ws,
-                &failing_provider,
-            )
-            .expect_err("slice 2 timeout must fail fast");
-
-            assert!(matches!(
-                err,
-                AdmitError::CaseProvider {
-                    ref canon_ref,
-                    slice_index: 2,
-                    slice_count: 2,
-                    source: ProviderError::Timeout { timeout_ms: 60_000, .. },
-                } if canon_ref == ".canons/cli/cli-flags-kebab-case.md"
-            ));
-            let rendered = err.to_string();
-            assert!(
-                rendered.contains(".canons/cli/cli-flags-kebab-case.md"),
-                "got: {rendered}"
-            );
-            assert!(rendered.contains("(slice 2/2)"), "got: {rendered}");
-            assert!(
-                rendered.contains("timed out after 60000ms"),
-                "got: {rendered}"
-            );
-            assert!(rendered.contains("Hint:"), "got: {rendered}");
-        }
+        let err = execute_admit(&AdmitOptions::default(), caseload, &ws, &provider)
+            .expect_err("timeout must propagate");
+        assert!(matches!(
+            err,
+            AdmitError::Provider(ProviderError::Timeout { .. })
+        ));
     }
 }
