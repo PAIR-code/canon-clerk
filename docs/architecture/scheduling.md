@@ -107,7 +107,7 @@ git diff origin/main | canon-clerk audit --diff -
 The runner:
 1. Initializes a blank `Caseload`.
 2. Resolves the transitive closure for `audit`: `[intake, discover, validate, configure, docket, admit, vet, audit]`.
-3. Executes each node in-memory sequentially according to the guarded scheduling invariant (inspecting `vet`'s resolved model capability in `.config.nodes.vet.model`: executing `vet` when `vet` resolves to a `Discriminator` model and deterministically skipping `vet` when `vet` resolves to a `Generator` model unless `.vetting` is already pre-populated on `--caseload`, avoiding duplicate autoregressive turns ahead of `audit`).
+3. Executes each node in-memory sequentially according to the guarded scheduling invariant.
 4. Returns the final verdict and exit code.
 
 ### Pattern B: Composable Unix Pipelining (`--caseload <path|->`)
@@ -162,7 +162,7 @@ The scheduler determines the node sequence using a deterministic static table. F
 | `canon-clerk docket` | `[intake, discover, validate, configure, docket]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`) is already present |
 | `canon-clerk admit` | `[intake, discover, validate, configure, docket, admit]` | Skips any node whose corresponding field is already populated |
 | `canon-clerk vet` | `[intake, discover, validate, configure, docket, admit, vet]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`, `.evidence`, `.vetting`) is already populated |
-| `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, vet, audit]` | Skips any node whose corresponding field is already populated (and deterministically skips `vet` when `vet` resolves to a `Generator` model and `.vetting` is absent) |
+| `canon-clerk audit` | `[intake, discover, validate, configure, docket, admit, vet, audit]` | Skips any node whose corresponding field is already populated |
 | `canon-clerk apprise` | `[intake, discover, validate, configure, apprise]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.apprisal`) is already present |
 
 ### Missing Input Source Guard vs. Empty Stream Short-Circuit
