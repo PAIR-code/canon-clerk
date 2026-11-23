@@ -24,6 +24,7 @@ Key architectural concepts:
 - [Caseload DAG Architecture](docs/architecture.md): Entry point and index to the Caseload DAG architectural documentation suite, execution mechanics, and pipeline stages.
 - [Caseload DAG Overview](docs/architecture/overview.md): Formal architectural specification of the Caseload paradigm, DAG topology, Caseload schema, and event stream.
 - [DAG Scheduling & Execution](docs/architecture/scheduling.md): Transitive dependency closure calculation, branch pruning, guarded lazy scheduling, and static schedule lookup table.
+- [Provider Profiles, Capabilities & Decision Budgets](docs/architecture/providers.md): Built-in and custom provider profiles, canonical `<provider>:<model>` grammar, capability ports, `DecisionBudgetProfile` matrices, and shared provider/credential/endpoint/thinking controls.
 - [Provider Transport & Rate-Limit Scheduling](docs/architecture/transport.md): Pooled HTTPS connection lifecycle, per-origin cooldown gating, multi-source retry backoff precedence, and single-shot probe isolation.
 - [GitHub Platform Adapter & Checks Publication](docs/architecture/github.md): Stage-agnostic GitHub Checks REST API publication, target/credential resolution, 50-annotation batching, output guards, and zero-spend Caseload replay.
 - [Consistency & Flipper Benchmarking](docs/architecture/benchmarking.md): Multi-trial stage stability harness, flipper diagnostics, and polymorphic subject dispersion contracts.
