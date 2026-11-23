@@ -15,6 +15,7 @@
 //! Context-budgeted multi-slice partitioning and topological span fencing for discriminative `vet`
 //! (`docs/architecture/nodes/vet.md` §4.3).
 
+use super::decision::{max_discriminative_state_chars_for_profile, slice_fits_single_batch};
 use crate::audit::{
     RenderedFileExhibit, build_shared_case_header, extract_file_exhibit_lines,
     format_file_exhibit_heading, format_pinned_reference_exhibits, is_metadata_plane_id,
@@ -24,6 +25,7 @@ use crate::audit::{
 use crate::canon::Canon;
 use crate::caseload::{CaseloadDiscovery, CaseloadIntake, ExhibitAssessment};
 use crate::discover::WorkspaceSnapshot;
+use crate::provider::DecisionBudgetProfile;
 use crate::spans::{ExhibitLine, TiledSpan, render_fenced_spans, tile_exhibit_lines};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -65,6 +67,7 @@ struct PreparedFileExhibit {
     lines: Vec<ExhibitLine>,
     tiled_spans: Vec<TiledSpan>,
     estimated_chars: usize,
+    estimated_unfenced_chars: usize,
     fallback_body: Option<String>,
 }
 
@@ -86,7 +89,8 @@ impl PreparedFileExhibit {
             } else {
                 0
             };
-            let estimated_chars = heading.len() + lines_chars + fence_overhead + 32;
+            let estimated_unfenced_chars = heading.len() + lines_chars + 32;
+            let estimated_chars = estimated_unfenced_chars + fence_overhead;
             Self {
                 file_path,
                 heading,
@@ -94,6 +98,7 @@ impl PreparedFileExhibit {
                 lines,
                 tiled_spans,
                 estimated_chars,
+                estimated_unfenced_chars,
                 fallback_body: None,
             }
         } else {
@@ -106,18 +111,32 @@ impl PreparedFileExhibit {
                 lines: Vec::new(),
                 tiled_spans: Vec::new(),
                 estimated_chars,
+                estimated_unfenced_chars: estimated_chars,
                 fallback_body: Some(fallback),
             }
         }
     }
 
-    fn render_into(&self, out: &mut String, next_span_num: &mut usize) -> Vec<VettingSpanTarget> {
+    fn span_noul_count(&self) -> usize {
+        if self.tiled_spans.len() > 1 {
+            self.tiled_spans.len()
+        } else {
+            0
+        }
+    }
+
+    fn render_into(
+        &self,
+        out: &mut String,
+        next_span_num: &mut usize,
+        include_spans: bool,
+    ) -> Vec<VettingSpanTarget> {
         let _ = writeln!(out, "{}", self.heading);
         if let Some(ref note) = self.fallback_body {
             let _ = writeln!(out, "{note}\n");
             return Vec::new();
         }
-        if self.tiled_spans.len() > 1 {
+        if include_spans && self.tiled_spans.len() > 1 {
             let (fenced, descs) = render_fenced_spans(
                 &self.file_path,
                 &self.lines,
@@ -135,7 +154,7 @@ impl PreparedFileExhibit {
                 })
                 .collect()
         } else {
-            let mut body = String::with_capacity(self.estimated_chars);
+            let mut body = String::with_capacity(self.estimated_unfenced_chars);
             for line in &self.lines {
                 let _ = writeln!(body, "{}", line.rendered);
             }
@@ -160,8 +179,8 @@ fn fallback_omission_note(file_path: &str, intake: &CaseloadIntake) -> String {
         .to_string()
 }
 
-/// Builds a single-call or multi-slice discriminative `state` plan with topological span fences,
-/// bounded by `max_state_chars`.
+/// Builds a single-call or multi-slice discriminative `state` plan with adaptive topological span
+/// fencing, bounded by `profile`'s single-batch `Noul` and character budgets.
 #[allow(
     clippy::too_many_arguments,
     reason = "Internal slice planner assembling case overview, canon statute, references, and fenced admitted exhibits"
@@ -173,8 +192,9 @@ pub(super) fn build_discriminative_case_plan(
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
-    max_state_chars: usize,
+    profile: DecisionBudgetProfile,
 ) -> DiscriminativeCasePlan {
+    let max_state_chars = max_discriminative_state_chars_for_profile(profile);
     let admitted_file_paths: BTreeSet<String> = admitted_exhibits
         .iter()
         .map(|e| e.file_path.as_str())
@@ -212,9 +232,21 @@ pub(super) fn build_discriminative_case_plan(
         };
     }
 
-    let total_all_body: usize = all_prepared.iter().map(|p| p.estimated_chars).sum();
-    if base_header.len() + SLICE_FRAME_RESERVE_CHARS + total_all_body <= max_state_chars {
-        let slice = assemble_slice(&base_header, &all_prepared, 0, 1);
+    let total_all_spans: usize = all_prepared
+        .iter()
+        .map(PreparedFileExhibit::span_noul_count)
+        .sum();
+    let single_slice_body_est: usize =
+        if 1 + all_prepared.len() + total_all_spans <= profile.max_nouls_per_call {
+            all_prepared.iter().map(|p| p.estimated_chars).sum()
+        } else {
+            all_prepared
+                .iter()
+                .map(|p| p.estimated_unfenced_chars)
+                .sum()
+        };
+    if base_header.len() + SLICE_FRAME_RESERVE_CHARS + single_slice_body_est <= max_state_chars {
+        let slice = assemble_slice(&base_header, &all_prepared, 0, 1, profile, max_state_chars);
         if slice.state.len() <= max_state_chars {
             return DiscriminativeCasePlan::Slices(vec![slice]);
         }
@@ -257,7 +289,14 @@ pub(super) fn build_discriminative_case_plan(
             .filter_map(|proxy| proxy.file_path.parse::<usize>().ok())
             .filter_map(|i| sliceable_prepared.get(i))
             .collect();
-        let slice = assemble_slice_refs(&shared_header, &group_items, slice_idx, total_slices);
+        let slice = assemble_slice_refs(
+            &shared_header,
+            &group_items,
+            slice_idx,
+            total_slices,
+            profile,
+            max_state_chars,
+        );
         if slice.state.len() > max_state_chars {
             return DiscriminativeCasePlan::OversizedContest;
         }
@@ -301,9 +340,18 @@ fn assemble_slice(
     items: &[PreparedFileExhibit],
     slice_idx: usize,
     total_slices: usize,
+    profile: DecisionBudgetProfile,
+    max_state_chars: usize,
 ) -> VettingExhibitSlice {
     let refs: Vec<&PreparedFileExhibit> = items.iter().collect();
-    assemble_slice_refs(shared_header, &refs, slice_idx, total_slices)
+    assemble_slice_refs(
+        shared_header,
+        &refs,
+        slice_idx,
+        total_slices,
+        profile,
+        max_state_chars,
+    )
 }
 
 fn assemble_slice_refs(
@@ -311,8 +359,31 @@ fn assemble_slice_refs(
     items: &[&PreparedFileExhibit],
     slice_idx: usize,
     total_slices: usize,
+    profile: DecisionBudgetProfile,
+    max_state_chars: usize,
 ) -> VettingExhibitSlice {
-    let body_est: usize = items.iter().map(|i| i.estimated_chars).sum();
+    let span_count: usize = items.iter().map(|i| i.span_noul_count()).sum();
+    if span_count > 0 && 1 + items.len() + span_count <= profile.max_nouls_per_call {
+        let fenced = render_slice_refs(shared_header, items, slice_idx, total_slices, true);
+        if fenced.state.len() <= max_state_chars && slice_fits_single_batch(&fenced, profile) {
+            return fenced;
+        }
+    }
+    render_slice_refs(shared_header, items, slice_idx, total_slices, false)
+}
+
+fn render_slice_refs(
+    shared_header: &str,
+    items: &[&PreparedFileExhibit],
+    slice_idx: usize,
+    total_slices: usize,
+    include_spans: bool,
+) -> VettingExhibitSlice {
+    let body_est: usize = if include_spans {
+        items.iter().map(|i| i.estimated_chars).sum()
+    } else {
+        items.iter().map(|i| i.estimated_unfenced_chars).sum()
+    };
     let mut state =
         String::with_capacity(shared_header.len() + body_est + SLICE_FRAME_RESERVE_CHARS);
     state.push_str(shared_header);
@@ -336,7 +407,7 @@ fn assemble_slice_refs(
     let mut spans = Vec::new();
     let mut next_span_num = 1usize;
     for item in items {
-        let file_spans = item.render_into(&mut state, &mut next_span_num);
+        let file_spans = item.render_into(&mut state, &mut next_span_num, include_spans);
         file_paths.push(item.file_path.clone());
         spans.extend(file_spans);
     }
