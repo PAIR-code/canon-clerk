@@ -26,7 +26,9 @@ use crate::caseload::{
 };
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
-use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
+use crate::provider::{
+    DEFAULT_GENERATION_TIMEOUT_MS, DecisionBudgetProfile, ProviderError, StructuredModelProvider,
+};
 use slices::{DiscriminativeCasePlan, build_discriminative_case_plan};
 use std::fmt;
 
@@ -273,7 +275,7 @@ fn prepare_vetting_cases<'a>(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
 ) -> Vec<PreparedVettingCase> {
-    let max_state_chars = decision::max_discriminative_state_chars(vet_model);
+    let profile = DecisionBudgetProfile::for_model(vet_model);
     active_entries
         .into_iter()
         .map(|(canon_ref, canon, admitted)| {
@@ -282,13 +284,7 @@ fn prepare_vetting_cases<'a>(
             );
             let discriminative_plan = if is_discriminative {
                 build_discriminative_case_plan(
-                    &canon_ref,
-                    canon,
-                    &admitted,
-                    intake,
-                    discovery,
-                    workspace,
-                    max_state_chars,
+                    &canon_ref, canon, &admitted, intake, discovery, workspace, profile,
                 )
             } else {
                 DiscriminativeCasePlan::Slices(Vec::new())
@@ -975,6 +971,209 @@ mod tests {
             assert_eq!(a3.vetting_status, VettingStatus::Contested);
             assert!(a3.contested_exhibits.is_empty());
             assert!(a3.contested_spans.is_empty());
+        }
+
+        #[test]
+        fn test_adaptive_span_fallback_avoids_multibatch_when_span_count_exceeds_noul_cap() {
+            let canon_ref = ".canons/core/no-unwrap.md";
+            // Build 8 compact multi-span files (~6+ spans each -> >48 total nouls on typesafe:jev-*,
+            // while remaining well under the 64k char single-slice window).
+            let mut single_file = String::new();
+            for s in 1..=7 {
+                single_file.push_str(&format!("fn s{s}() {{\n"));
+                for line in 1..=28 {
+                    single_file.push_str(&format!("    let x = {line};\n"));
+                }
+                single_file.push_str("}\n\n");
+            }
+
+            let mut ws = WorkspaceSnapshot::new().with_canon_markdown(
+                "---\ntriggers:\n  - \"src/**\"\n---\nProduction code MUST NOT call unwrap.\n",
+                &ParseCanonOptions::with_source_ref(canon_ref),
+            );
+            let mut target_paths = Vec::new();
+            let mut exhibits_vec = Vec::new();
+            for idx in 0..8 {
+                let path = format!("src/mod_{idx}.rs");
+                ws = ws.with_file_content(&path, &single_file);
+                target_paths.push(path.clone());
+                exhibits_vec.push(ExhibitAssessment {
+                    file_path: path,
+                    admissibility_summary: "admitted".to_string(),
+                    admissibility_score: 0.95,
+                    admissibility_status: AdmissibilityStatus::Admitted,
+                });
+            }
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths,
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Vet, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+                )
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "docketed".to_string(),
+                        colorability_score: 0.95,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    exhibits_vec,
+                )])));
+
+            let mut provider = MockVetProvider::empty();
+            provider
+                .question_scores
+                .insert("compliant".to_string(), 0.25);
+            provider
+                .question_scores
+                .insert("file:src/mod_2.rs".to_string(), 0.18);
+
+            let out = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
+                .expect("adaptive noul-cap fallback vet");
+            let reqs = provider.decision_requests.lock().unwrap();
+            assert_eq!(
+                reqs.len(),
+                1,
+                "span overflow must fall back to a single file-level batch instead of multi-batch re-transmission"
+            );
+            assert!(
+                !reqs[0].state.contains("=== [SPAN "),
+                "fallback slice must omit lexical span fences from state"
+            );
+            assert!(
+                !reqs[0].questions.keys().any(|k| k.starts_with("span:")),
+                "fallback slice must not emit per-span Noul questions"
+            );
+            assert_eq!(
+                reqs[0].questions.len(),
+                1 + 8,
+                "fallback slice must retain whole-slice + per-file Noul questions"
+            );
+
+            let assessment = &out.vetting.unwrap().cases[canon_ref];
+            assert_eq!(assessment.vetting_status, VettingStatus::Contested);
+            assert_eq!(
+                assessment.contested_exhibits,
+                vec!["src/mod_2.rs".to_string()],
+                "file-level contested_exhibits pruning must remain intact on fallback"
+            );
+            assert!(assessment.contested_spans.is_empty());
+        }
+
+        #[test]
+        fn test_adaptive_span_fallback_avoids_multibatch_when_span_questions_exceed_char_budget() {
+            let canon_ref = ".canons/core/no-unwrap.md";
+            // Build a single near-full file with 15 spans (1 + 2 + 15 = 18 <= 48 max_nouls_per_call
+            // on typesafe:jev-*), sized so fenced state + 18 questions exceeds max_batch_chars (64k)
+            // while unfenced file-level vetting (1 + 2 questions) fits in a single batch.
+            let padding = "x".repeat(110);
+            let mut near_cap = String::new();
+            for s in 1..=15 {
+                near_cap.push_str(&format!("fn sec_{s}() {{\n"));
+                for line in 1..=28 {
+                    near_cap.push_str(&format!("    let _v_{line} = \"{padding}\";\n"));
+                }
+                near_cap.push_str("}\n\n");
+            }
+
+            let ws = WorkspaceSnapshot::new()
+                .with_canon_markdown(
+                    "---\ntriggers:\n  - \"src/**\"\n---\nProduction code MUST NOT call unwrap.\n",
+                    &ParseCanonOptions::with_source_ref(canon_ref),
+                )
+                .with_file_content("src/near_cap.rs", &near_cap)
+                .with_file_content("src/clean.rs", "pub fn ok() -> usize { 1 }\n");
+
+            let caseload = Caseload::new()
+                .with_intake(CaseloadIntake {
+                    target_paths: vec!["src/near_cap.rs".to_string(), "src/clean.rs".to_string()],
+                    ..CaseloadIntake::default()
+                })
+                .with_discovery(CaseloadDiscovery {
+                    mode: DiscoveryMode::Triggered,
+                    candidate_canons: vec![canon_ref.to_string()],
+                    ..CaseloadDiscovery::default()
+                })
+                .with_validation(CaseloadValidation::default())
+                .with_config(
+                    CaseloadConfig::default()
+                        .with_node_model(HeuristicNode::Vet, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL),
+                )
+                .with_docket(CaseloadDocket::from_cases(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    CanonDocketAssessment {
+                        colorability_summary: "docketed".to_string(),
+                        colorability_score: 0.95,
+                        colorability_status: ColorabilityStatus::Docketed,
+                    },
+                )])))
+                .with_evidence(CaseloadEvidence::from_exhibits(BTreeMap::from([(
+                    canon_ref.to_string(),
+                    vec![
+                        ExhibitAssessment {
+                            file_path: "src/near_cap.rs".to_string(),
+                            admissibility_summary: "near cap".to_string(),
+                            admissibility_score: 0.95,
+                            admissibility_status: AdmissibilityStatus::Admitted,
+                        },
+                        ExhibitAssessment {
+                            file_path: "src/clean.rs".to_string(),
+                            admissibility_summary: "clean".to_string(),
+                            admissibility_score: 0.95,
+                            admissibility_status: AdmissibilityStatus::Admitted,
+                        },
+                    ],
+                )])));
+
+            let mut provider = MockVetProvider::empty();
+            provider
+                .question_scores
+                .insert("compliant".to_string(), 0.25);
+            provider
+                .question_scores
+                .insert("file:src/near_cap.rs".to_string(), 0.20);
+            provider
+                .question_scores
+                .insert("file:src/clean.rs".to_string(), 0.96);
+
+            let out = execute_vet(&VetOptions::default(), caseload, &ws, &provider)
+                .expect("adaptive char-budget fallback vet");
+            let reqs = provider.decision_requests.lock().unwrap();
+            assert_eq!(
+                reqs.len(),
+                1,
+                "char-budget span overflow must fall back to a single unfenced file-level batch"
+            );
+            assert!(
+                !reqs[0].state.contains("=== [SPAN "),
+                "char-budget fallback slice must omit lexical span fences"
+            );
+            assert!(
+                !reqs[0].questions.keys().any(|k| k.starts_with("span:")),
+                "char-budget fallback slice must not emit per-span Noul questions"
+            );
+            assert_eq!(reqs[0].questions.len(), 3);
+
+            let assessment = &out.vetting.unwrap().cases[canon_ref];
+            assert_eq!(assessment.vetting_status, VettingStatus::Contested);
+            assert_eq!(
+                assessment.contested_exhibits,
+                vec!["src/near_cap.rs".to_string()]
+            );
+            assert!(assessment.contested_spans.is_empty());
         }
     }
 }

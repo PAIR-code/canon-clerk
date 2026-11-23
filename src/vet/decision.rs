@@ -43,10 +43,26 @@ Question: Do the Admitted Exhibits in `state` comply with the Governing Canon St
 - Answer YES if the Admitted Exhibits comply, satisfy a declared `Exception`, OR if the canon's governed construct is absent/untouched in these exhibits (zero violation annotations required).\n\
 - Answer NO ONLY if an unexcused statute violation or missing required companion update is actually present in the exhibits.";
 
-pub(super) fn max_discriminative_state_chars(vet_model: &str) -> usize {
-    DecisionBudgetProfile::for_model(vet_model)
+pub(super) fn max_discriminative_state_chars_for_profile(profile: DecisionBudgetProfile) -> usize {
+    profile
         .max_batch_chars
         .saturating_sub(QUESTION_RESERVE_CHARS)
+}
+
+pub(super) fn slice_fits_single_batch(
+    slice: &VettingExhibitSlice,
+    profile: DecisionBudgetProfile,
+) -> bool {
+    let items = build_slice_noul_items(slice);
+    partition_decision_items(
+        &items,
+        slice.state.len(),
+        profile.max_nouls_per_call,
+        profile.max_batch_chars,
+        |(_, q)| q.len(),
+    )
+    .len()
+        <= 1
 }
 
 pub(super) fn file_question_key(file_path: &str) -> String {
