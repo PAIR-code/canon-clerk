@@ -18,6 +18,7 @@ pub mod admit;
 pub mod apprise;
 pub mod args;
 pub mod audit;
+pub mod canon_args;
 pub(crate) mod closure;
 mod commit_messages;
 pub mod configure;
