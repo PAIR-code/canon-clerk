@@ -75,12 +75,12 @@ impl DecisionBudgetProfile {
     };
 
     /// Calibrated profile for built-in local System One daemons (`local:*`, e.g. `llama-server` `Kev-4B` on `32k` ctx):
-    /// keeps screening batches small (`4` canons/pairs per call) while preserving `16` nouls/call for single-batch `vet` span localization.
+    /// keeps screening batches small (`2` canons/pairs per call for reliable CPU prefill under `180s`) while preserving `16` nouls/call for single-batch `vet` span localization.
     pub const LOCAL_SYSTEMONE: Self = Self {
         max_state_chars: 24_000,
         max_batch_chars: 32_000,
         max_nouls_per_call: 16,
-        default_screening_batch_size: 4,
+        default_screening_batch_size: 2,
     };
 
     /// Resolves the deterministic [`DecisionBudgetProfile`] for a discriminative model specifier.

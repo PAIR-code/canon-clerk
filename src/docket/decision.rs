@@ -345,7 +345,7 @@ mod tests {
                 max_state_chars: 24_000,
                 max_batch_chars: 32_000,
                 max_nouls_per_call: 16,
-                default_screening_batch_size: 4,
+                default_screening_batch_size: 2,
             }
         );
     }
