@@ -868,9 +868,10 @@ mod tests {
             .discovery
             .expect("discovery");
             assert!(
-                disc_builtin
-                    .candidate_canons
-                    .contains(&"builtin:canon-authoring/canons-must-be-atomic".to_string())
+                disc_builtin.candidate_canons.contains(
+                    &"builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations"
+                        .to_string()
+                )
             );
 
             // 2. Modifying .canons/*.canon.md triggers builtin:canon-authoring/*
@@ -891,9 +892,10 @@ mod tests {
             .discovery
             .expect("discovery");
             assert!(
-                disc_local
-                    .candidate_canons
-                    .contains(&"builtin:canon-authoring/canons-must-be-atomic".to_string())
+                disc_local.candidate_canons.contains(
+                    &"builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations"
+                        .to_string()
+                )
             );
 
             // 3. Modifying non-canon .canons/README.md does NOT trigger builtin:canon-authoring/*
@@ -1286,7 +1288,7 @@ mod tests {
                     all_canons: true,
                     canon_patterns: vec![
                         ".canons/architecture/foo.canon.md".to_string(),
-                        "builtin:canon-authoring/canons-must-be-atomic".to_string(),
+                        "builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations".to_string(),
                     ],
                     include_builtins: true,
                     ..DiscoverOptions::default()
@@ -1301,7 +1303,8 @@ mod tests {
                 explicit_disc.candidate_canons,
                 vec![
                     ".canons/architecture/foo.canon.md".to_string(),
-                    "builtin:canon-authoring/canons-must-be-atomic".to_string(),
+                    "builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations"
+                        .to_string(),
                 ]
             );
         }
