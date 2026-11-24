@@ -19,6 +19,33 @@ rustup update stable
 rustup component add clippy rustfmt
 ```
 
+### Optional: Faster Local & Worktree Builds (`sccache` & `mold`)
+
+On Linux `x86_64` with Rust 1.90+, `rustc` already uses `rust-lld` by default for fast linking. For even faster builds—especially when scaffolding fresh Git worktrees—you can optionally install:
+
+- **`sccache`** (recommended for worktrees): Safely shares compiled dependency artifacts across concurrent Git worktrees without sharing a mutable `target/` directory.
+  ```bash
+  cargo install sccache --locked
+  ```
+- **`mold`** (optional Linux linker upgrade over `rust-lld`):
+  ```bash
+  # Example on Debian/Ubuntu
+  sudo apt-get install mold
+  ```
+
+`./scripts/check.sh` automatically detects `sccache` and `mold` on your `PATH` when `RUSTC_WRAPPER` / `RUSTFLAGS` are unset (pass `RUSTC_WRAPPER=""` or `RUSTFLAGS=""` to opt out). To enable them for direct `cargo` commands as well, add to your personal `~/.cargo/config.toml`:
+
+```toml
+[build]
+rustc-wrapper = "sccache"
+
+# Optional on Linux x86_64 if mold is installed:
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+
+By default `sccache` stores its cache in `~/.cache/sccache`; set `SCCACHE_DIR` if you prefer a workspace-scoped cache location.
+
 ---
 
 ## 2. Forking Canon Clerk

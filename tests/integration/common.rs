@@ -16,6 +16,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(crate) fn bin_path() -> &'static str {
+    env!("CARGO_BIN_EXE_canon-clerk")
+}
+
 /// Self-contained temporary workspace populated with hermetic `.canons/` and `src/` fixtures.
 pub(crate) struct TempCanonWorkspace {
     path: PathBuf,
