@@ -172,19 +172,43 @@ Prompt your assistant:
 
 **What happens:** The assistant activates the `doc-driven-change` skill in `.agents/skills/doc-driven-change/` to inspect the documentation diff against `upstream/main`, structure a progressive task breakdown, and implement the change against the documented contracts.
 
-### Shift-Left WIP Auditing
+### Shift-Left Pre-Flight Verification
 
-Before pushing a branch or opening a pull request, run `./scripts/check.sh` for offline, hermetic verification (formatting, clippy, tests, and static canon validation). To also run live `canon-clerk audit` adjudication against your in-flight changes relative to `upstream/main` (requires `GEMINI_API_KEY` or configured provider credentials):
+Before pushing a branch or opening a pull request, run the `pr-preflight` skill to execute the full local shift-left gauntlet (PR title linting, offline CI parity checks, conditional metadata/workflow checks, and live `canon-clerk audit` adjudication with PR metadata forwarded).
+
+#### Directing Your AI Assistant (Recommended)
+Prompt your assistant:
+> *"Run pre-flight checks with title `feat(cli): add new flag (#123)`"*  
+> *"Verify my changes before opening a PR"*
+
+**What happens:** Your assistant activates the `pr-preflight` skill in `.agents/skills/pr-preflight/`, validates the proposed PR title against `.github/workflows/pr-title-lint.yml`, runs `./scripts/check.sh`, runs conditional checks when `.github/settings.yml` or `.github/workflows/` are touched, and executes live `canon-clerk audit` against the `upstream/main` merge-base with `--pr-title` and optional `--pr-body-file` forwarded.
+
+#### Under the Hood & Manual Fallback
+Under the hood, the assistant runs the composite script in `.agents/skills/pr-preflight/scripts/`:
 
 ```bash
-# Audit tracked changes in the current worktree against upstream/main merge-base:
-./scripts/audit-wip.sh
+# Full pre-flight (PR title lint + offline CI checks + live canon-clerk audit):
+./.agents/skills/pr-preflight/scripts/preflight.sh \
+  --pr-title "feat(cli): add new flag (#123)"
 
-# Forward optional PR metadata or provider overrides:
-./scripts/audit-wip.sh --pr-title "feat(cli): add new flag" --provider google
+# Include drafted PR body so PR-description canons evaluate locally:
+./.agents/skills/pr-preflight/scripts/preflight.sh \
+  --pr-title "feat(cli): add new flag (#123)" \
+  --pr-body-file /tmp/pr-body.md
+
+# Forward extra CLI arguments directly to `canon-clerk audit`:
+./.agents/skills/pr-preflight/scripts/preflight.sh \
+  --pr-title "feat(cli): add new flag (#123)" -- --provider google
+
+# Run deterministic checks only (disable live LLM audit):
+./.agents/skills/pr-preflight/scripts/preflight.sh \
+  --pr-title "feat(cli): add new flag (#123)" --no-audit
+
+# Validate a candidate PR title standalone:
+./scripts/check-pr-title.sh "feat(cli): add new flag (#123)"
 ```
 
-Local diff-only runs automatically prune canons that require absent PR metadata planes (`pr_title`, `pr_body`, `linked_issues`) while evaluating all diff-applicable canons.
+Stage or commit new files before running `preflight.sh` so they appear in the merge-base diff. Passing `--pr-title` (and optionally `--pr-body` / `--pr-body-file`) ensures PR-metadata canons evaluate locally rather than being pruned.
 
 ### Benchmarking Stage Consistency & Flippers
 
@@ -247,7 +271,7 @@ Under Canon Clerk's squash-and-merge policy, **your PR title directly becomes th
   - `ci: add PR title linting workflow (#9)`
   - `docs: add development setup guide (#1)`
 
-* **Automated CI Validation:** Our CI runs a PR title linter ([`.github/workflows/pr-title-lint.yml`](../.github/workflows/pr-title-lint.yml)) on every opened, edited, or synchronized PR. If the check fails, edit your PR title in GitHub to immediately clear the check.
+* **Local & Automated CI Validation:** Validate candidate titles locally before opening a PR with `./scripts/check-pr-title.sh "<title>"` (or automatically via `pr-preflight`), which parses the permitted types and scopes directly from [`.github/workflows/pr-title-lint.yml`](../.github/workflows/pr-title-lint.yml). CI also enforces the same workflow on every opened, edited, or synchronized PR; if the check fails, edit your PR title in GitHub to immediately clear it.
 
 ### Monitoring CI & Diagnosing Failures
 

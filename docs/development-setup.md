@@ -193,20 +193,21 @@ To verify changes locally before pushing or opening a pull request, run the unif
 This executes the identical offline, hermetic quality verification pipeline enforced by GitHub Actions CI:
 1. License header validation (`./scripts/check-license.sh`)
 2. File size ceiling validation (`./scripts/check-file-size.sh`)
-3. Code formatting verification (`cargo fmt --check`)
-4. Strict compiler lints (`cargo clippy --all-targets --all-features -- -D warnings`)
-5. Full unit and integration test suites (`cargo test`)
-6. Repository canon corpus validation (`cargo run --locked -- validate --all-canons --max-warnings 0`)
+3. Canon corpus taxonomy validation (`./scripts/check-canons.sh`)
+4. Code formatting verification (`cargo fmt --check`)
+5. Strict compiler lints (`cargo clippy --all-targets --all-features -- -D warnings`)
+6. Full unit and integration test suites (`cargo test`)
+7. Repository canon corpus validation (`cargo run --locked -- validate --all-canons --max-warnings 0`)
 
-### Shift-Left Canon Auditing (WIP)
+### Shift-Left Pre-Flight & Live Canon Auditing
 
-`./scripts/check.sh` stays strictly offline and hermetic. To run live LLM-backed `canon-clerk audit` adjudication locally against your work-in-progress diff before pushing (requires `GEMINI_API_KEY` or configured provider credentials), run:
+`./scripts/check.sh` stays strictly offline and hermetic. To run the complete shift-left pre-flight gauntlet—validating your PR title against `.github/workflows/pr-title-lint.yml`, running `./scripts/check.sh`, executing conditional metadata/workflow checks, and running live LLM-backed `canon-clerk audit` against your worktree's `upstream/main` merge-base diff (requires `GEMINI_API_KEY` or configured provider credentials)—run:
 
 ```bash
-./scripts/audit-wip.sh
+./.agents/skills/pr-preflight/scripts/preflight.sh --pr-title "feat(cli): add new flag (#123)"
 ```
 
-The script diffs tracked changes in your current worktree against the `upstream/main` (or `origin/main`) merge-base and pipes them to `canon-clerk audit --diff -`. Any additional CLI arguments are forwarded directly (for example, `./scripts/audit-wip.sh --pr-title "ci: add audit workflow"` or `./scripts/audit-wip.sh --provider typesafe`).
+Pass `--no-audit` to disable live LLM adjudication (`--audit` is enabled by default), `--pr-body-file <path>` to include a drafted PR description, or `-- <extra audit args>` to forward flags directly to `canon-clerk audit` (for example, `-- --provider google`). To lint a PR title standalone, run `./scripts/check-pr-title.sh "<title>"`.
 
 ---
 
