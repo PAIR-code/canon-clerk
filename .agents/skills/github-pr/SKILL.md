@@ -34,9 +34,9 @@ Resolves the PR, executes `gh pr view` and `gh pr checks` without synthetic refo
 ./.agents/skills/github-pr/scripts/pr-status.sh --watch 18
 ```
 
-### 2. `pr-failed-logs.sh [pr-number | --job <id>]`
+### 2. `pr-failed-logs.sh [pr-number | --job <id> | --check-run <id>]`
 
-Queries failing checks, retrieves logs via REST endpoint, saves complete logs to `/tmp/`, and prints the final 60 lines:
+Queries failing checks, retrieves GitHub Actions job logs (`/actions/runs/.../job/<id>`) and GitHub Check Run summaries/annotations (`/runs/<id>`, such as `PR Audit Report`) via the REST API, saves complete output to `/tmp/`, and shunts reports exceeding 8KB:
 
 ```bash
 # Auto-detects failing checks for current feature branch:
@@ -47,15 +47,19 @@ Queries failing checks, retrieves logs via REST endpoint, saves complete logs to
 
 # Inspect a specific GitHub Actions job directly:
 ./.agents/skills/github-pr/scripts/pr-failed-logs.sh --job 108349663838
+
+# Inspect a specific GitHub Check Run (e.g., PR Audit Report) directly:
+./.agents/skills/github-pr/scripts/pr-failed-logs.sh --check-run 138534485236
 ```
 
 ---
 
 ## CI Failure Triage Checklist
 
-When diagnosing failing status checks, classify the failure into one of four categories:
+When diagnosing failing status checks, classify the failure into one of five categories:
 
 1. **PR Title Linter (`PR Title / Conventional Commits`):** Fails if PR title violates Conventional Commits. Fix with `gh pr edit <pr-number> --title "type(scope): description (#issue)"` (no code commit needed).
 2. **Security & Policy Scans (`Google GitHub Admin`, `zizmor`):** Fails on workflow policies (e.g. unpinned actions, script injection). Fix by pinning action SHAs or addressing SARIF findings.
 3. **Contributor License Agreement (`cla/google`):** Fails if author email lacks signed Google CLA. Remind author to sign via `https://cla.developers.google.com/`.
 4. **Repository CI (Tests, Lint, Build):** Inspect failure lines via `pr-failed-logs.sh`, reproduce locally in the worktree, and push fixes.
+5. **Canon Clerk Audit (`PR Audit Report`):** Published as a GitHub Check Run. Inspect its summary, details, and file/line annotations via `pr-failed-logs.sh` (or `--check-run <id>`), address cited canon violations, and verify locally with `pr-preflight`.
