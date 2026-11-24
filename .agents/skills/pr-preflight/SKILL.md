@@ -43,9 +43,9 @@ Executes in fail-fast order:
   --pr-title "feat(cli): add output format flag (#123)" \
   -- --provider google
 
-# Deterministic checks only (disable live LLM audit):
+# Inner-loop deterministic checks only (NOT a substitute for pre-PR live audit):
 ./.agents/skills/pr-preflight/scripts/preflight.sh \
-  --pr-title "chore(agents): update preflight script (#428)" \
+  --pr-title "feat(cli): add output format flag (#123)" \
   --no-audit
 ```
 
@@ -61,7 +61,8 @@ To validate a candidate PR title alone before calling `gh pr create` or `gh pr e
 
 ## Operational Invariants
 
-1. **Stage or Commit New Files First:** `preflight.sh` diffs tracked files against the `upstream/main` merge-base (`git diff <merge-base>`). Stage new files with `git add` (or commit them) before running `preflight.sh` so they are included in the audit diff.
-2. **Always Pass `--pr-title` Before Opening a PR:** Passing `--pr-title` catches invalid Conventional Commit types/scopes locally and prevents PR-title canons from being pruned during `canon-clerk audit`.
-3. **Inspect Shunted Logs on Failure:** Output exceeding 8KB is automatically shunted to `/tmp/pr-preflight-<timestamp>.log`; inspect the full file rather than re-running individual commands blindly.
-4. **PR Body Hygiene:** Before running `gh pr create`, ensure the PR body omits CI checklists and file-by-file diff narration.
+1. **Run the Full Pre-Flight (Including Live Audit) Before Pushing or Opening a PR:** Always execute `preflight.sh` *without* `--no-audit` before pushing or creating a pull request so semantic canon violations are caught locally rather than in CI. Reserve `--no-audit` strictly for fast inner-loop iteration on deterministic checks.
+2. **Stage or Commit New Files First:** `preflight.sh` diffs tracked files against the `upstream/main` merge-base (`git diff <merge-base>`). Stage new files with `git add` (or commit them) before running `preflight.sh` so they are included in the audit diff.
+3. **Always Pass `--pr-title` Before Opening a PR:** Passing `--pr-title` catches invalid Conventional Commit types/scopes locally and prevents PR-title canons from being pruned during `canon-clerk audit`.
+4. **Inspect Shunted Logs on Failure:** Output exceeding 8KB is automatically shunted to `/tmp/pr-preflight-<timestamp>.log`; inspect the full file rather than re-running individual commands blindly.
+5. **PR Body Hygiene:** Before running `gh pr create`, ensure the PR body omits CI checklists and file-by-file diff narration.
