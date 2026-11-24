@@ -124,13 +124,14 @@ Canon Clerk embeds a production-grade corpus of **modular, domain-scoped `builti
 | 📦 **Build Systems** | [`builtins/build-systems/`](builtins/build-systems/) | Consolidated monorepo root bundling and private-package declaration hygiene. |
 | 📜 **Canon Authoring** | [`builtins/canon-authoring/`](builtins/canon-authoring/) | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, Canon Anatomy directives, succinctness, and directive contracts. |
 | 🛠️ **CLI Ergonomics** | [`builtins/cli/`](builtins/cli/) | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
+| 💬 **Code Comments** | [`builtins/code-comments/`](builtins/code-comments/) | Semantic comment truthfulness, signal-over-narration, substantiated safety/workaround notes, and API contract documentation completeness. |
 | ✨ **Code Quality** | [`builtins/code-quality/`](builtins/code-quality/) | Substantiated static-analysis suppressions with documented rationale. |
 | ⚡ **Concurrency & Async I/O** | [`builtins/concurrency/`](builtins/concurrency/) | Persistent, continuously driven runtime lifecycles for shared pooled or multiplexed asynchronous I/O clients. |
 | ⚙️ **Configuration** | [`builtins/configuration/`](builtins/configuration/) | Orthogonal configuration namespaces, `<provider>:<name>` specifier qualification, and deterministic specificity cascades. |
 | 🏷️ **Conventional Commits** | [`builtins/conventional-commits/`](builtins/conventional-commits/) | Semantic commit and PR invariants (`feat` for user-facing functionality, `fix` for user-facing defect repairs). |
 | 🔀 **Git Workflow** | [`builtins/git-workflow/`](builtins/git-workflow/) | Sanctioned issue scope hygiene and independent precursor domain-contract delivery. |
 | 📐 **OpenSpec** | [`builtins/openspec/`](builtins/openspec/) | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
-| 🔍 **Parser Design** | [`builtins/parser-design/`](builtins/parser-design/) | Lexical/semantic phase separation and explicit multi-occurrence/blank semantics. |
+| 🔍 **Parser Design** | [`builtins/parser-design/`](builtins/parser-design/) | Lexical/semantic phase separation, AST repeated-node cardinality, blank-payload normalization, and fault-tolerant diagnostics. |
 | 📝 **README Authoring** | [`builtins/readme-authoring/`](builtins/readme-authoring/) | Inverted pyramid orientation (lead with what and why), no unreleased roadmaps, feature parity, responsive dark/light hero banners, and shunting architecture to `docs/`. |
 | 🛡️ **Repository Governance** | [`builtins/repo-governance/`](builtins/repo-governance/) | GitHub Actions workflow script and CLI delegation hygiene. |
 | 🔒 **Security** | [`builtins/security/`](builtins/security/) | Workspace-external secret storage and POSIX `0600` owner-only credential file enforcement. |

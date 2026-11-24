@@ -33,6 +33,7 @@ architecture
 build-systems
 canon-authoring
 cli
+code-comments
 code-quality
 concurrency
 configuration
