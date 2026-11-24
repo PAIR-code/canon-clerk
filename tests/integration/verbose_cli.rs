@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::common::bin_path;
 use std::process::Command;
-
-fn bin_path() -> &'static str {
-    env!("CARGO_BIN_EXE_canon-clerk")
-}
 
 #[test]
 fn test_cli_verbose_suppresses_reqwest_and_hyper_debug_unless_rust_log_set() {

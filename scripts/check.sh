@@ -25,6 +25,15 @@ if [ -d "$HOME/.cargo/bin" ]; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
+# Auto-enable optional local build accelerators when installed and not explicitly configured.
+# Pass RUSTC_WRAPPER="" or RUSTFLAGS="" to opt out.
+if [ -z "${RUSTC_WRAPPER+set}" ] && command -v sccache >/dev/null 2>&1; then
+    export RUSTC_WRAPPER=sccache
+fi
+if [ -z "${RUSTFLAGS+set}" ] && command -v mold >/dev/null 2>&1; then
+    export RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+fi
+
 echo "=== 1/7: Checking License Headers ==="
 ./scripts/check-license.sh
 

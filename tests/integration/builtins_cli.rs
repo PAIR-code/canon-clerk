@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod common;
-
+use crate::common::{self, bin_path};
 use canon_clerk::Caseload;
 use std::process::Command;
-
-fn bin_path() -> &'static str {
-    env!("CARGO_BIN_EXE_canon-clerk")
-}
 
 #[test]
 fn test_cli_builtins_toggle_filtering_and_caseload_roundtrip() {
