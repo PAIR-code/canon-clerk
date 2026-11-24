@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Stage 2 semantic parser for the Canon body cognitive tetrad (`SPEC.md` §5).
+//! Stage 2 semantic parser for the Canon body anatomy (`SPEC.md` §5).
 
 use super::lexer::{
     CanonParseError, CanonToken, CanonTokenKind, DirectiveName, SourceSpan,
@@ -20,12 +20,12 @@ use super::lexer::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Recorded occurrence of a cognitive directive in the Canon body with 1-based source coordinates.
+/// Recorded occurrence of a Canon Anatomy directive in the Canon body with 1-based source coordinates.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct DirectiveOccurrence {
-    /// Normalized directive name (`exception`, `rationale`, or `remediation`).
+    /// Normalized directive name (`exception`, `precedent`, `rationale`, or `remediation`).
     pub name: DirectiveName,
-    /// Raw authored directive label (e.g. `"Exception:"`, `"**Remediation:**"`, `"## Exceptions"`).
+    /// Raw authored directive label (e.g. `"Exception:"`, `"Precedent:"`, `"**Remediation:**"`, `"## Exceptions"`).
     pub label: String,
     /// 1-based source coordinates covering the directive header and its body lines.
     pub span: SourceSpan,
@@ -33,7 +33,7 @@ pub struct DirectiveOccurrence {
     pub content: String,
 }
 
-/// Structured cognitive tetrad and raw body extracted from a Canon's Markdown body (`SPEC.md` §5).
+/// Structured Canon Anatomy directives and raw body extracted from a Canon's Markdown body (`SPEC.md` §5).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct CanonBody {
     /// Primary normative invariant statement (What).
@@ -43,7 +43,10 @@ pub struct CanonBody {
     pub invariant_span: Option<SourceSpan>,
     /// Discrete permissible deviation clauses evaluated as logical ORs (When / `Exception`).
     pub exceptions: Vec<String>,
-    /// Precedent engineering rationale (Why / `Rationale`).
+    /// Authoritative external standard or literature citations (Which / `Precedent`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub precedent: Option<String>,
+    /// Explanatory engineering rationale (Why / `Rationale`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
     /// Actionable contributor remediation instructions (How / `Remediation`).
@@ -135,10 +138,16 @@ fn append_token_to_section(
     }
 }
 
-fn collect_directive_tetrad(
-    occurrences: &[DirectiveOccurrence],
-) -> (Vec<String>, Option<String>, Option<String>) {
+struct CollectedDirectives {
+    exceptions: Vec<String>,
+    precedent: Option<String>,
+    rationale: Option<String>,
+    remediation: Option<String>,
+}
+
+fn collect_directives(occurrences: &[DirectiveOccurrence]) -> CollectedDirectives {
     let mut exceptions = Vec::new();
+    let mut precedent_parts = Vec::new();
     let mut rationale_parts = Vec::new();
     let mut remediation_parts = Vec::new();
 
@@ -150,14 +159,21 @@ fn collect_directive_tetrad(
             DirectiveName::Exception => {
                 exceptions.extend(expand_plural_exception_bullets(&occ.label, &occ.content));
             }
+            DirectiveName::Precedent => precedent_parts.push(occ.content.as_str()),
             DirectiveName::Rationale => rationale_parts.push(occ.content.as_str()),
             DirectiveName::Remediation => remediation_parts.push(occ.content.as_str()),
         }
     }
 
+    let precedent = (!precedent_parts.is_empty()).then(|| precedent_parts.join("\n\n"));
     let rationale = (!rationale_parts.is_empty()).then(|| rationale_parts.join("\n\n"));
     let remediation = (!remediation_parts.is_empty()).then(|| remediation_parts.join("\n\n"));
-    (exceptions, rationale, remediation)
+    CollectedDirectives {
+        exceptions,
+        precedent,
+        rationale,
+        remediation,
+    }
 }
 
 /// Stage 2 Body Parser: Assembles a [`CanonBody`] from a Stage 1 [`CanonToken`] slice.
@@ -246,14 +262,15 @@ pub fn parse_body_from_tokens(tokens: &[CanonToken]) -> CanonBody {
         invariant_span = None;
     }
 
-    let (exceptions, rationale, remediation) = collect_directive_tetrad(&occurrences);
+    let directives = collect_directives(&occurrences);
 
     CanonBody {
         invariant,
         invariant_span,
-        exceptions,
-        rationale,
-        remediation,
+        exceptions: directives.exceptions,
+        precedent: directives.precedent,
+        rationale: directives.rationale,
+        remediation: directives.remediation,
         directive_spans: occurrences,
         raw_body: raw_body_lines.join("\n"),
     }

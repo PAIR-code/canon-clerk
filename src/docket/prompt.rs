@@ -242,13 +242,7 @@ pub(super) fn append_canon_section(
     if !matched.is_empty() {
         let _ = writeln!(out, "- Triggered Exhibits: {}", matched.join(", "));
     }
-    let body = canon.raw_body.trim();
-    let statute = if body.is_empty() {
-        canon.invariant.trim()
-    } else {
-        body
-    };
-    let _ = writeln!(out, "\n{statute}");
+    let _ = writeln!(out, "\n{}", canon.invariant.trim());
     let _ = writeln!(out, "- Exact `canon_path`: `{canon_ref}`\n");
 }
 
@@ -270,6 +264,32 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_append_canon_section_renders_only_invariant_excluding_non_normative_directives() {
+        let canon = crate::canon::parse_canon(
+            "Boolean-returning functions MUST specify polarity.\n\n\
+             Precedent: Effective Java (Item 56).\n\n\
+             Rationale: Prevents inverted caller assumptions.\n\n\
+             Remediation: Document both true and false outcomes.",
+            &crate::canon::ParseCanonOptions::with_source_ref(
+                ".canons/boolean-return-docs-must-specify-polarity.canon.md",
+            ),
+        )
+        .expect("parse canon");
+
+        let mut out = String::new();
+        append_canon_section(
+            &mut out,
+            ".canons/boolean-return-docs-must-specify-polarity.canon.md",
+            &canon,
+            &["src/lib.rs".to_string()],
+        );
+        assert!(out.contains("Boolean-returning functions MUST specify polarity."));
+        assert!(!out.contains("Effective Java"));
+        assert!(!out.contains("Prevents inverted caller assumptions"));
+        assert!(!out.contains("Document both true and false outcomes"));
+    }
 
     #[test]
     fn test_append_linked_issues_renders_author_and_labels() {

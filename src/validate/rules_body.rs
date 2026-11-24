@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Static Markdown body and cognitive tetrad lint rules for Canon files (`docs/architecture/nodes/validate.md` §4).
+//! Static Markdown body and Canon Anatomy lint rules for Canon files (`docs/architecture/nodes/validate.md` §4).
 
 use crate::canon::{CanonBody, CanonToken, CanonTokenKind, DirectiveName, SourceSpan};
 use crate::caseload::{AnnotationLevel, CodeAnnotation};
@@ -174,6 +174,7 @@ fn scan_body_token(
 }
 
 fn check_directive_occurrences(path: &str, body: &CanonBody, out: &mut Vec<CodeAnnotation>) {
+    let mut seen_precedent = false;
     let mut seen_rationale = false;
     let mut seen_remediation = false;
 
@@ -191,6 +192,17 @@ fn check_directive_occurrences(path: &str, body: &CanonBody, out: &mut Vec<CodeA
         }
 
         match occ.name {
+            DirectiveName::Precedent => {
+                if seen_precedent {
+                    out.push(make_directive_warning(
+                        path,
+                        occ.span,
+                        "duplicate-directive",
+                        "Duplicate 'Precedent' directive; single-occurrence directives should appear at most once per canon.".to_string(),
+                    ));
+                }
+                seen_precedent = true;
+            }
             DirectiveName::Rationale => {
                 if seen_rationale {
                     out.push(make_directive_warning(

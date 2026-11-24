@@ -452,6 +452,7 @@ pub fn parse_canon_or_fallback(raw_content: &str, options: &ParseCanonOptions) -
         invariant: title,
         invariant_span: None,
         exceptions: Vec::new(),
+        precedent: None,
         rationale: None,
         remediation: None,
         source_ref: source_info.as_ref().map(|s| s.source_ref.clone()),

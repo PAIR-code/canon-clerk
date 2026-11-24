@@ -59,11 +59,12 @@ impl SourceSpan {
     }
 }
 
-/// Cognitive directive keyword names recognized by Canon Clerk (`SPEC.md` §5).
+/// Canon Anatomy directive keyword names recognized by Canon Clerk (`SPEC.md` §5).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum DirectiveName {
     Exception,
+    Precedent,
     Rationale,
     Remediation,
 }
@@ -73,6 +74,7 @@ impl DirectiveName {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Exception => "exception",
+            Self::Precedent => "precedent",
             Self::Rationale => "rationale",
             Self::Remediation => "remediation",
         }
@@ -97,7 +99,7 @@ pub enum CanonTokenKind {
         /// Cleaned heading text with leading/trailing `#` markers removed.
         text: String,
     },
-    /// Cognitive directive line or section header (`Exception`, `Rationale`, `Remediation`).
+    /// Canon Anatomy directive line or section header (`Exception`, `Precedent`, `Rationale`, `Remediation`).
     Directive {
         /// Normalized directive name.
         name: DirectiveName,
@@ -205,6 +207,8 @@ fn match_directive_keyword(text: &str) -> Option<(DirectiveName, usize)> {
         Some((DirectiveName::Exception, "exceptions".len()))
     } else if lower.starts_with("exception") {
         Some((DirectiveName::Exception, "exception".len()))
+    } else if lower.starts_with("precedent") {
+        Some((DirectiveName::Precedent, "precedent".len()))
     } else if lower.starts_with("rationale") {
         Some((DirectiveName::Rationale, "rationale".len()))
     } else if lower.starts_with("remediation") {
