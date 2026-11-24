@@ -761,6 +761,32 @@ Precedent: Google Style Guides; Effective Java (Item 56).";
             assert!(body.rationale.is_none());
             assert!(body.remediation.is_none());
         }
+
+        #[test]
+        fn test_precedent_handles_missing_blank_and_repeated_occurrences() {
+            let missing = parse_body("Functions MUST validate inputs.").expect("parse missing");
+            assert_eq!(missing.precedent, None);
+
+            let blank = parse_body("Functions MUST validate inputs.\n\nPrecedent:   \t  \n")
+                .expect("parse blank");
+            assert_eq!(blank.precedent, None);
+            assert_eq!(blank.directive_spans.len(), 1);
+            assert_eq!(blank.directive_spans[0].name, DirectiveName::Precedent);
+            assert!(blank.directive_spans[0].content.is_empty());
+
+            let repeated = parse_body(
+                "Functions MUST validate inputs.\n\n\
+                 Precedent: RFC 2119.\n\n\
+                 Precedent:   \n\n\
+                 **Precedent:** POSIX.1-2017.",
+            )
+            .expect("parse repeated");
+            assert_eq!(
+                repeated.precedent.as_deref(),
+                Some("RFC 2119.\n\nPOSIX.1-2017.")
+            );
+            assert_eq!(repeated.directive_spans.len(), 3);
+        }
     }
 
     mod fault_tolerant_states {
@@ -780,6 +806,7 @@ Precedent: Google Style Guides; Effective Java (Item 56).";
             assert_eq!(zero_byte.title, "All Caps Spec Must Refer To Spec Md");
             assert_eq!(zero_byte.invariant, "All Caps Spec Must Refer To Spec Md");
             assert!(zero_byte.exceptions.is_empty());
+            assert!(zero_byte.precedent.is_none());
             assert!(zero_byte.rationale.is_none());
             assert!(zero_byte.remediation.is_none());
 
@@ -813,6 +840,8 @@ Exception:
 
 Exception: Valid exception clause.
 
+Precedent:   \t  
+
 Rationale:   \t  
 
 **Remediation:**    ";
@@ -832,10 +861,11 @@ Rationale:   \t
             assert!(canon.references.is_empty());
             assert_eq!(canon.invariant, "Invariant text.");
             assert_eq!(canon.exceptions, vec!["Valid exception clause."]);
+            assert_eq!(canon.precedent, None);
             assert_eq!(canon.rationale, None);
             assert_eq!(canon.remediation, None);
-            // All 4 directive occurrences (including blank ones) are preserved with spans for `validate`
-            assert_eq!(canon.directive_spans.len(), 4);
+            // All 5 directive occurrences (including blank ones) are preserved with spans for `validate`
+            assert_eq!(canon.directive_spans.len(), 5);
         }
 
         #[test]
@@ -854,6 +884,10 @@ Invariant text.
 Exception: First exception.
 
 Exception: Second exception.
+
+Precedent: RFC 2119.
+
+Precedent: POSIX.1-2017.
 
 Rationale: First rationale paragraph.
 
@@ -878,11 +912,15 @@ Rationale: Second rationale paragraph.
                 vec!["First exception.", "Second exception."]
             );
             assert_eq!(
+                canon.precedent.as_deref(),
+                Some("RFC 2119.\n\nPOSIX.1-2017.")
+            );
+            assert_eq!(
                 canon.rationale.as_deref(),
                 Some("First rationale paragraph.\n\nSecond rationale paragraph.")
             );
             assert_eq!(canon.remediation.as_deref(), Some("Step 1.\n\nStep 2."));
-            assert_eq!(canon.directive_spans.len(), 6);
+            assert_eq!(canon.directive_spans.len(), 8);
         }
 
         #[test]
