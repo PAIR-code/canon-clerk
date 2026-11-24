@@ -45,7 +45,7 @@ run_failed_logs() {
         exit 1
         ;;
     esac
-    dump_check_run "$REPO" "$2" "manual" "Direct Check Run Inspection"
+    dump_check_run "$REPO" "$2"
     return 0
   fi
 
@@ -87,7 +87,7 @@ run_failed_logs() {
   CHECKS_RC=0
   FAILING_CHECKS="$(gh pr checks "$PR_NUMBER" --repo "$REPO" --json name,state,bucket,link --jq '.[] | select(.bucket == "fail") | [.name, .state, .link] | @tsv')" || CHECKS_RC=$?
   if [ "$CHECKS_RC" -ne 0 ]; then
-    echo "Error: Failed to query checks for PR #${PR_NUMBER} in repository '${REPO}' (gh exit code ${CHECKS_RC})." >&2
+    echo "Error: Failed to query checks for PR #${PR_NUMBER} in repository '${REPO}' (gh exit code ${CHECKS_RC}). Verify authentication with 'gh auth status' or confirm the PR exists with 'gh pr view ${PR_NUMBER} --repo ${REPO}'." >&2
     return "$CHECKS_RC"
   fi
 
@@ -118,7 +118,7 @@ run_failed_logs() {
     esac
 
     if [ -n "$CHECK_RUN_ID" ]; then
-      dump_check_run "$REPO" "$CHECK_RUN_ID" "$PR_NUMBER" "$NAME"
+      dump_check_run "$REPO" "$CHECK_RUN_ID"
       continue
     fi
 
@@ -131,60 +131,15 @@ run_failed_logs() {
 dump_check_run() {
   REPO="$1"
   CHECK_RUN_ID="$2"
-  PR_NUMBER="$3"
-  CHECK_NAME="$4"
 
-  REPORT_FILE="/tmp/pr-${PR_NUMBER}-check-run-${CHECK_RUN_ID}.md"
-
-  echo "--- Check Run: ${CHECK_NAME} (ID: ${CHECK_RUN_ID}) ---"
-  if ! gh api "repos/${REPO}/check-runs/${CHECK_RUN_ID}" --jq '
-    "Status: " + (.status // "unknown") + " | Conclusion: " + (.conclusion // "unknown"),
-    (if (.output.title // "") != "" then "\nTitle: " + .output.title else empty end),
-    (if (.output.summary // "") != "" then "\n=== Summary ===\n" + .output.summary else empty end),
-    (if (.output.text // "") != "" then "\n=== Details ===\n" + .output.text else empty end)
-  ' > "$REPORT_FILE" 2>&1; then
-    echo "Warning: Failed to fetch check run ${CHECK_RUN_ID} via gh api."
-    cat "$REPORT_FILE"
-    rm -f "$REPORT_FILE"
-    echo ""
+  if ! gh api "repos/${REPO}/check-runs/${CHECK_RUN_ID}"; then
+    echo "Warning: Failed to fetch check run ${CHECK_RUN_ID}. Verify authentication with 'gh auth status' or inspect manually with 'gh api repos/${REPO}/check-runs/${CHECK_RUN_ID}'." >&2
     return 0
   fi
-
-  ANNOTATIONS_FILE="$(mktemp /tmp/pr-check-run-annotations.XXXXXX)"
-  if gh api --paginate "repos/${REPO}/check-runs/${CHECK_RUN_ID}/annotations" --jq '
-    .[] |
-    "[" + (.annotation_level // "notice") + "] " +
-    (.path // "<unknown>") + ":" + ((.start_line // 0) | tostring) +
-    (if (.end_line != null and .end_line != .start_line) then "-" + (.end_line | tostring) else "" end) +
-    (if (.title // "") != "" then " (" + .title + ")" else "" end) +
-    "\n" + (.message // "") + "\n"
-  ' > "$ANNOTATIONS_FILE" 2>&1; then
-    if [ -s "$ANNOTATIONS_FILE" ]; then
-      {
-        echo ""
-        echo "=== Annotations ==="
-        cat "$ANNOTATIONS_FILE"
-      } >> "$REPORT_FILE"
-    fi
-  else
-    echo "Warning: Failed to fetch annotations for check run ${CHECK_RUN_ID} via gh api." >> "$REPORT_FILE"
-  fi
-  rm -f "$ANNOTATIONS_FILE"
-
-  REPORT_SIZE="$(wc -c < "$REPORT_FILE" | tr -d ' ')"
-  echo "Saved check run report to: ${REPORT_FILE} (${REPORT_SIZE} bytes)"
   echo ""
 
-  MAX_BYTES=8192
-  if [ "$REPORT_SIZE" -gt "$MAX_BYTES" ]; then
-    echo "=== First 60 lines of check run report ==="
-    head -n 60 "$REPORT_FILE"
-    echo "=== End of preview ==="
-    echo "View full report with: view_file ${REPORT_FILE}"
-  else
-    echo "=== Complete Check Run Report ==="
-    cat "$REPORT_FILE"
-    echo "=== End of check run report ==="
+  if ! gh api --paginate "repos/${REPO}/check-runs/${CHECK_RUN_ID}/annotations"; then
+    echo "Warning: Failed to fetch annotations for check run ${CHECK_RUN_ID}. Verify authentication with 'gh auth status' or inspect manually with 'gh api repos/${REPO}/check-runs/${CHECK_RUN_ID}/annotations'." >&2
   fi
   echo ""
 }
@@ -229,7 +184,7 @@ dump_job_log() {
 # Output shunting when exceeding 8KB per canon
 TMP_OUT="$(mktemp /tmp/pr-failed-logs-out.XXXXXX)"
 set +e
-( set -e; run_failed_logs "$@" ) > "$TMP_OUT" 2>&1
+( set -e; run_failed_logs "$@" ) > "$TMP_OUT"
 EXIT_CODE=$?
 set -e
 
@@ -239,10 +194,10 @@ MAX_BYTES=8192
 if [ "$SIZE" -gt "$MAX_BYTES" ]; then
   SHUNTED_LOG="/tmp/pr-failed-logs-$(date +%s).log"
   mv "$TMP_OUT" "$SHUNTED_LOG"
-  head -n 60 "$SHUNTED_LOG"
-  echo ""
-  echo "[OUTPUT TRUNCATED: Output size (${SIZE} bytes) exceeds 8KB limit]"
-  echo "Complete log written to: ${SHUNTED_LOG}"
+  tail -n 60 "$SHUNTED_LOG" | tail -c "$MAX_BYTES"
+  echo "" >&2
+  echo "[OUTPUT TRUNCATED: Output size (${SIZE} bytes) exceeds 8KB limit]" >&2
+  echo "Complete log written to: ${SHUNTED_LOG}" >&2
 else
   cat "$TMP_OUT"
   rm -f "$TMP_OUT"
