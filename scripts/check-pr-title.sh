@@ -15,8 +15,9 @@ set -eu
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Validates a pull request title against the Conventional Commits types, scopes,
-# and header pattern configured in .github/workflows/pr-title-lint.yml.
+# Validates a pull request title against Conventional Commits header syntax and
+# the `types`, `scopes`, and `requireScope` settings parsed from
+# .github/workflows/pr-title-lint.yml.
 #
 # Architectural constraint: Canon Clerk's local development setup requires only
 # the Rust toolchain and POSIX shell utilities (no Node/commitlint, yq, or
@@ -32,8 +33,9 @@ print_help() {
     cat <<EOF
 Usage: $0 <pr-title | ->
 
-Validates a candidate pull request title against the permitted types, scopes,
-and Conventional Commits header pattern in .github/workflows/pr-title-lint.yml.
+Validates a candidate pull request title against Conventional Commits header
+syntax and the permitted types, scopes, and requireScope settings parsed from
+.github/workflows/pr-title-lint.yml.
 
 Arguments:
   <pr-title>   Pull request title string to validate
@@ -131,7 +133,7 @@ END {
         exit 1
     }
 
-    # Match headerPattern: ^(\w+)(?:\(([\w\$\.\-\*\s,]+)\))?\!?:\s([^\n\r]+)$
+    # Validate Conventional Commits header syntax: type[(scope[,scope])][!]: <non-blank subject>
     if (!match(title, /^[A-Za-z0-9_]+/)) {
         printf "Error: No release type found in pull request title \"%s\". Use \"type(scope): subject\" where type is one of: %s.\n", title, type_list > "/dev/stderr"
         exit 1
