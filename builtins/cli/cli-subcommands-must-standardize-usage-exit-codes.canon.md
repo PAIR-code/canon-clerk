@@ -8,4 +8,6 @@ Hierarchical CLI subcommands MUST terminate with exit status `2` on option, argu
 
 Exception: Declarative argument-parsing frameworks whose root parser centrally enforces exit status `2` across nested subcommands MAY omit per-subcommand exit-override hooks IFF syntax and usage errors uniformly exit with status `2` at runtime.
 
-Rationale: Following GNU Coding Standards §4.3 and BSD `sysexits.h` conventions, exit status `2` distinguishes invocation and syntax defects from domain or runtime failures (`exit 1`); imperative CLI frameworks whose subcommands default to `exit 1` require explicit parser exit overrides.
+Precedent: GNU Coding Standards §4.3; BSD `sysexits.h`.
+
+Rationale: Exit status `2` distinguishes invocation and syntax defects from domain or runtime failures (`exit 1`); imperative CLI frameworks whose subcommands default to `exit 1` require explicit parser exit overrides.

@@ -9,7 +9,7 @@ tags:
   - api-design
   - configuration
 ---
-Public schema, configuration, and API field names MUST denote specific domain concepts and structural semantics on a cold read rather than generic or overloaded placeholders whose meaning requires inspecting implementation code.
+Public schema, configuration, and API field names MUST self-descriptively denote specific domain concepts and structural semantics from the schema signature alone rather than generic or overloaded placeholders whose meaning requires inspecting implementation code.
 
 Exception: Generic container field names (such as `items` or `data`) MAY be used IFF mandated by an external wire standard or envelope specification (such as JSON:API, OpenAPI pagination envelopes, or GraphQL connections).
 
