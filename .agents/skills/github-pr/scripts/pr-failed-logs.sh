@@ -24,9 +24,28 @@ run_failed_logs() {
     REPO="PAIR-code/canon-clerk"
   fi
 
-  # 2. Direct Job ID mode (--job <job-id>)
-  if [ "$1" = "--job" ] && [ -n "$2" ]; then
+  # 2. Direct inspection modes (--job <job-id> | --check-run <check-run-id>)
+  if [ "$1" = "--job" ]; then
+    case "$2" in
+      ''|*[!0-9]*)
+        echo "Error: --job requires a numeric job ID (got: '${2:-}')." >&2
+        echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>  OR  $0 --check-run <check-run-id>" >&2
+        exit 1
+        ;;
+    esac
     dump_job_log "$REPO" "$2" "manual" "Direct Job Inspection"
+    return 0
+  fi
+
+  if [ "$1" = "--check-run" ]; then
+    case "$2" in
+      ''|*[!0-9]*)
+        echo "Error: --check-run requires a numeric check run ID (got: '${2:-}')." >&2
+        echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>  OR  $0 --check-run <check-run-id>" >&2
+        exit 1
+        ;;
+    esac
+    dump_check_run "$REPO" "$2"
     return 0
   fi
 
@@ -37,7 +56,7 @@ run_failed_logs() {
     case "$PR_ARG" in
       ''|*[!0-9]*)
         echo "Error: PR argument must be a valid PR number (got: '$1')." >&2
-        echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>" >&2
+        echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>  OR  $0 --check-run <check-run-id>" >&2
         exit 1
         ;;
       *)
@@ -48,7 +67,7 @@ run_failed_logs() {
     BRANCH="$(git branch --show-current 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
     if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ] || [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
       echo "Error: Cannot auto-detect PR for branch '$BRANCH'. Please specify a PR number." >&2
-      echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>" >&2
+      echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>  OR  $0 --check-run <check-run-id>" >&2
       exit 1
     fi
 
@@ -59,13 +78,18 @@ run_failed_logs() {
 
     if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
       echo "Error: No pull request found for branch '$BRANCH' in repository '$REPO'." >&2
-      echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>" >&2
+      echo "Usage: $0 [pr-number]  OR  $0 --job <job-id>  OR  $0 --check-run <check-run-id>" >&2
       exit 1
     fi
   fi
 
   # 4. Query failing checks using gh pr checks
-  FAILING_CHECKS="$(gh pr checks "$PR_NUMBER" --repo "$REPO" --json name,state,bucket,link --jq '.[] | select(.bucket == "fail") | [.name, .state, .link] | @tsv')"
+  CHECKS_RC=0
+  FAILING_CHECKS="$(gh pr checks "$PR_NUMBER" --repo "$REPO" --json name,state,bucket,link --jq '.[] | select(.bucket == "fail") | [.name, .state, .link] | @tsv')" || CHECKS_RC=$?
+  if [ "$CHECKS_RC" -ne 0 ]; then
+    echo "Error: Failed to query checks for PR #${PR_NUMBER} in repository '${REPO}' (gh exit code ${CHECKS_RC}). Verify authentication with 'gh auth status' or confirm the PR exists with 'gh pr view ${PR_NUMBER} --repo ${REPO}'." >&2
+    return "$CHECKS_RC"
+  fi
 
   if [ -z "$FAILING_CHECKS" ]; then
     echo "No failing checks found for PR #${PR_NUMBER}."
@@ -76,19 +100,48 @@ run_failed_logs() {
   echo "$FAILING_CHECKS"
   echo ""
 
-  # 5. Retrieve and dump logs for each failing check
+  # 5. Retrieve and dump logs or check run details for each failing check
   echo "$FAILING_CHECKS" | while IFS="$(printf '\t')" read -r NAME STATE LINK; do
-    JOB_ID="$(echo "$LINK" | sed -E -n 's#.*/actions/runs/[0-9]+/job/([0-9]+).*#\1#p')"
-
-    if [ -z "$JOB_ID" ]; then
-      echo "--- Check: ${NAME} (${STATE}) ---"
-      echo "External check (no GitHub Actions job ID): ${LINK}"
-      echo ""
+    JOB_ID="$(printf '%s\n' "$LINK" | sed -E -n 's#.*/actions/runs/[0-9]+/job/([0-9]+).*#\1#p')"
+    if [ -n "$JOB_ID" ]; then
+      dump_job_log "$REPO" "$JOB_ID" "$PR_NUMBER" "$NAME"
       continue
     fi
 
-    dump_job_log "$REPO" "$JOB_ID" "$PR_NUMBER" "$NAME"
+    CHECK_RUN_ID=""
+    case "$LINK" in
+      */actions/runs/*)
+        ;;
+      *)
+        CHECK_RUN_ID="$(printf '%s\n' "$LINK" | sed -E -n 's#.*/runs/([0-9]+)([/?#].*|$)#\1#p')"
+        ;;
+    esac
+
+    if [ -n "$CHECK_RUN_ID" ]; then
+      dump_check_run "$REPO" "$CHECK_RUN_ID"
+      continue
+    fi
+
+    echo "--- Check: ${NAME} (${STATE}) ---"
+    echo "External check (no GitHub Actions job ID or Check Run ID): ${LINK}"
+    echo ""
   done
+}
+
+dump_check_run() {
+  REPO="$1"
+  CHECK_RUN_ID="$2"
+
+  if ! gh api "repos/${REPO}/check-runs/${CHECK_RUN_ID}"; then
+    echo "Warning: Failed to fetch check run ${CHECK_RUN_ID}. Verify authentication with 'gh auth status' or inspect manually with 'gh api repos/${REPO}/check-runs/${CHECK_RUN_ID}'." >&2
+    return 0
+  fi
+  echo ""
+
+  if ! gh api --paginate "repos/${REPO}/check-runs/${CHECK_RUN_ID}/annotations"; then
+    echo "Warning: Failed to fetch annotations for check run ${CHECK_RUN_ID}. Verify authentication with 'gh auth status' or inspect manually with 'gh api repos/${REPO}/check-runs/${CHECK_RUN_ID}/annotations'." >&2
+  fi
+  echo ""
 }
 
 dump_job_log() {
@@ -131,7 +184,7 @@ dump_job_log() {
 # Output shunting when exceeding 8KB per canon
 TMP_OUT="$(mktemp /tmp/pr-failed-logs-out.XXXXXX)"
 set +e
-( run_failed_logs "$@" ) > "$TMP_OUT" 2>&1
+( set -e; run_failed_logs "$@" ) > "$TMP_OUT"
 EXIT_CODE=$?
 set -e
 
@@ -141,10 +194,10 @@ MAX_BYTES=8192
 if [ "$SIZE" -gt "$MAX_BYTES" ]; then
   SHUNTED_LOG="/tmp/pr-failed-logs-$(date +%s).log"
   mv "$TMP_OUT" "$SHUNTED_LOG"
-  head -n 60 "$SHUNTED_LOG"
-  echo ""
-  echo "[OUTPUT TRUNCATED: Output size (${SIZE} bytes) exceeds 8KB limit]"
-  echo "Complete log written to: ${SHUNTED_LOG}"
+  tail -n 60 "$SHUNTED_LOG" | tail -c "$MAX_BYTES"
+  echo "" >&2
+  echo "[OUTPUT TRUNCATED: Output size (${SIZE} bytes) exceeds 8KB limit]" >&2
+  echo "Complete log written to: ${SHUNTED_LOG}" >&2
 else
   cat "$TMP_OUT"
   rm -f "$TMP_OUT"
