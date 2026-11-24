@@ -106,13 +106,7 @@ fn append_canon_section(out: &mut String, canon_ref: &str, canon: &Canon, matche
     if !matched.is_empty() {
         let _ = writeln!(out, "- Triggered Exhibits: {}", matched.join(", "));
     }
-    let body = canon.raw_body.trim();
-    let statute = if body.is_empty() {
-        canon.invariant.trim()
-    } else {
-        body
-    };
-    let _ = writeln!(out, "\n{statute}");
+    let _ = writeln!(out, "\n{}", canon.invariant.trim());
     let _ = writeln!(out, "- Exact `canon_path`: `{canon_ref}`\n");
 }
 

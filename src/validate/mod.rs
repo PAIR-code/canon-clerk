@@ -471,8 +471,53 @@ Items MUST omit negated modal stems.";
         }
     }
 
-    mod body_and_tetrad_linting {
+    mod body_and_anatomy_linting {
         use super::*;
+
+        #[test]
+        fn test_precedent_directive_after_invariant_passes_without_atomicity_warning() {
+            let raw = "\
+Boolean-returning functions MUST specify both `true` and `false` polarity in doc comments.
+
+Precedent: Google Style Guides; Effective Java (Item 56).";
+
+            let meta = lint_canon_source(
+                raw,
+                &ParseCanonOptions::with_source_ref(
+                    ".canons/boolean-return-docs-must-specify-polarity.canon.md",
+                ),
+            );
+            assert_eq!(meta.result, ValidationOutcome::Pass);
+            assert_eq!(meta.error_count, 0);
+            assert_eq!(meta.warning_count, 0);
+        }
+
+        #[test]
+        fn test_flags_blank_and_duplicate_precedent_directives() {
+            let raw = "\
+Items MUST be valid.
+
+Precedent:   
+
+Precedent: RFC 2119.";
+
+            let meta = lint_canon_source(
+                raw,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md"),
+            );
+            assert_eq!(meta.error_count, 0);
+            assert_eq!(meta.warning_count, 2);
+            assert!(
+                meta.diagnostics
+                    .iter()
+                    .any(|d| d.title.as_deref() == Some("blank-directive"))
+            );
+            assert!(
+                meta.diagnostics
+                    .iter()
+                    .any(|d| d.title.as_deref() == Some("duplicate-directive"))
+            );
+        }
 
         #[test]
         fn test_flags_lowercase_rfc2119_keywords_outside_inline_code() {

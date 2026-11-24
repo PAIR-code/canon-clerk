@@ -72,7 +72,7 @@ flowchart LR
    - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
    - **Canon Naming & ID Standards:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`), non-empty canonical `id` derivation from file stems, and realm-and-scope `id` uniqueness (`(source_kind, scope, id)`), preserving `SPEC.md` §6.2 cross-realm coexistence without false `duplicate-canon-id` collisions.
    - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
-   - **Directive Headers:** Validates `Exception`, `Rationale`, and `Remediation` directive blocks.
+   - **Directive Headers:** Validates `Exception`, `Precedent`, `Rationale`, and `Remediation` directive blocks.
 4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon into precise line-and-column `CodeAnnotation`s (e.g. YAML parse errors, lowercase RFC 2119 keyword locations, unclosed directives).
 
 ---

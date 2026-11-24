@@ -16,13 +16,14 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 ### 1.3 Core Principles
 1. **Zero Barrier to Entry:** Even an empty file with a `.canon.md` extension MUST be treated as a fully valid, enforceable canon.
 2. **Progressive Disclosure:** Advanced optimizations (deterministic path filtering via `triggers:`, custom inspection scopes, and structured rubrics) are strictly OPTIONAL.
-3. **The What / When / Why / How Tetrad:** Canons scale along an intuitive cognitive architecture:
+3. **Progressive Canon Anatomy:** Canons scale along an intuitive cognitive architecture:
    * **What (The Invariant):** The boundary condition that MUST be true (formulated using RFC 2119 keywords).
    * **When (Permissible Deviations — `Exception`):** Strict, verifiable conditions under which an invariant violation is waived.
-   * **Why (Precedent Reasoning — `Rationale`):** The underlying engineering rationale or Chesterton's Fence explaining why the invariant exists.
-   * **How (Remediation):** Actionable contributor remediation instructions detailing how to achieve compliance upon failure.
+   * **Which (Authoritative Citations — `Precedent`):** External standards, formal specifications, or canonical literature anchoring the rule.
+   * **Why (Explanatory Reasoning — `Rationale`):** The underlying engineering rationale or Chesterton's Fence explaining why the invariant exists (only when non-obvious).
+   * **How (Remediation):** Actionable contributor remediation instructions detailing how to achieve compliance upon failure (only when non-obvious).
 
-While conforming canons require only the "What", mature canons naturally synthesize this tetrad.
+While conforming canons require only the "What", mature canons naturally compose these anatomical directives as needed.
 
 ### 1.4 Conforming Canon Attributes
 > **Canon:** *(n)*. A source code or repository change rule that is: **semantic**, **atomic**, **falsifiable**, **bounded**, **grounded**, **salient**, and **correctable**.
@@ -202,7 +203,7 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * **Caps:** Subject to file count (default: 5) and byte size (default: 32KB) limits.
 
 8. **`invariant` Derivation (The Invariant Statement):**
-   * If a Markdown body contains text outside recognized directive blocks (`Exception`, `Rationale`, `Remediation`), the first text block (excluding any opening `#` or `##` heading) MUST be used as the invariant statement.
+   * If a Markdown body contains text outside recognized directive blocks (`Exception`, `Precedent`, `Rationale`, `Remediation`), the first text block (excluding any opening `#` or `##` heading) MUST be used as the invariant statement.
    * If the Markdown body is empty, or consists solely of headings or directives with zero invariant body text (e.g., a 0-byte file such as `all-caps-spec-must-refer-to-spec-md.canon.md` or a heading-only file `# PRs Must Include Tests`), implementations MUST fall back to using the derived `title` as the invariant statement.
    * *Rationale:* Adhering to Principle 1.3.1 (Zero Barrier to Entry) and canon naming standards (`canon-names-must-state-invariants`), a canon's filename or heading embodies its normative policy. This guarantees that minimal, 0-byte, or heading-only files function as valid, evaluable canons without producing empty evaluation prompts.
 
@@ -210,18 +211,20 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
 
 ## 5. Directives & Reserved Keywords
 
-Canons scale across an intuitive **What / When / Why / How** cognitive tetrad:
+Canons compose a progressive **Canon Anatomy** across five complementary roles:
 * **What (The Invariant):** The normative boundary condition specifying what MUST or MUST NOT be true (formulated with RFC 2119 keywords).
 * **When (Permissible Deviations):** The `Exception` directive defining strict conditions under which an invariant violation is waived.
-* **Why (The Rationale):** The `Rationale` directive articulating *why* the invariant exists (Chesterton's Fence).
-* **How (Remediation):** The `Remediation` directive instructing the contributor on actionable steps required to achieve compliance upon failure.
+* **Which (Authoritative Citations):** The `Precedent` directive naming the external standards, specifications, or canonical literature that anchor the rule.
+* **Why (The Rationale):** The `Rationale` directive articulating *why* the invariant exists (Chesterton's Fence) when the trade-off or failure mode is non-obvious.
+* **How (Remediation):** The `Remediation` directive instructing the contributor on actionable steps required to achieve compliance upon failure when non-obvious.
 
-Canon text may include reserved semantic directives to govern auditor behavior, convey author intent, and direct contributor remediation:
+Canon text may include reserved semantic directives to govern auditor behavior, anchor authoritative precedent, convey author intent, and direct contributor remediation:
 
-| Directive | Tetrad Role | Target Actor | CI Role / Verdict | Normative Contract |
+| Directive | Anatomy Role | Target Actor | CI Role / Verdict | Normative Contract |
 | :--- | :--- | :--- | :--- | :--- |
 | **None** (Default) | **What** | Contributor | **`fail`** (Blocking) | PR violates the invariant. Auditor reports the violation and failure rationale with no further advice. |
 | **`Exception`** | **When** (Permissible Deviations) | Evaluator (Clerk AI) | Conditional **`pass`** | Defines strict conditions under which an invariant violation is waived. If conditions are met semantically, verdict transitions from `fail` $\rightarrow$ `pass`. |
+| **`Precedent`** | **Which** (Authoritative Citations) | Evaluator (Clerk AI) & Explainer (AI Assistant) | Informative (Non-normative standard anchor) | **Authoritative Citation.** Names external standards, specifications, or canonical literature anchoring the invariant. Evaluator AI uses it for edge-case exegesis without importing unstated requirements beyond the written invariant; omitted from forward-pass relevance screening (`docket`/`admit`/`apprise`) to avoid lexical or language priming. |
 | **`Rationale`** | **Why** | Evaluator (Clerk AI) & Explainer (AI Assistant) | Informative (Explanatory context) | **Chesterton's Fence.** Explains *why* the canon exists if not self-evident. Evaluator AI uses it to disambiguate edge cases against author intent; auditor quotes or synthesizes it in check runs and reports to explain why the invariant is in place. |
 | **`Remediation`** | **How** | Contributor | **`fail`** (Blocking) | **Contributor action required.** Auditor instructs the contributor on actions needed to unblock the PR (e.g., pointing to required templates or documentation). |
 
@@ -231,14 +234,19 @@ Canon text may include reserved semantic directives to govern auditor behavior, 
 > * **Semantic Sufficiency Over Syntactic Presence:** Unlike deterministic linters that only verify comment flags (such as `// eslint-disable-next-line` or `// canon-ignore`), the Auditor MUST evaluate the *substantive content*, factual grounding, and truthfulness of the justification against the diff and PR context. A hand-wavy or tautological comment (e.g., `// bespoke: this is faster`) MUST fail an exception demanding specific, measurable performance benchmarks or CVE isolation.
 > * **Plurality & Independent Evaluation (Logical OR):** Multiple discrete `Exception` clauses evaluate independently as logical ORs. If any single exception clause is fully satisfied, the invariant violation is waived.
 > * **Biconditional Formulation (ADVISORY):** Authors SHOULD formulate `Exception` clauses using RFC 2119 keywords specifying permissible deviation (e.g. `MAY be introduced IFF accompanied by...`). The keyword `IFF` (if and only if) establishes a rigorous, testable biconditional boundary.
-> * **Orthogonality & Antecedent Gating:** `Exception` is orthogonal to `Rationale` and `Remediation`. It acts as an antecedent gate before contributor remediation: if an exception is met, the check passes without triggering `Remediation`. If all exception clauses fail, the violation stands, executing `Remediation` (`fail`) or default blocking `fail`.
+> * **Orthogonality & Antecedent Gating:** `Exception` is orthogonal to `Precedent`, `Rationale`, and `Remediation`. It acts as an antecedent gate before contributor remediation: if an exception is met, the check passes without triggering `Remediation`. If all exception clauses fail, the violation stands, executing `Remediation` (`fail`) or default blocking `fail`.
+
+> **Precedent Normative Constraints & Advisory Guidance:**
+> When a canon invariant codifies an established domain practice, formal specification, or industry consensus, authors SHOULD cite the governing standard or canonical literature in a dedicated `Precedent:` directive rather than folding citations into the invariant opening or a needless `Rationale:`:
+> * **Single Occurrence:** A canon SHOULD declare at most one `Precedent` directive, listing one or more authoritative references concisely (e.g., `Precedent: RFC 2119; POSIX.1-2017; clig.dev`).
+> * **Non-Normative Exegesis Only:** `Precedent` is strictly non-normative. Evaluators MUST NOT fail code for violating external requirements of a cited standard that are not stated in the canon's own Normative Invariant (`What`).
+> * **AI Evaluator Latent Anchoring & Screening Isolation:** Explicit standard citations act as high-affinity latent anchors for frontier reasoning models during substantive adjudication (`audit`), activating pre-trained clusters of architectural intent, edge-case nuances, and industry consensus without verbose prompt overhead. Separating `Precedent:` from the invariant keeps the invariant's grammatical subject focused on the governed construct and keeps forward-pass relevance screeners (`docket`, `admit`, `apprise`) free of citation or language priming.
 
 > **Rationale Normative Constraints & Advisory Guidance:**
 > To preserve clarity and prevent prompt dilution:
 > * **Conciseness Limit:** A `Rationale` SHOULD be a single sentence (or <= 30 words). Lengthy essays MUST be deferred to external documentation files or pull request descriptions.
 > * **Non-Duplication:** A `Rationale` MUST NOT merely restate the negative invariant rule (e.g., "Files must not be empty because empty files are disallowed"). It MUST articulate the underlying engineering rationale, architectural trade-off, or failure mode being prevented (Chesterton's Fence).
-> * **Citing Governing Standards & Precedents (ADVISORY):** When a canon invariant codifies an established domain practice, formal specification, or industry consensus, authors SHOULD explicitly cite the governing standard or precedent (e.g. RFC 2119, POSIX.1-2017, W3C WCAG, IEEE 754, SemVer 2.0.0, The Twelve-Factor App, or clig.dev) directly within the invariant or `Rationale:` directive.  
->   *AI Evaluator Latent Anchoring:* Explicit standard citations act as high-affinity latent anchors for frontier reasoning models, activating pre-trained clusters of architectural intent, edge-case nuances, and industry consensus without verbose prompt overhead.
+> * **Omission When Self-Evident:** Omit `Rationale:` when the engineering trade-off or failure mode is self-evident; use `Precedent:` alone when only an authoritative standard citation is needed.
 
 ### 5.1 Syntax Forms
 
@@ -246,7 +254,7 @@ Directives MAY be expressed via inline keywords or explicit Markdown section hea
 
 #### A. Inline Annotation Syntax
 
-**Typographic Styling & Visual Affordances (Informative):** Directives in raw Markdown are recognized with or without bold asterisks (e.g. `Exception:`, `**Exception:**`, `Rationale:`, `**Rationale:**`, `Remediation:`, `**Remediation:**`).
+**Typographic Styling & Visual Affordances (Informative):** Directives in raw Markdown are recognized with or without bold asterisks (e.g. `Exception:`, `**Exception:**`, `Precedent:`, `**Precedent:**`, `Rationale:`, `**Rationale:**`, `Remediation:`, `**Remediation:**`).
 
 Examples:
 ```markdown
@@ -255,6 +263,11 @@ Standard platform APIs MUST be used rather than introducing bespoke implementati
 Exception: A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result.
 
 Exception: A bespoke implementation MAY be introduced IFF isolating a documented security vulnerability or CVE.
+```
+```markdown
+Boolean-returning functions MUST document both `true` and `false` return polarity in their doc comments.
+
+Precedent: Google Style Guides; Effective Java (Item 56).
 ```
 ```markdown
 PRs introducing user-facing features must update documentation. **Remediation:** Suggest a specific section under `docs/` to be updated.
@@ -280,6 +293,9 @@ Standard, built-in platform functions MUST be used rather than introducing bespo
 - A bespoke implementation MAY be introduced IFF accompanied by an inline comment explaining a specific, measurable performance result.
 - A bespoke implementation MAY be introduced IFF isolating a documented security vulnerability or CVE.
 
+## Precedent
+POSIX.1-2017; The Pragmatic Programmer (DRY).
+
 ## Rationale
 Custom utility functions increase maintenance drag and duplicate vetted runtime capabilities.
 
@@ -296,18 +312,19 @@ Manual verification instructions ensure reviewers can reproduce visual flow and 
 ```
 
 ### 5.2 Auditor Interpretation & Prompt Contract
-Unlike static linters, canon evaluators do not employ a deterministic pre-parser or regex tokenizer to extract directive text blocks. Instead, the canon's raw Markdown body is passed directly into the evaluator's prompt context:
+Unlike static linters, canon evaluators do not employ a deterministic pre-parser or regex tokenizer to extract directive text blocks for substantive adjudication. Instead, the canon's structured fields and Markdown body are supplied according to each pipeline stage's role:
 
-1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Exception`, `Remediation`, and `Rationale` (e.g., `Exception:`, `**Exception:**`, `## Exceptions`, `## Exception`, `**Remediation:**`, `## Remediation`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
-2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Exception`, `Remediation`, and `Rationale`, instructing the reasoning model to map them directly to its structured output payload and evaluation process:
+1. **Capitalized Proper Noun Signaling:** Authors SHOULD capitalize `Exception`, `Precedent`, `Rationale`, and `Remediation` (e.g., `Exception:`, `**Exception:**`, `## Exceptions`, `## Exception`, `Precedent:`, `**Precedent:**`, `## Precedent`, `**Remediation:**`, `## Remediation`, `Rationale:`, `**Rationale:**`, `## Rationale`) to clearly signal intentional directive semantics to the frontier model.
+2. **Prompt-Level Behavioral Contract:** Deep Auditor system instructions MUST define the operational meaning of `Exception`, `Precedent`, `Rationale`, and `Remediation`, instructing the reasoning model to map them directly to its structured output payload and evaluation process:
    * **`Exception`** $\rightarrow$ Screen intake context against declared exception criteria; if semantically satisfied, short-circuit verdict to conditional `pass`, recording the matched exception clause and justification in the audit report.
+   * **`Precedent`** $\rightarrow$ Anchor edge-case exegesis in the cited authoritative standard or canonical literature without expanding the normative scope beyond the written invariant; omitted from forward-pass relevance screening (`docket`, `admit`, `apprise`) so citations do not prime language or domain matching.
    * **`Remediation`** $\rightarrow$ Formulate actionable author instructions in the response `remediation` field, resulting in a blocking `fail` (or `action_required`).
    * **`Rationale`** $\rightarrow$ Ground evaluation in author intent, and formulate explanatory context in the response `rationale` field (or synthesized review feedback) explaining why the invariant exists.
-3. **Exegesis & Edge-Case Disambiguation:** The evaluator AI and downstream AI assistants MUST use `Rationale` as an interpretive lens during semantic exegesis:
-   * **Edge-case disambiguation:** When diffs present borderline, ambiguous, or technically complex compliance scenarios, the evaluator AI disambiguates author intent against the stated `Rationale` rather than applying naive or superficial literalism.
-   * **Latent standard anchoring:** Citations to authoritative standards (e.g. POSIX, RFCs, SemVer, clig.dev) ground the model in established industry definitions, eliminating hallucinations or arbitrary stylistic debates during compliance screening.
-   * **Explanatory check runs:** In check run reports and review comments, the auditor quotes or synthesizes the `Rationale` to explain to the PR author *why* the invariant is in place, grounding any violation or advisory in architectural context.
-4. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Remediation for author:**`, `### Remediation`, `**Guidance:**`, `Rationale:`, `**Rationale:**`, or `### Why this rule exists`) remain fully functional.
+3. **Exegesis & Edge-Case Disambiguation:** The evaluator AI and downstream AI assistants MUST use `Precedent` and `Rationale` as interpretive lenses during semantic exegesis:
+   * **Edge-case disambiguation:** When diffs present borderline, ambiguous, or technically complex compliance scenarios, the evaluator AI disambiguates author intent against the stated `Precedent` and `Rationale` rather than applying naive or superficial literalism.
+   * **Latent standard anchoring:** Citations to authoritative standards in `Precedent` (e.g. POSIX, RFCs, SemVer, clig.dev) ground the model in established industry definitions, eliminating hallucinations or arbitrary stylistic debates during compliance screening.
+   * **Explanatory check runs:** In check run reports and review comments, the auditor quotes or synthesizes the `Rationale` (and relevant `Precedent`) to explain to the PR author *why* the invariant is in place, grounding any violation or advisory in architectural context.
+4. **Resilience to Variation:** Because evaluation is performed contextually by the reasoning model rather than through rigid AST pattern-matching, minor natural language phrasing variations (e.g., `**Remediation for author:**`, `### Remediation`, `**Guidance:**`, `Precedent:`, `**Precedent:**`, `Rationale:`, `**Rationale:**`, or `### Why this rule exists`) remain fully functional.
 
 ---
 

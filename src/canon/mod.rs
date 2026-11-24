@@ -67,7 +67,10 @@ pub struct Canon {
     pub invariant_span: Option<SourceSpan>,
     /// Discrete permissible deviation clauses evaluated as logical ORs — When (`SPEC.md` §5).
     pub exceptions: Vec<String>,
-    /// Precedent engineering rationale — Why (`SPEC.md` §5).
+    /// Authoritative external standard or literature citations — Which (`SPEC.md` §5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub precedent: Option<String>,
+    /// Explanatory engineering rationale — Why (`SPEC.md` §5).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
     /// Actionable contributor remediation instructions — How (`SPEC.md` §5).
@@ -181,6 +184,7 @@ pub fn assemble_canon_from_tokens(
         invariant,
         invariant_span: body.invariant_span,
         exceptions: body.exceptions,
+        precedent: body.precedent,
         rationale: body.rationale,
         remediation: body.remediation,
         source_ref: source_info.as_ref().map(|s| s.source_ref.clone()),
@@ -271,6 +275,8 @@ Primary invariant statement.
 
 Exception: Legacy modules MAY omit this.
 
+Precedent: RFC 2119; POSIX.1-2017.
+
 Rationale: Invariant preserves type safety.
 
 **Remediation:** Follow these steps:
@@ -283,7 +289,7 @@ cargo check
                 .iter()
                 .filter(|t| matches!(t.kind, CanonTokenKind::Directive { .. }))
                 .collect();
-            assert_eq!(directives.len(), 3);
+            assert_eq!(directives.len(), 4);
             assert_eq!(directives[0].span.start_line, 3);
             assert_eq!(
                 directives[0].kind,
@@ -297,14 +303,23 @@ cargo check
             assert_eq!(
                 directives[1].kind,
                 CanonTokenKind::Directive {
-                    name: DirectiveName::Rationale,
-                    label: "Rationale:".to_string(),
-                    value: "Invariant preserves type safety.".to_string(),
+                    name: DirectiveName::Precedent,
+                    label: "Precedent:".to_string(),
+                    value: "RFC 2119; POSIX.1-2017.".to_string(),
                 }
             );
             assert_eq!(directives[2].span.start_line, 7);
             assert_eq!(
                 directives[2].kind,
+                CanonTokenKind::Directive {
+                    name: DirectiveName::Rationale,
+                    label: "Rationale:".to_string(),
+                    value: "Invariant preserves type safety.".to_string(),
+                }
+            );
+            assert_eq!(directives[3].span.start_line, 9);
+            assert_eq!(
+                directives[3].kind,
                 CanonTokenKind::Directive {
                     name: DirectiveName::Remediation,
                     label: "**Remediation:**".to_string(),
@@ -319,9 +334,9 @@ cargo check
             assert_eq!(
                 code_block.span,
                 SourceSpan {
-                    start_line: 8,
+                    start_line: 10,
                     start_column: 1,
-                    end_line: 10,
+                    end_line: 12,
                     end_column: 3,
                 }
             );
@@ -669,11 +684,11 @@ Body text.";
         }
     }
 
-    mod body_cognitive_tetrad {
+    mod body_canon_anatomy {
         use super::*;
 
         #[test]
-        fn test_parses_full_tetrad_and_plural_exceptions_section() {
+        fn test_parses_full_anatomy_and_plural_exceptions_section() {
             let raw = "\
 ## Rule
 Standard platform functions MUST be used rather than introducing bespoke implementations.
@@ -682,13 +697,16 @@ Standard platform functions MUST be used rather than introducing bespoke impleme
 - A bespoke implementation MAY be introduced IFF accompanied by a benchmark.
 - A bespoke implementation MAY be introduced IFF isolating a documented CVE.
 
+## Precedent
+POSIX.1-2017; The Pragmatic Programmer (DRY).
+
 ## Rationale
 Custom utility functions increase maintenance drag.
 
 ## Remediation
 Replace custom utilities with platform equivalents.";
 
-            let body = parse_body(raw).expect("parse tetrad");
+            let body = parse_body(raw).expect("parse anatomy");
             assert_eq!(
                 body.invariant,
                 "Standard platform functions MUST be used rather than introducing bespoke implementations."
@@ -702,6 +720,10 @@ Replace custom utilities with platform equivalents.";
                 ]
             );
             assert_eq!(
+                body.precedent.as_deref(),
+                Some("POSIX.1-2017; The Pragmatic Programmer (DRY).")
+            );
+            assert_eq!(
                 body.rationale.as_deref(),
                 Some("Custom utility functions increase maintenance drag.")
             );
@@ -709,7 +731,61 @@ Replace custom utilities with platform equivalents.";
                 body.remediation.as_deref(),
                 Some("Replace custom utilities with platform equivalents.")
             );
-            assert_eq!(body.directive_spans.len(), 3);
+            assert_eq!(body.directive_spans.len(), 4);
+        }
+
+        #[test]
+        fn test_precedent_is_not_merged_into_invariant_or_exception() {
+            let raw = "\
+Boolean-returning functions MUST document both `true` and `false` polarity.
+
+Exception: Self-evident predicates MAY omit polarity docs IFF the name states the exact condition.
+
+Precedent: Google Style Guides; Effective Java (Item 56).";
+
+            let body = parse_body(raw).expect("parse precedent");
+            assert_eq!(
+                body.invariant,
+                "Boolean-returning functions MUST document both `true` and `false` polarity."
+            );
+            assert_eq!(
+                body.exceptions,
+                vec![
+                    "Self-evident predicates MAY omit polarity docs IFF the name states the exact condition."
+                ]
+            );
+            assert_eq!(
+                body.precedent.as_deref(),
+                Some("Google Style Guides; Effective Java (Item 56).")
+            );
+            assert!(body.rationale.is_none());
+            assert!(body.remediation.is_none());
+        }
+
+        #[test]
+        fn test_precedent_handles_missing_blank_and_repeated_occurrences() {
+            let missing = parse_body("Functions MUST validate inputs.").expect("parse missing");
+            assert_eq!(missing.precedent, None);
+
+            let blank = parse_body("Functions MUST validate inputs.\n\nPrecedent:   \t  \n")
+                .expect("parse blank");
+            assert_eq!(blank.precedent, None);
+            assert_eq!(blank.directive_spans.len(), 1);
+            assert_eq!(blank.directive_spans[0].name, DirectiveName::Precedent);
+            assert!(blank.directive_spans[0].content.is_empty());
+
+            let repeated = parse_body(
+                "Functions MUST validate inputs.\n\n\
+                 Precedent: RFC 2119.\n\n\
+                 Precedent:   \n\n\
+                 **Precedent:** POSIX.1-2017.",
+            )
+            .expect("parse repeated");
+            assert_eq!(
+                repeated.precedent.as_deref(),
+                Some("RFC 2119.\n\nPOSIX.1-2017.")
+            );
+            assert_eq!(repeated.directive_spans.len(), 3);
         }
     }
 
@@ -730,6 +806,7 @@ Replace custom utilities with platform equivalents.";
             assert_eq!(zero_byte.title, "All Caps Spec Must Refer To Spec Md");
             assert_eq!(zero_byte.invariant, "All Caps Spec Must Refer To Spec Md");
             assert!(zero_byte.exceptions.is_empty());
+            assert!(zero_byte.precedent.is_none());
             assert!(zero_byte.rationale.is_none());
             assert!(zero_byte.remediation.is_none());
 
@@ -763,6 +840,8 @@ Exception:
 
 Exception: Valid exception clause.
 
+Precedent:   \t  
+
 Rationale:   \t  
 
 **Remediation:**    ";
@@ -782,10 +861,11 @@ Rationale:   \t
             assert!(canon.references.is_empty());
             assert_eq!(canon.invariant, "Invariant text.");
             assert_eq!(canon.exceptions, vec!["Valid exception clause."]);
+            assert_eq!(canon.precedent, None);
             assert_eq!(canon.rationale, None);
             assert_eq!(canon.remediation, None);
-            // All 4 directive occurrences (including blank ones) are preserved with spans for `validate`
-            assert_eq!(canon.directive_spans.len(), 4);
+            // All 5 directive occurrences (including blank ones) are preserved with spans for `validate`
+            assert_eq!(canon.directive_spans.len(), 5);
         }
 
         #[test]
@@ -804,6 +884,10 @@ Invariant text.
 Exception: First exception.
 
 Exception: Second exception.
+
+Precedent: RFC 2119.
+
+Precedent: POSIX.1-2017.
 
 Rationale: First rationale paragraph.
 
@@ -828,11 +912,15 @@ Rationale: Second rationale paragraph.
                 vec!["First exception.", "Second exception."]
             );
             assert_eq!(
+                canon.precedent.as_deref(),
+                Some("RFC 2119.\n\nPOSIX.1-2017.")
+            );
+            assert_eq!(
                 canon.rationale.as_deref(),
                 Some("First rationale paragraph.\n\nSecond rationale paragraph.")
             );
             assert_eq!(canon.remediation.as_deref(), Some("Step 1.\n\nStep 2."));
-            assert_eq!(canon.directive_spans.len(), 6);
+            assert_eq!(canon.directive_spans.len(), 8);
         }
 
         #[test]

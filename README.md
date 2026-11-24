@@ -27,7 +27,7 @@
 - **Salient** — Maximizes signal density and precise domain terminology tailored for an AI readership.
 - **Correctable** — Admits a viable path to compliance, whether through explicit remediation instructions or implicit action.
 
-Canons scale across an intuitive **What / When / Why / How** cognitive tetrad ([`SPEC.md`](SPEC.md)), functioning both as off-the-shelf standard rule packs and as custom repository-specific invariants.
+Canons compose a progressive **Canon Anatomy**—What, When, Which, Why, and How ([`SPEC.md`](SPEC.md))—functioning both as off-the-shelf standard rule packs and as custom repository-specific invariants.
 
 ---
 
@@ -122,7 +122,7 @@ Canon Clerk embeds a production-grade corpus of **modular, domain-scoped `builti
 | 🔌 **API Design** | [`builtins/api-design/`](builtins/api-design/) | Single-source defaults, additive exclusions, co-located option/result types, streaming multi-resource APIs, and domain encapsulation. |
 | 🏗️ **Architecture** | [`builtins/architecture/`](builtins/architecture/) | Pure format validators, explicit library dependencies, narrow module option boundaries, and Hexagonal workspace isolation. |
 | 📦 **Build Systems** | [`builtins/build-systems/`](builtins/build-systems/) | Consolidated monorepo root bundling and private-package declaration hygiene. |
-| 📜 **Canon Authoring** | [`builtins/canon-authoring/`](builtins/canon-authoring/) | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, What/When/Why/How tetrad, succinctness, and directive contracts. |
+| 📜 **Canon Authoring** | [`builtins/canon-authoring/`](builtins/canon-authoring/) | Meta-canons governing canon authoring: atomicity, falsifiability, semantic scope, Canon Anatomy directives, succinctness, and directive contracts. |
 | 🛠️ **CLI Ergonomics** | [`builtins/cli/`](builtins/cli/) | Strict Unix CLI standards: POSIX streams, `--json` schema output, stage/provider flag qualification, error remediation hints, and exit codes. |
 | ✨ **Code Quality** | [`builtins/code-quality/`](builtins/code-quality/) | Substantiated static-analysis suppressions with documented rationale. |
 | ⚡ **Concurrency & Async I/O** | [`builtins/concurrency/`](builtins/concurrency/) | Persistent, continuously driven runtime lifecycles for shared pooled or multiplexed asynchronous I/O clients. |
@@ -145,7 +145,7 @@ Beyond automated `canon-clerk audit` gates in CI, teams and AI coding assistants
 
 - **AI Coding Assistants (Claude Code, Cursor, Copilot, Antigravity):** Reference canon directories or individual canons in `AGENTS.md`, system prompts, or cursorrules to anchor agent generation to your team's architectural invariants.
 - **Pull Request Review Checklists:** Link directly to version-controlled canons in PR templates to make expectations transparent and citations unambiguous.
-- **Architectural Standards:** Use the normative What/When/Why/How tetrad ([`SPEC.md`](SPEC.md)) as a clean, standardized format for Architectural Decision Records (ADRs) and engineering tenets.
+- **Architectural Standards:** Use the normative Canon Anatomy ([`SPEC.md`](SPEC.md)) as a clean, standardized format for Architectural Decision Records (ADRs) and engineering tenets.
 
 ---
 
