@@ -6,7 +6,7 @@ inspect:
 tags:
   - canon-authoring
 ---
-A canon invariant's grammatical subject MUST name the specific domain construct or modification action it governs rather than an enclosing container or umbrella category.
+A canon invariant's grammatical subject, whether stated in the body or derived from the filename or heading when the body omits an invariant clause, MUST name the specific domain construct or modification action it governs rather than an enclosing container or umbrella category.
 
 Rationale: During heuristic relevance screening, evaluator models determine jurisdiction from the invariant's grammatical subject; framing a construct-specific rule around its enclosing container or an umbrella noun induces false-positive applicability and boundary flips whenever unrelated changes touch the same container.
 
