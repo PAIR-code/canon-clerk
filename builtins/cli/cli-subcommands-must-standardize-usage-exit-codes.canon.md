@@ -4,6 +4,8 @@ inspect:
 tags:
   - cli
 ---
-Subcommands in hierarchical CLI command trees MUST configure argument parser exit overrides and error formatters to ensure that option, argument, and syntax errors uniformly terminate with exit status `2` across all subcommand nesting levels.
+Hierarchical CLI subcommands MUST terminate with exit status `2` on option, argument, and syntax errors across all command nesting levels.
 
-Rationale: Following GNU Coding Standards §4.3 and BSD `sysexits.h` conventions, command-line interfaces standardly reserve exit code `2` for syntax and argument parsing errors, distinguishing invocation defects from domain validation failures (`exit 1`). In hierarchical CLI frameworks, subcommands default to generic exit codes unless exit-handling is explicitly overridden.
+Exception: Declarative argument-parsing frameworks whose root parser centrally enforces exit status `2` across nested subcommands MAY omit per-subcommand exit-override hooks IFF syntax and usage errors uniformly exit with status `2` at runtime.
+
+Rationale: Following GNU Coding Standards §4.3 and BSD `sysexits.h` conventions, exit status `2` distinguishes invocation and syntax defects from domain or runtime failures (`exit 1`); imperative CLI frameworks whose subcommands default to `exit 1` require explicit parser exit overrides.
