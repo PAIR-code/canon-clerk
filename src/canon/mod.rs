@@ -536,16 +536,20 @@ Body text.";
 
         #[test]
         fn test_builtin_and_pack_realm_sourcing() {
-            let builtin =
-                resolve_source_info("builtin:canon-authoring/canons-must-be-atomic.canon.md")
-                    .unwrap();
+            let builtin = resolve_source_info(
+                "builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations.canon.md",
+            )
+            .unwrap();
             assert_eq!(builtin.source_kind, CanonSourceKind::Builtin);
             assert_eq!(builtin.file_path, None);
             assert_eq!(
                 builtin.diagnostic_path,
-                "canon-authoring/canons-must-be-atomic"
+                "canon-authoring/canon-invariants-must-omit-conjunctive-obligations"
             );
-            assert_eq!(derive_id(None, Some(&builtin)), "canons-must-be-atomic");
+            assert_eq!(
+                derive_id(None, Some(&builtin)),
+                "canon-invariants-must-omit-conjunctive-obligations"
+            );
 
             let pack = resolve_source_info("security:auth/tokens-must-expire.canon.md").unwrap();
             assert_eq!(

@@ -64,7 +64,7 @@ Canons evaluate from four sourcing tiers:
 1. **Local Workspace Canons:**  
    Authored directly in the subject repository (e.g. `.canons/agent-orientation/agents-md-must-be-unconditional.canon.md` or `packages/ui/.canons/prs-must-verify-accessibility.canon.md`). Identified by workspace-relative file paths, preserving native IDE link clickability and terminal editor jumps.
 2. **Built-in Standard Canons:**  
-   Core standard canons bundled directly into the `canon-clerk` binary (e.g. `builtin:canon-authoring/canons-must-be-atomic`). Provided out-of-the-box for instant codex validation without requiring downstream repositories to re-author baseline engineering rules.
+   Core standard canons bundled directly into the `canon-clerk` binary (e.g. `builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations`). Provided out-of-the-box for instant codex validation without requiring downstream repositories to re-author baseline engineering rules.
 3. **Library Canons (Rule Packs):**  
    External canon rule packs imported or linked via workspace configuration under a unique pack namespace alias (e.g. `security:auth/tokens-must-expire`).
 4. **Ephemeral Inline Canons:**  
@@ -123,7 +123,7 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * **Diagnostic Path:** Implementations SHOULD report the path relative to the nearest enclosing `.canons/` directory or pack root (e.g. `agent-orientation/agents-md-must-be-unconditional`, `auth/tokens-must-expire`) in diagnostic outputs, logs, and triage summaries to guide human and AI agent triage.
    * *Example (Local Implicit):* `.canons/prs-must-include-tests.canon.md` -> `prs-must-include-tests`
    * *Example (Nested Local Implicit):* `.canons/auth/tokens-must-expire.canon.md` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
-   * *Example (Builtin Implicit):* `builtin:canon-authoring/canons-must-be-atomic` -> `canons-must-be-atomic` (diagnostic path: `canon-authoring/canons-must-be-atomic`)
+   * *Example (Builtin Implicit):* `builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations` -> `canon-invariants-must-omit-conjunctive-obligations` (diagnostic path: `canon-authoring/canon-invariants-must-omit-conjunctive-obligations`)
    * *Example (Inline Implicit):* `inline:security/no-eval` -> `no-eval` (diagnostic path: `security/no-eval`)
    * *Example (Pack Implicit):* `security:auth/tokens-must-expire` -> `tokens-must-expire` (diagnostic path: `auth/tokens-must-expire`)
    * *Example (Explicit):* `id: "Auth: Token Expiry (v2)"` -> `auth-token-expiry-v2`
@@ -276,7 +276,7 @@ PRs introducing user-facing features must update documentation. **Remediation:**
 PRs modifying UI components must include manual test scripts. **Remediation:** Document a 3-step manual test script in the PR description verifying user interaction.
 ```
 ```markdown
-Each canon MUST only address a single, cohesive concept for its invariant. Rationale: Multi-rule canon files increase the likelihood of flakiness, since subsequent AI evaluations may focus on different parts of the rule set.
+Each canon invariant MUST state a single obligation rather than conjoining independent obligations into one rule. Precedent: ISO/IEC/IEEE 29148 (Singular Requirements). Rationale: The Caseload already composes separate canon files as a logical `AND`; bundling independent obligations induces evaluation flakiness.
 ```
 ```markdown
 Each canon file name MUST state a testable invariant rather than a passive topic. Rationale: Canon Clerk derives check run titles from file stems; invariant names ensure CI reports immediately communicate expectations.
@@ -336,7 +336,7 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
    Within Canon Clerk, canon identity and uniqueness are governed by their source-qualified reference (workspace-relative path for local canons, `builtin:<path>` for standard rules, or `<pack-alias>:<path>` for library canons):
    * Within a single directory or pack root, filesystem uniqueness structurally prevents identical paths.
    * Canons sharing identical filenames or derived `id`s across disparate sources (e.g. `builtin:auth/tokens-must-expire` vs local `.canons/auth/tokens-must-expire.canon.md`) or disjoint monorepo scopes (e.g. `packages/auth/.canons/tokens-must-expire.canon.md` vs `packages/billing/.canons/tokens-must-expire.canon.md`) represent distinct statutory authorities and do NOT collide.
-   * In user-facing reports, summaries, and CLI outputs where bare `id`s would be ambiguous within an active evaluation run, implementations SHOULD qualify the display name using the canon's diagnostic path or source-qualified reference (e.g. `auth/tokens-must-expire`, `builtin:canon-authoring/canons-must-be-atomic`, `security:auth/tokens-must-expire`).
+   * In user-facing reports, summaries, and CLI outputs where bare `id`s would be ambiguous within an active evaluation run, implementations SHOULD qualify the display name using the canon's diagnostic path or source-qualified reference (e.g. `auth/tokens-must-expire`, `builtin:canon-authoring/canon-invariants-must-omit-conjunctive-obligations`, `security:auth/tokens-must-expire`).
 
 ---
 

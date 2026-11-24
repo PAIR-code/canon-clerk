@@ -8,7 +8,7 @@ inspect:
 tags:
   - git-workflow
 ---
-A pull request MUST only implement changes sanctioned by its motivating issue and PR description. Out-of-band changes, drive-by refactorings, or unrelated improvements MUST be omitted.
+Pull request diffs MUST only implement changes sanctioned by their motivating issue and pull request description.
 
 Exception: A pull request MAY introduce or update project canons not explicitly enumerated in the motivating issue IFF the canons codify invariants directly governing the files, subsystems, or specifications modified in the pull request, and are documented in the pull request summary.
 
