@@ -6,7 +6,7 @@ inspect:
 tags:
   - parser-design
 ---
-Structured markup and grammar AST parsers MUST explicitly codify normalization semantics for empty or whitespace-only directive and field payloads (such as omitting optional AST nodes or producing empty collections).
+AST directive and field payload normalization rules in structured markup parsers MUST explicitly codify semantics for empty or whitespace-only payloads.
 
 Exception: Syntax productions whose formal grammar assigns semantic significance to whitespace (such as fenced code blocks, indentation-sensitive blocks, or literal string tokens) MAY preserve raw whitespace IFF codified in the grammar specification.
 
