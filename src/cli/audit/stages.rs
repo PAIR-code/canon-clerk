@@ -23,12 +23,12 @@ use crate::audit::{AuditOptions, execute_audit};
 use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVerdict};
 use crate::cli::CliError;
 use crate::cli::closure::ClosureBackend;
-use crate::cli::provenance::StageDisposition;
-use crate::cli::runners::{resolve_closure_branch_b_options, run_branch_b_configure_checked};
-use crate::cli::vet::stages::{
+use crate::cli::hydration::{
     materialize_base_workspace_references, populate_live_case_and_reference_snapshots,
     populate_live_target_snapshots,
 };
+use crate::cli::provenance::StageDisposition;
+use crate::cli::runners::{resolve_closure_branch_b_options, run_branch_b_configure_checked};
 use crate::configure::{
     ConfigureError, ConfigureScope, StoredConfig, can_fast_forward_existing_config,
     resolve_provider_connections,
@@ -283,7 +283,7 @@ fn execute_configured_spine(
         let mut cleared = after_docket;
         cleared.evidence = None;
         cleared.vetting = None;
-        populate_live_target_snapshots(&cleared, snapshot, backend);
+        populate_live_target_snapshots(&cleared, snapshot, backend, admit_opts.diff_head_lines);
         let admitted = telemetry
             .run_stage(PipelineStage::Admit, |scope| {
                 let instrumented = scope.instrument_provider(provider);
@@ -308,7 +308,12 @@ fn execute_configured_spine(
         });
     }
 
-    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend)?;
+    populate_live_case_and_reference_snapshots(
+        &after_admit,
+        snapshot,
+        backend,
+        vet_opts.diff_head_lines,
+    )?;
     let (after_vet, vet_disp) = execute_vet_step(
         after_admit,
         pre.vetting,

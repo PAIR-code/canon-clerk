@@ -27,10 +27,12 @@ mod slices;
 pub use error::AuditError;
 pub use exhibits::resolve_canon_reference_paths;
 pub(crate) use exhibits::{
-    extract_file_exhibit_lines, format_file_exhibit_heading, is_metadata_plane_id,
+    extract_file_exhibit_lines, format_diff_artifact_patch, format_file_exhibit_heading,
+    is_metadata_plane_id,
 };
 pub(crate) use reference_overlay::{
     apply_base_diff_to_references, collect_base_reference_disk_paths,
+    materialize_base_diff_exhibits,
 };
 pub(crate) use slice_pack::{
     RenderedFileExhibit, format_pinned_reference_exhibits, pack_rendered_exhibit_slices,
@@ -45,6 +47,7 @@ use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{GenerationRequest, StructuredModelProvider};
+use crate::spans::{DEFAULT_DIFF_HEAD_LINES, DiffHeadBudget};
 use decode::decode_case_adjudication;
 use fold::fold_case_slice_adjudications;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
@@ -75,6 +78,8 @@ pub struct AuditOptions {
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case trial calls (`>= 1`; defaults to [`DEFAULT_AUDIT_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
+    /// Post-image head-context line budget for modified diff exhibits (`0` disables; defaults to [`DEFAULT_DIFF_HEAD_LINES`]).
+    pub diff_head_lines: usize,
 }
 
 impl Default for AuditOptions {
@@ -83,6 +88,7 @@ impl Default for AuditOptions {
             threshold: DEFAULT_AUDIT_THRESHOLD,
             timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
             max_concurrent_calls: None,
+            diff_head_lines: DEFAULT_DIFF_HEAD_LINES,
         }
     }
 }
@@ -248,6 +254,7 @@ pub fn execute_audit(
         active_trials,
         node_cfg,
         options.timeout_ms,
+        options.diff_head_lines,
         intake,
         discovery,
         workspace,
@@ -289,6 +296,7 @@ fn prepare_all_trial_calls(
     active_trials: Vec<ActiveTrialEntry<'_>>,
     node_cfg: &ResolvedNodeConfig,
     timeout_ms: u64,
+    diff_head_lines: usize,
     intake: &crate::caseload::CaseloadIntake,
     discovery: &crate::caseload::CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
@@ -310,6 +318,7 @@ fn prepare_all_trial_calls(
             discovery,
             workspace,
             MAX_AUDIT_TRIAL_CHARS,
+            DiffHeadBudget(diff_head_lines),
         );
         let slice_count = slices.len();
         for (idx, slice) in slices.into_iter().enumerate() {

@@ -25,6 +25,7 @@ use crate::caseload::{
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{DEFAULT_GENERATION_TIMEOUT_MS, ProviderError, StructuredModelProvider};
+use crate::spans::DEFAULT_DIFF_HEAD_LINES;
 use exhibits::resolve_case_candidate_exhibits;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -50,6 +51,8 @@ pub struct AdmitOptions {
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case `admit` calls (`>= 1`; defaults to [`DEFAULT_ADMIT_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
+    /// Post-image head-context line budget for modified diff exhibits (`0` disables; defaults to [`DEFAULT_DIFF_HEAD_LINES`]).
+    pub diff_head_lines: usize,
 }
 
 impl Default for AdmitOptions {
@@ -58,6 +61,7 @@ impl Default for AdmitOptions {
             threshold: DEFAULT_ADMIT_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: None,
+            diff_head_lines: DEFAULT_DIFF_HEAD_LINES,
         }
     }
 }

@@ -245,6 +245,7 @@ fn execute_single_trial(
                 threshold: spec.threshold,
                 timeout_ms: spec.timeout_ms,
                 max_concurrent_calls: spec.max_concurrent_calls,
+                ..AdmitOptions::default()
             };
             session
                 .run_stage(PipelineStage::Admit, |scope| {
@@ -272,6 +273,7 @@ fn execute_single_trial(
                 threshold: spec.threshold,
                 timeout_ms: spec.timeout_ms,
                 max_concurrent_calls: spec.max_concurrent_calls,
+                ..AuditOptions::default()
             };
             session
                 .run_stage(PipelineStage::Audit, |scope| {

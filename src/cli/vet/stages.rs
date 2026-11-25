@@ -17,14 +17,15 @@
 use super::VetArgs;
 use super::guards::{has_admit_cli_overrides, has_docket_cli_overrides, resolve_vet_concurrency};
 use crate::admit::{AdmitOptions, execute_admit};
-use crate::audit::{
-    apply_base_diff_to_references, collect_base_reference_disk_paths, resolve_canon_reference_paths,
-};
-use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVetting, HeuristicNode, WorkspaceState};
+use crate::caseload::{Caseload, CaseloadEvidence, CaseloadVetting, HeuristicNode};
 use crate::cli::CliError;
 use crate::cli::admit::guards::resolve_admit_concurrency;
 use crate::cli::closure::ClosureBackend;
 use crate::cli::docket::guards::{resolve_docket_batch_size, resolve_docket_concurrency};
+use crate::cli::hydration::{
+    materialize_base_workspace_references, populate_live_case_and_reference_snapshots,
+    populate_live_target_snapshots,
+};
 use crate::cli::provenance::StageDisposition;
 use crate::cli::runners::{
     build_live_model_provider, resolve_closure_branch_b_options, run_branch_b_configure,
@@ -35,7 +36,7 @@ use crate::docket::{DocketOptions, execute_docket};
 use crate::provider::StructuredModelProvider;
 use crate::telemetry::{PipelineStage, TelemetrySession};
 use crate::vet::{VetOptions, execute_vet};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub(super) struct VetCascadeOutcome {
     pub(super) caseload: Caseload,
@@ -175,35 +176,21 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
 
     let configured = run_branch_b_configure(&configure_options, Some(caseload), telemetry)?;
     let cfg_snapshot = configured.config.clone().unwrap_or_default();
-    let docket_model = cfg_snapshot
-        .model_for(HeuristicNode::Docket)
-        .unwrap_or_default();
-    let admit_model = cfg_snapshot
-        .model_for(HeuristicNode::Admit)
-        .unwrap_or_default();
-    let vet_model = cfg_snapshot
-        .model_for(HeuristicNode::Vet)
-        .unwrap_or_default();
-    let docket_opts = DocketOptions {
-        threshold: thresholds.docket_threshold,
-        timeout_ms: explicit_timeout_ms
-            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(docket_model)),
-        max_canons_per_call: explicit_docket_batch_size,
-        max_concurrent_calls: docket_concurrency,
-    };
-    let admit_opts = AdmitOptions {
-        threshold: thresholds.admit_threshold,
-        timeout_ms: explicit_timeout_ms
-            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(admit_model)),
-        max_concurrent_calls: admit_concurrency,
-    };
-    let vet_opts = VetOptions {
-        threshold: thresholds.vet_threshold,
-        timeout_ms: explicit_timeout_ms
-            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(vet_model)),
-        max_concurrent_calls: vet_concurrency,
-        ..VetOptions::default()
-    };
+    let diff_head_lines = args
+        .diff_context
+        .resolve_diff_head_lines(env, configure_options.stored_config.as_ref())?;
+    let (docket_opts, admit_opts, vet_opts) = build_vet_cascade_stage_opts(
+        &cfg_snapshot,
+        VetCascadeStageInputs {
+            thresholds,
+            explicit_timeout_ms,
+            explicit_docket_batch_size,
+            docket_concurrency,
+            admit_concurrency,
+            vet_concurrency,
+            diff_head_lines,
+        },
+    );
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {
         ClosureBackend::Hermetic { provider, .. } => *provider,
@@ -291,7 +278,7 @@ fn execute_configured_vet_spine(
     } else {
         let mut cleared = after_docket;
         cleared.evidence = None;
-        populate_live_target_snapshots(&cleared, snapshot, backend);
+        populate_live_target_snapshots(&cleared, snapshot, backend, admit_opts.diff_head_lines);
         let admitted = telemetry
             .run_stage(PipelineStage::Admit, |scope| {
                 let instrumented = scope.instrument_provider(provider);
@@ -315,7 +302,12 @@ fn execute_configured_vet_spine(
         });
     }
 
-    populate_live_case_and_reference_snapshots(&after_admit, snapshot, backend)?;
+    populate_live_case_and_reference_snapshots(
+        &after_admit,
+        snapshot,
+        backend,
+        vet_opts.diff_head_lines,
+    )?;
     let after_vet = telemetry
         .run_stage(PipelineStage::Vet, |scope| {
             let instrumented = scope.instrument_provider(provider);
@@ -332,102 +324,53 @@ fn execute_configured_vet_spine(
     })
 }
 
-pub(crate) fn populate_live_target_snapshots(
-    caseload: &Caseload,
-    snapshot: &mut WorkspaceSnapshot,
-    backend: &ClosureBackend<'_>,
-) {
-    let ClosureBackend::LiveDisk { workspace_root } = backend else {
-        return;
-    };
-    let Some(discovery) = &caseload.discovery else {
-        return;
-    };
-    let diffs = caseload.intake.as_ref().map(|i| &i.diffs);
-    let paths_to_load: Vec<String> = discovery
-        .target_files
-        .iter()
-        .filter(|path| {
-            diffs.is_none_or(|d| {
-                d.get(*path)
-                    .is_none_or(|art| art.patch.is_none() && art.content.is_none())
-            })
-        })
-        .cloned()
-        .collect();
-    if !paths_to_load.is_empty() {
-        snapshot.populate_file_contents_from_disk(workspace_root, &paths_to_load);
-    }
+struct VetCascadeStageInputs {
+    thresholds: VetCascadeThresholds,
+    explicit_timeout_ms: Option<u64>,
+    explicit_docket_batch_size: Option<usize>,
+    docket_concurrency: Option<usize>,
+    admit_concurrency: Option<usize>,
+    vet_concurrency: Option<usize>,
+    diff_head_lines: usize,
 }
 
-/// Hydrates base-branch reference files from disk (when live) and applies `.intake.diffs` in
-/// memory for all candidate/active canons whenever `.intake.workspace_state == WorkspaceState::Base`.
-pub(crate) fn materialize_base_workspace_references(
-    caseload: &Caseload,
-    snapshot: &mut WorkspaceSnapshot,
-    backend: &ClosureBackend<'_>,
-) -> Result<(), CliError> {
-    let Some(intake) = caseload.intake.as_ref() else {
-        return Ok(());
+fn build_vet_cascade_stage_opts(
+    cfg_snapshot: &crate::caseload::CaseloadConfig,
+    inputs: VetCascadeStageInputs,
+) -> (DocketOptions, AdmitOptions, VetOptions) {
+    let docket_model = cfg_snapshot
+        .model_for(HeuristicNode::Docket)
+        .unwrap_or_default();
+    let admit_model = cfg_snapshot
+        .model_for(HeuristicNode::Admit)
+        .unwrap_or_default();
+    let vet_model = cfg_snapshot
+        .model_for(HeuristicNode::Vet)
+        .unwrap_or_default();
+    let docket_opts = DocketOptions {
+        threshold: inputs.thresholds.docket_threshold,
+        timeout_ms: inputs
+            .explicit_timeout_ms
+            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(docket_model)),
+        max_canons_per_call: inputs.explicit_docket_batch_size,
+        max_concurrent_calls: inputs.docket_concurrency,
     };
-    if intake.workspace_state != WorkspaceState::Base || intake.diffs.is_empty() {
-        return Ok(());
-    }
-
-    let mut canon_refs = BTreeSet::new();
-    if let Some(disc) = caseload.discovery.as_ref() {
-        for canon_ref in &disc.candidate_canons {
-            canon_refs.insert(canon_ref.clone());
-        }
-    }
-    if let Some(evidence) = caseload.evidence.as_ref() {
-        for canon_ref in &evidence.active_cases {
-            canon_refs.insert(canon_ref.clone());
-        }
-    }
-    let canon_list: Vec<String> = canon_refs.into_iter().collect();
-    if canon_list.is_empty() {
-        return Ok(());
-    }
-
-    if let ClosureBackend::LiveDisk { workspace_root } = backend {
-        let base_paths = collect_base_reference_disk_paths(&canon_list, intake, snapshot);
-        if !base_paths.is_empty() {
-            snapshot.populate_file_contents_from_disk(workspace_root, &base_paths);
-        }
-    }
-
-    apply_base_diff_to_references(&canon_list, intake, snapshot)
-        .map_err(|err| CliError::usage(err.to_string()))
-}
-
-pub(crate) fn populate_live_case_and_reference_snapshots(
-    caseload: &Caseload,
-    snapshot: &mut WorkspaceSnapshot,
-    backend: &ClosureBackend<'_>,
-) -> Result<(), CliError> {
-    materialize_base_workspace_references(caseload, snapshot, backend)?;
-    populate_live_target_snapshots(caseload, snapshot, backend);
-    let ClosureBackend::LiveDisk { workspace_root } = backend else {
-        return Ok(());
+    let admit_opts = AdmitOptions {
+        threshold: inputs.thresholds.admit_threshold,
+        timeout_ms: inputs
+            .explicit_timeout_ms
+            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(admit_model)),
+        max_concurrent_calls: inputs.admit_concurrency,
+        diff_head_lines: inputs.diff_head_lines,
     };
-    let Some(evidence) = &caseload.evidence else {
-        return Ok(());
+    let vet_opts = VetOptions {
+        threshold: inputs.thresholds.vet_threshold,
+        timeout_ms: inputs
+            .explicit_timeout_ms
+            .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(vet_model)),
+        max_concurrent_calls: inputs.vet_concurrency,
+        diff_head_lines: inputs.diff_head_lines,
+        ..VetOptions::default()
     };
-    let mut paths_to_load = BTreeSet::new();
-    for canon_ref in &evidence.active_cases {
-        for admitted in evidence.admitted_exhibits_for(canon_ref) {
-            paths_to_load.insert(admitted.file_path.clone());
-        }
-        if let Some(canon) = snapshot.canons.get(canon_ref) {
-            for ref_path in resolve_canon_reference_paths(canon, snapshot) {
-                paths_to_load.insert(ref_path);
-            }
-        }
-    }
-    let collected: Vec<String> = paths_to_load.into_iter().collect();
-    if !collected.is_empty() {
-        snapshot.populate_file_contents_from_disk(workspace_root, &collected);
-    }
-    Ok(())
+    (docket_opts, admit_opts, vet_opts)
 }

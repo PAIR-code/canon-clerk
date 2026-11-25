@@ -120,6 +120,15 @@ pub struct StoredDefaultsConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_backoff_ms: Option<u64>,
+
+    /// Default post-image head-context line budget for modified diff exhibits (`0` disables; default: `80`).
+    #[serde(
+        default,
+        rename = "diffHeadLines",
+        alias = "diff_head_lines",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub diff_head_lines: Option<usize>,
 }
 
 /// Per-node model and operational tuning overrides under `nodes.<node>` in `~/.config/canon-clerk/config.json`.
@@ -675,6 +684,17 @@ mod tests {
             assert!(err.to_string().contains("Hint:"));
 
             let _ = fs::remove_dir_all(&ws_dir);
+        }
+
+        #[test]
+        fn test_defaults_diff_head_lines_camel_and_snake_case() {
+            let camel: StoredConfig = serde_json::from_str(r#"{"defaults":{"diffHeadLines":120}}"#)
+                .expect("camelCase diffHeadLines must deserialize");
+            assert_eq!(camel.defaults.diff_head_lines, Some(120));
+
+            let snake: StoredConfig = serde_json::from_str(r#"{"defaults":{"diff_head_lines":0}}"#)
+                .expect("snake_case diff_head_lines must deserialize");
+            assert_eq!(snake.defaults.diff_head_lines, Some(0));
         }
     }
 }

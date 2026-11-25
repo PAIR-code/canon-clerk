@@ -15,9 +15,15 @@
 //! Pure-Rust pan-source topological span tiling, explicit lexical span fences, and Strategy D
 //! breadcrumb skeleton rendering (`docs/architecture/nodes/vet.md` §4.3, `audit.md` §3–§4).
 
+mod head_context;
 mod skeleton;
 mod tiler;
 
+pub use head_context::{DEFAULT_DIFF_HEAD_LINES, ENV_DIFF_HEAD_LINES, MAX_HEAD_CONTEXT_CHARS};
+pub(crate) use head_context::{
+    DiffHeadBudget, DiffHeadExpandInput, expand_diff_patch_lines,
+    format_diff_patch_with_head_context, render_exhibit_lines,
+};
 pub(crate) use skeleton::render_breadcrumb_skeleton;
 pub(crate) use tiler::{TiledSpan, render_fenced_spans, tile_exhibit_lines};
 

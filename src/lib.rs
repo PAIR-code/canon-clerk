@@ -90,15 +90,16 @@ pub use caseload::{
 pub use cli::{
     AdmitArgs, AdmitFormat, AdmitNodeModelArgs, AllNodeModelArgs, AppriseArgs, AppriseFormat,
     AppriseNodeModelArgs, AuditArgs, AuditFormat, AuditNodeModelArgs, CanonSelectionArgs,
-    CaseloadIoArgs, Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiscoverArgs,
-    DiscoverFormat, DocketArgs, DocketFormat, DocketNodeModelArgs, ENV_LOG_FILE, ENV_VERBOSE,
-    FilingSourceArgs, GithubCheckArgs, IntakeArgs, OnMissingCredentials, ProbeArgs, ProbeFormat,
-    ProviderConfigArgs, ProviderTransportArgs, RejectedUnqualifiedTuningArgs, ResolvedFilingSource,
-    StageDisposition, StderrProgressSink, StderrTelemetryOptions, ValidateArgs, ValidateFormat,
-    VetArgs, VetFormat, VetNodeModelArgs, WorkspaceStateArg, build_cli_telemetry_sink,
-    init_logging, open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag, run, run_admit,
-    run_admit_live_with_telemetry, run_admit_with_snapshot_and_provider, run_admit_with_telemetry,
-    run_apprise, run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
+    CaseloadIoArgs, Cli, CliError, Commands, ConfigureArgs, ConfigureFormat, DiffContextArgs,
+    DiscoverArgs, DiscoverFormat, DocketArgs, DocketFormat, DocketNodeModelArgs, ENV_LOG_FILE,
+    ENV_VERBOSE, FilingSourceArgs, GithubCheckArgs, IntakeArgs, OnMissingCredentials, ProbeArgs,
+    ProbeFormat, ProviderConfigArgs, ProviderTransportArgs, RejectedUnqualifiedTuningArgs,
+    ResolvedFilingSource, StageDisposition, StderrProgressSink, StderrTelemetryOptions,
+    ValidateArgs, ValidateFormat, VetArgs, VetFormat, VetNodeModelArgs, WorkspaceStateArg,
+    build_cli_telemetry_sink, init_logging, open_jsonl_log_sink, resolve_log_file_path,
+    resolve_verbose_flag, run, run_admit, run_admit_live_with_telemetry,
+    run_admit_with_snapshot_and_provider, run_admit_with_telemetry, run_apprise,
+    run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
     run_apprise_with_telemetry, run_audit, run_audit_live_with_telemetry,
     run_audit_with_snapshot_and_provider, run_audit_with_telemetry, run_configure,
     run_configure_with_env, run_configure_with_telemetry, run_discover, run_discover_in_workspace,
@@ -159,6 +160,7 @@ pub use provider::{
     TokenUsage, TypesafeDecisionProvider, default_concurrency_for_model,
     default_timeout_ms_for_model,
 };
+pub use spans::{DEFAULT_DIFF_HEAD_LINES, ENV_DIFF_HEAD_LINES, MAX_HEAD_CONTEXT_CHARS};
 pub use telemetry::{
     CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,
     NoopTelemetrySink, PipelineStage, RecordingTelemetrySink, StageScope, SteppingTelemetryClock,

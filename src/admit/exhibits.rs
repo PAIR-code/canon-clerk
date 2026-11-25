@@ -118,13 +118,14 @@ pub(super) fn append_candidate_exhibit_section(
     exhibit_id: &str,
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) {
     match exhibit_id {
         "pr_title" => append_pr_title_exhibit(out, intake),
         "pr_body" => append_pr_body_exhibit(out, intake),
         "commit_messages" => append_commit_messages_exhibit(out, intake),
         "linked_issues" => append_linked_issues_exhibit(out, intake),
-        file_path => append_file_exhibit(out, file_path, intake, workspace),
+        file_path => append_file_exhibit(out, file_path, intake, workspace, diff_head_lines),
     }
 }
 
@@ -216,9 +217,10 @@ fn append_file_exhibit(
     file_path: &str,
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) {
     if let Some(artifact) = intake.diffs.get(file_path) {
-        append_diff_artifact_exhibit(out, artifact, workspace);
+        append_diff_artifact_exhibit(out, artifact, intake, workspace, diff_head_lines);
     } else {
         let _ = writeln!(
             out,
@@ -241,7 +243,9 @@ fn append_file_exhibit(
 fn append_diff_artifact_exhibit(
     out: &mut String,
     artifact: &FileArtifact,
+    intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) {
     match &artifact.previous_path {
         Some(prev) => {
@@ -268,7 +272,14 @@ fn append_diff_artifact_exhibit(
     }
 
     if let Some(patch) = non_blank(artifact.patch.as_deref()) {
-        let bounded = truncate_chars(patch, MAX_MICRO_EXHIBIT_CHARS, "patch");
+        let rendered = crate::audit::format_diff_artifact_patch(
+            artifact,
+            patch,
+            intake,
+            workspace,
+            diff_head_lines,
+        );
+        let bounded = truncate_chars(&rendered, MAX_MICRO_EXHIBIT_CHARS, "patch");
         let _ = writeln!(out, "```diff\n{bounded}\n```");
     } else if let Some(content) = non_blank(artifact.content.as_deref()).or_else(|| {
         workspace
@@ -345,9 +356,61 @@ mod tests {
             "commit_messages",
             &intake,
             &WorkspaceSnapshot::default(),
+            crate::spans::DEFAULT_DIFF_HEAD_LINES,
         );
         assert!(rendered.contains("### Candidate Exhibit: `commit_messages`"));
         assert!(rendered.contains("1. [deadbee] feat(cli): support commit_messages"));
         assert!(rendered.contains("- Exact `file_path`: `commit_messages`"));
+    }
+
+    #[test]
+    fn test_admit_diff_exhibit_expands_head_context_and_respects_zero_disable() {
+        let mut diffs = std::collections::BTreeMap::new();
+        diffs.insert(
+            "builtins/example.canon.md".to_string(),
+            FileArtifact {
+                path: "builtins/example.canon.md".to_string(),
+                status: crate::caseload::FileChangeStatus::Modified,
+                previous_path: None,
+                lines_added: 1,
+                lines_deleted: 1,
+                patch: Some("@@ -4,3 +4,3 @@\n line 4\n-old 5\n+new 5\n line 6".to_string()),
+                patch_omission_reason: None,
+                content: None,
+                content_omission_reason: None,
+            },
+        );
+        let intake = CaseloadIntake {
+            diffs,
+            ..CaseloadIntake::default()
+        };
+        let ws = WorkspaceSnapshot::new().with_file_content(
+            "builtins/example.canon.md",
+            "---\ntriggers:\n  - \"**/*.md\"\nline 4\nnew 5\nline 6\n\nRationale: keep me visible.\n",
+        );
+
+        let mut expanded = String::new();
+        append_candidate_exhibit_section(
+            &mut expanded,
+            "builtins/example.canon.md",
+            &intake,
+            &ws,
+            crate::spans::DEFAULT_DIFF_HEAD_LINES,
+        );
+        assert!(expanded.contains("    1 | ---"));
+        assert!(expanded.contains("+   5 | new 5"));
+        assert!(expanded.contains("    8 | Rationale: keep me visible."));
+
+        let mut disabled = String::new();
+        append_candidate_exhibit_section(
+            &mut disabled,
+            "builtins/example.canon.md",
+            &intake,
+            &ws,
+            0,
+        );
+        assert!(!disabled.contains("    1 | ---"));
+        assert!(!disabled.contains("Rationale: keep me visible."));
+        assert!(disabled.contains("+   5 | new 5"));
     }
 }

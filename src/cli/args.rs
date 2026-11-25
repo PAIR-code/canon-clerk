@@ -347,6 +347,7 @@ impl ProviderConfigArgs {
     }
 }
 
+pub use crate::cli::diff_context_args::DiffContextArgs;
 pub use crate::cli::github_args::{
     GithubCheckArgs, GithubIssueArgs, RejectedGithubIssueArgs, ResolvedFilingSource,
 };
