@@ -5,7 +5,7 @@ triggers:
 inspect:
   - diff
 tags:
-  - architecture
+  - documentation
 ---
 Normative specifications for cross-cutting contracts (shared options, default matrices, schemas, or protocols) MUST be single-sourced in an authoritative document and delegated via hyperlink from component specifications rather than duplicated inline.
 

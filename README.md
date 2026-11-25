@@ -129,6 +129,7 @@ Canon Clerk embeds a production-grade corpus of **modular, domain-scoped `builti
 | ⚡ **Concurrency & Async I/O** | [`builtins/concurrency/`](builtins/concurrency/) | Persistent, continuously driven runtime lifecycles for shared pooled or multiplexed asynchronous I/O clients. |
 | ⚙️ **Configuration** | [`builtins/configuration/`](builtins/configuration/) | Orthogonal configuration namespaces, `<provider>:<name>` specifier qualification, and deterministic specificity cascades. |
 | 🏷️ **Conventional Commits** | [`builtins/conventional-commits/`](builtins/conventional-commits/) | Semantic commit and PR invariants (`feat` for user-facing functionality, `fix` for user-facing defect repairs). |
+| 📚 **Documentation** | [`builtins/documentation/`](builtins/documentation/) | Living specification single-sourcing: delegating cross-cutting contracts, omitting hardcoded collection counts, and referencing externally defined taxonomies by concept. |
 | 🔀 **Git Workflow** | [`builtins/git-workflow/`](builtins/git-workflow/) | Sanctioned issue scope hygiene and independent precursor domain-contract delivery. |
 | 📐 **OpenSpec** | [`builtins/openspec/`](builtins/openspec/) | Reference pack for Spec-Driven Development: living spec synchronization on `feat`/`fix` changes and conceptual capability modeling. |
 | 🔍 **Parser Design** | [`builtins/parser-design/`](builtins/parser-design/) | Lexical/semantic phase separation, AST repeated-node cardinality, blank-payload normalization, and fault-tolerant diagnostics. |
