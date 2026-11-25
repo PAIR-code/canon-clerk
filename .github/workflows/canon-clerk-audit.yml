@@ -53,12 +53,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --github-check-name "PR Audit Report" --github-bypass-label skip-audit --on-missing-credentials skip --output-caseload caseload.json
+        run: ./target/debug/canon-clerk audit --github-pr --publish-github-check --github-check-name "PR Audit Report" --github-bypass-label skip-audit --on-missing-credentials skip --verbose --output-caseload caseload.json --log-file telemetry.jsonl
 
-      - name: Upload Caseload forensics artifact
+      - name: Upload audit forensics artifact
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: canon-clerk-audit-caseload
-          path: caseload.json
+          path: |
+            caseload.json
+            telemetry.jsonl
           if-no-files-found: ignore
