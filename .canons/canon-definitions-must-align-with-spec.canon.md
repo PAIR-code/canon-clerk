@@ -1,12 +1,8 @@
 ---
 triggers:
-  - "README.md"
-  - "SPEC.md"
-  - "AGENTS.md"
+  - "{AGENTS,README,SPEC}.md"
 references:
-  - "SPEC.md"
-  - "README.md"
-  - "AGENTS.md"
+  - "{AGENTS,README,SPEC}.md"
 inspect:
   - diff
 tags:

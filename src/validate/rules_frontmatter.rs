@@ -14,9 +14,10 @@
 
 //! Static frontmatter lint rules for Canon Markdown files (`docs/architecture/nodes/validate.md` §4).
 
+use super::rules_globs::check_glob_list_hygiene;
 use crate::canon::{
-    CanonParseError, CanonSourceInfo, ExtractedFrontmatter, FrontmatterKeySpan, InspectToken,
-    SourceSpan, has_directory_traversal,
+    CanonParseError, CanonSourceInfo, CanonSourceKind, ExtractedFrontmatter, FrontmatterKeySpan,
+    InspectToken, SourceSpan, has_directory_traversal,
 };
 use crate::caseload::{AnnotationLevel, CodeAnnotation};
 use crate::discover::GlobPattern;
@@ -64,6 +65,7 @@ pub(crate) fn lint_frontmatter(
     extracted: &ExtractedFrontmatter,
     out: &mut Vec<CodeAnnotation>,
 ) {
+    check_kebab_case_filename(path, source_info, out);
     check_negated_file_stem(path, source_info, out);
 
     if extracted.key_spans.is_empty() {
@@ -86,13 +88,16 @@ pub(crate) fn lint_frontmatter(
         }
 
         if !RECOGNIZED_KEYS.contains(&entry.key.as_str()) {
+            if is_extension_key(&entry.key) {
+                continue;
+            }
             out.push(make_annotation(
                 path,
                 entry.key_span,
                 AnnotationLevel::Warning,
                 "no-unrecognized-keys",
                 format!(
-                    "Unrecognized frontmatter key '{}'. Allowed keys are: id, title, triggers, exists, inspect, tags, references.",
+                    "Unrecognized frontmatter key '{}'. Allowed keys are: id, title, triggers, exists, inspect, tags, references (or x-* extension keys).",
                     entry.key
                 ),
             ));
@@ -103,6 +108,52 @@ pub(crate) fn lint_frontmatter(
         check_id_conventions(path, source_info, entry, out);
         check_scope_and_globs(path, scope, entry, out);
     }
+}
+
+fn is_extension_key(key: &str) -> bool {
+    key.starts_with("x-") && key.len() > 2
+}
+
+fn check_kebab_case_filename(
+    path: &str,
+    source_info: Option<&CanonSourceInfo>,
+    out: &mut Vec<CodeAnnotation>,
+) {
+    let Some(info) = source_info else {
+        return;
+    };
+    if info.source_kind != CanonSourceKind::Workspace {
+        return;
+    }
+    let stem = info
+        .file_stem
+        .strip_suffix(".md")
+        .unwrap_or(&info.file_stem);
+    if stem.is_empty() || is_ascii_kebab_case(stem) {
+        return;
+    }
+    out.push(CodeAnnotation {
+        path: path.to_string(),
+        start_line: 1,
+        end_line: 1,
+        start_column: Some(1),
+        end_column: Some(1),
+        annotation_level: AnnotationLevel::Warning,
+        message: format!(
+            "Canon file stem '{stem}' should use lowercase ASCII kebab-case ([a-z0-9]+(-[a-z0-9]+)*)."
+        ),
+        title: Some("kebab-case-filenames".to_string()),
+    });
+}
+
+fn is_ascii_kebab_case(stem: &str) -> bool {
+    !stem.is_empty()
+        && stem.split('-').all(|seg| {
+            !seg.is_empty()
+                && seg
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
 }
 
 fn check_negated_file_stem(
@@ -289,12 +340,15 @@ fn check_scope_and_globs(
             validate_single_pattern(path, scope, entry, pattern, entry.value_span, out);
         }
         serde_yaml::Value::Sequence(seq) => {
+            let mut string_patterns: Vec<(usize, &str)> = Vec::new();
             for (idx, item) in seq.iter().enumerate() {
                 if let Some(pattern) = item.as_str() {
                     let span = item_or_value_span(entry, idx);
                     validate_single_pattern(path, scope, entry, pattern, span, out);
+                    string_patterns.push((idx, pattern));
                 }
             }
+            check_glob_list_hygiene(path, entry, &string_patterns, out);
         }
         _ => {}
     }

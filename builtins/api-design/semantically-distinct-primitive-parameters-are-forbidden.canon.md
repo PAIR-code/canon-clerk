@@ -1,16 +1,6 @@
 ---
 triggers:
-  - "**/*.rs"
-  - "**/*.ts"
-  - "**/*.tsx"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.kt"
-  - "**/*.cs"
-  - "**/*.c"
-  - "**/*.cpp"
-  - "**/*.h"
-  - "**/*.hpp"
+  - "**/*.{c,cpp,cs,go,h,hpp,java,kt,rs,ts,tsx}"
 inspect:
   - diff
 tags:

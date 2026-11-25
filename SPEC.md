@@ -207,6 +207,14 @@ When optional metadata fields are omitted, implementations MUST resolve them acc
    * If the Markdown body is empty, or consists solely of headings or directives with zero invariant body text (e.g., a 0-byte file such as `all-caps-spec-must-refer-to-spec-md.canon.md` or a heading-only file `# PRs Must Include Tests`), implementations MUST fall back to using the derived `title` as the invariant statement.
    * *Rationale:* Adhering to Principle 1.3.1 (Zero Barrier to Entry) and canon naming standards (`canon-names-must-state-invariants`), a canon's filename or heading embodies its normative policy. This guarantees that minimal, 0-byte, or heading-only files function as valid, evaluable canons without producing empty evaluation prompts.
 
+### 4.3 Frontmatter Extension Fields (`x-*`)
+
+To support non-normative, tool- or organization-specific metadata (such as preset curation tags `x-presets`, ownership `x-owner`, or compliance mappings `x-compliance`) without colliding with future specification fields:
+
+* **Reserved Prefix:** Frontmatter keys prefixed with `x-` followed by a non-empty suffix (e.g., `x-presets`, `x-owner`) are reserved as an opaque extension namespace. Future versions of `SPEC.md` MUST NOT standardize a normative frontmatter key beginning with `x-`.
+* **Validator Acceptance:** Conforming validators MUST accept `x-*` keys (with a non-empty suffix) without emitting unrecognized-key warnings or errors, while continuing to enforce valid YAML syntax and duplicate-key diagnostics (including duplicate `x-*` keys). Bare `x-` (empty suffix) is NOT a valid extension key and MUST remain subject to unrecognized-key diagnostics.
+* **Canonicalization & Prompt Isolation:** Conforming canonicalizers and evaluators MUST omit or ignore `x-*` keys during canonicalization and MUST NOT inject `x-*` keys or values into heuristic or model evaluation prompts.
+
 ---
 
 ## 5. Directives & Reserved Keywords
