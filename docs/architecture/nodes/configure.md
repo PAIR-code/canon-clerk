@@ -116,7 +116,7 @@ flowchart LR
    }
    ```
 
-   Per-profile execution knob cascades (`threshold`, `batchSize`, `concurrency`, `thinkingLevel`/`reasoningBudget`) are defined authoritatively in [`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults), and live transport controls (`timeoutMs`, `maxRetries`, `maxBackoffMs`) in [`../transport.md` §6](../transport.md#6-out-of-band-telemetry--cli-transport-controls).
+   Per-profile execution knob cascades (`threshold`, `batchSize`, `concurrency`, `thinkingLevel`/`reasoningBudget`) are defined authoritatively in [`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults), live transport controls (`timeoutMs`, `maxRetries`, `maxBackoffMs`) in [`../transport.md` §6](../transport.md#6-out-of-band-telemetry--cli-transport-controls), and the runtime diff head-context budget (`defaults.diffHeadLines`) in [`../overview.md` §9](../overview.md#9-diff-exhibit-head-context-budget).
 
 4. **Closure-Exact Credential Validation & Partial-Closure `--caseload` Chaining:**
    - **Converged Evaluation Closures (`apprise`, `docket`, `admit`, `vet`, `audit`):** Resolve node bindings and verify provider credentials **strictly for the heuristic nodes executed in that subcommand's closure** (`{apprise}` on `apprise`; `{docket}` on `docket`; `{docket, admit}` on `admit`; `{docket, admit, vet}` on `vet`; `{docket, admit, vet, audit}` on telescoping `audit`).
