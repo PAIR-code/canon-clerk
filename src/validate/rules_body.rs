@@ -180,7 +180,7 @@ fn scan_body_token(
 }
 
 /// Replaces inline code spans (`` `...` ``) with spaces of identical character length so 1-based column positions remain exact.
-pub(crate) fn mask_inline_code(line: &str) -> String {
+fn mask_inline_code(line: &str) -> String {
     let mut chars: Vec<char> = line.chars().collect();
     let mut idx = 0;
     while idx < chars.len() {

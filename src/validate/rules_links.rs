@@ -14,10 +14,10 @@
 
 //! Static Markdown body link coverage lint rule (`links-declared-in-references`) for Canon files (`docs/architecture/nodes/validate.md` §4).
 
-use super::rules_body::mask_inline_code;
 use crate::canon::{CanonSourceInfo, CanonToken, CanonTokenKind};
 use crate::caseload::{AnnotationLevel, CodeAnnotation};
 use crate::discover::GlobPattern;
+use pulldown_cmark::{Event, Parser, Tag};
 
 /// Flags relative workspace Markdown links in canon body prose (outside fenced code blocks and inline code spans)
 /// that are not covered by frontmatter `references:`.
@@ -45,9 +45,12 @@ pub(crate) fn check_links_declared_in_references(
         ) {
             continue;
         }
-        let masked = mask_inline_code(&token.raw);
-        for (start_col, end_col, raw_target) in extract_markdown_link_targets(&masked) {
-            let Some(rel_target) = normalize_relative_link_target(&raw_target) else {
+
+        for (event, range) in Parser::new(&token.raw).into_offset_iter() {
+            let Event::Start(Tag::Link { dest_url, .. }) = event else {
+                continue;
+            };
+            let Some(rel_target) = normalize_relative_link_target(&dest_url) else {
                 continue;
             };
             let resolved = resolve_link_against_workspace(&rel_target, canon_dir, scope);
@@ -56,6 +59,14 @@ pub(crate) fn check_links_declared_in_references(
                 .any(|glob| glob.is_match(&resolved) || glob.is_match(&rel_target));
 
             if !is_covered {
+                let start_col = token
+                    .raw
+                    .get(..range.start)
+                    .map_or(1, |prefix| prefix.chars().count() + 1);
+                let end_col = token
+                    .raw
+                    .get(..range.end)
+                    .map_or(start_col, |prefix| prefix.chars().count().max(start_col));
                 out.push(CodeAnnotation {
                     path: path.to_string(),
                     start_line: token.span.start_line,
@@ -64,7 +75,7 @@ pub(crate) fn check_links_declared_in_references(
                     end_column: Some(end_col),
                     annotation_level: AnnotationLevel::Warning,
                     message: format!(
-                        "Relative Markdown link '{raw_target}' is not covered by frontmatter 'references:'; add '{resolved}' to 'references:' so the auditor receives the linked document."
+                        "Relative Markdown link '{dest_url}' is not covered by frontmatter 'references:'; add '{resolved}' to 'references:' so the auditor receives the linked document."
                     ),
                     title: Some("links-declared-in-references".to_string()),
                 });
@@ -73,62 +84,12 @@ pub(crate) fn check_links_declared_in_references(
     }
 }
 
-/// Extracts `(start_col, end_col, target)` for non-image Markdown inline links `[label](target)`.
-fn extract_markdown_link_targets(masked_line: &str) -> Vec<(usize, usize, String)> {
-    let chars: Vec<char> = masked_line.chars().collect();
-    let mut results = Vec::new();
-    let mut i = 0;
-
-    while i < chars.len() {
-        if chars[i] == '[' && (i == 0 || chars[i - 1] != '!') {
-            let link_start = i;
-            let mut j = i + 1;
-            let mut depth = 1usize;
-            while j < chars.len() && depth > 0 {
-                match chars[j] {
-                    '[' => depth += 1,
-                    ']' => depth -= 1,
-                    _ => {}
-                }
-                j += 1;
-            }
-            if depth == 0 && j < chars.len() && chars[j] == '(' {
-                let target_start = j + 1;
-                let mut k = target_start;
-                let mut paren_depth = 1usize;
-                while k < chars.len() && paren_depth > 0 {
-                    match chars[k] {
-                        '(' => paren_depth += 1,
-                        ')' => paren_depth -= 1,
-                        _ => {}
-                    }
-                    k += 1;
-                }
-                if paren_depth == 0 {
-                    let raw_target: String = chars[target_start..k - 1].iter().collect();
-                    results.push((link_start + 1, k, raw_target));
-                    i = k;
-                    continue;
-                }
-            }
-        }
-        i += 1;
-    }
-
-    results
-}
-
 fn normalize_relative_link_target(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.starts_with('#') {
         return None;
     }
-    let unwrapped = trimmed
-        .strip_prefix('<')
-        .and_then(|s| s.strip_suffix('>'))
-        .unwrap_or(trimmed);
-    let url_part = unwrapped.split_whitespace().next()?;
-    let without_frag = url_part.split('#').next().unwrap_or(url_part);
+    let without_frag = trimmed.split('#').next().unwrap_or(trimmed);
     let without_query = without_frag.split('?').next().unwrap_or(without_frag);
     if without_query.is_empty() {
         return None;
@@ -143,7 +104,6 @@ fn normalize_relative_link_target(raw: &str) -> Option<String> {
     {
         return None;
     }
-    // Reject any other URI scheme like `file:` or `vscode:` before a slash.
     if let Some(colon_pos) = without_query.find(':')
         && !without_query[..colon_pos].contains('/')
     {

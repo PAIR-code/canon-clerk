@@ -28,6 +28,7 @@ serde_yaml = "0.9"
 diffy = "0.5"
 globset = "0.4"
 httpdate = "1.0"
+pulldown-cmark = { version = "0.13.6", default-features = false }
 
 [profile.dev]
 debug = 0
