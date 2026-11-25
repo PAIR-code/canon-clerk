@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Dual-input guard, stage-prefixed flag validation, and fast-forward predicates for `canon-clerk apprise`.
+//! Intent-required guard, stage-prefixed flag validation, and fast-forward predicates for `canon-clerk apprise`.
 
 use super::AppriseArgs;
 use crate::apprise::{
     DEFAULT_APPRISE_MAX_CONCURRENT_CALLS, DEFAULT_APPRISE_THRESHOLD, ENV_APPRISE_BATCH_SIZE,
     ENV_APPRISE_CONCURRENCY, ENV_APPRISE_THRESHOLD,
 };
-use crate::caseload::{Caseload, HeuristicNode, IntakeScope, normalize_unit_score};
+use crate::caseload::{Caseload, HeuristicNode, normalize_unit_score};
 use crate::cli::CliError;
-use crate::cli::args::CanonSelectionArgs;
 use crate::cli::closure::has_provider_overrides;
 use crate::cli::node_args::check_retired_tuning_env_vars;
 use crate::configure::StoredConfig;
@@ -210,9 +209,8 @@ pub(super) fn can_fast_forward_completed_apprisal(
         && !has_provider_overrides(&args.provider)
 }
 
-pub(super) fn enforce_dual_input_guard(
+pub(super) fn enforce_intent_required_guard(
     intake_opts: &IntakeOptions,
-    canons: &CanonSelectionArgs,
     incoming: Option<&Caseload>,
 ) -> Result<(), CliError> {
     let has_intent = if let Some(cli_intent) = &intake_opts.intent {
@@ -224,32 +222,14 @@ pub(super) fn enforce_dual_input_guard(
             .is_some_and(|s| !s.trim().is_empty())
     };
 
-    let cli_has_scope = intake_opts.all_targets
-        || intake_opts.patch_content.is_some()
-        || intake_opts.target_paths.is_some()
-        || !canons.is_empty();
-    let upstream_has_scope = incoming.is_some_and(|c| c.discovery.is_some())
-        || incoming.and_then(|c| c.intake.as_ref()).is_some_and(|i| {
-            i.scope == IntakeScope::AllTargets || !i.target_paths.is_empty() || !i.diffs.is_empty()
-        });
-    let has_scope = cli_has_scope || upstream_has_scope;
-
-    match (has_intent, has_scope) {
-        (true, true) => Ok(()),
-        (false, false) => Err(CliError::usage(
-            "Prospective apprisal requires both a non-empty design intent and an explicit target or canon scope.\n  \
-             Hint: Pass `--intent <TEXT>` alongside target paths (`src/...`, `-`, `--diff <PATH|->`, `--all-targets`) \
-             or canon scope (`--all-canons`, `--canon <PATH|GLOB>`), or supply `--caseload <PATH|->`.",
-        )),
-        (false, true) => Err(CliError::usage(
+    if has_intent {
+        Ok(())
+    } else {
+        Err(CliError::usage(
             "Prospective apprisal requires a non-empty design intent (`--intent <TEXT>`).\n  \
-             Hint: Pass `--intent <TEXT>` describing the planned architectural change, \
-             or supply `--caseload <PATH|->` with `.intake.intent` populated.",
-        )),
-        (true, false) => Err(CliError::usage(
-            "Prospective apprisal requires an explicit target or canon scope alongside `--intent`.\n  \
-             Hint: Specify prospective target paths (`src/...`, `-`, `--diff <PATH|->`, `--all-targets`) \
-             or canon scope (`--all-canons`, `--canon <PATH|GLOB>`), or supply `--caseload <PATH|->` with `.discovery` populated.",
-        )),
+             Hint: Pass `--intent <TEXT>` describing the planned work (defaults to `--all-canons`, \
+             or narrow with target paths / `--canon <PATH|GLOB>`), or supply `--caseload <PATH|->` \
+             with `.intake.intent` populated.",
+        ))
     }
 }

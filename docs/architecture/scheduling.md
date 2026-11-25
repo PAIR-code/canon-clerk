@@ -178,7 +178,7 @@ The scheduler and CLI enforce strict input handling to distinguish operator erro
    - The runner logs `0 modified files; 0 candidate canons matched` and short-circuits cleanly with **exit code 0**.
 
 3. **The Case or Controversy Invariant:**  
-   The heuristic adjudication spine (`docket`, `admit`, `vet`, `audit`) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the prospective apprisal spine (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries and prospective file paths to determine governing statutes.
+   The heuristic adjudication spine (`docket`, `admit`, `vet`, `audit`) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the prospective apprisal spine (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries—optionally narrowed to prospective target paths or defaulting to `--all-canons`—to determine governing statutes.
 
 ### Short-Circuit Fast Exit Conditions
 Across the pipeline, six deterministic short-circuit conditions trigger early termination:
@@ -206,7 +206,7 @@ A zero-result or clean run can occur at any stage along the DAG:
 7. **At `audit`:** Contested exhibits were adjudicated compliant with canon statutes (or satisfied declared `Exception` clauses).
 
 ### The Funnel Receipt Format
-When a multi-stage command runs in human-readable mode (default TTY stdout), the terminal output prints a compact **Pipeline Funnel Receipt** summarizing the operational watermark of every executed ancestor node in the closure (grouping closure nodes that share identical resolved models on the `configure` line):
+When a multi-stage command runs in human-readable mode (default TTY stdout), the terminal output prints a compact **Pipeline Funnel Receipt** summarizing the operational watermark of every executed ancestor node in the closure (grouping closure nodes that share identical resolved models on the `configure` line, and surfacing `(all-canons)` on the `discover` line whenever trigger matching was bypassed):
 
 ```text
 Pipeline Provenance:

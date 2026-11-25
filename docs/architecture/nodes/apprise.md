@@ -35,7 +35,7 @@ flowchart LR
 
     Apprise --> Notice["Statutory Notice Report<br/><i>(Applicable canons & guidance, Exit 0)</i>"]
     Apprise -. "zero candidates" .-> EmptyNotice["Fast Exit (No-op 0)<br/><i>Empty apprisal assessment</i>"]
-    Apprise -. "missing intent or scope" .-> UsageError["Usage Error<br/><i>(Dual-input guard, Exit 2)</i>"]
+    Apprise -. "missing or blank intent" .-> UsageError["Usage Error<br/><i>(Intent-required guard, Exit 2)</i>"]
 
     style Apprise fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff
     style EmptyNotice stroke-dasharray: 5 5
@@ -46,7 +46,7 @@ flowchart LR
   - `validate` (Branch A: validated candidate canons in `caseload.discovery.candidate_canons` and `caseload.validation`).
   - `configure` (Branch B: resolved `apprise` node model binding in `caseload.config.nodes.apprise` and verified provider credentials).
 - **Transitive Prerequisites:** `intake`, `discover`.
-- **The Dual-Input Invariant:** Statutory apprisal evaluates governing statutes against **both** a non-empty prospective design `intent` (`--intent <text>` or pre-populated `.intake.intent`) **and** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`). Omitting either input fails fast with exit code `2` rather than silently evaluating an empty scope.
+- **The Intent-Required Invariant & Default `--all-canons` Scope:** Statutory apprisal strictly requires a non-empty prospective design `intent` (`--intent <text>` or pre-populated `.intake.intent`); omitting intent or supplying blank whitespace fails fast with exit code `2`. When non-empty design intent is supplied **without** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`), `apprise` defaults discovery to `--all-canons` so contributors and agents do not miss cross-cutting canons before they know every file they will touch. When explicit targets or canon filters *are* supplied, existing scoped discovery behavior is preserved.
 - **Branch Independence & Pruning:**
   - Evaluates without requiring code diffs, patches, or work-in-progress (WIP) exhibits.
   - Decoupled from the contentious dispute track: completely prunes `docket`, `admit`, and `audit` from execution.
@@ -70,8 +70,8 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Dual-Input Verification & Candidate Canon Early Exit:**  
-   Verifies that non-empty prospective design intent is present on `caseload.intake.intent` alongside resolved discovery scope in `caseload.discovery`. Extracts `candidate_canons` from `caseload.discovery` (resolved from prospective target paths, globs, or explicit canon selection). If `candidate_canons` is empty after evaluating an explicit target or canon scope, attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits immediately with exit code `0`.
+1. **Intent Verification, Default Scope Resolution & Candidate Canon Early Exit:**  
+   Verifies that non-empty prospective design intent is present on `caseload.intake.intent` alongside resolved discovery scope in `caseload.discovery` (which defaults to `all-canons` when no explicit target scope or pre-populated `.discovery` is supplied). Extracts `candidate_canons` from `caseload.discovery` (resolved from full-corpus `--all-canons`, prospective target paths, globs, or explicit canon selection). If `candidate_canons` is empty, attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits immediately with exit code `0`.
 2. **Discriminative `Noul` Screening (`Discriminator` Required):**  
    Evaluates candidate canons against the prospective design intent and target scope context using `caseload.config.nodes.apprise`, which strictly requires a `Discriminator` model ([`../providers.md` §2–§3](../providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities)):
    - **Shared-Context Parallel `Noul` Evaluation:** Encodes the prospective design intent and target scope once as shared filing context and evaluates parallel per-canon applicability hypotheses (`nouls`) in a single forward pass with zero output tokens, surfacing deterministic statutory invariant notices on applicable canons while automatically partitioning oversized candidate sweeps according to the active model's `DecisionBudgetProfile` ([`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults)), overridable via `--apprise-batch-size`.
@@ -89,34 +89,39 @@ flowchart LR
 The CLI exposes `apprise` as the primary entry point for design-time and pre-flight planning:
 
 ```bash
-# 1. Inline design intent with prospective target paths:
+# 1. Full-corpus apprisal from design intent alone (defaults to --all-canons):
+canon-clerk apprise --intent "Refactor authentication to round-robin between providers"
+
+# 2. Inline design intent narrowed to prospective target paths:
 canon-clerk apprise --intent "Refactor authentication to round-robin between providers" "src/auth" "src/frontend"
 
-# 2. Streaming newline-delimited prospective target paths via standard input ('-'):
+# 3. Streaming newline-delimited prospective target paths via standard input ('-'):
 git diff origin/main --name-only | canon-clerk apprise --intent "Rotate auth provider" -
 
-# 3. Running against an upstream Caseload file:
+# 4. Running against an upstream Caseload file:
 canon-clerk apprise --caseload upstream-discovery.json
 
-# 4. Tab-separated compact records for shell scripting:
+# 5. Tab-separated compact records for shell scripting:
 canon-clerk apprise --intent "Add CLI output flag" src/cli --format compact
 
-# 5. Machine-readable JSON output for AI Agent prompt injection:
-canon-clerk apprise --intent "Add Kafka event bus" src/events --json
+# 6. Machine-readable JSON output for AI Agent prompt injection:
+canon-clerk apprise --intent "Add Kafka event bus" --json
 
-# 6. Partition large candidate sets into concurrent batches of 15 canons:
+# 7. Partition large candidate sets into concurrent batches of 15 canons:
 canon-clerk apprise --intent "Add CLI output flag" src/cli --apprise-batch-size 15 --apprise-concurrency 4
 ```
 
-### Dual-Input Guard (Missing Intent or Target Scope)
-`canon-clerk apprise` enforces a strict **Dual-Input Guard**: invoking `apprise` requires **both** a non-empty prospective design `intent` (`--intent <TEXT>` or pre-populated `.intake.intent`) **and** an explicit target or canon scope (positional `TARGETS`, newline-delimited target paths via `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`). Omitting either input (naked invocation, supplying `--intent` without target/canon scope, or supplying target/canon scope without `--intent`) fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance:
+### Intent-Required Guard & Default `--all-canons` Scope
+`canon-clerk apprise` enforces an **Intent-Required Guard**: invoking `apprise` strictly requires a non-empty prospective design `intent` (`--intent <TEXT>` or pre-populated `.intake.intent`). Naked invocation (`canon-clerk apprise`), supplying target/canon scope without `--intent`, or passing blank/whitespace-only `--intent` fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance:
 ```text
-error: Prospective apprisal requires both a non-empty design intent and an explicit target or canon scope.
-  Hint: Pass '--intent <TEXT>' alongside target paths ('src/...', '-', '--diff <PATH|->', '--all-targets')
-        or canon scope ('--all-canons', '--canon <PATH|GLOB>'), or supply '--caseload <PATH|->'.
+error: Prospective apprisal requires a non-empty design intent (`--intent <TEXT>`).
+  Hint: Pass `--intent <TEXT>` describing the planned work (defaults to `--all-canons`, or narrow with
+        target paths / `--canon <PATH|GLOB>`), or supply `--caseload <PATH|->` with `.intake.intent` populated.
 ```
 
-Conversely, when both prospective design intent and an explicit target or canon scope are provided and `discover` matches zero candidate canons, the command attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits cleanly with exit code `0` without invoking `validate` or requiring provider credentials (`GEMINI_API_KEY`).
+When non-empty design intent is supplied without an explicit target scope (`TARGETS`, `-`, `--diff`, `--all-targets`) or pre-populated upstream `.discovery`, `apprise` automatically resolves discovery in `all-canons` mode (still honoring explicit canon filters such as `--canon <PATH|GLOB>`, `--no-builtins`, or `--canon-name`). The resolved `all-canons` discovery mode is surfaced transparently in the `stylish` Pipeline Funnel Provenance receipt and in `.discovery.mode` (`"all-canons"`) in JSON output.
+
+When discovery matches zero candidate canons, the command attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits cleanly with exit code `0` without invoking `validate` or requiring provider credentials (`GEMINI_API_KEY`).
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Prospective target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
@@ -142,5 +147,5 @@ Conversely, when both prospective design intent and an explicit target or canon 
 ### CLI Exit Codes
 - **0:** Successful statutory apprisal (including clean zero-candidate short-circuits).
 - **1:** Candidate canon validation failure (`validation.has_errors` is `true`, evaluated before checking provider credentials) or local workspace I/O runtime error.
-- **2:** Usage error, dual-input guard violation (missing design intent or missing target/canon scope), invalid or out-of-range `--apprise-threshold`, invalid or zero `--apprise-batch-size` / `--apprise-concurrency`, invalid `--max-retries` / `--max-backoff-ms`, invalid `<provider>:<model>` specifier, rejected unqualified or out-of-closure stage flag, conflicting `stdin` operands, missing API credentials, or model provider error.
+- **2:** Usage error, intent-required guard violation (missing or blank design intent), invalid or out-of-range `--apprise-threshold`, invalid or zero `--apprise-batch-size` / `--apprise-concurrency`, invalid `--max-retries` / `--max-backoff-ms`, invalid `<provider>:<model>` specifier, rejected unqualified or out-of-closure stage flag, conflicting `stdin` operands, missing API credentials, or model provider error.
 

@@ -16,7 +16,8 @@
 
 use crate::caseload::{
     Caseload, CaseloadConfig, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
-    CaseloadValidation, CaseloadVerdict, CaseloadVetting, HeuristicNode, IntakeScope,
+    CaseloadValidation, CaseloadVerdict, CaseloadVetting, DiscoveryMode, HeuristicNode,
+    IntakeScope,
 };
 use std::io::Write;
 
@@ -142,14 +143,31 @@ pub(crate) fn write_discover_provenance(
     let glyph = glyph_for(disp);
     let suffix = fast_forward_suffix(disp);
     let matched = discovery.map_or(0, |d| d.candidate_canons.len());
-    let detail = match (matched, total_canons) {
-        (0, Some(total)) => format!("0 candidate canons matched ({total} canons evaluated)"),
-        (0, None) => "0 candidate canons matched".to_string(),
-        (n, Some(total)) if total >= n => format!(
-            "{n} candidate canon(s) matched ({} un-triggered)",
-            total - n
-        ),
-        (n, _) => format!("{n} candidate canon(s) matched"),
+    let is_all_canons = discovery.is_some_and(|d| d.mode == DiscoveryMode::AllCanons);
+    let detail = if is_all_canons {
+        match (matched, total_canons) {
+            (0, Some(total)) => {
+                format!("0 candidate canons matched (all-canons; {total} canons evaluated)")
+            }
+            (0, None) => "0 candidate canons matched (all-canons)".to_string(),
+            (n, Some(total)) if total > n => {
+                format!(
+                    "{n} candidate canon(s) matched (all-canons; {} excluded)",
+                    total - n
+                )
+            }
+            (n, _) => format!("{n} candidate canon(s) matched (all-canons)"),
+        }
+    } else {
+        match (matched, total_canons) {
+            (0, Some(total)) => format!("0 candidate canons matched ({total} canons evaluated)"),
+            (0, None) => "0 candidate canons matched".to_string(),
+            (n, Some(total)) if total >= n => format!(
+                "{n} candidate canon(s) matched ({} un-triggered)",
+                total - n
+            ),
+            (n, _) => format!("{n} candidate canon(s) matched"),
+        }
     };
     writeln!(stdout, "  {glyph} discover  : {detail}{suffix}")
 }
