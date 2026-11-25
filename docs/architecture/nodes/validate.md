@@ -67,12 +67,14 @@ flowchart LR
 1. **Candidate Intake:** Extracts `candidate_canons` from `caseload.discovery` (which was populated upstream either via path-trigger discovery or plenary `--all-canons` discovery).
 2. **AST Parsing:** Parses Markdown AST and YAML frontmatter blocks.
 3. **Static Rule Verification:**
-   - **Frontmatter Schema:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`).
+   - **Frontmatter Schema & Extensions:** Validates YAML types (`id`, `title`, `triggers`, `exists`, `inspect`, `tags`, `references`), flags duplicate keys (`duplicate-frontmatter-keys`), and warns on unrecognized keys (`no-unrecognized-keys`) while exempting `x-*` extension keys with a non-empty suffix per `SPEC.md` §4.3.
+   - **Frontmatter Glob Hygiene:** Checks `triggers`, `exists`, and `references` for uncollapsed sibling extension globs (`prefer-brace-alternation`), post-expansion duplicate globs (`no-duplicate-globs`), and catch-all subsumed globs (`no-subsumed-globs`).
    - **Scope Containment Verification:** Enforces that scoped canons located in `<scope>/.canons/**` do not attempt directory traversal (e.g. `../`) or declare paths superior or external to `<scope>/` in `triggers:`, `exists:`, or `references:`.
    - **RFC 2119 Formulations:** Verifies normative keyword usage (`MUST`, `SHOULD`, etc.) in uppercase.
-   - **Canon Naming & ID Standards:** Enforces invariant slug naming conventions (`canon-names-must-state-invariants`), non-empty canonical `id` derivation from file stems, and realm-and-scope `id` uniqueness (`(source_kind, scope, id)`), preserving `SPEC.md` §6.2 cross-realm coexistence without false `duplicate-canon-id` collisions.
-   - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants.
-   - **Directive Headers:** Validates `Exception`, `Precedent`, `Rationale`, and `Remediation` directive blocks.
+   - **Canon Naming, Filenames & ID Standards:** Enforces lowercase ASCII kebab-case filenames (`kebab-case-filenames`), invariant slug naming conventions (`no-negated-file-stems`, `no-negated-ids`, `id-matches-filename`), non-empty canonical `id` derivation from file stems, and realm-and-scope `id` uniqueness (`(source_kind, scope, id)`), preserving `SPEC.md` §6.2 cross-realm coexistence without false `duplicate-canon-id` collisions.
+   - **Directory Hygiene & Reference Integrity:** Evaluates purely against `WorkspaceSnapshot.existing_files` (zero direct filesystem I/O) to flag non-`.md` files under `**/.canons/**` other than direct `<scope>/.canons/config.yaml` policy files (`no-non-canon-files`), dead `references:` patterns matching zero workspace files (`valid-reference-targets`), and relative workspace Markdown links in canon body prose omitted from `references:` (`links-declared-in-references`).
+   - **Rule Atomicity:** Ensures single-rule cohesion; flags compound invariants (`rule-atomicity`).
+   - **Directive Headers & Casing:** Validates `Exception`, `Precedent`, `Rationale`, and `Remediation` directive blocks for blank payloads (`blank-directive`), duplicate single-occurrence directives (`duplicate-directive`), canonical capitalized casing (`valid-directive-casing`), and deprecated legacy `Guidance:` / `Supplement:` directives (`no-deprecated-directive`).
 4. **Diagnostic Assembly:** Assembles structured warnings and errors per canon into precise line-and-column `CodeAnnotation`s (e.g. YAML parse errors, lowercase RFC 2119 keyword locations, unclosed directives).
 
 ---

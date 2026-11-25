@@ -14,7 +14,9 @@
 
 //! Static Markdown body and Canon Anatomy lint rules for Canon files (`docs/architecture/nodes/validate.md` §4).
 
-use crate::canon::{CanonBody, CanonToken, CanonTokenKind, DirectiveName, SourceSpan};
+use super::rules_directives::check_directives;
+use super::rules_links::check_links_declared_in_references;
+use crate::canon::{CanonBody, CanonSourceInfo, CanonToken, CanonTokenKind, DirectiveName};
 use crate::caseload::{AnnotationLevel, CodeAnnotation};
 
 const UPPERCASE_RFC2119_KEYWORDS: &[&str] = &[
@@ -32,13 +34,17 @@ const LOWERCASE_MODAL_VERBS: &[&str] = &["must", "should", "shall"];
 /// Evaluates all static Markdown body and directive lint rules against tokenized Canon content.
 pub(crate) fn lint_body(
     path: &str,
+    source_info: Option<&CanonSourceInfo>,
+    scope: Option<&str>,
+    references: &[String],
     tokens: &[CanonToken],
     body: &CanonBody,
     out: &mut Vec<CodeAnnotation>,
 ) {
     check_unclosed_code_blocks(path, tokens, out);
     check_invariant_and_exception_modals(path, tokens, body, out);
-    check_directive_occurrences(path, body, out);
+    check_directives(path, tokens, body, out);
+    check_links_declared_in_references(path, source_info, scope, references, tokens, out);
 }
 
 fn check_unclosed_code_blocks(path: &str, tokens: &[CanonToken], out: &mut Vec<CodeAnnotation>) {
@@ -173,83 +179,8 @@ fn scan_body_token(
     }
 }
 
-fn check_directive_occurrences(path: &str, body: &CanonBody, out: &mut Vec<CodeAnnotation>) {
-    let mut seen_precedent = false;
-    let mut seen_rationale = false;
-    let mut seen_remediation = false;
-
-    for occ in &body.directive_spans {
-        if occ.content.trim().is_empty() {
-            out.push(make_directive_warning(
-                path,
-                occ.span,
-                "blank-directive",
-                format!(
-                    "Directive '{}' has blank or whitespace-only content and will be omitted.",
-                    occ.label
-                ),
-            ));
-        }
-
-        match occ.name {
-            DirectiveName::Precedent => {
-                if seen_precedent {
-                    out.push(make_directive_warning(
-                        path,
-                        occ.span,
-                        "duplicate-directive",
-                        "Duplicate 'Precedent' directive; single-occurrence directives should appear at most once per canon.".to_string(),
-                    ));
-                }
-                seen_precedent = true;
-            }
-            DirectiveName::Rationale => {
-                if seen_rationale {
-                    out.push(make_directive_warning(
-                        path,
-                        occ.span,
-                        "duplicate-directive",
-                        "Duplicate 'Rationale' directive; single-occurrence directives should appear at most once per canon.".to_string(),
-                    ));
-                }
-                seen_rationale = true;
-            }
-            DirectiveName::Remediation => {
-                if seen_remediation {
-                    out.push(make_directive_warning(
-                        path,
-                        occ.span,
-                        "duplicate-directive",
-                        "Duplicate 'Remediation' directive; single-occurrence directives should appear at most once per canon.".to_string(),
-                    ));
-                }
-                seen_remediation = true;
-            }
-            DirectiveName::Exception => {}
-        }
-    }
-}
-
-fn make_directive_warning(
-    path: &str,
-    span: SourceSpan,
-    title: &str,
-    message: String,
-) -> CodeAnnotation {
-    CodeAnnotation {
-        path: path.to_string(),
-        start_line: span.start_line,
-        end_line: span.end_line,
-        start_column: Some(span.start_column),
-        end_column: Some(span.end_column),
-        annotation_level: AnnotationLevel::Warning,
-        message,
-        title: Some(title.to_string()),
-    }
-}
-
 /// Replaces inline code spans (`` `...` ``) with spaces of identical character length so 1-based column positions remain exact.
-fn mask_inline_code(line: &str) -> String {
+pub(crate) fn mask_inline_code(line: &str) -> String {
     let mut chars: Vec<char> = line.chars().collect();
     let mut idx = 0;
     while idx < chars.len() {

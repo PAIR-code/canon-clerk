@@ -15,17 +15,21 @@
 //! Core domain execution engine and static canon linter for the `validate` Caseload DAG stage (`docs/architecture/nodes/validate.md`).
 
 mod rules_body;
+mod rules_directives;
 mod rules_frontmatter;
+mod rules_globs;
+mod rules_links;
 
 use crate::canon::{
-    Canon, CanonSourceKind, DEFAULT_FALLBACK_ID, ParseCanonOptions, derive_id,
-    extract_frontmatter_from_tokens, parse_body_from_tokens, resolve_source_info, tokenize_canon,
+    Canon, CanonScope, CanonSourceKind, DEFAULT_FALLBACK_ID, ParseCanonOptions, derive_id,
+    extract_frontmatter_from_tokens, has_directory_traversal, parse_body_from_tokens,
+    resolve_source_info, tokenize_canon,
 };
 use crate::caseload::{
-    AnnotationLevel, Caseload, CaseloadValidation, CodeAnnotation, ValidatedCanonMetadata,
-    ValidationOutcome,
+    AnnotationLevel, Caseload, CaseloadDiscovery, CaseloadValidation, CodeAnnotation,
+    DiscoveryMode, ValidatedCanonMetadata, ValidationOutcome,
 };
-use crate::discover::{DiscoverError, WorkspaceSnapshot};
+use crate::discover::{DiscoverError, GlobPattern, WorkspaceSnapshot, scope_relative_path};
 use rules_body::lint_body;
 use rules_frontmatter::{annotation_from_parse_error, lint_frontmatter};
 use std::collections::BTreeMap;
@@ -141,7 +145,16 @@ pub fn lint_canon_source(raw_content: &str, options: &ParseCanonOptions) -> Vali
         });
     }
 
-    lint_body(path, &tokens, &body, &mut diagnostics);
+    let references = extract_reference_patterns(extracted_opt.as_ref());
+    lint_body(
+        path,
+        source_info.as_ref(),
+        effective_scope.as_deref(),
+        &references,
+        &tokens,
+        &body,
+        &mut diagnostics,
+    );
     finalize_metadata(diagnostics, false)
 }
 
@@ -201,6 +214,7 @@ pub fn execute_validate(
                     title: Some("duplicate-canon-id".to_string()),
                 });
             }
+            check_valid_reference_targets(canon_ref, canon, workspace, &mut meta.diagnostics);
             meta.diagnostics
         } else {
             vec![CodeAnnotation {
@@ -225,6 +239,8 @@ pub fn execute_validate(
         }
         raw_results.insert(canon_ref.clone(), diagnostics);
     }
+
+    check_no_non_canon_files(discovery, workspace, &mut raw_results, &mut total_warnings);
 
     let warnings_exceeded = options.max_warnings.is_some_and(|max| total_warnings > max);
     let has_errors = any_errors || warnings_exceeded;
@@ -269,6 +285,127 @@ pub fn execute_validate_on_disk(
     }
 
     execute_validate(options, caseload, &snapshot)
+}
+
+fn extract_reference_patterns(
+    extracted: Option<&crate::canon::ExtractedFrontmatter>,
+) -> Vec<String> {
+    let Some(ext) = extracted else {
+        return Vec::new();
+    };
+    let Some(val) = ext.frontmatter.get("references") else {
+        return Vec::new();
+    };
+    match val {
+        serde_yaml::Value::String(s) => vec![s.clone()],
+        serde_yaml::Value::Sequence(seq) => seq
+            .iter()
+            .filter_map(|v| v.as_str().map(ToOwned::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn check_valid_reference_targets(
+    canon_ref: &str,
+    canon: &Canon,
+    workspace: &WorkspaceSnapshot,
+    out: &mut Vec<CodeAnnotation>,
+) {
+    if canon.source_kind != Some(CanonSourceKind::Workspace) {
+        return;
+    }
+
+    let scope_obj = canon.scope.as_deref().map(|s| CanonScope(s.to_string()));
+    for entry in &canon.frontmatter_key_spans {
+        if entry.key != "references" {
+            continue;
+        }
+        let items: Vec<(String, crate::canon::SourceSpan)> = match &entry.raw_value {
+            serde_yaml::Value::String(s) => vec![(s.clone(), entry.value_span)],
+            serde_yaml::Value::Sequence(seq) => seq
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, v)| {
+                    let s = v.as_str()?.to_string();
+                    let span = entry
+                        .item_spans
+                        .get(idx)
+                        .copied()
+                        .unwrap_or(entry.value_span);
+                    Some((s, span))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        for (pattern, span) in items {
+            if canon.scope.is_some() && has_directory_traversal(&pattern) {
+                continue;
+            }
+            let Ok(glob) = GlobPattern::parse(&pattern) else {
+                continue;
+            };
+            let matched = workspace.existing_files.iter().any(|existing| {
+                scope_relative_path(existing, scope_obj.as_ref())
+                    .is_some_and(|rel| glob.is_match(&rel))
+            });
+            if !matched {
+                out.push(CodeAnnotation {
+                    path: canon_ref.to_string(),
+                    start_line: span.start_line,
+                    end_line: span.end_line,
+                    start_column: Some(span.start_column),
+                    end_column: Some(span.end_column),
+                    annotation_level: AnnotationLevel::Warning,
+                    message: format!(
+                        "Reference pattern '{pattern}' matches zero files in the workspace (SPEC.md §4.2.7)."
+                    ),
+                    title: Some("valid-reference-targets".to_string()),
+                });
+            }
+        }
+    }
+}
+
+fn check_no_non_canon_files(
+    discovery: &CaseloadDiscovery,
+    workspace: &WorkspaceSnapshot,
+    raw_results: &mut BTreeMap<String, Vec<CodeAnnotation>>,
+    total_warnings: &mut usize,
+) {
+    for rel_path in &workspace.existing_files {
+        let in_canons_dir = rel_path.starts_with(".canons/") || rel_path.contains("/.canons/");
+        if !in_canons_dir {
+            continue;
+        }
+        if rel_path.to_ascii_lowercase().ends_with(".md") {
+            continue;
+        }
+        if rel_path == ".canons/config.yaml" || rel_path.ends_with("/.canons/config.yaml") {
+            continue;
+        }
+        let should_report = discovery.mode == DiscoveryMode::AllCanons
+            || discovery.target_files.iter().any(|t| t == rel_path);
+        if !should_report {
+            continue;
+        }
+
+        let diag = CodeAnnotation {
+            path: rel_path.clone(),
+            start_line: 1,
+            end_line: 1,
+            start_column: Some(1),
+            end_column: Some(1),
+            annotation_level: AnnotationLevel::Warning,
+            message: format!(
+                "Non-canon file '{rel_path}' resides under '.canons/'. Remove it or move it outside '.canons/' (only '.md' files and direct '.canons/config.yaml' policy files are permitted)."
+            ),
+            title: Some("no-non-canon-files".to_string()),
+        };
+        *total_warnings += 1;
+        raw_results.entry(rel_path.clone()).or_default().push(diag);
+    }
 }
 
 type ScopeIdKey = (Option<CanonSourceKind>, Option<String>, String);
@@ -469,6 +606,150 @@ Items MUST omit negated modal stems.";
             assert_eq!(meta.error_count, 0);
             assert_eq!(meta.warning_count, 3); // no-negated-file-stems, id-matches-filename, no-negated-ids
         }
+
+        #[test]
+        fn test_x_extension_fields_exempt_from_unrecognized_keys_but_checked_for_duplicates() {
+            let valid_raw = "\
+---
+x-owner: \"@platform\"
+x-presets:
+  - recommended
+triggers:
+  - \"src/**/*.rs\"
+---
+Items MUST be valid.";
+
+            let opts = ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md");
+            let meta = lint_canon_source(valid_raw, &opts);
+            assert_eq!(meta.error_count, 0);
+            assert_eq!(meta.warning_count, 0, "{:?}", meta.diagnostics);
+
+            // Verify x-* keys are not leaked into parsed Canon normalized fields
+            let parsed = crate::canon::parse_canon(valid_raw, &opts).expect("parse_canon");
+            assert_eq!(parsed.id, "items-must-be-valid");
+            assert!(parsed.tags.is_empty());
+
+            // Bare `x-` and duplicate `x-*` must still warn
+            let bad_raw = "\
+---
+x-: true
+x-owner: \"@a\"
+x-owner: \"@b\"
+---
+Items MUST be valid.";
+            let bad_meta = lint_canon_source(bad_raw, &opts);
+            let titles: Vec<&str> = bad_meta
+                .diagnostics
+                .iter()
+                .filter_map(|d| d.title.as_deref())
+                .collect();
+            assert!(titles.contains(&"no-unrecognized-keys"), "{titles:?}");
+            assert!(titles.contains(&"duplicate-frontmatter-keys"), "{titles:?}");
+        }
+
+        #[test]
+        fn test_prefer_brace_alternation_and_glob_hygiene() {
+            let uncollapsed = "\
+---
+triggers:
+  - \"**/*.go\"
+  - \"**/*.rs\"
+  - \"**/*.ts\"
+---
+Items MUST be valid.";
+            let meta = lint_canon_source(
+                uncollapsed,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md"),
+            );
+            assert!(
+                meta.diagnostics.iter().any(|d| {
+                    d.title.as_deref() == Some("prefer-brace-alternation")
+                        && d.message.contains("**/*.{go,rs,ts}")
+                }),
+                "{:?}",
+                meta.diagnostics
+            );
+
+            // Two literal filenames should NOT trigger prefer-brace-alternation
+            let two_literals = "\
+---
+triggers:
+  - \"README.md\"
+  - \"SPEC.md\"
+---
+Items MUST be valid.";
+            let two_meta = lint_canon_source(
+                two_literals,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md"),
+            );
+            assert_eq!(two_meta.warning_count, 0, "{:?}", two_meta.diagnostics);
+
+            // Three literal sibling filenames SHOULD trigger prefer-brace-alternation
+            let three_literals = "\
+---
+triggers:
+  - \"AGENTS.md\"
+  - \"README.md\"
+  - \"SPEC.md\"
+---
+Items MUST be valid.";
+            let three_meta = lint_canon_source(
+                three_literals,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md"),
+            );
+            assert!(
+                three_meta.diagnostics.iter().any(|d| {
+                    d.title.as_deref() == Some("prefer-brace-alternation")
+                        && d.message.contains("{AGENTS,README,SPEC}.md")
+                }),
+                "{:?}",
+                three_meta.diagnostics
+            );
+
+            // Duplicate (via brace expansion) and subsumed globs
+            let dup_and_subsumed = "\
+---
+triggers:
+  - \"**\"
+  - \"**/*.ts\"
+  - \"**/*.{ts,tsx}\"
+---
+Items MUST be valid.";
+            let ds_meta = lint_canon_source(
+                dup_and_subsumed,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md"),
+            );
+            let titles: Vec<&str> = ds_meta
+                .diagnostics
+                .iter()
+                .filter_map(|d| d.title.as_deref())
+                .collect();
+            assert!(titles.contains(&"no-duplicate-globs"), "{titles:?}");
+            assert!(titles.contains(&"no-subsumed-globs"), "{titles:?}");
+        }
+
+        #[test]
+        fn test_kebab_case_filenames() {
+            let raw = "Items MUST be valid.";
+            let bad_meta = lint_canon_source(
+                raw,
+                &ParseCanonOptions::with_source_ref(".canons/Bad_FileName.canon.md"),
+            );
+            assert!(
+                bad_meta
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.title.as_deref() == Some("kebab-case-filenames")),
+                "{:?}",
+                bad_meta.diagnostics
+            );
+
+            let good_meta = lint_canon_source(
+                raw,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid-1.canon.md"),
+            );
+            assert_eq!(good_meta.warning_count, 0, "{:?}", good_meta.diagnostics);
+        }
     }
 
     mod body_and_anatomy_linting {
@@ -582,6 +863,75 @@ Rationale: Two rules in one canon.";
                     .iter()
                     .any(|d| d.title.as_deref() == Some("rule-atomicity"))
             );
+        }
+
+        #[test]
+        fn test_flags_directive_casing_and_deprecated_directives() {
+            let raw = "\
+Items MUST be valid.
+
+exception: Legacy callers MAY bypass IFF documented.
+
+Guidance: Use the standard helper.
+
+## Supplement
+Extra notes.
+
+RATIONALE: Keep directives consistent.";
+
+            let meta = lint_canon_source(
+                raw,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-be-valid.canon.md"),
+            );
+            let titles: Vec<&str> = meta
+                .diagnostics
+                .iter()
+                .filter_map(|d| d.title.as_deref())
+                .collect();
+            assert_eq!(
+                titles
+                    .iter()
+                    .filter(|&&t| t == "valid-directive-casing")
+                    .count(),
+                2,
+                "{titles:?}"
+            );
+            assert_eq!(
+                titles
+                    .iter()
+                    .filter(|&&t| t == "no-deprecated-directive")
+                    .count(),
+                2,
+                "{titles:?}"
+            );
+        }
+
+        #[test]
+        fn test_links_declared_in_references_flags_undeclared_and_ignores_external_or_code() {
+            let raw = "\
+---
+references:
+  - \"SPEC.md\"
+---
+Items MUST follow [SPEC](SPEC.md) and [architecture](docs/arch.md#overview).
+
+See also [external](https://example.com), [anchor](#local), and `[inline](docs/ignored.md)`.
+
+```markdown
+[fenced](docs/fenced.md)
+```";
+
+            let meta = lint_canon_source(
+                raw,
+                &ParseCanonOptions::with_source_ref(".canons/items-must-follow-spec.canon.md"),
+            );
+            let link_diags: Vec<&CodeAnnotation> = meta
+                .diagnostics
+                .iter()
+                .filter(|d| d.title.as_deref() == Some("links-declared-in-references"))
+                .collect();
+            assert_eq!(link_diags.len(), 1, "{link_diags:?}");
+            assert!(link_diags[0].message.contains("docs/arch.md"));
         }
     }
 
@@ -706,6 +1056,72 @@ Rationale: Two rules in one canon.";
                 val.results
             );
             assert_eq!(val.results.len(), 2);
+        }
+
+        #[test]
+        fn test_directory_hygiene_and_valid_reference_targets_in_workspace_snapshot() {
+            let ws = WorkspaceSnapshot::new()
+                .with_file("SPEC.md")
+                .with_file("packages/ui/README.md")
+                .with_file(".canons/config.yaml")
+                .with_file(".canons/README.md")
+                .with_file(".canons/stray-notes.txt")
+                .with_file(".canons/nested/config.yaml")
+                .with_canon_markdown(
+                    "---\nreferences:\n  - \"SPEC.md\"\n  - \"docs/missing.md\"\n---\nItems MUST stay grounded.",
+                    &ParseCanonOptions::with_source_ref(".canons/items-must-stay-grounded.canon.md"),
+                )
+                .with_canon_markdown(
+                    "---\nreferences:\n  - \"README.md\"\n  - \"missing-local.md\"\n---\nUI items MUST stay grounded.",
+                    &ParseCanonOptions::with_source_ref(
+                        "packages/ui/.canons/ui-items-must-stay-grounded.canon.md",
+                    ),
+                );
+
+            let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
+                mode: DiscoveryMode::AllCanons,
+                target_files: Vec::new(),
+                config_files: vec![".canons/config.yaml".to_string()],
+                candidate_canons: vec![
+                    ".canons/items-must-stay-grounded.canon.md".to_string(),
+                    "packages/ui/.canons/ui-items-must-stay-grounded.canon.md".to_string(),
+                ],
+                active_exhibits: ActiveExhibits::default(),
+                triggers_join: BTreeMap::new(),
+                ..CaseloadDiscovery::default()
+            });
+
+            let validated =
+                execute_validate(&ValidateOptions::default(), caseload, &ws).expect("validate");
+            let val = validated.validation.expect("validation");
+
+            // Stray non-.md file and nested config.yaml are flagged; direct config.yaml and README.md are allowed
+            assert!(val.results.contains_key(".canons/stray-notes.txt"));
+            assert!(val.results.contains_key(".canons/nested/config.yaml"));
+            assert!(!val.results.contains_key(".canons/config.yaml"));
+            assert!(!val.results.contains_key(".canons/README.md"));
+
+            let root_ref_diags: Vec<&CodeAnnotation> = val
+                .results
+                .get(".canons/items-must-stay-grounded.canon.md")
+                .unwrap()
+                .diagnostics
+                .iter()
+                .filter(|d| d.title.as_deref() == Some("valid-reference-targets"))
+                .collect();
+            assert_eq!(root_ref_diags.len(), 1, "{root_ref_diags:?}");
+            assert!(root_ref_diags[0].message.contains("docs/missing.md"));
+
+            let scoped_ref_diags: Vec<&CodeAnnotation> = val
+                .results
+                .get("packages/ui/.canons/ui-items-must-stay-grounded.canon.md")
+                .unwrap()
+                .diagnostics
+                .iter()
+                .filter(|d| d.title.as_deref() == Some("valid-reference-targets"))
+                .collect();
+            assert_eq!(scoped_ref_diags.len(), 1, "{scoped_ref_diags:?}");
+            assert!(scoped_ref_diags[0].message.contains("missing-local.md"));
         }
     }
 }

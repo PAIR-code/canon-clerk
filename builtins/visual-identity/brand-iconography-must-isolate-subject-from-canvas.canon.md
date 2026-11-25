@@ -1,9 +1,7 @@
 ---
 triggers:
   - "assets/**"
-  - "**/*.png"
-  - "**/*.svg"
-  - "**/*.webp"
+  - "**/*.{png,svg,webp}"
 inspect:
   - diff
 tags:
