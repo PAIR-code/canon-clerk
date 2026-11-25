@@ -11,4 +11,6 @@ Normative specifications for cross-cutting contracts MUST be single-sourced in a
 
 Exception: A component specification MAY include a brief informative mention or component-specific override inline IFF it links to the authoritative document for the normative specification.
 
-Rationale: Anchored in arc42 §8 (Crosscutting Concepts) and ISO/IEC Directives Part 2 (Normative References), separating normative definitions from informative component references prevents silent specification divergence across sibling documents.
+Precedent: arc42 §8 (Crosscutting Concepts); ISO/IEC Directives Part 2 (Normative References).
+
+Rationale: Separating normative definitions from informative component references prevents silent specification divergence across sibling documents.
