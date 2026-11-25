@@ -17,13 +17,7 @@ Instead of running a monolithic pipeline that redundantly requires network conne
 
 ## 2. Transitive Dependency Closures & Pruning
 
-The full DAG consists of:
-- **Branch A (The Filing Track):** `intake` $\longrightarrow$ `discover` $\longrightarrow$ `validate`
-- **Branch B (The Environment Track):** `configure`
-- **Diagnostic Leaf:** `probe` (depends strictly on `configure`)
-- **Dual Track Convergence:**
-  - **The Contentious Track (Adjudication of In-Flight Changes):** `docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`
-  - **The Apprisal Track (Prospective Jurisprudence):** `apprise` (evaluates prospective design intent against candidate canons, bypassing `docket`)
+Operating over the canonical DAG topology defined in [`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) (**Branch A: Filing Track**, **Branch B: Environment Track**, **Diagnostic Leaf**, **Heuristic Cascade / Adjudication Spine**, and **Apprisal Track**), the scheduler computes minimal ancestor subgraphs per terminal stop point:
 
 ```mermaid
 flowchart TD
@@ -57,14 +51,14 @@ When an operator or CI workflow executes a subcommand $T$, the runner constructs
 ### Transitive Closure Pruning Rules
 1. **Branch A Independence:** `configure` and `probe` execute with zero knowledge of Git diffs, modified files, or repository canons.
 2. **Branch B Independence:** `intake`, `discover`, and `validate` execute with zero knowledge of AI providers, model configurations, or API credentials.
-3. **Diagnostic Isolation:** `probe` is never scheduled during review cascades (`docket`, `admit`, `vet`, `audit`), eliminating unnecessary health-check latency prior to screening.
+3. **Diagnostic Isolation:** `probe` is never scheduled during [Heuristic Cascade](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) or [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) runs, eliminating unnecessary health-check latency prior to screening.
 4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons`, Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidate_canons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
 
 ---
 
 ## 3. The Guarded / Lazy Scheduling Invariant
 
-When executing toward a converged target (`docket`, `admit`, `vet`, `audit`), both Branch A (`validate`) and Branch B (`configure`) are required ancestors. However, running `configure` unconditionally at startup would break a critical engineering invariant: **PRs touching un-governed files must pass in CI without requiring API credentials or external secret provisioning.**
+When executing toward a converged [Heuristic Cascade](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) or [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) target, both Branch A (`validate`) and Branch B (`configure`) are required ancestors. However, running `configure` unconditionally at startup would break a critical engineering invariant: **PRs touching un-governed files must pass in CI without requiring API credentials or external secret provisioning.**
 
 To uphold this guarantee, the scheduler enforces the **Guarded / Lazy Scheduling Invariant**:
 
@@ -91,7 +85,7 @@ flowchart TD
 2. **Branch B (`configure`) is never evaluated if candidates count is zero.** Fork pull requests, documentation updates, and changes to un-governed directories succeed in ~15ms without configured provider credentials (`GEMINI_API_KEY` / `TYPESAFE_API_KEY`).
 3. **`validate` evaluates candidate syntax before credentials are checked.** If a canon contains YAML or markdown errors, the runner fails fast with exit code `1` before loading provider credentials.
 4. **`configure` resolves JIT with closure-exact node bindings and credential sufficiency** only when valid candidate canons exist and heuristic evaluation is imminent. `configure` resolves the active default provider (`--provider <slug>` $\succ$ `CANON_CLERK_PROVIDER` $\succ$ `defaults.provider` $\succ$ `"google"`) and each closure node's `<provider>:<model>` binding along the 4-level per-node specificity cascade, verifying credentials strictly for the providers referenced by the heuristic nodes executed in that closure (for example, allowing `--provider typesafe` with `TYPESAFE_API_KEY` alone to execute `apprise`, `docket`, `admit`, and `vet` without `GEMINI_API_KEY`, while failing fast with exit code `2` on `audit` unless `audit` is provisioned with a `Generator` model and its provider credential). When `--caseload` chains a partial upstream closure into a downstream command (`vet` $\to$ `audit`), downstream `audit` preserves pre-populated upstream node bindings and resolves `audit` JIT, invalidating upstream/downstream stages only when an upstream stage's model or active provider is explicitly overridden.
-5. **Stage-seam concurrency drains to zero and remains thread-identity isolated.** Multi-unit heuristic stages (`apprise`, `docket`, `admit`, `vet`, `audit`) execute bounded concurrent work uniformly within each stage over the shared pooled provider requester ([`transport.md`](transport.md)) and drain all in-flight worker activity—including waking any cooldown-parked sibling workers upon cooperative stage abort—before advancing to the next DAG node, guaranteeing that upstream cardinality (`1` unit vs. `N` units) never alters the transport liveness or execution behavior of downstream stages.
+5. **Stage-seam concurrency drains to zero and remains thread-identity isolated.** Multi-unit [heuristic stages](overview.md#5-the-caseload-pipeline-nodes) execute bounded concurrent work uniformly within each stage over the shared pooled provider requester ([`transport.md`](transport.md)) and drain all in-flight worker activity—including waking any cooldown-parked sibling workers upon cooperative stage abort—before advancing to the next DAG node, guaranteeing that upstream cardinality (`1` unit vs. `N` units) never alters the transport liveness or execution behavior of downstream stages.
 
 ---
 
@@ -135,7 +129,7 @@ To prevent cross-stage parameter leakage in telescoping cascades, all stage-spec
 - **Per-Node Concurrency (`--<node>-concurrency <count>`):** `--apprise-concurrency`, `--docket-concurrency`, `--admit-concurrency`, `--vet-concurrency`, `--audit-concurrency`
 
 #### Scoping & Validation Invariants:
-1. **Transitive Acceptance on Evaluation Closures:** An evaluation subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure (while standalone `configure` and `probe` accept all five `--<node>-model` flags to inspect and probe full bench configurations):
+1. **Transitive Acceptance on Evaluation Closures:** An evaluation subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure (while standalone `configure` and `probe` accept all heuristic `--<node>-model` flags to inspect and probe full bench configurations):
    - `canon-clerk audit` accepts `--audit-*`, `--vet-*`, `--admit-*`, and `--docket-*` flags because `docket`, `admit`, and `vet` precede `audit`.
    - `canon-clerk vet` accepts `--vet-*`, `--admit-*`, and `--docket-*` flags.
    - `canon-clerk admit` accepts `--docket-*` and `--admit-*` flags.
@@ -169,7 +163,7 @@ The scheduler determines the node sequence using a deterministic static table. F
 The scheduler and CLI enforce strict input handling to distinguish operator error from legitimate no-ops:
 
 1. **Missing Source Guard (Naked Invocation $\implies$ Exit 2):**  
-   When a subcommand requiring filing context or explicit scope (`intake`, `discover`, `validate`, `docket`, `admit`, `vet`, `audit`, `apprise`) is invoked without file arguments, diff flags (`--diff`), intent flags (`--intent`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
+   When a subcommand requiring filing context or explicit scope (any [Branch A, Heuristic Cascade, or Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) subcommand) is invoked without file arguments, diff flags (`--diff`), intent flags (`--intent`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
 
 2. **Empty Stream Short-Circuit (Legitimate No-op $\implies$ Exit 0):**  
    When an operator explicitly designates an input source (e.g. `git diff origin/main | canon-clerk audit --diff -`) and that source produces zero changes:
@@ -178,10 +172,10 @@ The scheduler and CLI enforce strict input handling to distinguish operator erro
    - The runner logs `0 modified files; 0 candidate canons matched` and short-circuits cleanly with **exit code 0**.
 
 3. **The Case or Controversy Invariant:**  
-   The heuristic adjudication spine (`docket`, `admit`, `vet`, `audit`) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the prospective apprisal spine (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries—optionally narrowed to prospective target paths or defaulting to `--all-canons`—to determine governing statutes.
+   The [Heuristic Cascade](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries—optionally narrowed to prospective target paths or defaulting to `--all-canons`—to determine governing statutes.
 
 ### Short-Circuit Fast Exit Conditions
-Across the pipeline, six deterministic short-circuit conditions trigger early termination:
+Across the pipeline, the following deterministic short-circuit conditions trigger early termination:
 1. **At `discover`:** If `candidate_canons` is empty $\implies$ Exit `0` immediately (`intake` and `discovery` attached to emitted Caseload; downstream nodes skipped).
 2. **At `validate`:** If `validation.has_errors == true` $\implies$ Exit `1` immediately (malformed canon syntax; zero tokens spent).
 3. **At `docket`:** If `active_docket` is empty $\implies$ Exit `0` immediately (all candidate canons dismissed at macro screening; zero trials scheduled).

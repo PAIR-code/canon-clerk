@@ -38,6 +38,7 @@ code-quality
 concurrency
 configuration
 conventional-commits
+documentation
 git-workflow
 openspec
 parser-design

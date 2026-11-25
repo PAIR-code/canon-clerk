@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary & Architectural Role
 
-On medium-to-large filings, heuristic Caseload stages (`apprise`, `docket`, `admit`, `vet`, `audit`) fan out 30–50+ bounded concurrent model requests (`scheduling.md` §3) against shared upstream or self-hosted provider origins (`generativelanguage.googleapis.com`, `api.typesafe.ai`, corporate gateways, and local `/v1/systemone` daemons). Uncoordinated, single-shot HTTP execution exhibits two structural failure modes under realistic pull-request workloads:
+On medium-to-large filings, [heuristic Caseload stages](overview.md#5-the-caseload-pipeline-nodes) fan out 30–50+ bounded concurrent model requests ([`scheduling.md` §3](scheduling.md#3-the-guarded--lazy-scheduling-invariant)) against shared upstream or self-hosted provider origins (`generativelanguage.googleapis.com`, `api.typesafe.ai`, corporate gateways, and local `/v1/systemone` daemons). Uncoordinated, single-shot HTTP execution exhibits structural failure modes under realistic pull-request workloads:
 
 1. **Rolling Minute-Window Rate-Limit Exhaustion (`HTTP 429`):** High-throughput discriminative and generative stages can consume a provider's rolling 60-second input-token or request-per-minute quota mid-stage. Naive per-call millisecond retries exhaust all attempts while tens of seconds remain in the rolling window, while uncoordinated sibling workers continue firing doomed Attempt-1 calls into the throttled origin and wake up in a simultaneous thundering herd.
 2. **Bimodal Tail-Latency Spikes & Transient Transport Faults:** A single transient socket reset, upstream `5xx` overload, or reasoning tail-latency timeout on one slice out of dozens otherwise aborts the entire pipeline and discards all completed sibling work units.
@@ -17,7 +17,7 @@ Canon Clerk centralizes outbound provider transport behind a **shared pooled HTT
 ```mermaid
 flowchart LR
     subgraph HeuristicStages ["Heuristic Evaluation Stages"]
-        Workers["Bounded Stage Workers<br/>(apprise · docket · admit · vet · audit)"]
+        Workers["Bounded Stage Workers<br/>(Heuristic Evaluation Stages)"]
     end
 
     subgraph DiagnosticStage ["Diagnostic Leaf"]
@@ -42,8 +42,8 @@ flowchart LR
 
 ## 2. Persistent Reactor & Connection Pool Lifecycle
 
-1. **Lazy Background Reactor Initialization (`0ms` Offline Overhead):** Persistent HTTPS connection pools and asynchronous timers execute on a dedicated, continuously driven background reactor initialized lazily on the first live network request. Purely local closures (`intake`, `discover`, `validate`, `configure`) and guarded zero-candidate short-circuits (`scheduling.md` §3) spawn zero background reactor threads and initialize zero TLS pools.
-2. **Thread-Identity Invariant Socket Reuse:** Because stage work units run on scoped OS worker threads that exit at each DAG node seam (`scheduling.md` §3), driving all socket I/O and idle keep-alive tasks on the persistent background reactor ensures pooled HTTP/1.1 and HTTP/2 connections remain live across worker thread exits and stage transitions (`docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`).
+1. **Lazy Background Reactor Initialization (`0ms` Offline Overhead):** Persistent HTTPS connection pools and asynchronous timers execute on a dedicated, continuously driven background reactor initialized lazily on the first live network request. Purely local deterministic closures ([`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track)) and guarded zero-candidate short-circuits ([`scheduling.md` §3](scheduling.md#3-the-guarded--lazy-scheduling-invariant)) spawn zero background reactor threads and initialize zero TLS pools.
+2. **Thread-Identity Invariant Socket Reuse:** Because stage work units run on scoped OS worker threads that exit at each DAG node seam ([`scheduling.md` §3](scheduling.md#3-the-guarded--lazy-scheduling-invariant)), driving all socket I/O and idle keep-alive tasks on the persistent background reactor ensures pooled HTTP/1.1 and HTTP/2 connections remain live across worker thread exits and stage transitions along the [Heuristic Cascade](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track).
 3. **Unified Protocol-Driven Multi-Profile Sharing:** Runtime execution and diagnostic probing construct adapters from a single resolved map of provider connections keyed by profile `<slug>`. Each connection binds a reusable wire-protocol driver, normalized `baseUrl`, and authentication scheme while sharing one underlying connection pool and origin cooldown registry:
    - **`gemini` Wire Protocol:** Routes `Generator` models to `POST {baseUrl}/models/{model}:generateContent` and `Discriminator` (`gemini-decision-*`) models to `POST {baseUrl}/decisions`, authenticating with the `x-goog-api-key` header.
    - **`systemone` Wire Protocol:** Normalizes bare origin URLs (`http://127.0.0.1:8080` or `http://127.0.0.1:8080/`) to `POST {origin}/v1/systemone` and explicit path prefixes (`https://api.typesafe.ai/v1` or `http://127.0.0.1:8080/v1`) to `POST {baseUrl}/systemone` (preserving URLs already ending in `/systemone`), sending `Authorization: Bearer <key>` when an API key is configured and omitting authentication headers on keyless custom `systemone` profiles.
@@ -84,7 +84,7 @@ sequenceDiagram
 2. **Monotonic Coalescing (Zero Multiplicative Stacking):** When multiple already-in-flight workers receive `HTTP 429` (or `HTTP 503` carrying an explicit retry delay) concurrently from the same origin, each worker updates the shared origin deadline monotonically (`cooldown_until = max(cooldown_until, now + advised_delay)`). Consequently, $K$ concurrent workers share a single cooldown window rather than stacking $K \times \text{delay}$.
 3. **Staggered Worker Release:** Workers releasing from an origin cooldown gate reserve staggered wakeup slots spaced by short intervals (`100ms–250ms`), smoothing burst re-entry into the provider's rolling token/request window and preventing wakeup thundering herds.
 4. **Wire-Only Per-Attempt Timeout Isolation:** Waiting on a pre-dispatch origin cooldown gate or inter-attempt retry backoff **never** consumes the request's per-attempt wire timeout budget (`timeout_ms`, default `60,000ms` on cloud profiles and `180,000ms` on built-in `local:*` nodes; overridable via `--timeout <MS>` / `CANON_CLERK_TIMEOUT_MS` / `defaults.timeoutMs`). Each attempt's socket timeout clock starts strictly when the HTTP request dispatches onto the wire.
-5. **Cross-Stage Continuity & Cooperative Abort Wakeup:** Within a telescoping CLI cascade (`docket` $\to$ `admit` $\to$ `vet` $\to$ `audit`), the shared requester carries origin cooldown state across stage seams. If an unrecoverable failure triggers cooperative stage abort (`scheduling.md` §3) while sibling workers in that stage are parked on a cooldown or backoff timer, parked workers wake immediately rather than stalling terminal exit for the remainder of the cooldown window.
+5. **Cross-Stage Continuity & Cooperative Abort Wakeup:** Within a telescoping CLI cascade ([`scheduling.md` §4](scheduling.md#pattern-a-telescoping-backfill-mode-default-interactive--ci)), the shared requester carries origin cooldown state across stage seams. If an unrecoverable failure triggers cooperative stage abort ([`scheduling.md` §3](scheduling.md#3-the-guarded--lazy-scheduling-invariant)) while sibling workers in that stage are parked on a cooldown or backoff timer, parked workers wake immediately rather than stalling terminal exit for the remainder of the cooldown window.
 
 ---
 
@@ -125,7 +125,7 @@ The diagnostic health check leaf ([`nodes/probe.md`](nodes/probe.md)) verifies l
 
 - **Zero Retries (`0`):** `probe` dispatches exactly one HTTP request per deduplicated target in `.probe.targets`.
 - **Cooldown Gate Bypass:** `probe` never sleeps on pre-dispatch origin cooldown gates and never mutates shared cooldown state, ensuring a throttled endpoint immediately reports its `HTTP 429` status on `.probe` within `--timeout` (`5000ms` default).
-- **Strict CLI Flag Scoping:** Passing `--max-retries` or `--max-backoff-ms` to `canon-clerk probe` (or to offline commands `intake`, `discover`, `validate`, `configure`) is rejected with exit code `2`.
+- **Strict CLI Flag Scoping:** Passing `--max-retries` or `--max-backoff-ms` to `canon-clerk probe` (or to offline deterministic stages defined in [`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track)) is rejected with exit code `2`.
 
 ---
 
@@ -141,13 +141,13 @@ Before sleeping on any pre-dispatch origin cooldown or inter-attempt retry backo
 
 ### Domain-Classified Timeouts & Shared CLI Transport Controls
 
-Canon Clerk partitions network timeouts into three orthogonal domains so long-running local CPU evaluations never cause health checks or dead sockets to stall:
+Canon Clerk partitions network timeouts into orthogonal domains so long-running local CPU evaluations never cause health checks or dead sockets to stall:
 
 1. **TCP/TLS Connect Timeout (`10,000ms`, fixed):** Bounds initial socket/TLS handshake establishment across pooled connections.
 2. **Diagnostic `probe` Timeout (`5,000ms` default):** Controlled exclusively by `probe --timeout <MS>` / `CANON_CLERK_PROBE_TIMEOUT_MS` so `defaults.timeoutMs` or `CANON_CLERK_TIMEOUT_MS` never slows down reachability checks against a stopped local daemon.
-3. **Heuristic Evaluation Wire Timeout (`60,000ms` cloud / `180,000ms` `local:*` default):** Per-attempt wire timeout across all five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`).
+3. **Heuristic Evaluation Wire Timeout (`60,000ms` cloud / `180,000ms` `local:*` default):** Per-attempt wire timeout across all [heuristic evaluation subcommands](overview.md#5-the-caseload-pipeline-nodes).
 
-All five heuristic evaluation subcommands (`apprise`, `docket`, `admit`, `vet`, `audit`) accept shared transport timeout and retry controls resolved via Canon Clerk's standard 4-level specificity cascade (explicit CLI flag $\succ$ environment variable $\succ$ `~/.config/canon-clerk/config.json` `defaults` $\succ$ built-in/profile default):
+All [heuristic evaluation subcommands](overview.md#5-the-caseload-pipeline-nodes) accept shared transport timeout and retry controls resolved via Canon Clerk's [configuration specificity cascade](nodes/configure.md#4-process--domain-logic-configuration):
 
 | CLI Flag | Environment Variable | `config.json` Key | Default | Domain & Validation Contract |
 | :--- | :--- | :--- | :--- | :--- |

@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary & Architectural Role
 
-Static canon validation (`validate`) guarantees syntactic and structural conformance to `SPEC.md`, but cannot detect stochastic boundary instability when heuristic stages evaluate natural-language rules against realistic workloads. Across repeated evaluations ($N$ trials at `temperature: 0.0`), run-to-run classification variance (*flippers*) surfaces two distinct classes of defects:
+Static canon validation (`validate`) guarantees syntactic and structural conformance to `SPEC.md`, but cannot detect stochastic boundary instability when heuristic stages evaluate natural-language rules against realistic workloads. Across repeated evaluations ($N$ trials at `temperature: 0.0`), run-to-run classification variance (*flippers*) surfaces distinct classes of defects:
 
 1. **Engine & Prompt Drift:** Autoregressive score drift across large candidate canon sets, compliance-vs.-jurisdiction rubric confusion, or missing frontmatter context.
 2. **Latent Canon-Authoring Ambiguity:** Non-atomic invariants, ambiguous grammatical subjects, unobservable cognitive conditions, or overly narrow terminology that place unrelated changes near the `0.5` decision boundary.
@@ -30,7 +30,7 @@ The **Consistency & Flipper Benchmark** domain service (`bench`) provides a repe
 
 Canon Clerk preserves a strict boundary between the production review gate and developer benchmarking infrastructure:
 
-- **Single-Verb Production CLI Invariant:** As established in [`overview.md`](overview.md#1-executive-summary-the-caseload-paradigm), subcommands on the shipped `canon-clerk` binary represent exclusively terminal stop points along the Caseload DAG (`intake`, `discover`, `validate`, `configure`, `probe`, `apprise`, `docket`, `admit`, `vet`, `audit`). Multi-trial benchmarking is therefore exposed through a dedicated developer runner (`consistency_bench` / `scripts/bench-consistency.sh`) rather than adding non-DAG subcommands to `canon-clerk`.
+- **Single-Verb Production CLI Invariant:** As established in [`overview.md`](overview.md#1-executive-summary-the-caseload-paradigm), subcommands on the shipped `canon-clerk` binary represent exclusively terminal stop points along the Caseload DAG. Multi-trial benchmarking is therefore exposed through a dedicated developer runner (`consistency_bench` / `scripts/bench-consistency.sh`) rather than adding non-DAG subcommands to `canon-clerk`.
 - **Segregation from Hermetic Gates:** Executing live $N$-trial model sweeps requires network access, provider quotas, and API credentials. Keeping the benchmark runner separate from `./scripts/check.sh` guarantees that commit-stage and pull-request verification remain fast, offline, and deterministic, while still verifying all benchmark aggregation logic hermetically against mock providers during routine test suites.
 
 ```mermaid
@@ -40,13 +40,13 @@ flowchart LR
     end
 
     subgraph HexagonCore ["Core Crate Domain Services"]
-        Upstream["Branch A + B Closure<br/>(intake → discover → validate + configure)"]
+        Upstream["Branch A + B Closure<br/>(Deterministic Filing & Env)"]
         Bench["Consistency Benchmark Engine<br/>(N-Trial Loop, Telemetry Capture, Flipper Stats)"]
-        Stages["Heuristic Stage Engines<br/>(apprise · docket · admit · vet · audit)"]
+        Stages["Heuristic Stage Engines"]
     end
 
     subgraph DrivenPort ["Driven Adapters"]
-        Provider["Structured & Decision Model Providers<br/>(google:* · typesafe:*)"]
+        Provider["Structured & Decision Model Providers<br/>(Configured Provider Profiles)"]
     end
 
     Runner --> Upstream
@@ -59,7 +59,7 @@ flowchart LR
 
 ## 3. Single-Closure Preparation & Trial Isolation Invariants
 
-To measure model and rubric stability without confounding filing noise or redundant filesystem work, every benchmark run enforces three execution invariants:
+To measure model and rubric stability without confounding filing noise or redundant filesystem work, every benchmark run enforces the following execution invariants:
 
 ```mermaid
 flowchart TD
@@ -106,7 +106,7 @@ In `admit` ([`nodes/admit.md`](nodes/admit.md#caseload-delta)), `.evidence.exhib
 
 The `consistency_bench` CLI adapter (invoked via `./scripts/bench-consistency.sh`) adheres to all repository CLI ergonomics invariants:
 
-- **Precedence Cascade:** Benchmark flags (`--stage`, `--trials`, `--provider`, `--model`, `--<node>-model`, `--threshold`, `--batch-size`, `--concurrency`, `--format`, `--include-stable`, `--output-json`) resolve with standard precedence: explicit CLI flags (`--model <provider:model>` overriding the benchmarked `--stage` node alongside per-node `--<node>-model` overrides for target and upstream cascade preparation) $\succ$ `CANON_CLERK_BENCH_*` environment variables (`CANON_CLERK_BENCH_MODEL`, `CANON_CLERK_BENCH_THRESHOLD`, `CANON_CLERK_BENCH_BATCH_SIZE`, `CANON_CLERK_BENCH_CONCURRENCY`) $\succ$ stage- and provider-specific environment variables (`CANON_CLERK_PROVIDER`, `CANON_CLERK_APPRISE_*`, `CANON_CLERK_DOCKET_*`, `CANON_CLERK_ADMIT_*`, `CANON_CLERK_VET_*`, `CANON_CLERK_AUDIT_*`) $\succ$ host `config.json` (`defaults.*` and `nodes.<stage>.*`) $\succ$ built-in defaults (`N = 5` trials, `google` provider, threshold `0.8` for `vet` and `0.5` for all other stages, batch size `256` on `google:gemini-decision-*`, `48` on cloud `systemone` profiles, and `2` on `local:*`, with `unbounded` / `0` supported on `--batch-size` for single-turn comparative sweeps, concurrency `4` on cloud profiles / `1` on `local:*`). All model specifiers enforce strict `<provider>:<model>` formatting ([`nodes/configure.md`](nodes/configure.md#data-plane--security-invariants)).
+- **Precedence Cascade:** Benchmark flags (`--stage`, `--trials`, `--provider`, `--model`, `--<node>-model`, `--threshold`, `--batch-size`, `--concurrency`, `--format`, `--include-stable`, `--output-json`) resolve with standard precedence: explicit CLI flags (`--model <provider:model>` overriding the benchmarked `--stage` node alongside per-node `--<node>-model` overrides for target and upstream cascade preparation) $\succ$ `CANON_CLERK_BENCH_*` environment variables (`CANON_CLERK_BENCH_MODEL`, `CANON_CLERK_BENCH_THRESHOLD`, `CANON_CLERK_BENCH_BATCH_SIZE`, `CANON_CLERK_BENCH_CONCURRENCY`) $\succ$ per-stage and provider environment variables (`CANON_CLERK_PROVIDER`, `CANON_CLERK_<NODE>_*` per [`providers.md` §4–§5](providers.md#4-decisionbudgetprofile--per-profile-execution-defaults)) $\succ$ host `config.json` (`defaults.*` and `nodes.<stage>.*` per [`nodes/configure.md`](nodes/configure.md#4-process--domain-logic-configuration)) $\succ$ built-in defaults (`N = 5` trials, with provider, threshold, batch-size, and concurrency defaults inherited from [`providers.md` §4](providers.md#4-decisionbudgetprofile--per-profile-execution-defaults), plus `unbounded` / `0` supported on `--batch-size` for single-turn comparative sweeps). All model specifiers enforce strict `<provider>:<model>` formatting ([`providers.md` §2](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities)).
 - **Data vs. Diagnostic Stream Separation:** Per-trial execution progress (`[bench] ...`) writes exclusively to `stderr` (suppressed via `-q` / `--quiet`), while `stdout` emits uncorrupted Markdown diagnostic tables or canonicalized benchmark report JSON (`--json` / `--format json`). `--output-json <path>` archives the structured JSON report to disk independently of `stdout` so operators can view Markdown tables interactively while saving machine-readable artifacts.
 - **Standardized Exit Codes:**
   - **`0`:** Benchmark completed across all configured trials (including zero-candidate, empty-docket, and zero-evidence short-circuits or runs where flippers were observed—flipper presence is diagnostic data, not a process error).
