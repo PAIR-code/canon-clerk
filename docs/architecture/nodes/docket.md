@@ -31,7 +31,7 @@ flowchart LR
     Config --> Docket
     Params --> Docket
 
-    Docket --> Admit["admit (Micro Triage)<br/><i>(Pipeline Cascade)</i><br/><code>.evidence</code>"]
+    Docket --> Admit["admit (Micro Triage)<br/><i>(Adjudication Track)</i><br/><code>.evidence</code>"]
     Docket -. "standalone CLI" .-> DocketReport["Active Docket Report<br/><i>(Colorability scores, Exit 0)</i>"]
     Docket -. "zero candidates or empty docket" .-> ZeroCases["Fast Exit (Zero Trials 0)<br/><i>Prunes admit & audit</i>"]
     Docket -. "missing filing" .-> UsageError["Usage Error<br/><i>(Case-or-Controversy guard, Exit 2)</i>"]
@@ -80,7 +80,7 @@ flowchart LR
    Each candidate canon's calibrated `Noul` probability is clamped into `[0.0, 1.0]` alongside a deterministic score summary (`colorability_summary`), and the core domain engine deterministically evaluates the continuous score against the threshold to assign `colorability_status`:
    - Canons scoring $\ge 0.5$ establish jurisdiction, are marked `colorability_status: "docketed"`, and are entered into `active_docket`.
    - Canons scoring $< 0.5$ are marked `colorability_status: "dismissed"`.
-4. **Latency & Token Economy:** Executes in ~150–400ms with zero output tokens across 20+ candidate canons, and scales across 40+ candidate canons via concurrent batches with reduced wall-clock latency and stabilized per-canon classifications.
+4. **Token Economy & Batch Scaling:** Executes as a single discriminative forward pass with zero output tokens per batch, scaling across large candidate canon sets via concurrent batches with stabilized per-canon classifications.
 
 ---
 
@@ -131,7 +131,7 @@ Conversely, when an explicitly designated stream yields zero changes or `discove
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes
-- **`stylish` (Default):** Renders the **Pipeline Funnel Provenance Receipt** followed by the Active Docket summary listing docketed cases (`active_docket`) alongside their `colorability_summary` rationales (including an explicit empty-docket watermark when zero cases are colorable).
+- **`stylish` (Default):** Renders the **Pipeline Funnel Receipt** followed by the Active Docket summary listing docketed cases (`active_docket`) alongside their `colorability_summary` rationales (including an explicit empty-docket watermark when zero cases are colorable).
 - **`compact`:** Emits unadorned tab-separated `<canon>\t<status>\t<score>\t<summary>` records (one candidate canon per line in deterministic lexicographical order).
 - **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing the populated `.docket` container.
 

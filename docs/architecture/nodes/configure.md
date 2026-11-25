@@ -123,7 +123,7 @@ flowchart LR
    - **Partial-Closure Chaining (`--caseload`):** When an upstream command writes a partial `Caseload` that is piped into a downstream command (`canon-clerk vet --output-caseload c.json || canon-clerk audit --caseload c.json`), downstream `audit` preserves pre-populated upstream node bindings in `.config.nodes` without re-verifying credentials for already-completed upstream stages, resolves `audit` JIT, and verifies credentials strictly for the newly executed stage(s)—invalidating pre-populated upstream/downstream stages only when an upstream stage's model is explicitly overridden or `--provider <slug>` selects a provider slug different from the already-recorded `.config.provider` (passing a matching `--provider <slug>` is idempotent and preserves pre-populated upstream `.docket`/`.evidence`/`.vetting` stages).
    - **Standalone `configure` and `probe`:** Resolve all provisioned heuristic nodes for the active configuration (all heuristic nodes on `--provider google`, or the discriminative nodes on `--provider typesafe` or `--provider local` when `audit` is unpinned—or all heuristic nodes when `audit` is pinned via `--audit-model` / `CANON_CLERK_AUDIT_MODEL` / `nodes.audit.model`) and verify credentials strictly for the providers referenced by those provisioned nodes.
 
-5. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
+5. **Deterministic & Offline:** Executes locally without sending network requests or spending tokens.
 
 ---
 

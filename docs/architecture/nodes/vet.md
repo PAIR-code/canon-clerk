@@ -46,7 +46,7 @@ flowchart LR
   - `admit` (admitted exhibits and trial-ready active cases in `caseload.evidence`).
   - `configure` (Branch B: resolved closure node bindings in `caseload.config.nodes` and verified provider credentials, evaluated JIT only when active cases with admitted exhibits require vetting).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `docket`.
-- **The Case or Controversy Invariant:** As a [Heuristic Cascade](../overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) stage, `vet` evaluates compliance *as applied to a concrete filing*. Naked invocations or canon-only invocations lacking an underlying filing (`caseload.intake`) fail fast with exit code `2`.
+- **The Case or Controversy Invariant:** As an [Adjudication Track](../overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) stage, `vet` evaluates compliance *as applied to a concrete filing*. Naked invocations or canon-only invocations lacking an underlying filing (`caseload.intake`) fail fast with exit code `2`.
 - **Pruned from Execution:** `probe`, `apprise`, downstream judicial adjudication (`audit`).
 
 ---
@@ -94,7 +94,7 @@ flowchart LR
 
 ## 5. Driving Adapter: CLI
 
-The CLI exposes `vet` as a fast pre-flight compliance gate (analogous to `go vet` / `cargo vet`) that developers, pre-push hooks, and AI coding agents can run in ~1–1.5s on discriminative models before optionally escalating contested cases to `canon-clerk audit`:
+The CLI exposes `vet` as a fast pre-flight compliance gate (analogous to `go vet` / `cargo vet`) that developers, pre-push hooks, and AI coding agents can run on zero-output-token discriminative models before optionally escalating contested cases to `canon-clerk audit`:
 
 ```bash
 # 1. Fast pre-flight compliance check (0 output tokens; defaults to google:gemini-decision-1):
@@ -139,7 +139,7 @@ Conversely, when an explicitly designated stream yields zero changes, `discover`
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes
-- **`stylish` (Default):** Renders the **Pipeline Funnel Provenance Receipt** ([`../scheduling.md` §6](../scheduling.md#6-the-pipeline-funnel-provenance-contract-terminal-receipts)) followed by the Vetting Gate summary banner (`PASS` when all cases are `vetted`, `CONTESTED` when one or more cases require `audit`, with aggregate `vetted`/`contested` counts). By default, per-case `vetting_summary` detail blocks are listed **strictly for `contested` cases**—accompanied by indented localized span pointers (`<path>:L<start>..L<end> (<score>)`) whenever `contested_spans` is populated—omitting `[vetted]` per-case blocks unless `-v` (`--verbose` / `CANON_CLERK_VERBOSE`) is active.
+- **`stylish` (Default):** Renders the **Pipeline Funnel Receipt** ([`../scheduling.md` §6](../scheduling.md#6-the-pipeline-funnel-provenance-contract-terminal-receipts)) followed by the Vetting Gate summary banner (`PASS` when all cases are `vetted`, `CONTESTED` when one or more cases require `audit`, with aggregate `vetted`/`contested` counts). By default, per-case `vetting_summary` detail blocks are listed **strictly for `contested` cases**—accompanied by indented localized span pointers (`<path>:L<start>..L<end> (<score>)`) whenever `contested_spans` is populated—omitting `[vetted]` per-case blocks unless `-v` (`--verbose` / `CANON_CLERK_VERBOSE`) is active.
 - **`compact`:** Emits unadorned tab-separated `<canon>\tcontested\t<score>\t<summary>\t<spans>` diagnostic records in deterministic lexicographical order by `canon_path` strictly for `contested` cases—where `<spans>` is a comma-separated list of deterministic `<path>:L<start>..L<end>` coordinates (or `-` when unnarrowed)—omitting `vetted` cases (exiting `0` with empty `stdout` when all cases are prima facie compliant).
 - **`json` / `--json`:** Emits the complete cumulative `Caseload` JSON envelope containing the full `.vetting` container (`vetted_cases`, `contested_cases`, and all per-case `cases` assessments including `contested_spans`).
 

@@ -57,14 +57,14 @@ Unrecognized provider slugs (not matching a built-in profile or a configured `pr
 
 Discriminative context/question-batching budgets (`DecisionBudgetProfile`) and stage execution defaults bind to the resolved provider profile and wire protocol:
 
-| Profile / Protocol Tier | Upstream Ceiling | Max State Chars | Max Batch Chars | Max `nouls` / Call | Default Screening `batchSize` (`apprise`, `docket`, `admit`) | Default `concurrency` (`apprise`..`audit`) |
+| Profile / Protocol Tier | Upstream Ceiling | Max State Chars | Max Batch Chars | Max `Noul`s / Call | Default Screening `batchSize` (`apprise`, `docket`, `admit`) | Default `concurrency` (`apprise`..`audit`) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `gemini` `Discriminator` (`google:gemini-decision-*` & custom `gemini`) | `262,144` tokens / `1,000` questions | `240,000` | `480,000` | `256` | `256` | `4` |
 | Cloud `systemone` `Discriminator` (`typesafe:jev-*` & custom `systemone`) | `32,768` tokens | `36,000` | `64,000` | `48` | `48` | `4` |
 | Built-in `local` `systemone` (`local:*`) | Local GGUF context | `24,000` | `32,000` | `16` | `2` | `1` |
 | `gemini` `Generator` (`audit`, e.g., `google:gemini-4-carbon`) | Generative context | — | — | — | N/A *(rejected)* | `4` |
 
-- **`vet` Bifurcated Span Budget:** `vet` packs paired (`compliant`, `claims_exception`) `nouls` within `Max nouls / Call` and `Max Batch Chars` (`256` / `480,000` on `gemini`; `48` / `64,000` on cloud `systemone`; `16` / `32,000` on `local:*` so single-batch span localization stays active on typical local diffs) before falling back to unfenced file-level vetting ([`nodes/vet.md` §4](nodes/vet.md#4-process--domain-logic-core)).
+- **`vet` Bifurcated Span Budget:** `vet` packs paired (`compliant`, `claims_exception`) `Noul`s within `Max Nouls / Call` and `Max Batch Chars` (`256` / `480,000` on `gemini`; `48` / `64,000` on cloud `systemone`; `16` / `32,000` on `local:*` so single-batch span localization stays active on typical local diffs) before falling back to unfenced file-level vetting ([`nodes/vet.md` §4](nodes/vet.md#4-process--domain-logic-core)).
 - **Transport Timeout & Retry Defaults:** Per-attempt wire timeouts (`60,000ms` cloud / `180,000ms` `local:*`) and retry/cooldown bounds (`--timeout`, `--max-retries`, `--max-backoff-ms`) are specified authoritatively in [`transport.md` §6](transport.md#6-out-of-band-telemetry--cli-transport-controls).
 
 ### Operational Knob Specificity Cascades
@@ -87,7 +87,7 @@ For any referenced profile `<slug>` (with `<UPPER_SLUG>` formed by uppercasing `
 - **Base URL Precedence:** Built-in CLI flag (`--gemini-base-url` on `google`, `--typesafe-base-url` on `typesafe`, `--local-base-url` on `local`) $\succ$ `CANON_CLERK_<UPPER_SLUG>_BASE_URL` $\succ$ `<UPPER_SLUG>_BASE_URL` (plus `GEMINI_BASE_URL` on `google`) $\succ$ `providers.<slug>.baseUrl` in `config.json` $\succ$ built-in profile default. Resolved URLs must begin with `http://` or `https://` and name a non-empty host authority, failing fast with exit code `2` during `configure` when malformed.
 
 ### Reasoning Control Mutual Exclusivity & Capability Scoping
-`thinking_level` and `reasoning_budget` are mutually exclusive within any single configuration layer (CLI flags, environment variables, `nodes.<node>`, or `defaults`), failing fast with exit code `2` when both appear at the same layer; across distinct precedence layers, the higher-precedence layer supersedes and clears the lower-precedence alternative. Shared/ambient thinking controls (`--thinking-level`, `--reasoning-budget`, `CANON_CLERK_THINKING_LEVEL`, `CANON_CLERK_REASONING_BUDGET`, `defaults.thinkingLevel`, `defaults.reasoningBudget`) apply strictly to `Generator`-bound nodes and leave `Discriminator`-bound nodes unset, whereas explicitly declaring per-node `nodes.<node>.thinkingLevel` or `nodes.<node>.reasoningBudget` on a node whose resolved model is a `Discriminator` fails fast with exit code `2`.
+`thinkingLevel` and `reasoningBudget` (serialized on `caseload.config.nodes.<node>` as `thinking_level` and `reasoning_budget`) are mutually exclusive within any single configuration layer (CLI flags, environment variables, `nodes.<node>`, or `defaults`), failing fast with exit code `2` when both appear at the same layer; across distinct precedence layers, the higher-precedence layer supersedes and clears the lower-precedence alternative. Shared/ambient thinking controls (`--thinking-level`, `--reasoning-budget`, `CANON_CLERK_THINKING_LEVEL`, `CANON_CLERK_REASONING_BUDGET`, `defaults.thinkingLevel`, `defaults.reasoningBudget`) apply strictly to `Generator`-bound nodes and leave `Discriminator`-bound nodes unset, whereas explicitly declaring per-node `nodes.<node>.thinkingLevel` or `nodes.<node>.reasoningBudget` on a node whose resolved model is a `Discriminator` fails fast with exit code `2`.
 
 ### Shared CLI Flags & Environment Variables
 Accepted across `configure`, `probe`, and all [heuristic evaluation subcommands](overview.md#5-the-caseload-pipeline-nodes) (where evaluation subcommands resolve them JIT only when heuristic execution is required):
