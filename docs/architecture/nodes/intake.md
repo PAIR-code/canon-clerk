@@ -28,7 +28,7 @@ flowchart LR
     Sources --> Intake["intake<br/><b>(Current Node)</b><br/><code>.intake</code>"]
     Params --> Intake
 
-    Intake --> Discover["discover<br/><i>(Pipeline Cascade)</i><br/><code>.discovery</code>"]
+    Intake --> Discover["discover<br/><i>(Filing Track)</i><br/><code>.discovery</code>"]
     Intake -. "standalone CLI" .-> IntakeReport["Filing Report / JSON<br/><i>(Tendered exhibits, Exit 0)</i>"]
     Intake -. "naked invocation" .-> UsageError["Usage Error<br/><i>(Missing source guidance, Exit 2)</i>"]
 
@@ -37,7 +37,7 @@ flowchart LR
     style UsageError stroke-dasharray: 5 5
 ```
 
-- **Direct Prerequisites:** None (Root node of Branch A).
+- **Direct Prerequisites:** None (Root node of the Filing Track).
 - **Transitive Prerequisites:** None.
 - **Incoming Caseload:** May accept an empty or existing `Caseload` record.
 - **Subprocess Isolation:** **Zero child-process VCS execution.** The core domain engine does not run `git` subprocesses internally; driving adapters feed diffs and target paths directly via domain interfaces.
@@ -99,7 +99,7 @@ canon-clerk intake --github-pr 42 --github-repo PAIR-code/canon-clerk
 canon-clerk intake --github-issue
 canon-clerk intake --github-issue 397 --github-repo PAIR-code/canon-clerk
 
-# Ingest all repository files as target artifacts:
+# Ingest all repository files as target file exhibits:
 canon-clerk intake --all-targets
 
 # Ingest upstream caseload and attach intake:
@@ -114,7 +114,7 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 - `--github-repo <owner/repo>`: Target GitHub repository slug (fallback env: `GITHUB_REPOSITORY`), shared across `--github-pr`, numbered `--github-issue <number>`, and `--publish-github-check`.
 - `--workspace-state <head|base>`: Declares whether the workspace on disk is already post-patch (`head`, default) or pre-patch (`base`, e.g., `pull_request_target` CI checkouts), instructing downstream stages to reconstruct post-patch `references:` and diff head context in memory per [`../exhibits.md` §3](../exhibits.md#3-workspace-state--in-memory-patch-overlay). When `--github-pr` is active and `--workspace-state` is omitted, defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"` (otherwise `head`); explicit `--workspace-state` always overrides.
 - `--intent <text>`: Ingests prospective design intent or plan description.
-- `--all-targets`: Ingests all repository files as target artifacts (used for full-repo sweeps).
+- `--all-targets`: Ingests all repository files as target file exhibits (used for full-repo sweeps).
 - `--pr-title <text>`: Ingests PR title text (overrides title fetched by `--github-pr`).
 - `--pr-body <text>` / `--pr-body-file <path>`: Ingests PR description (overrides body fetched by `--github-pr`).
 - `--linked-issue <path|->`: Repeatable flag ingesting one or more linked issue records from JSON files or `-` for stdin (governed by the single-stdin guard). Strictly JSON (no raw Markdown fallback); accepts a single object or JSON array in native `LinkedIssueContext`, `gh issue view --json`, or GitHub REST API issue shape while ignoring comments/reactions (`SPEC.md` §4.2). Explicit `--linked-issue` flags override linked issues auto-fetched by `--github-pr` (`CLI flag > event/API metadata`).

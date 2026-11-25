@@ -29,7 +29,7 @@ flowchart LR
     Docket --> Admit["admit<br/><b>(Current Node)</b><br/><code>.evidence</code>"]
     Params --> Admit
 
-    Admit --> Vet["vet (Prima Facie Vetting)<br/><i>(Pipeline Cascade)</i><br/><code>.vetting</code>"]
+    Admit --> Vet["vet (Prima Facie Vetting)<br/><i>(Adjudication Track)</i><br/><code>.vetting</code>"]
     Admit -. "standalone CLI" .-> AdmitReport["Evidence Manifest<br/><i>(Admitted exhibits per case, Exit 0)</i>"]
     Admit -. "empty docket or zero admitted exhibits" .-> ZeroExhibits["Fast Exit (No Evidence 0)<br/><i>Prunes vet & audit</i>"]
     Admit -. "missing filing" .-> UsageError["Usage Error<br/><i>(Case-or-Controversy guard, Exit 2)</i>"]
@@ -133,7 +133,7 @@ Conversely, when an explicitly designated stream yields zero changes, `discover`
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes
-- **`stylish` (Default):** Renders the **Pipeline Funnel Provenance Receipt** ([`../scheduling.md` §6](../scheduling.md#6-the-pipeline-funnel-provenance-contract-terminal-receipts)) followed by the Evidence Manifest listing active cases (`active_cases`) and their admitted exhibits alongside `admissibility_summary` rationales (including explicit watermarks on empty dockets or zero admitted exhibits).
+- **`stylish` (Default):** Renders the **Pipeline Funnel Receipt** ([`../scheduling.md` §6](../scheduling.md#6-the-pipeline-funnel-provenance-contract-terminal-receipts)) followed by the Evidence Manifest listing active cases (`active_cases`) and their admitted exhibits alongside `admissibility_summary` rationales (including explicit watermarks on empty dockets or zero admitted exhibits).
 - **`compact`:** Emits unadorned tab-separated `<canon>\t<exhibit>\t<status>\t<score>\t<summary>` records in deterministic lexicographical order by `(canon_path, file_path)`.
 - **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing the populated `.evidence` container.
 

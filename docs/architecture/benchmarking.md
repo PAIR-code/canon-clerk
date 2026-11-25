@@ -46,7 +46,7 @@ flowchart LR
     end
 
     subgraph DrivenPort ["Driven Adapters"]
-        Provider["Structured & Decision Model Providers<br/>(Configured Provider Profiles)"]
+        Provider["Discriminator & Generator Model Providers<br/>(Configured Provider Profiles)"]
     end
 
     Runner --> Upstream

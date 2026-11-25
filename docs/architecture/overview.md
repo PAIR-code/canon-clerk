@@ -24,7 +24,7 @@ $$
 \begin{aligned}
 \text{Branch A (Filing Track):}\quad & \text{intake} \longrightarrow \text{discover} \longrightarrow \text{validate} \\
 \text{Branch B (Environment Track):}\quad & \text{configure} \quad (\longrightarrow \text{probe}) \\
-\text{Adjudication Spine:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{docket} \longrightarrow \text{admit} \longrightarrow \text{vet} \longrightarrow \text{audit} \\
+\text{Adjudication Track:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{docket} \longrightarrow \text{admit} \longrightarrow \text{vet} \longrightarrow \text{audit} \\
 \text{Apprisal Track:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{apprise}
 \end{aligned}
 $$
@@ -33,30 +33,30 @@ When invoked, a subcommand executes only the **transitive dependency closure** r
 
 ---
 
-## 2. DAG Topology: Two Feeder Branches $\to$ Adjudication Spine & Apprisal Track
+## 2. DAG Topology: Two Feeder Branches $\to$ Adjudication Track & Apprisal Track
 
-The DAG consists of **Two Feeder Branches** that converge at `docket` (for dispute adjudication) and `apprise` (for prospective statutory notice), followed by the **Adjudication Spine**, with an auxiliary diagnostic leaf for provider health:
+The DAG consists of **Two Feeder Branches** that converge at `docket` (for dispute adjudication) and `apprise` (for prospective statutory notice), followed by the **Adjudication Track**, with an auxiliary diagnostic leaf for provider health:
 
 1. **Branch A: The Filing Track (`intake` $\longrightarrow$ `discover` $\longrightarrow$ `validate`):**  
    Ingests in-flight diffs, target paths, or prospective design intent, verifies state preconditions (`exists:`), matches candidate canon triggers, and validates candidate canon ASTs and schemas. Completely local, deterministic, and requires 0 tokens and zero API credentials.
 2. **Branch B: The Environment Track (`configure`):**  
-   Resolves the active default provider profile (`--provider <slug>`), per-node `<provider>:<model>` bindings across the invoked heuristic closure, extended thinking controls, endpoint `baseUrl` overrides, and required provider credentials across built-in and custom provider profiles (see [`providers.md`](providers.md) and [`nodes/configure.md`](nodes/configure.md)). Completely offline, deterministic, and completes in <5ms with 0 tokens and zero network calls.
+   Resolves the active default provider profile (`--provider <slug>`), per-node `<provider>:<model>` bindings across the invoked heuristic closure, extended thinking controls, endpoint `baseUrl` overrides, and required provider credentials across built-in and custom provider profiles (see [`providers.md`](providers.md) and [`nodes/configure.md`](nodes/configure.md)). Completely offline, deterministic, with 0 tokens and zero network calls.
 3. **Diagnostic Leaf (`probe`):**  
    An auxiliary termination node depending strictly on `configure`. Concurrently probes deduplicated configured model targets for live reachability and roundtrip latency without triggering an evaluation run.
-4. **The Heuristic Cascade (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`):**  
-   Converges at `docket` (requiring both validated candidate canons and active node configuration), followed by exhibit admissibility screening (`admit`), prima facie compliance vetting on the papers (`vet`), and isolated generative adjudication of contested cases (`audit`).
-5. **The Prospective Apprisal Track (`apprise`):**  
+4. **The Adjudication Track (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`):**  
+   Converges at `docket` (requiring both validated candidate canons and active node configuration) as a heuristic cascade, followed by exhibit admissibility screening (`admit`), prima facie compliance vetting on the papers (`vet`), and isolated generative adjudication of contested cases (`audit`).
+5. **The Apprisal Track (`apprise`):**  
    Converges at `apprise` (requiring validated candidate canons and `apprise` node configuration) to evaluate prospective design intent before implementation, completely bypassing diff parsing, `docket`, `admit`, `vet`, and `audit`.
 
 ```mermaid
 flowchart TD
-    subgraph BranchA ["Branch A: The Filing (Deterministic · 100% Local · 0 Tokens · No Credentials)"]
+    subgraph BranchA ["Branch A: The Filing Track (Deterministic · 100% Local · 0 Tokens · No Credentials)"]
         InFlight["In-Flight Change<br/>(Target Paths, Globs, Diff Stream, or Intent)"] --> S1["intake<br/>(Parse diffs, target paths/globs, & PR metadata → FileArtifacts)"]
         S1 --> S2["discover<br/>(Check exists: preconditions, match triggers, & prune exhibits)"]
         S2 --> S3["validate<br/>(AST & schema pre-flight of candidate canons)"]
     end
 
-    subgraph BranchB ["Branch B: The Environment (Deterministic · 100% Local · 0 Tokens)"]
+    subgraph BranchB ["Branch B: The Environment Track (Deterministic · 100% Local · 0 Tokens)"]
         Env["Environment & Flags<br/>(Provider selector, per-node models, API keys, thinking controls)"] --> S4["configure<br/>(Resolve per-node models & verify closure credentials)"]
     end
 
@@ -68,7 +68,7 @@ flowchart TD
         S_Apprise["apprise<br/>(Statutory Notice: Candidate canons → Applicable Canons)"]
     end
 
-    subgraph HeuristicCascade ["The Heuristic Cascade (AI-Driven · Positive Polarity)"]
+    subgraph AdjudicationTrack ["The Adjudication Track (AI-Driven · Positive Polarity)"]
         S5["docket<br/>(Macro Triage: Candidate canons → Active Cases)"] --> S6["admit<br/>(Micro Triage: Target files/diff hunks → Admitted Exhibits)"]
         S6 --> S6_Vet["vet<br/>(Prima Facie Vetting: Active Cases → Vetted vs. Contested)"]
         S6_Vet --> S7["audit<br/>(Judicial Adjudication: Generative trials for Contested Cases)"]
@@ -133,7 +133,7 @@ flowchart TD
 - **CLI Binary:** The sole driving adapter translating POSIX stdin streams (`-`, `--diff -`, `--caseload -`), argv flags, and local working directories into inputs for the domain engine and configuration. Formats user-facing terminal progress, spinners, event streams, and the **Pipeline Funnel Receipt** (summarizing upstream ancestor outcomes to prevent "silent zero" ambiguity), and maps domain results to shell exit codes (`0`, `1`, `2`).
 - **CI / GitHub Integration (Tripartite Output Model):** CI runners invoke the native CLI binary directly without requiring a separate Action codebase. The CLI natively satisfies three output tiers in GitHub Actions:
   1. **Inline Diff Annotations:** Emits native workflow command annotations (`::error file=...::`, `::warning file=...::`) for all `CodeAnnotation`s on `stdout`/`stderr`, pinpointing line violations directly on the PR *Files changed* diff.
-  2. **Run Summary:** Appends the rendered Markdown Funnel Receipt and stage verdict report to `$GITHUB_STEP_SUMMARY`.
+  2. **Run Summary:** Appends the rendered Markdown Pipeline Funnel Receipt and stage verdict report to `$GITHUB_STEP_SUMMARY`.
   3. **Caseload Artifact Archival:** Supports `--output-caseload <path>` to write the full-fidelity cumulative `Caseload` JSON to disk independently of stdout. This allows workflows to upload `caseload.json` via `actions/upload-artifact` (`if: always()`) for post-run failure forensics, compliance auditing, or multi-job workflow chaining:
      ```yaml
      - name: Run Canon Clerk Gate
@@ -187,24 +187,28 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 
 ## 5. The Caseload Pipeline Nodes
 
-| Node / Verb | Track | Engine / Capability | Cost / Latency | Gate Rule |
+| Node / Verb | Track | Engine / Capability | Cost Profile | Gate Rule |
 | :--- | :--- | :--- | :--- | :--- |
-| `intake` | Branch A (Filing) | Deterministic | 0 tokens, ~5ms | Parsed context; fail fast (code 2) on corrupted input |
-| `discover` | Branch A (Filing) | Deterministic | 0 tokens, ~8ms | Matches > 0; verifies `exists:` & `triggers:`; short-circuits (exit 0) on 0 candidates |
-| `validate` | Branch A (Filing) | Deterministic | 0 tokens, ~12ms | 0 syntax errors; fails fast (code 1) on lint error |
-| `configure` | Branch B (Env) | Deterministic | 0 tokens, <5ms | Valid node config & closure keys; fails fast (code 2) on invalid flags or missing keys |
-| `probe` | Diagnostic Leaf | Network probe | 0 tokens, variable | Deduplicated targets reachable; fails fast (code 2) on failure |
-| `apprise` | Apprisal Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | ~150–400ms, 0 output tokens | `apprisal_score >= 0.5`; exits 0 if candidates empty |
-| `docket` | Cascade Spine | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | ~150–400ms, 0 output tokens | `colorability_score >= 0.5`; exits 0 if docket empty |
-| `admit` | Cascade Spine | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | ~200–600ms, 0 output tokens | `admissibility_score >= 0.5`; exits 0 if no exhibits |
-| `vet` | Cascade Spine | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | ~150–400ms, 0 output tokens | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
-| `audit` | Cascade Spine | [`Generator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | ~1.5–2.5s, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
+| `intake` | Branch A (Filing Track) | Deterministic | 0 tokens, local | Parsed context; fail fast (code 2) on corrupted input |
+| `discover` | Branch A (Filing Track) | Deterministic | 0 tokens, local | Matches > 0; verifies `exists:` & `triggers:`; short-circuits (exit 0) on 0 candidates |
+| `validate` | Branch A (Filing Track) | Deterministic | 0 tokens, local | 0 syntax errors; fails fast (code 1) on lint error |
+| `configure` | Branch B (Environment Track) | Deterministic | 0 tokens, local | Valid node config & closure keys; fails fast (code 2) on invalid flags or missing keys |
+| `probe` | Diagnostic Leaf | Network probe | 0 tokens, single-shot ping | Deduplicated targets reachable; fails fast (code 2) on failure |
+| `apprise` | Apprisal Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `apprisal_score >= 0.5`; exits 0 if candidates empty |
+| `docket` | Adjudication Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `colorability_score >= 0.5`; exits 0 if docket empty |
+| `admit` | Adjudication Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `admissibility_score >= 0.5`; exits 0 if no exhibits |
+| `vet` | Adjudication Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `vetting_score >= 0.8` $\implies$ vetted (0), else contested (1) |
+| `audit` | Adjudication Track | [`Generator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | Generative, contested only | `compliance_score >= 0.5` $\implies$ pass (0), else fail (1) |
 
 ---
 
 ## 6. The Token & Latency Sieve
 
-The Caseload Pipeline functions as an aggressive filter funnel, eliminating the overwhelming majority of candidate pairs before invoking deep reasoning:
+The Caseload Pipeline functions as an aggressive filter funnel, eliminating the overwhelming majority of candidate pairs before invoking deep reasoning.
+
+### Illustrative Funnel Walkthrough (Example)
+
+*The following walkthrough and table present an illustrative example for a typical pull request with point-in-time estimates; these figures are informative only and do not constitute normative latency or token budgets.*
 
 ```mermaid
 flowchart TD
@@ -241,7 +245,7 @@ flowchart TD
 | **`admit` Gate** | 3 active Cases | 5 admitted hunks | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens (~1,800 input) | ~250ms |
 | **`vet` Gate** | 2 vetted, 1 contested | 5 admitted hunks | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | ~200ms |
 | **`audit` Adjudication** | 1 contested trial | 2 exhibits | [`Generator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | ~1,500 tokens | ~1,200ms |
-| **Total Funnel** | **3 evaluated** | **5 exhibits** | **Cascade Sieve** | **~4,500 tokens** | **< 2.0s** |
+| **Total Funnel** | **3 evaluated** | **5 exhibits** | **Adjudication Track** | **~4,500 tokens** | **< 2.0s** |
 
 *(Versus naive evaluation: 100 canons × 6 files = 600 pairs $\approx$ 220,000 tokens and 45s latency. **~97% token reduction**).*
 
@@ -269,16 +273,16 @@ Each pipeline stage owns a dedicated, non-overlapping field on the cumulative `C
 
 | Field on `Caseload` | Enriched By | Track | Payload Summary | Authoritative Specification |
 | :--- | :--- | :--- | :--- | :--- |
-| `.intake` | `intake` | Branch A (Filing) | Tendered exhibits: diff hunks, target paths, PR metadata, or intent queries | [`nodes/intake.md`](nodes/intake.md#caseload-delta) |
-| `.discovery` | `discover` | Branch A (Filing) | Candidate canons matching path triggers & target file intersections | [`nodes/discover.md`](nodes/discover.md#caseload-delta) |
-| `.validation` | `validate` | Branch A (Filing) | Deterministic AST linting and frontmatter schema validation results | [`nodes/validate.md`](nodes/validate.md#caseload-delta) |
-| `.config` | `configure` | Branch B (Env) | Resolved default `provider` slug and per-node `<provider>:<model>` + optional thinking bindings | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
+| `.intake` | `intake` | Branch A (Filing Track) | Tendered exhibits: diff hunks, target paths, PR metadata, or intent queries | [`nodes/intake.md`](nodes/intake.md#caseload-delta) |
+| `.discovery` | `discover` | Branch A (Filing Track) | Candidate canons matching path triggers & target file intersections | [`nodes/discover.md`](nodes/discover.md#caseload-delta) |
+| `.validation` | `validate` | Branch A (Filing Track) | Deterministic AST linting and frontmatter schema validation results | [`nodes/validate.md`](nodes/validate.md#caseload-delta) |
+| `.config` | `configure` | Branch B (Environment Track) | Resolved default `provider` slug and per-node `<provider>:<model>` + optional thinking bindings | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
 | `.probe` | `probe` | Diagnostic Leaf | Deduplicated target endpoint reachability, bound nodes, roundtrip latency (ms), and resolved models | [`nodes/probe.md`](nodes/probe.md#caseload-delta) |
 | `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisal_score`, `apprisal_summary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
-| `.docket` | `docket` | Dispute Spine | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |
-| `.evidence` | `admit` | Dispute Spine | Micro triage evidence admissibility: admitted file exhibits per active case | [`nodes/admit.md`](nodes/admit.md#caseload-delta) |
-| `.vetting` | `vet` | Dispute Spine | Prima facie compliance vetting assessments (`vetted_cases`, `contested_cases`) | [`nodes/vet.md`](nodes/vet.md#caseload-delta) |
-| `.verdict` | `audit` | Dispute Spine | Final substantive adjudications, compliance scores, decrees, and line annotations | [`nodes/audit.md`](nodes/audit.md#caseload-delta) |
+| `.docket` | `docket` | Adjudication Track | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |
+| `.evidence` | `admit` | Adjudication Track | Micro triage evidence admissibility: admitted file exhibits per active case | [`nodes/admit.md`](nodes/admit.md#caseload-delta) |
+| `.vetting` | `vet` | Adjudication Track | Prima facie compliance vetting assessments (`vetted_cases`, `contested_cases`) | [`nodes/vet.md`](nodes/vet.md#caseload-delta) |
+| `.verdict` | `audit` | Adjudication Track | Final substantive adjudications, compliance scores, decrees, and line annotations | [`nodes/audit.md`](nodes/audit.md#caseload-delta) |
 
 Downstream subcommands fast-forward across any stage whose corresponding namespace is already populated on an incoming `Caseload` (via `--caseload <path|->`).
 

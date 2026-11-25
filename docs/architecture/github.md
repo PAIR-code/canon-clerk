@@ -66,7 +66,7 @@ When any of these options is enabled, Canon Clerk resolves and validates the req
 
 ## 3. Pull Request Diff & Metadata Ingestion (`--github-pr`)
 
-The CLI driving adapter supports native pull request ingestion via `--github-pr [<NUMBER>]` across `intake` and every downstream filing-closure stage ([`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track), [`scheduling.md` §2](scheduling.md#2-transitive-dependency-closures--pruning)), while keeping the `intake` core domain engine (`src/intake/`) 100% pure in-memory with zero network or subprocess side effects:
+The CLI driving adapter supports native pull request ingestion via `--github-pr [<NUMBER>]` across `intake` and every downstream filing-closure stage ([`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track), [`scheduling.md` §2](scheduling.md#2-transitive-dependency-closures--pruning)), while keeping the `intake` core domain engine (`src/intake/`) 100% pure in-memory with zero network or subprocess side effects:
 
 1. **Metadata Resolution:**
    - **Bare `--github-pr`:** Reads `pull_request.number`, `pull_request.title`, `pull_request.body`, `pull_request.head.sha`, `pull_request.labels[].name`, and event `sender.login` directly from the JSON file at `$GITHUB_EVENT_PATH`. Unreadable or malformed event payloads, or payloads missing `pull_request.number`, fail fast with exit code `2` and an actionable `Hint:`.
@@ -109,7 +109,7 @@ The outbound GitHub Checks client enforces the following wire invariants over Ca
 ## 5. CLI Ergonomics, Forensics Durability & Replay
 
 1. **Duplicate Annotation Suppression & Step Summary Parity:**  
-   When `--publish-github-check` is active and neither `--format` nor `--json` is explicitly specified under `GITHUB_ACTIONS=true`, terminal `stdout` defaults to `stylish` rather than `github`. This prevents GitHub Actions from rendering duplicate `::error::` workflow commands alongside the Check Run's inline annotations, while still appending the rendered Markdown Funnel Provenance Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY` when set so the Actions workflow run summary page displays full results alongside the standalone Check Run. Explicit `--format github` remains available for zero-setup workflows that do not grant `checks: write`.
+   When `--publish-github-check` is active and neither `--format` nor `--json` is explicitly specified under `GITHUB_ACTIONS=true`, terminal `stdout` defaults to `stylish` rather than `github`. This prevents GitHub Actions from rendering duplicate `::error::` workflow commands alongside the Check Run's inline annotations, while still appending the rendered Markdown Pipeline Funnel Receipt and Verdict Report to `$GITHUB_STEP_SUMMARY` when set so the Actions workflow run summary page displays full results alongside the standalone Check Run. Explicit `--format github` remains available for zero-setup workflows that do not grant `checks: write`.
 2. **Forensics-First Durability:**  
    `--output-caseload <PATH>` is always flushed to disk **before** issuing any GitHub Checks API request. If GitHub returns a transient HTTP or transport error, the CLI exits with code `2` and prints an actionable replay hint referencing the saved Caseload artifact so forensics and LLM results are never lost.
 3. **Zero-Spend Replay:**  
@@ -132,7 +132,7 @@ When `Canon Clerk Audit` is promoted from advisory to an enforcing required stat
 
 ## 7. GitHub Issue Inquiry Ingestion (`--github-issue`)
 
-For the [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) (`intake` and `apprise`), the CLI driving adapter supports opt-in GitHub Issue ingestion via `--github-issue [<NUMBER>]` while keeping `src/intake/` 100% pure in-memory with zero network or subprocess side effects:
+For the [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) (`intake` and `apprise`), the CLI driving adapter supports opt-in GitHub Issue ingestion via `--github-issue [<NUMBER>]` while keeping `src/intake/` 100% pure in-memory with zero network or subprocess side effects:
 
 1. **Resolution Modes (Zero-API Event vs. Fail-Fast REST):**
    - **Bare `--github-issue`:** Reads `issue.number`, `issue.title`, `issue.body`, `issue.labels[].name`, `issue.user.login`, and `issue.html_url` directly from the JSON file at `$GITHUB_EVENT_PATH`, enabling zero-API-read GitHub Actions workflows triggered on `issues: [opened, edited, labeled, reopened]` without requiring `GITHUB_TOKEN` or `GITHUB_REPOSITORY`. Fails fast with exit code `2` and an actionable `Hint:` if `$GITHUB_EVENT_PATH` is missing, unreadable, malformed, or lacks a positive integer `issue.number` (`>= 1`).
@@ -141,8 +141,8 @@ For the [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudic
 2. **Caseload Mapping & Precedence:**
    - Formats the resolved issue deterministically into `.intake.intent`: `#<number>: <title>` (falling back to `#<number>` if title is absent), followed by `Labels: <label1>, <label2>` when non-empty, followed by a blank line and the Markdown `body` when non-empty.
    - Explicit `--intent <TEXT>` always overrides the formatted issue text (`CLI flag > event/API metadata`, matching `--pr-title`/`--pr-body` precedence on `--github-pr`).
-   - Does **not** populate `.intake.linked_issues`, preserving `SPEC.md` §4.2's PR-linked-issue metadata plane semantics so replaying an issue intake `Caseload` never falsely activates `inspect: [linked_issues]` canons on the contentious track.
+   - Does **not** populate `.intake.linked_issues`, preserving `SPEC.md` §4.2's PR-linked-issue metadata plane semantics so replaying an issue intake `Caseload` never falsely activates `inspect: [linked_issues]` canons on the Adjudication Track.
 3. **Stage Scoping & Conflict Guards:**
    - **Exposed only on `intake` and `apprise`:** `--github-issue` appears in CLI `--help` strictly on `intake` and `apprise`.
-   - **Self-Correcting Rejection Elsewhere:** Passing `--github-issue` on [Heuristic Cascade](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) stages fails fast with exit code `2` and a `Hint:` pointing to `--linked-issue <PATH|->` for PR/diff audits (or `canon-clerk apprise --github-issue` for prospective issue screening). Passing `--github-issue` on `discover` or `validate` fails fast with exit code `2` and a `Hint:` pointing to `canon-clerk apprise --github-issue` or piping `canon-clerk intake --github-issue ... --json | canon-clerk <stage> --caseload -`.
+   - **Self-Correcting Rejection Elsewhere:** Passing `--github-issue` on [Adjudication Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) stages fails fast with exit code `2` and a `Hint:` pointing to `--linked-issue <PATH|->` for PR/diff audits (or `canon-clerk apprise --github-issue` for prospective issue screening). Passing `--github-issue` on `discover` or `validate` fails fast with exit code `2` and a `Hint:` pointing to `canon-clerk apprise --github-issue` or piping `canon-clerk intake --github-issue ... --json | canon-clerk <stage> --caseload -`.
    - **Mutually Exclusive with `--github-pr`:** Passing both `--github-issue` and `--github-pr` fails fast with exit code `2`. Composes cleanly with positional `TARGETS`, `--canon`, and `apprise`'s default `--all-canons` fallback.

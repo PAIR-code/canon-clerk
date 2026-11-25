@@ -36,7 +36,7 @@ flowchart LR
     Intake --> Discover["discover<br/><b>(Current Node)</b><br/><code>.discovery</code>"]
     Params --> Discover
 
-    Discover --> Validate["validate<br/><i>(Pipeline Cascade)</i><br/><code>.validation</code>"]
+    Discover --> Validate["validate<br/><i>(Filing Track)</i><br/><code>.validation</code>"]
     Discover -. "standalone CLI" .-> DiscoveryReport["Discovered Canons Table<br/><i>(Matched triggers & exhibits, Exit 0)</i>"]
     Discover -. "candidate_canons is empty" .-> FastExit["Fast Exit (No-op 0)<br/><i>Prunes validate, docket, admit, audit</i>"]
 
@@ -75,7 +75,7 @@ flowchart LR
 ## 4. Process & Domain Logic (`core`)
 
 1. **Exhibit Materialization:** Resolves exhibit discovery directives from `caseload.intake` (e.g. expanding directory recursion roots and matching target glob patterns against workspace checkout into concrete file exhibits).
-2. **Plenary Canon Discovery (`--all-canons`):** When `all_canons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace that survives unconditional `<scope>/.canons/config.yaml` policy rules (rules with omitted `exhibits:`) is placed directly into `candidate_canons` with `mode: "all-canons"`. This establishes the active statutory corpus for downstream `validate --all-canons` ("Codex Audit").
+2. **Plenary Canon Discovery (`--all-canons`):** When `all_canons: true` is passed (via `--all-canons`), path trigger intersection is bypassed. Every discoverable canon in the workspace that survives unconditional `<scope>/.canons/config.yaml` policy rules (rules with omitted `exhibits:`) is placed directly into `candidate_canons` with `mode: "all-canons"`. This establishes the active statutory corpus for downstream `validate --all-canons` (Facial Codex Review).
    - **Two Hemispheres Invariant:** `--all-canons` operates exclusively on the *governing rule packs*, distinct from `--all-targets` (in `intake`), which operates on the *subject-matter codebase*.
 3. **Canon Corpus Enumeration & Sourcing:** Discovers all candidate canons across active realms:
    - **Local Workspace Canons:** Discovered via the default pattern `**/.canons/**/*.canon.md`, retaining workspace-relative file paths while ignoring non-canon documents (such as `.canons/README.md`, `.canons/AGENTS.md`, and `.canons/config.yaml`).

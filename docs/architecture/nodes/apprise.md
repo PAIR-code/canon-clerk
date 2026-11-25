@@ -49,7 +49,7 @@ flowchart LR
 - **The Intent-Required Invariant & Default `--all-canons` Scope:** Statutory apprisal strictly requires a non-empty prospective design `intent` (`--intent <text>`, `--github-issue [<number>]`, or pre-populated `.intake.intent`); omitting intent or supplying blank whitespace fails fast with exit code `2`. When non-empty design intent is supplied **without** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`), `apprise` defaults discovery to `--all-canons` so contributors and agents do not miss cross-cutting canons before they know every file they will touch. When explicit targets or canon filters *are* supplied, existing scoped discovery behavior is preserved.
 - **Branch Independence & Pruning:**
   - Evaluates without requiring code diffs, patches, or work-in-progress (WIP) exhibits.
-  - Decoupled from the [Heuristic Cascade](../overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track): prunes all contentious adjudication stages from execution.
+  - Decoupled from the [Adjudication Track](../overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track): prunes all contentious adjudication stages from execution.
   - Diagnostic leaf `probe` is never scheduled.
 
 ---
@@ -80,7 +80,7 @@ flowchart LR
    Each candidate canon's calibrated `Noul` probability is clamped into `[0.0, 1.0]` alongside a deterministic statutory notice summary (`apprisal_summary`), and the core domain engine deterministically evaluates the continuous score against the threshold to assign `apprisal_status`:
    - Canons scoring $\ge 0.5$ establish prospective jurisdiction and are marked `apprisal_status: "applicable"`.
    - Canons scoring $< 0.5$ are marked `apprisal_status: "dismissed"`.
-4. **Latency & Token Economy:** Executes in ~150–400ms with zero output tokens across 20+ candidate canons, and scales across 40+ candidate canons via concurrent batches with reduced wall-clock latency and stabilized per-canon classifications.
+4. **Token Economy & Batch Scaling:** Executes as a single discriminative forward pass with zero output tokens per batch, scaling across large candidate canon sets via concurrent batches with stabilized per-canon classifications.
 
 ---
 
@@ -123,7 +123,7 @@ error: Prospective apprisal requires a non-empty design intent (`--intent <TEXT>
         target paths / `--canon <PATH|GLOB>`), or supply `--caseload <PATH|->` with `.intake.intent` populated.
 ```
 
-When non-empty design intent is supplied without an explicit target scope (`TARGETS`, `-`, `--diff`, `--all-targets`) or pre-populated upstream `.discovery`, `apprise` automatically resolves discovery in `all-canons` mode (still honoring explicit canon filters such as `--canon <PATH|GLOB>`, `--no-builtins`, or `--canon-name`). The resolved `all-canons` discovery mode is surfaced transparently in the `stylish` Pipeline Funnel Provenance receipt and in `.discovery.mode` (`"all-canons"`) in JSON output.
+When non-empty design intent is supplied without an explicit target scope (`TARGETS`, `-`, `--diff`, `--all-targets`) or pre-populated upstream `.discovery`, `apprise` automatically resolves discovery in `all-canons` mode (still honoring explicit canon filters such as `--canon <PATH|GLOB>`, `--no-builtins`, or `--canon-name`). The resolved `all-canons` discovery mode is surfaced transparently in the `stylish` Pipeline Funnel Receipt and in `.discovery.mode` (`"all-canons"`) in JSON output.
 
 When discovery matches zero candidate canons, the command attaches an empty `.apprisal` record (`assessments: {}`) and short-circuits cleanly with exit code `0` without invoking `validate` or requiring provider credentials (`GEMINI_API_KEY`).
 
@@ -146,7 +146,7 @@ When discovery matches zero candidate canons, the command attaches an empty `.ap
 - `--json`: Emits enriched `Caseload` JSON to `stdout` (equivalent to `--format json`).
 
 ### CLI Output Modes
-- **`stylish` (Default):** Renders the **Pipeline Funnel Provenance Receipt** followed by the Statutory Apprisal summary listing applicable canons alongside their `apprisal_summary` rationales.
+- **`stylish` (Default):** Renders the **Pipeline Funnel Receipt** followed by the Statutory Apprisal summary listing applicable canons alongside their `apprisal_summary` rationales.
 - **`compact`:** Emits unadorned tab-separated `<canon>\t<status>\t<score>\t<summary>` records (one candidate canon per line in deterministic lexicographical order).
 - **`json` / `--json`:** Emits the cumulative `Caseload` JSON envelope containing the populated `.apprisal` container.
 
