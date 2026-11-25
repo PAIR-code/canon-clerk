@@ -181,11 +181,15 @@ pub(super) fn execute_jit_configure_docket_admit_and_vet(
         .resolve_diff_head_lines(env, configure_options.stored_config.as_ref())?;
     let (docket_opts, admit_opts, vet_opts) = build_vet_cascade_stage_opts(
         &cfg_snapshot,
-        thresholds,
-        explicit_timeout_ms,
-        explicit_docket_batch_size,
-        (docket_concurrency, admit_concurrency, vet_concurrency),
-        diff_head_lines,
+        VetCascadeStageInputs {
+            thresholds,
+            explicit_timeout_ms,
+            explicit_docket_batch_size,
+            docket_concurrency,
+            admit_concurrency,
+            vet_concurrency,
+            diff_head_lines,
+        },
     );
     let live_instance;
     let active_provider: &dyn StructuredModelProvider = match backend {
@@ -320,15 +324,20 @@ fn execute_configured_vet_spine(
     })
 }
 
-fn build_vet_cascade_stage_opts(
-    cfg_snapshot: &crate::caseload::CaseloadConfig,
+struct VetCascadeStageInputs {
     thresholds: VetCascadeThresholds,
     explicit_timeout_ms: Option<u64>,
     explicit_docket_batch_size: Option<usize>,
-    concurrencies: (Option<usize>, Option<usize>, Option<usize>),
+    docket_concurrency: Option<usize>,
+    admit_concurrency: Option<usize>,
+    vet_concurrency: Option<usize>,
     diff_head_lines: usize,
+}
+
+fn build_vet_cascade_stage_opts(
+    cfg_snapshot: &crate::caseload::CaseloadConfig,
+    inputs: VetCascadeStageInputs,
 ) -> (DocketOptions, AdmitOptions, VetOptions) {
-    let (docket_concurrency, admit_concurrency, vet_concurrency) = concurrencies;
     let docket_model = cfg_snapshot
         .model_for(HeuristicNode::Docket)
         .unwrap_or_default();
@@ -339,25 +348,28 @@ fn build_vet_cascade_stage_opts(
         .model_for(HeuristicNode::Vet)
         .unwrap_or_default();
     let docket_opts = DocketOptions {
-        threshold: thresholds.docket_threshold,
-        timeout_ms: explicit_timeout_ms
+        threshold: inputs.thresholds.docket_threshold,
+        timeout_ms: inputs
+            .explicit_timeout_ms
             .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(docket_model)),
-        max_canons_per_call: explicit_docket_batch_size,
-        max_concurrent_calls: docket_concurrency,
+        max_canons_per_call: inputs.explicit_docket_batch_size,
+        max_concurrent_calls: inputs.docket_concurrency,
     };
     let admit_opts = AdmitOptions {
-        threshold: thresholds.admit_threshold,
-        timeout_ms: explicit_timeout_ms
+        threshold: inputs.thresholds.admit_threshold,
+        timeout_ms: inputs
+            .explicit_timeout_ms
             .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(admit_model)),
-        max_concurrent_calls: admit_concurrency,
-        diff_head_lines,
+        max_concurrent_calls: inputs.admit_concurrency,
+        diff_head_lines: inputs.diff_head_lines,
     };
     let vet_opts = VetOptions {
-        threshold: thresholds.vet_threshold,
-        timeout_ms: explicit_timeout_ms
+        threshold: inputs.thresholds.vet_threshold,
+        timeout_ms: inputs
+            .explicit_timeout_ms
             .unwrap_or_else(|| crate::provider::default_timeout_ms_for_model(vet_model)),
-        max_concurrent_calls: vet_concurrency,
-        diff_head_lines,
+        max_concurrent_calls: inputs.vet_concurrency,
+        diff_head_lines: inputs.diff_head_lines,
         ..VetOptions::default()
     };
     (docket_opts, admit_opts, vet_opts)

@@ -33,6 +33,25 @@ pub const MAX_HEAD_CONTEXT_CHARS: usize = 4_096;
 /// Environment variable overriding `--diff-head-lines` (`docs/architecture/overview.md` §9).
 pub const ENV_DIFF_HEAD_LINES: &str = "CANON_CLERK_DIFF_HEAD_LINES";
 
+/// Typed post-image head-context line budget for modified diff exhibits (`0` disables expansion).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiffHeadBudget(pub(crate) usize);
+
+impl DiffHeadBudget {
+    pub(crate) const fn lines(self) -> usize {
+        self.0
+    }
+}
+
+/// Named-field inputs for expanding a unified diff patch with post-image head context.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DiffHeadExpandInput<'a> {
+    pub(crate) path: &'a str,
+    pub(crate) patch: &'a str,
+    pub(crate) post_patch_content: Option<&'a str>,
+    pub(crate) budget: DiffHeadBudget,
+}
+
 struct ParsedHunk {
     header: ExhibitLine,
     new_start: usize,
@@ -51,23 +70,19 @@ pub(crate) fn render_exhibit_lines(lines: &[ExhibitLine]) -> String {
     out
 }
 
-/// Expands a unified diff `patch` with up to `diff_head_lines` post-image head lines from
-/// `post_patch_content`, bounded internally by [`MAX_HEAD_CONTEXT_CHARS`].
+/// Expands a unified diff patch with up to `input.budget.lines()` post-image head lines from
+/// `input.post_patch_content`, bounded internally by [`MAX_HEAD_CONTEXT_CHARS`].
 ///
-/// Falls back cleanly to [`parse_unified_patch_lines`] when `diff_head_lines == 0`,
+/// Falls back cleanly to [`parse_unified_patch_lines`] when `budget` is `0`,
 /// `post_patch_content` is absent/empty, the patch has no hunks, or line 1 alone exceeds
 /// [`MAX_HEAD_CONTEXT_CHARS`].
-pub(crate) fn expand_diff_patch_lines(
-    path: &str,
-    patch: &str,
-    post_patch_content: Option<&str>,
-    diff_head_lines: usize,
-) -> Vec<ExhibitLine> {
-    let parsed = parse_unified_patch_lines(patch);
+pub(crate) fn expand_diff_patch_lines(input: DiffHeadExpandInput<'_>) -> Vec<ExhibitLine> {
+    let parsed = parse_unified_patch_lines(input.patch);
+    let diff_head_lines = input.budget.lines();
     if diff_head_lines == 0 {
         return parsed;
     }
-    let Some(content) = post_patch_content else {
+    let Some(content) = input.post_patch_content else {
         return parsed;
     };
     let file_lines: Vec<&str> = content.lines().collect();
@@ -85,7 +100,7 @@ pub(crate) fn expand_diff_patch_lines(
         return leading;
     }
 
-    let kind = SourceKind::from_path(path);
+    let kind = SourceKind::from_path(input.path);
     let mut out = Vec::with_capacity(effective_head_limit + hunks.len().saturating_mul(16));
     out.extend(leading);
 
@@ -141,14 +156,9 @@ pub(crate) fn expand_diff_patch_lines(
     out
 }
 
-/// Formats a unified diff `patch` with head-context expansion into a 1-based line-annotated string.
-pub(crate) fn format_diff_patch_with_head_context(
-    path: &str,
-    patch: &str,
-    post_patch_content: Option<&str>,
-    diff_head_lines: usize,
-) -> String {
-    let lines = expand_diff_patch_lines(path, patch, post_patch_content, diff_head_lines);
+/// Formats a unified diff patch with head-context expansion into a 1-based line-annotated string.
+pub(crate) fn format_diff_patch_with_head_context(input: DiffHeadExpandInput<'_>) -> String {
+    let lines = expand_diff_patch_lines(input);
     render_exhibit_lines(&lines)
 }
 
@@ -262,12 +272,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
  Exception: Brief informative mentions MAY appear inline.
  ";
 
-        let rendered = format_diff_patch_with_head_context(
-            "builtins/documentation/example.canon.md",
+        let rendered = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "builtins/documentation/example.canon.md",
             patch,
-            Some(post_patch),
-            DEFAULT_DIFF_HEAD_LINES,
-        );
+            post_patch_content: Some(post_patch),
+            budget: DiffHeadBudget(DEFAULT_DIFF_HEAD_LINES),
+        });
 
         assert!(rendered.contains("    1 | ---"));
         assert!(rendered.contains("    - | Normative specifications MUST be single-sourced."));
@@ -301,8 +311,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
 +fn line_101() {}
  fn line_102() {}";
 
-        let rendered =
-            format_diff_patch_with_head_context("src/lib.rs", patch, Some(&post_patch), 20);
+        let rendered = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "src/lib.rs",
+            patch,
+            post_patch_content: Some(&post_patch),
+            budget: DiffHeadBudget(20),
+        });
 
         assert!(rendered.contains("    1 | fn line_1() {}"));
         assert!(rendered.contains("   20 | fn line_20() {}"));
@@ -326,8 +340,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
 +Line 41
  Line 42";
 
-        let rendered =
-            format_diff_patch_with_head_context("README.md", patch, Some(&post_patch), 10);
+        let rendered = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "README.md",
+            patch,
+            post_patch_content: Some(&post_patch),
+            budget: DiffHeadBudget(10),
+        });
 
         assert!(rendered.contains("    1 | Line 1"));
         assert!(rendered.contains("   10 | Line 10"));
@@ -354,7 +372,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
 +let x_46 = 46;
  let x_47 = 47;";
 
-        let lines = expand_diff_patch_lines("src/app.rs", patch, Some(&post_patch), 10);
+        let lines = expand_diff_patch_lines(DiffHeadExpandInput {
+            path: "src/app.rs",
+            patch,
+            post_patch_content: Some(&post_patch),
+            budget: DiffHeadBudget(10),
+        });
         let rendered = render_exhibit_lines(&lines);
 
         // Line 4 must appear exactly once (as the added line).
@@ -384,8 +407,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
 +line 3
  line 4";
 
-        let rendered =
-            format_diff_patch_with_head_context("src/mod.rs", patch, Some(&post_patch), 10);
+        let rendered = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "src/mod.rs",
+            patch,
+            post_patch_content: Some(&post_patch),
+            budget: DiffHeadBudget(10),
+        });
 
         assert!(rendered.contains("    1 | line 1"));
         assert!(rendered.contains("+   3 | line 3"));
@@ -398,8 +425,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
         let huge_line = "a".repeat(MAX_HEAD_CONTEXT_CHARS + 500);
         let patch = "@@ -1,1 +1,1 @@\n-old\n+new";
 
-        let expanded =
-            format_diff_patch_with_head_context("dist/bundle.min.js", patch, Some(&huge_line), 80);
+        let expanded = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "dist/bundle.min.js",
+            patch,
+            post_patch_content: Some(&huge_line),
+            budget: DiffHeadBudget(80),
+        });
         let raw = render_exhibit_lines(&parse_unified_patch_lines(patch));
         assert_eq!(expanded, raw);
     }
@@ -409,7 +440,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
         let post_patch = "line 1\nline 2\nline 3\nline 4\nline 5";
         let patch = "@@ -4,2 +4,2 @@\n-old 4\n+line 4\n line 5";
 
-        let disabled = format_diff_patch_with_head_context("src/a.rs", patch, Some(post_patch), 0);
+        let disabled = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "src/a.rs",
+            patch,
+            post_patch_content: Some(post_patch),
+            budget: DiffHeadBudget(0),
+        });
         let raw = render_exhibit_lines(&parse_unified_patch_lines(patch));
         assert_eq!(disabled, raw);
         assert!(!disabled.contains("line 1"));
@@ -418,7 +454,12 @@ Rationale: Separating normative definitions prevents silent divergence.";
     #[test]
     fn missing_post_patch_content_falls_back_to_raw_hunk() {
         let patch = "@@ -10,2 +10,2 @@\n-old 10\n+new 10\n line 11";
-        let fallback = format_diff_patch_with_head_context("src/a.rs", patch, None, 80);
+        let fallback = format_diff_patch_with_head_context(DiffHeadExpandInput {
+            path: "src/a.rs",
+            patch,
+            post_patch_content: None,
+            budget: DiffHeadBudget(80),
+        });
         let raw = render_exhibit_lines(&parse_unified_patch_lines(patch));
         assert_eq!(fallback, raw);
     }

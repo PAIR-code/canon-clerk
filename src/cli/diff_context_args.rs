@@ -41,6 +41,10 @@ pub struct DiffContextArgs {
 impl DiffContextArgs {
     /// Resolves the effective diff head-context line budget following standard specificity precedence:
     /// `CLI --diff-head-lines` -> `CANON_CLERK_DIFF_HEAD_LINES` -> `config.json defaults.diffHeadLines` -> `80`.
+    ///
+    /// # Errors
+    /// Returns [`CliError`] (usage error, exit code `2`) if `--diff-head-lines` or
+    /// `CANON_CLERK_DIFF_HEAD_LINES` cannot be parsed as a non-negative integer (`usize`).
     pub fn resolve_diff_head_lines(
         &self,
         env: &BTreeMap<String, String>,

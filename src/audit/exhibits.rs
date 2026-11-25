@@ -24,8 +24,9 @@ use crate::caseload::{
 };
 use crate::discover::{GlobPattern, WorkspaceSnapshot, normalize_workspace_path};
 use crate::spans::{
-    ExhibitLine, expand_diff_patch_lines, format_diff_patch_with_head_context,
-    parse_snapshot_lines, render_breadcrumb_skeleton, render_exhibit_lines,
+    DiffHeadBudget, DiffHeadExpandInput, ExhibitLine, expand_diff_patch_lines,
+    format_diff_patch_with_head_context, parse_snapshot_lines, render_breadcrumb_skeleton,
+    render_exhibit_lines,
 };
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -112,7 +113,12 @@ pub(crate) fn format_diff_artifact_patch(
     diff_head_lines: usize,
 ) -> String {
     let post_patch = resolve_diff_post_patch_content(artifact, intake, workspace);
-    format_diff_patch_with_head_context(&artifact.path, patch, post_patch, diff_head_lines)
+    format_diff_patch_with_head_context(DiffHeadExpandInput {
+        path: &artifact.path,
+        patch,
+        post_patch_content: post_patch,
+        budget: DiffHeadBudget(diff_head_lines),
+    })
 }
 
 /// Renders a single admitted exhibit (`ExhibitAssessment`) into `out` with 1-based line numbers for file exhibits.
@@ -175,7 +181,12 @@ pub(crate) fn extract_file_exhibit_lines(
             let post_patch = resolve_diff_post_patch_content(artifact, intake, workspace);
             return Some((
                 true,
-                expand_diff_patch_lines(&artifact.path, patch, post_patch, diff_head_lines),
+                expand_diff_patch_lines(DiffHeadExpandInput {
+                    path: &artifact.path,
+                    patch,
+                    post_patch_content: post_patch,
+                    budget: DiffHeadBudget(diff_head_lines),
+                }),
             ));
         }
         let content = non_blank(artifact.content.as_deref()).or_else(|| {
@@ -315,7 +326,12 @@ fn append_diff_file_exhibit(
 
     if let Some(patch) = non_blank(artifact.patch.as_deref()) {
         let post_patch = resolve_diff_post_patch_content(artifact, intake, workspace);
-        let lines = expand_diff_patch_lines(&artifact.path, patch, post_patch, diff_head_lines);
+        let lines = expand_diff_patch_lines(DiffHeadExpandInput {
+            path: &artifact.path,
+            patch,
+            post_patch_content: post_patch,
+            budget: DiffHeadBudget(diff_head_lines),
+        });
         let body = match hot_spans {
             Some(spans) => render_breadcrumb_skeleton(&artifact.path, &lines, spans),
             None => render_exhibit_lines(&lines),

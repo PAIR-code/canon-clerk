@@ -21,7 +21,8 @@ mod tiler;
 
 pub use head_context::{DEFAULT_DIFF_HEAD_LINES, ENV_DIFF_HEAD_LINES, MAX_HEAD_CONTEXT_CHARS};
 pub(crate) use head_context::{
-    expand_diff_patch_lines, format_diff_patch_with_head_context, render_exhibit_lines,
+    DiffHeadBudget, DiffHeadExpandInput, expand_diff_patch_lines,
+    format_diff_patch_with_head_context, render_exhibit_lines,
 };
 pub(crate) use skeleton::render_breadcrumb_skeleton;
 pub(crate) use tiler::{TiledSpan, render_fenced_spans, tile_exhibit_lines};

@@ -47,7 +47,7 @@ use crate::concurrency::execute_bounded_stage_work;
 use crate::configure::is_discriminative_model;
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::{GenerationRequest, StructuredModelProvider};
-use crate::spans::DEFAULT_DIFF_HEAD_LINES;
+use crate::spans::{DEFAULT_DIFF_HEAD_LINES, DiffHeadBudget};
 use decode::decode_case_adjudication;
 use fold::fold_case_slice_adjudications;
 use prompt::{AUDIT_SYSTEM_INSTRUCTION, build_audit_schema};
@@ -318,7 +318,7 @@ fn prepare_all_trial_calls(
             discovery,
             workspace,
             MAX_AUDIT_TRIAL_CHARS,
-            diff_head_lines,
+            DiffHeadBudget(diff_head_lines),
         );
         let slice_count = slices.len();
         for (idx, slice) in slices.into_iter().enumerate() {

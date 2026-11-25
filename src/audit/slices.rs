@@ -27,6 +27,7 @@ use super::slice_pack::{
 use crate::canon::Canon;
 use crate::caseload::{CaseloadDiscovery, CaseloadIntake, ExhibitAssessment};
 use crate::discover::WorkspaceSnapshot;
+use crate::spans::DiffHeadBudget;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
@@ -60,7 +61,7 @@ pub(super) fn build_audit_case_slices(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     max_trial_chars: usize,
-    diff_head_lines: usize,
+    diff_head_budget: DiffHeadBudget,
 ) -> Vec<AuditTrialSlice> {
     let all_admitted_file_paths: BTreeSet<String> = admitted_exhibits
         .iter()
@@ -84,7 +85,7 @@ pub(super) fn build_audit_case_slices(
             intake,
             discovery,
             workspace,
-            diff_head_lines,
+            diff_head_budget.lines(),
         );
         if full_prompt.len() <= max_trial_chars {
             let primary_fallback_path = full_paths.iter().next().cloned();
@@ -110,7 +111,7 @@ pub(super) fn build_audit_case_slices(
             discovery,
             workspace,
             max_trial_chars,
-            diff_head_lines,
+            diff_head_budget,
         );
 
     if sliceable_files.is_empty() {
@@ -209,8 +210,9 @@ fn prepare_audit_header_and_sliceable_files(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     max_trial_chars: usize,
-    diff_head_lines: usize,
+    diff_head_budget: DiffHeadBudget,
 ) -> (String, BTreeSet<String>, Vec<RenderedFileExhibit>) {
+    let diff_head_lines = diff_head_budget.lines();
     let mut header = build_shared_case_header(
         canon_ref,
         canon,

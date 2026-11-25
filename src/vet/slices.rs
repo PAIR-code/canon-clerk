@@ -26,7 +26,9 @@ use crate::canon::Canon;
 use crate::caseload::{CaseloadDiscovery, CaseloadIntake, ExhibitAssessment};
 use crate::discover::WorkspaceSnapshot;
 use crate::provider::DecisionBudgetProfile;
-use crate::spans::{ExhibitLine, TiledSpan, render_fenced_spans, tile_exhibit_lines};
+use crate::spans::{
+    DiffHeadBudget, ExhibitLine, TiledSpan, render_fenced_spans, tile_exhibit_lines,
+};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
@@ -265,7 +267,7 @@ pub(super) fn build_discriminative_case_plan(
         intake,
         workspace,
         max_state_chars,
-        diff_head_lines,
+        DiffHeadBudget(diff_head_lines),
     );
 
     if shared_header.len() + SLICE_FRAME_RESERVE_CHARS >= max_state_chars {
@@ -323,7 +325,7 @@ fn prepare_multi_slice_header_and_files(
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
     max_state_chars: usize,
-    diff_head_lines: usize,
+    diff_head_budget: DiffHeadBudget,
 ) -> (String, Vec<PreparedFileExhibit>) {
     let reference_set: BTreeSet<&str> = reference_paths.iter().map(String::as_str).collect();
     let (pinned_refs, non_ref_files) = partition_and_render_file_exhibits(
@@ -331,7 +333,7 @@ fn prepare_multi_slice_header_and_files(
         &reference_set,
         intake,
         workspace,
-        diff_head_lines,
+        diff_head_budget.lines(),
     );
 
     if !pinned_refs.is_empty() && !non_ref_files.is_empty() {
