@@ -76,10 +76,13 @@ impl PreparedFileExhibit {
         exhibit: &ExhibitAssessment,
         intake: &CaseloadIntake,
         workspace: &WorkspaceSnapshot,
+        diff_head_lines: usize,
     ) -> Self {
         let file_path = exhibit.file_path.clone();
         let heading = format_file_exhibit_heading(&file_path, exhibit, intake);
-        if let Some((is_diff, lines)) = extract_file_exhibit_lines(&file_path, intake, workspace) {
+        if let Some((is_diff, lines)) =
+            extract_file_exhibit_lines(&file_path, intake, workspace, diff_head_lines)
+        {
             let tiled_spans = tile_exhibit_lines(&file_path, &lines);
             let lines_chars: usize = lines.iter().map(|l| l.rendered.len() + 1).sum();
             let fence_overhead = if tiled_spans.len() > 1 {
@@ -193,6 +196,7 @@ pub(super) fn build_discriminative_case_plan(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     profile: DecisionBudgetProfile,
+    diff_head_lines: usize,
 ) -> DiscriminativeCasePlan {
     let max_state_chars = max_discriminative_state_chars_for_profile(profile);
     let admitted_file_paths: BTreeSet<String> = admitted_exhibits
@@ -217,7 +221,7 @@ pub(super) fn build_discriminative_case_plan(
     let all_prepared: Vec<PreparedFileExhibit> = admitted_exhibits
         .iter()
         .filter(|e| !is_metadata_plane_id(&e.file_path))
-        .map(|e| PreparedFileExhibit::from_exhibit(e, intake, workspace))
+        .map(|e| PreparedFileExhibit::from_exhibit(e, intake, workspace, diff_head_lines))
         .collect();
 
     if all_prepared.is_empty() {
@@ -261,6 +265,7 @@ pub(super) fn build_discriminative_case_plan(
         intake,
         workspace,
         max_state_chars,
+        diff_head_lines,
     );
 
     if shared_header.len() + SLICE_FRAME_RESERVE_CHARS >= max_state_chars {
@@ -306,6 +311,10 @@ pub(super) fn build_discriminative_case_plan(
     DiscriminativeCasePlan::Slices(slices)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal multi-slice header planner threading shared header, exhibits, references, workspace, budget, and diff head-context limit"
+)]
 fn prepare_multi_slice_header_and_files(
     mut header: String,
     admitted_exhibits: &[&ExhibitAssessment],
@@ -314,10 +323,16 @@ fn prepare_multi_slice_header_and_files(
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
     max_state_chars: usize,
+    diff_head_lines: usize,
 ) -> (String, Vec<PreparedFileExhibit>) {
     let reference_set: BTreeSet<&str> = reference_paths.iter().map(String::as_str).collect();
-    let (pinned_refs, non_ref_files) =
-        partition_and_render_file_exhibits(admitted_exhibits, &reference_set, intake, workspace);
+    let (pinned_refs, non_ref_files) = partition_and_render_file_exhibits(
+        admitted_exhibits,
+        &reference_set,
+        intake,
+        workspace,
+        diff_head_lines,
+    );
 
     if !pinned_refs.is_empty() && !non_ref_files.is_empty() {
         let refs_slice: Vec<&RenderedFileExhibit> = pinned_refs.iter().collect();

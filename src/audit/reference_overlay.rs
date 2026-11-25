@@ -22,6 +22,8 @@ use crate::caseload::{
 use crate::discover::{GlobPattern, WorkspaceSnapshot, normalize_workspace_path};
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fs;
+use std::path::Path;
 
 /// Deterministic fail-closed error raised when a `references:` file cannot be reconstructed
 /// from a `--workspace-state base` checkout and `.intake.diffs`.
@@ -265,6 +267,88 @@ pub(crate) fn apply_base_diff_to_references(
     }
 
     Ok(())
+}
+
+/// Best-effort in-memory overlay reconstructing post-patch file contents for modified, renamed,
+/// or copied diff exhibits under `--workspace-state base` (`docs/architecture/overview.md` §9).
+///
+/// Unlike [`apply_base_diff_to_references`] (which fails closed for statutory `references:`),
+/// missing base files, binary files, or patch conflicts are silently skipped so exhibit rendering
+/// gracefully falls back to the raw unified diff hunk without ever exposing unpatched base lines.
+pub(crate) fn materialize_base_diff_exhibits(
+    paths: &[String],
+    intake: &CaseloadIntake,
+    workspace: &mut WorkspaceSnapshot,
+    workspace_root: Option<&Path>,
+) {
+    if intake.workspace_state != WorkspaceState::Base || intake.diffs.is_empty() {
+        return;
+    }
+
+    let mut overlay_updates: Vec<(String, String)> = Vec::new();
+    for diff_path in paths {
+        if workspace.applied_base_diffs.contains(diff_path) {
+            continue;
+        }
+        let Some(artifact) = intake.diffs.get(diff_path) else {
+            continue;
+        };
+        if !matches!(
+            artifact.status,
+            FileChangeStatus::Modified | FileChangeStatus::Renamed | FileChangeStatus::Copied
+        ) {
+            continue;
+        }
+        if artifact.content.is_some() {
+            continue;
+        }
+        let Some(patch) = artifact.patch.as_deref() else {
+            continue;
+        };
+
+        let base_path = match artifact.status {
+            FileChangeStatus::Renamed | FileChangeStatus::Copied => artifact
+                .previous_path
+                .as_deref()
+                .unwrap_or(diff_path.as_str()),
+            _ => diff_path.as_str(),
+        };
+
+        let base_content = if !workspace.applied_base_diffs.contains(base_path)
+            && let Some(in_mem) = workspace.file_contents.get(base_path)
+        {
+            Some(in_mem.clone())
+        } else if let Some(root) = workspace_root {
+            let full_path = root.join(base_path);
+            if full_path.is_file() {
+                fs::read_to_string(&full_path).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let Some(base_content) = base_content else {
+            continue;
+        };
+
+        if let Ok(post_patch) = apply_unified_patch(
+            &base_content,
+            Some(base_path),
+            diff_path,
+            patch,
+            "<diff-head-context>",
+        ) {
+            overlay_updates.push((diff_path.clone(), post_patch));
+        }
+    }
+
+    for (path, post_patch) in overlay_updates {
+        workspace.existing_files.insert(path.clone());
+        workspace.file_contents.insert(path.clone(), post_patch);
+        workspace.applied_base_diffs.insert(path);
+    }
 }
 
 fn reconstruct_post_patch_content(
@@ -657,5 +741,66 @@ rename to docs/new.md
             ws.file_contents.get("docs/new.md").map(String::as_str),
             Some("pure rename content\n")
         );
+    }
+
+    #[test]
+    fn test_materialize_base_diff_exhibits_reconstructs_modified_and_renamed_and_falls_back() {
+        let mut ws = WorkspaceSnapshot::new()
+            .with_file_content(
+                "src/small.md",
+                "line 1\nline 2\nline 3\nline 4\nRationale: keep me visible.\n",
+            )
+            .with_file_content("src/old_name.rs", "// license header\nfn old() {}\n")
+            .with_file_content("src/conflict.rs", "completely different base\n");
+
+        let diff = "\
+diff --git a/src/small.md b/src/small.md
+--- a/src/small.md
++++ b/src/small.md
+@@ -1,3 +1,3 @@
+ line 1
+-line 2
++line 2 updated
+ line 3
+diff --git a/src/old_name.rs b/src/new_name.rs
+similarity index 50%
+rename from src/old_name.rs
+rename to src/new_name.rs
+--- a/src/old_name.rs
++++ b/src/new_name.rs
+@@ -1,2 +1,2 @@
+ // license header
+-fn old() {}
++fn new_fn() {}
+diff --git a/src/conflict.rs b/src/conflict.rs
+--- a/src/conflict.rs
++++ b/src/conflict.rs
+@@ -1,2 +1,2 @@
+-expected line that does not match
++replacement
+";
+        let intake = base_intake_from_diff(diff);
+        let paths = vec![
+            "src/small.md".to_string(),
+            "src/new_name.rs".to_string(),
+            "src/conflict.rs".to_string(),
+        ];
+
+        materialize_base_diff_exhibits(&paths, &intake, &mut ws, None);
+
+        assert!(ws.applied_base_diffs.contains("src/small.md"));
+        assert!(ws.file_contents.get("src/small.md").is_some_and(
+            |c| c.contains("line 2 updated") && c.contains("Rationale: keep me visible.")
+        ));
+
+        assert!(ws.applied_base_diffs.contains("src/new_name.rs"));
+        assert!(
+            ws.file_contents
+                .get("src/new_name.rs")
+                .is_some_and(|c| c.contains("// license header") && c.contains("fn new_fn() {}"))
+        );
+
+        // Patch mismatch falls back gracefully without marking applied_base_diffs.
+        assert!(!ws.applied_base_diffs.contains("src/conflict.rs"));
     }
 }

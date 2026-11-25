@@ -113,7 +113,7 @@ pub(super) fn execute_admit_decisions(
         discovery,
         workspace,
         &admit_model,
-        options.timeout_ms,
+        options,
     );
 
     let concurrency_limit = options.max_concurrent_calls.unwrap_or_else(|| {
@@ -145,12 +145,13 @@ fn pack_exhibit_grouped_batches(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     admit_model: &str,
-    timeout_ms: u64,
+    options: &AdmitOptions,
 ) -> Vec<(Vec<PairSubject>, DecisionRequest)> {
     if sorted_pairs.is_empty() {
         return Vec::new();
     }
 
+    let timeout_ms = options.timeout_ms;
     let budget = DecisionBudgetProfile::for_model(admit_model);
     let mut filing_overview = String::with_capacity(1024);
     append_filing_overview(&mut filing_overview, intake, discovery);
@@ -166,7 +167,13 @@ fn pack_exhibit_grouped_batches(
     let mut rendered_exhibits = BTreeMap::new();
     for exhibit_id in unique_exhibits {
         let mut buf = String::with_capacity(512);
-        append_candidate_exhibit_section(&mut buf, exhibit_id, intake, workspace);
+        append_candidate_exhibit_section(
+            &mut buf,
+            exhibit_id,
+            intake,
+            workspace,
+            options.diff_head_lines,
+        );
         rendered_exhibits.insert(exhibit_id.clone(), buf);
     }
 

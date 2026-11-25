@@ -21,7 +21,7 @@ mod stages;
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence};
 use crate::cli::CliError;
 use crate::cli::args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs,
+    CanonSelectionArgs, CaseloadIoArgs, DiffContextArgs, FilingSourceArgs, ProviderConfigArgs,
     ProviderTransportArgs, RejectedGithubIssueArgs,
 };
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
@@ -163,6 +163,9 @@ pub struct AdmitArgs {
 
     #[command(flatten)]
     pub transport: ProviderTransportArgs,
+
+    #[command(flatten)]
+    pub diff_context: DiffContextArgs,
 
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(

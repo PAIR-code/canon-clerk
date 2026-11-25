@@ -21,7 +21,7 @@ pub(crate) mod stages;
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVetting};
 use crate::cli::CliError;
 use crate::cli::args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs,
+    CanonSelectionArgs, CaseloadIoArgs, DiffContextArgs, FilingSourceArgs, ProviderConfigArgs,
     ProviderTransportArgs, RejectedGithubIssueArgs,
 };
 use crate::cli::closure::{
@@ -187,6 +187,9 @@ pub struct VetArgs {
 
     #[command(flatten)]
     pub transport: ProviderTransportArgs,
+
+    #[command(flatten)]
+    pub diff_context: DiffContextArgs,
 
     /// Output format (`stylish`, `json`, or `compact`).
     #[arg(

@@ -146,6 +146,7 @@ pub(crate) fn build_audit_case_user_prompt(
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) -> (String, BTreeSet<String>) {
     let admitted_file_paths: BTreeSet<String> = admitted_exhibits
         .iter()
@@ -168,7 +169,7 @@ pub(crate) fn build_audit_case_user_prompt(
 
     let _ = writeln!(out, "## Admitted Exhibits ({})\n", admitted_exhibits.len());
     for exhibit in admitted_exhibits {
-        append_admitted_exhibit_section(&mut out, exhibit, intake, workspace);
+        append_admitted_exhibit_section(&mut out, exhibit, intake, workspace, diff_head_lines);
     }
 
     let _ = writeln!(out, "## Admitted File Exhibit Paths");

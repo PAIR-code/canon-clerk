@@ -60,6 +60,7 @@ pub(super) fn build_audit_case_slices(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     max_trial_chars: usize,
+    diff_head_lines: usize,
 ) -> Vec<AuditTrialSlice> {
     let all_admitted_file_paths: BTreeSet<String> = admitted_exhibits
         .iter()
@@ -83,6 +84,7 @@ pub(super) fn build_audit_case_slices(
             intake,
             discovery,
             workspace,
+            diff_head_lines,
         );
         if full_prompt.len() <= max_trial_chars {
             let primary_fallback_path = full_paths.iter().next().cloned();
@@ -108,6 +110,7 @@ pub(super) fn build_audit_case_slices(
             discovery,
             workspace,
             max_trial_chars,
+            diff_head_lines,
         );
 
     if sliceable_files.is_empty() {
@@ -206,6 +209,7 @@ fn prepare_audit_header_and_sliceable_files(
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
     max_trial_chars: usize,
+    diff_head_lines: usize,
 ) -> (String, BTreeSet<String>, Vec<RenderedFileExhibit>) {
     let mut header = build_shared_case_header(
         canon_ref,
@@ -236,7 +240,13 @@ fn prepare_audit_header_and_sliceable_files(
             let spans = is_contested
                 .then(|| contested_spans.get(&exhibit.file_path).map(Vec::as_slice))
                 .flatten();
-            let rendered = render_single_file_exhibit_with_spans(exhibit, intake, workspace, spans);
+            let rendered = render_single_file_exhibit_with_spans(
+                exhibit,
+                intake,
+                workspace,
+                spans,
+                diff_head_lines,
+            );
             if is_contested && is_ref {
                 contested_refs.push(rendered);
             } else if is_contested {
@@ -282,6 +292,7 @@ fn prepare_audit_header_and_sliceable_files(
         contested_spans,
         intake,
         workspace,
+        diff_head_lines,
     );
     if !pinned_refs.is_empty() && !non_ref_files.is_empty() {
         let refs_slice: Vec<&RenderedFileExhibit> = pinned_refs.iter().collect();
@@ -298,6 +309,7 @@ fn prepare_audit_header_and_sliceable_files(
         contested_spans,
         intake,
         workspace,
+        diff_head_lines,
     );
     (header, BTreeSet::new(), all_files)
 }
@@ -338,7 +350,7 @@ pub(crate) fn build_shared_case_header(
             metadata_exhibits.len()
         );
         for exhibit in metadata_exhibits {
-            append_admitted_exhibit_section(&mut header, exhibit, intake, workspace);
+            append_admitted_exhibit_section(&mut header, exhibit, intake, workspace, 0);
         }
     }
 
@@ -360,6 +372,7 @@ fn partition_and_render_file_exhibits_with_spans(
     contested_spans: &BTreeMap<String, Vec<(usize, usize)>>,
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) -> (Vec<RenderedFileExhibit>, Vec<RenderedFileExhibit>) {
     let mut pinned_refs = Vec::new();
     let mut non_ref_files = Vec::new();
@@ -368,7 +381,13 @@ fn partition_and_render_file_exhibits_with_spans(
             continue;
         }
         let spans = contested_spans.get(&exhibit.file_path).map(Vec::as_slice);
-        let rendered = render_single_file_exhibit_with_spans(exhibit, intake, workspace, spans);
+        let rendered = render_single_file_exhibit_with_spans(
+            exhibit,
+            intake,
+            workspace,
+            spans,
+            diff_head_lines,
+        );
         if reference_set.contains(exhibit.file_path.as_str()) {
             pinned_refs.push(rendered);
         } else {
@@ -383,13 +402,20 @@ fn render_admitted_file_exhibits_with_spans(
     contested_spans: &BTreeMap<String, Vec<(usize, usize)>>,
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) -> Vec<RenderedFileExhibit> {
     admitted_exhibits
         .iter()
         .filter(|exhibit| !is_metadata_plane_id(&exhibit.file_path))
         .map(|exhibit| {
             let spans = contested_spans.get(&exhibit.file_path).map(Vec::as_slice);
-            render_single_file_exhibit_with_spans(exhibit, intake, workspace, spans)
+            render_single_file_exhibit_with_spans(
+                exhibit,
+                intake,
+                workspace,
+                spans,
+                diff_head_lines,
+            )
         })
         .collect()
 }
@@ -399,6 +425,7 @@ fn render_single_file_exhibit_with_spans(
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
     hot_spans: Option<&[(usize, usize)]>,
+    diff_head_lines: usize,
 ) -> RenderedFileExhibit {
     let mut rendered = String::with_capacity(768);
     append_admitted_exhibit_section_with_spans(
@@ -407,6 +434,7 @@ fn render_single_file_exhibit_with_spans(
         intake,
         workspace,
         hot_spans,
+        diff_head_lines,
     );
     RenderedFileExhibit {
         file_path: exhibit.file_path.clone(),
@@ -419,6 +447,7 @@ pub(crate) fn partition_and_render_file_exhibits(
     reference_set: &BTreeSet<&str>,
     intake: &CaseloadIntake,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) -> (Vec<RenderedFileExhibit>, Vec<RenderedFileExhibit>) {
     partition_and_render_file_exhibits_with_spans(
         admitted_exhibits,
@@ -426,6 +455,7 @@ pub(crate) fn partition_and_render_file_exhibits(
         &BTreeMap::new(),
         intake,
         workspace,
+        diff_head_lines,
     )
 }
 

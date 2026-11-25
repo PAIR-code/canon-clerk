@@ -22,9 +22,11 @@ pub mod canon_args;
 pub(crate) mod closure;
 mod commit_messages;
 pub mod configure;
+mod diff_context_args;
 pub mod discover;
 pub mod docket;
 mod github_args;
+pub(crate) mod hydration;
 pub mod intake;
 pub mod io;
 mod linked_issues;
@@ -46,8 +48,8 @@ pub use apprise::{
     run_apprise_with_snapshot_and_provider, run_apprise_with_telemetry,
 };
 pub use args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
-    ProviderTransportArgs, ResolvedFilingSource, WorkspaceStateArg,
+    CanonSelectionArgs, CaseloadIoArgs, DiffContextArgs, FilingSourceArgs, GithubCheckArgs,
+    ProviderConfigArgs, ProviderTransportArgs, ResolvedFilingSource, WorkspaceStateArg,
 };
 pub use audit::{
     AuditArgs, AuditFormat, OnMissingCredentials, run_audit, run_audit_live_with_telemetry,

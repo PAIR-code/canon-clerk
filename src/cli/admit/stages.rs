@@ -255,6 +255,7 @@ pub(super) fn execute_jit_configure_docket_and_admit(
             .transport
             .resolve_timeout_ms_for_model(env, stored_ref, admit_model)?,
         max_concurrent_calls: admit_concurrency,
+        diff_head_lines: args.diff_context.resolve_diff_head_lines(env, stored_ref)?,
     };
 
     execute_configured_admit_spine(
@@ -307,7 +308,12 @@ fn execute_configured_admit_spine(
         });
     }
 
-    populate_live_target_file_snapshots(&after_docket, snapshot, backend);
+    crate::cli::hydration::populate_live_target_snapshots(
+        &after_docket,
+        snapshot,
+        backend,
+        admit_opts.diff_head_lines,
+    );
     let after_admit = run_admit_stage(
         admit_opts,
         after_docket,
@@ -322,34 +328,6 @@ fn execute_configured_admit_spine(
         docket_disp,
         admit_disp: StageDisposition::Executed,
     })
-}
-
-fn populate_live_target_file_snapshots(
-    caseload: &Caseload,
-    snapshot: &mut WorkspaceSnapshot,
-    backend: &ClosureBackend<'_>,
-) {
-    let ClosureBackend::LiveDisk { workspace_root } = backend else {
-        return;
-    };
-    let Some(discovery) = &caseload.discovery else {
-        return;
-    };
-    let diffs = caseload.intake.as_ref().map(|i| &i.diffs);
-    let paths_to_load: Vec<String> = discovery
-        .target_files
-        .iter()
-        .filter(|path| {
-            diffs.is_none_or(|d| {
-                d.get(*path)
-                    .is_none_or(|art| art.patch.is_none() && art.content.is_none())
-            })
-        })
-        .cloned()
-        .collect();
-    if !paths_to_load.is_empty() {
-        snapshot.populate_file_contents_from_disk(workspace_root, &paths_to_load);
-    }
 }
 
 fn run_docket_stage(

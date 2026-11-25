@@ -31,6 +31,7 @@ use crate::provider::{
     DEFAULT_GENERATION_TIMEOUT_MS, DecisionBudgetProfile, ProviderError, StructuredModelProvider,
     default_concurrency_for_model,
 };
+use crate::spans::DEFAULT_DIFF_HEAD_LINES;
 use slices::{DiscriminativeCasePlan, build_discriminative_case_plan};
 use std::fmt;
 
@@ -60,6 +61,8 @@ pub struct VetOptions {
     pub timeout_ms: u64,
     /// Optional maximum concurrent in-flight per-case vetting calls (`>= 1`; defaults to [`DEFAULT_VET_MAX_CONCURRENT_CALLS`]).
     pub max_concurrent_calls: Option<usize>,
+    /// Post-image head-context line budget for modified diff exhibits (`0` disables; defaults to [`DEFAULT_DIFF_HEAD_LINES`]).
+    pub diff_head_lines: usize,
 }
 
 impl Default for VetOptions {
@@ -69,6 +72,7 @@ impl Default for VetOptions {
             exception_threshold: DEFAULT_VET_EXCEPTION_THRESHOLD,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: None,
+            diff_head_lines: DEFAULT_DIFF_HEAD_LINES,
         }
     }
 }
@@ -256,6 +260,7 @@ pub fn execute_vet(
         intake,
         discovery,
         workspace,
+        options.diff_head_lines,
     );
 
     let concurrency_limit = options.max_concurrent_calls.unwrap_or_else(|| {
@@ -283,13 +288,21 @@ fn prepare_vetting_cases<'a>(
     intake: &CaseloadIntake,
     discovery: &CaseloadDiscovery,
     workspace: &WorkspaceSnapshot,
+    diff_head_lines: usize,
 ) -> Vec<PreparedVettingCase> {
     let profile = DecisionBudgetProfile::for_model(vet_model);
     active_entries
         .into_iter()
         .map(|(canon_ref, canon, admitted)| {
             let discriminative_plan = build_discriminative_case_plan(
-                &canon_ref, canon, &admitted, intake, discovery, workspace, profile,
+                &canon_ref,
+                canon,
+                &admitted,
+                intake,
+                discovery,
+                workspace,
+                profile,
+                diff_head_lines,
             );
             PreparedVettingCase {
                 canon_ref,

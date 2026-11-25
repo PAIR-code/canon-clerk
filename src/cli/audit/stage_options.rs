@@ -128,6 +128,7 @@ pub(super) fn build_stage_options(
     stored: Option<&StoredConfig>,
     thresholds: AuditCascadeThresholds,
 ) -> Result<ResolvedStageOptions, CliError> {
+    let diff_head_lines = args.diff_context.resolve_diff_head_lines(env, stored)?;
     Ok(ResolvedStageOptions {
         explicit_docket_batch_size: resolve_docket_batch_size(args.docket_batch_size, env, stored)?,
         docket_concurrency: resolve_docket_concurrency(args.docket_concurrency, env, stored)?,
@@ -135,17 +136,20 @@ pub(super) fn build_stage_options(
             threshold: thresholds.admit_threshold,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: resolve_admit_concurrency(args.admit_concurrency, env, stored)?,
+            diff_head_lines,
         },
         vet_opts: VetOptions {
             threshold: thresholds.vet_threshold,
             timeout_ms: DEFAULT_GENERATION_TIMEOUT_MS,
             max_concurrent_calls: resolve_vet_concurrency(args.vet_concurrency, env, stored)?,
+            diff_head_lines,
             ..VetOptions::default()
         },
         audit_opts: AuditOptions {
             threshold: thresholds.audit_threshold,
             timeout_ms: DEFAULT_AUDIT_TIMEOUT_MS,
             max_concurrent_calls: resolve_audit_concurrency(args.audit_concurrency, env, stored)?,
+            diff_head_lines,
         },
     })
 }
