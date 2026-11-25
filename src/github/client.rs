@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
 use std::time::Duration;
 
-const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
+pub(super) const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
 const GITHUB_API_DIFF_ACCEPT: &str = "application/vnd.github.v3.diff";
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const GITHUB_USER_AGENT: &str = concat!("canon-clerk/", env!("CARGO_PKG_VERSION"));
@@ -165,7 +165,7 @@ impl GithubChecksClient {
         })?
     }
 
-    fn send_get_with_link(
+    pub(super) fn send_get_with_link(
         &self,
         url: &str,
         token: &str,

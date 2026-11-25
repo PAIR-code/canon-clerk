@@ -29,6 +29,7 @@ use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &DocketArgs) -> Result<(), CliError> {
+    args.rejected_github_issue.validate_contentious("docket")?;
     args.rejected_unqualified.validate(
         "docket",
         "`--docket-threshold <FLOAT>` (or set `CANON_CLERK_DOCKET_THRESHOLD`)",

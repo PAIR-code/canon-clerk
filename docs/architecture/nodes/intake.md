@@ -62,7 +62,7 @@ flowchart LR
 
 ## 4. Process & Domain Logic (`core`)
 
-1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), GitHub pull request (`--github-pr [<number>]`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`, `--linked-issue`, `--commit-message`, `--commit-messages-file`), or an incoming `--caseload`.
+1. **Input Source Resolution & Missing Source Invariant:** Requires an explicitly designated input source: positional target paths, unified diff (`--diff <path|->`), GitHub pull request (`--github-pr [<number>]`), GitHub issue inquiry (`--github-issue [<number>]`), stdin token stream (`-`), prospective `--intent`, `--all-targets`, PR metadata (`--pr-title`, `--pr-body`, `--pr-body-file`, `--linked-issue`, `--commit-message`, `--commit-messages-file`), or an incoming `--caseload`.
    - **Missing Source Guard (Naked Invocation):** Invoking `canon-clerk intake` with zero sources fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance. The CLI never silently hangs waiting for input on a TTY.
    - **Empty Stream Outcome (Legitimate No-op):** An explicitly designated source that yields zero changes (e.g. `git diff origin/main | canon-clerk intake --diff -` on a clean branch) successfully produces an empty filing (`diffs: {}`, `target_paths: []`) and exits `0`.
 2. **Tendered Exhibits Cataloging:** Captures raw literal exhibits directly from the invocation context:
@@ -95,6 +95,10 @@ git diff origin/main | canon-clerk intake --diff -
 canon-clerk intake --github-pr
 canon-clerk intake --github-pr 42 --github-repo PAIR-code/canon-clerk
 
+# Ingest natively from a GitHub issue as prospective design intent (Actions `on: issues` or explicit issue number):
+canon-clerk intake --github-issue
+canon-clerk intake --github-issue 397 --github-repo PAIR-code/canon-clerk
+
 # Ingest all repository files as target artifacts:
 canon-clerk intake --all-targets
 
@@ -105,8 +109,9 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 ### CLI Flags & Environment
 - `-` (Positional): Reads newline-delimited paths from stdin.
 - `--diff <path|->`: Ingests unified diff patch from file or stdin (mutually exclusive with `--github-pr`).
-- `--github-pr [<number>]`: Opt-in native GitHub pull request filing source (mutually exclusive with `--diff`; see [`../github.md` §3](../github.md#3-pull-request-diff--metadata-ingestion---github-pr)). Bare `--github-pr` extracts `pull_request.number`, `title`, `body`, and `head.sha` from `$GITHUB_EVENT_PATH`; `--github-pr <number>` fetches PR metadata via `GET /repos/{owner}/{repo}/pulls/{number}`. Both modes fetch the unified diff via `Accept: application/vnd.github.v3.diff` using `GITHUB_TOKEN` / `GH_TOKEN` and `GITHUB_API_URL`. Explicit `--pr-title`, `--pr-body`, and `--pr-body-file` override fetched metadata (`CLI flag > event/API metadata`).
-- `--github-repo <owner/repo>`: Target GitHub repository slug (fallback env: `GITHUB_REPOSITORY`), shared across `--github-pr` ingestion and `--publish-github-check`.
+- `--github-pr [<number>]`: Opt-in native GitHub pull request filing source (mutually exclusive with `--diff` and `--github-issue`; see [`../github.md` §3](../github.md#3-pull-request-diff--metadata-ingestion---github-pr)). Bare `--github-pr` extracts `pull_request.number`, `title`, `body`, and `head.sha` from `$GITHUB_EVENT_PATH`; `--github-pr <number>` fetches PR metadata via `GET /repos/{owner}/{repo}/pulls/{number}`. Both modes fetch the unified diff via `Accept: application/vnd.github.v3.diff` using `GITHUB_TOKEN` / `GH_TOKEN` and `GITHUB_API_URL`. Explicit `--pr-title`, `--pr-body`, and `--pr-body-file` override fetched metadata (`CLI flag > event/API metadata`).
+- `--github-issue [<number>]`: Opt-in native GitHub issue inquiry source for prospective design intent (mutually exclusive with `--github-pr`; see [`../github.md` §7](../github.md#7-github-issue-inquiry-ingestion---github-issue)). Bare `--github-issue` reads `issue.number`, `title`, `body`, `labels[].name`, `user.login`, and `html_url` directly from `$GITHUB_EVENT_PATH` with zero API calls; `--github-issue <number>` fetches `GET /repos/{owner}/{repo}/issues/{number}` using `GITHUB_TOKEN` / `GH_TOKEN`, `--github-repo` / `GITHUB_REPOSITORY`, and `GITHUB_API_URL` (failing fast on HTTP 404/403, transport errors, or PR-as-issue responses). Formats `#<number>: <title>`, optional `Labels: ...`, and Markdown body into `.intake.intent` without populating `.intake.linked_issues`; explicit `--intent <text>` overrides (`CLI flag > event/API metadata`).
+- `--github-repo <owner/repo>`: Target GitHub repository slug (fallback env: `GITHUB_REPOSITORY`), shared across `--github-pr`, numbered `--github-issue <number>`, and `--publish-github-check`.
 - `--workspace-state <head|base>`: Declares whether the workspace on disk is already post-patch (`head`, default) or pre-patch (`base`, e.g., `pull_request_target` CI checkouts), instructing downstream stages to materialize `references:` files by applying `.intake.diffs` in memory onto base-branch files. When `--github-pr` is active and `--workspace-state` is omitted, defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"` (otherwise `head`); explicit `--workspace-state` always overrides.
 - `--intent <text>`: Ingests prospective design intent or plan description.
 - `--all-targets`: Ingests all repository files as target artifacts (used for full-repo sweeps).
@@ -121,4 +126,4 @@ canon-clerk intake --diff pr-42.patch --caseload existing.json --json
 
 ### CLI Exit Codes
 - **0:** Successful intake (including an empty filing from a clean diff stream).
-- **2:** Usage error, missing input source (naked invocation), conflicting `--diff` and `--github-pr`, conflicting `--commit-message` and `--commit-messages-file`, blank `--commit-message`, conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--linked-issue`, `--commit-messages-file`, `--caseload`), missing/invalid GitHub token, repository, PR number, or `$GITHUB_EVENT_PATH` payload, GitHub API fetch failure, or corrupted diff/JSON stream.
+- **2:** Usage error, missing input source (naked invocation), conflicting `--diff` and `--github-pr`, conflicting `--github-pr` and `--github-issue`, conflicting `--commit-message` and `--commit-messages-file`, blank `--commit-message`, conflicting multiple `-` stdin operands, unreadable flag input file (`--diff`, `--pr-body-file`, `--linked-issue`, `--commit-messages-file`, `--caseload`), missing/invalid GitHub token, repository, PR/issue number, or `$GITHUB_EVENT_PATH` payload, PR-as-issue rejection, GitHub API fetch failure, or corrupted diff/JSON stream.

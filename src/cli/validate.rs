@@ -16,7 +16,9 @@
 
 use crate::caseload::{AnnotationLevel, Caseload, CaseloadValidation, CodeAnnotation};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, RejectedGithubIssueArgs,
+};
 use crate::cli::io::ensure_single_stdin_source_with_canons;
 use crate::cli::runners::run_branch_a_validate;
 use crate::cli::telemetry::resolve_verbose_flag;
@@ -71,6 +73,9 @@ pub enum ValidateFormat {
 pub struct ValidateArgs {
     #[command(flatten)]
     pub filing: FilingSourceArgs,
+
+    #[command(flatten)]
+    pub rejected_github_issue: RejectedGithubIssueArgs,
 
     #[command(flatten)]
     pub canons: CanonSelectionArgs,
@@ -130,6 +135,8 @@ pub(crate) fn run_validate_with_env_and_telemetry(
     env: &BTreeMap<String, String>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
+    args.rejected_github_issue
+        .validate_intermediate("validate")?;
     ensure_single_stdin_source_with_canons(
         &args.filing,
         Some(&args.canons),

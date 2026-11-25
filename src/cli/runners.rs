@@ -30,6 +30,7 @@ use crate::validate::{ValidateError, ValidateOptions, execute_validate_on_disk};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::Read;
+use std::num::NonZeroU64;
 use std::path::Path;
 
 /// Maps a domain [`DiscoverError`] to a typed [`CliError`] preserving exit code conventions (`1` IO/runtime, `2` usage).
@@ -61,14 +62,29 @@ fn execute_intake_step(
     })
 }
 
-/// Executes Branch A `intake` stage, honoring fast-forward skip semantics if `.intake` is already present.
-pub fn run_branch_a_intake(
+/// Executes Branch A `intake` stage with optional `--github-issue` and explicit environment map,
+/// honoring fast-forward skip semantics if `.intake` is already present.
+///
+/// - When `github_issue` is `None`, GitHub Issue inquiry ingestion is disabled; `Some(None)` reads
+///   `$GITHUB_EVENT_PATH` with zero API calls; `Some(Some(n))` fetches issue `#n` via GitHub's REST API.
+/// - When `incoming` is `None`, initializes a fresh [`Caseload`] from designated filing sources (or fails
+///   fast if no filing source is supplied); when `Some(caseload)` is provided with no new filing sources,
+///   fast-forwards the existing caseload unchanged.
+///
+/// # Errors
+/// Returns [`CliError`] (usage exit code `2`) if filing or `--github-issue` resolution fails, if no
+/// filing source or incoming caseload is supplied, or if unified diff parsing fails.
+pub fn run_branch_a_intake_with_issue_and_env(
     filing: &FilingSourceArgs,
+    github_issue: Option<Option<NonZeroU64>>,
     incoming: Option<Caseload>,
     stdin: &mut dyn Read,
+    env: &BTreeMap<String, String>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
-    let intake_opts = filing.resolve_intake_options(stdin)?;
+    let intake_opts = filing
+        .resolve_intake_options_with_issue_and_env(github_issue, stdin, env)?
+        .intake;
 
     if intake_opts.has_designated_source() {
         execute_intake_step(&intake_opts, incoming, telemetry)
@@ -77,6 +93,26 @@ pub fn run_branch_a_intake(
     } else {
         Err(CliError::usage(IntakeError::MissingInputSource.to_string()))
     }
+}
+
+/// Executes Branch A `intake` stage using the current process environment, honoring fast-forward
+/// skip semantics if `.intake` is already present.
+///
+/// When `incoming` is `None`, initializes a fresh [`Caseload`] from `filing` (failing fast if no
+/// designated source is provided); when `Some(caseload)` is provided without new filing inputs,
+/// returns it unchanged.
+///
+/// # Errors
+/// Returns [`CliError`] (usage exit code `2`) if filing source resolution fails, if no filing source
+/// or incoming caseload is provided, or if unified diff parsing fails.
+pub fn run_branch_a_intake(
+    filing: &FilingSourceArgs,
+    incoming: Option<Caseload>,
+    stdin: &mut dyn Read,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, CliError> {
+    let env: BTreeMap<String, String> = env::vars().collect();
+    run_branch_a_intake_with_issue_and_env(filing, None, incoming, stdin, &env, telemetry)
 }
 
 /// Executes the Branch A `[intake, discover]` transitive closure with fast-forward skipping.

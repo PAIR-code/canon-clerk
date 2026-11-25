@@ -16,13 +16,16 @@
 
 use crate::caseload::{ThinkingLevel, WorkspaceState};
 use crate::cli::CliError;
-use crate::cli::github_args::{resolve_filing_source, resolve_filing_source_with_fetcher};
+use crate::cli::github_args::{
+    resolve_filing_source, resolve_filing_source_with_fetcher, resolve_filing_source_with_issue,
+};
 use crate::configure::{ConfigureError, parse_thinking_level};
 use crate::github::GithubPullRequestFetcher;
 use crate::intake::IntakeOptions;
 use clap::{Args, ValueEnum};
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::num::NonZeroU64;
 
 /// CLI value enum for `--workspace-state <head|base>`.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +179,24 @@ impl FilingSourceArgs {
             .map(|resolved| resolved.intake)
     }
 
+    /// Resolves flags and optional `--github-pr` / `--github-issue` inputs against an explicit environment map.
+    ///
+    /// - When `github_issue` is `None`, GitHub Issue inquiry ingestion is disabled.
+    /// - When `github_issue` is `Some(None)` (bare `--github-issue`), reads issue metadata from `$GITHUB_EVENT_PATH` with zero API calls.
+    /// - When `github_issue` is `Some(Some(number))`, fetches the issue from GitHub's REST API using `GITHUB_TOKEN`/`GH_TOKEN` and `--github-repo`/`GITHUB_REPOSITORY`.
+    ///
+    /// # Errors
+    /// Returns [`CliError`] (usage exit code `2`) on conflicting filing flags (`--diff` with `--github-pr`, or
+    /// `--github-pr` with `--github-issue`), unreadable operand files/stdin, or invalid/failed GitHub PR or Issue resolution.
+    pub fn resolve_intake_options_with_issue_and_env(
+        &self,
+        github_issue: Option<Option<NonZeroU64>>,
+        stdin: &mut dyn Read,
+        env: &BTreeMap<String, String>,
+    ) -> Result<ResolvedFilingSource, CliError> {
+        resolve_filing_source_with_issue(self, github_issue, stdin, env)
+    }
+
     /// Resolves flags and optional `--github-pr` inputs against an explicit environment map.
     pub fn resolve_intake_options_with_env(
         &self,
@@ -326,7 +347,9 @@ impl ProviderConfigArgs {
     }
 }
 
-pub use crate::cli::github_args::{GithubCheckArgs, ResolvedFilingSource};
+pub use crate::cli::github_args::{
+    GithubCheckArgs, GithubIssueArgs, RejectedGithubIssueArgs, ResolvedFilingSource,
+};
 pub use crate::cli::io::CaseloadIoArgs;
 pub use crate::cli::transport_args::ProviderTransportArgs;
 

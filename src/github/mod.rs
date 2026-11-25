@@ -16,6 +16,7 @@
 
 mod client;
 mod commits;
+mod issue_inquiry;
 mod linked_issues;
 mod pull_request;
 
@@ -27,6 +28,9 @@ use std::fs;
 use std::path::Path;
 
 pub use client::GithubChecksClient;
+pub use issue_inquiry::{
+    GithubIssueFetcher, GithubIssueInquiry, GithubIssueTarget, resolve_github_issue_inquiry,
+};
 pub use linked_issues::fetch_linked_issues_for_pr_body;
 pub use pull_request::{
     ENV_GITHUB_ACTOR, ENV_GITHUB_EVENT_NAME, GithubBypassMatch, GithubPullRequestEventContext,

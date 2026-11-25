@@ -25,7 +25,7 @@ use crate::caseload::Caseload;
 use crate::cli::CliError;
 use crate::cli::args::{
     CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubCheckArgs, ProviderConfigArgs,
-    ProviderTransportArgs,
+    ProviderTransportArgs, RejectedGithubIssueArgs,
 };
 use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
@@ -106,6 +106,9 @@ pub enum AuditFormat {
 pub struct AuditArgs {
     #[command(flatten)]
     pub filing: FilingSourceArgs,
+
+    #[command(flatten)]
+    pub rejected_github_issue: RejectedGithubIssueArgs,
 
     #[command(flatten)]
     pub canons: CanonSelectionArgs,

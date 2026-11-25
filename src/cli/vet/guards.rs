@@ -59,6 +59,7 @@ pub(super) fn resolve_and_validate_vet_cli_params(
 }
 
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &VetArgs) -> Result<(), CliError> {
+    args.rejected_github_issue.validate_contentious("vet")?;
     args.rejected_unqualified.validate(
         "vet",
         "`--vet-threshold <FLOAT>`, `--admit-threshold <FLOAT>`, or `--docket-threshold <FLOAT>`",
