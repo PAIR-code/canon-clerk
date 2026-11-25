@@ -14,12 +14,9 @@
 
 //! Core domain execution engine for the `intake` Caseload DAG stage (Branch A root node).
 
-pub mod diff;
+mod diff;
 
-pub use diff::{
-    DiffParseError, DiffToken, DiffTokenKind, assemble_diff_artifacts, normalize_diff_path,
-    parse_unified_diff, tokenize_diff, unquote_git_path,
-};
+pub use diff::{DiffParseError, parse_unified_diff};
 
 use crate::caseload::{
     Caseload, CaseloadIntake, CommitMessageContext, IntakeScope, LinkedIssueContext,

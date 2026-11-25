@@ -35,7 +35,9 @@ pub struct ProviderTransportArgs {
         value_name = "MS",
         allow_hyphen_values = true,
         help_heading = "Provider Transport & Retry",
-        help = "Per-attempt wire timeout in milliseconds (default: 60000 cloud, 180000 local; fallback env: CANON_CLERK_TIMEOUT_MS)"
+        help = format!(
+            "Per-attempt wire timeout in milliseconds (default: {DEFAULT_GENERATION_TIMEOUT_MS} cloud, {DEFAULT_LOCAL_GENERATION_TIMEOUT_MS} local; fallback env: {ENV_TIMEOUT_MS})"
+        )
     )]
     pub timeout: Option<String>,
 
@@ -45,7 +47,9 @@ pub struct ProviderTransportArgs {
         value_name = "COUNT",
         allow_hyphen_values = true,
         help_heading = "Provider Transport & Retry",
-        help = "Maximum retry attempts per model call on transient 429/5xx/timeout errors; 0 disables retries (default: 2; fallback env: CANON_CLERK_MAX_RETRIES)"
+        help = format!(
+            "Maximum retry attempts per model call on transient 429/5xx/timeout errors; 0 disables retries (default: {DEFAULT_MAX_RETRIES}; fallback env: {ENV_MAX_RETRIES})"
+        )
     )]
     pub max_retries: Option<String>,
 
@@ -55,7 +59,9 @@ pub struct ProviderTransportArgs {
         value_name = "MS",
         allow_hyphen_values = true,
         help_heading = "Provider Transport & Retry",
-        help = "Maximum per-wait rate-limit cooldown or retry backoff in milliseconds; 0 fails fast on 429 waits (default: 90000; fallback env: CANON_CLERK_MAX_BACKOFF_MS)"
+        help = format!(
+            "Maximum per-wait rate-limit cooldown or retry backoff in milliseconds; 0 fails fast on 429 waits (default: {DEFAULT_MAX_BACKOFF_MS}; fallback env: {ENV_MAX_BACKOFF_MS})"
+        )
     )]
     pub max_backoff_ms: Option<String>,
 }

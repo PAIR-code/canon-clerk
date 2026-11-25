@@ -19,8 +19,10 @@ mod gemini;
 mod gemini_decisions;
 mod typesafe;
 
-pub use gemini::{GeminiEndpointProber, MultiProviderEndpointProber, decode_gemini_probe_response};
-pub use gemini_decisions::{GeminiDecisionsEndpointProber, decode_gemini_decisions_probe_response};
+#[cfg(test)]
+use gemini::decode_gemini_probe_response;
+pub use gemini::{GeminiEndpointProber, MultiProviderEndpointProber};
+pub use gemini_decisions::GeminiDecisionsEndpointProber;
 pub use typesafe::TypesafeEndpointProber;
 
 use crate::caseload::{
@@ -28,10 +30,9 @@ use crate::caseload::{
     TYPESAFE_PROVIDER, ThinkingLevel,
 };
 use crate::configure::{MissingCredentialSpec, ProviderConnection, model_provider};
-pub use crate::provider::{
-    DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, build_generate_content_url,
-    strip_provider_prefix,
-};
+#[cfg(test)]
+use crate::provider::strip_provider_prefix;
+pub use crate::provider::{DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;

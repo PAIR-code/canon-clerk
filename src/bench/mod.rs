@@ -31,13 +31,11 @@ pub use error::{
     ENV_BENCH_CONCURRENCY, ENV_BENCH_FORMAT, ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_MODEL,
     ENV_BENCH_OUTPUT_JSON, ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS,
 };
-pub use extract::{ExtractedAssessment, SubjectKey, extract_stage_assessments};
-pub use prepare::{
-    ConfigSweepInputs, UpstreamCaseloadInputs, parse_batch_tokens, prepare_upstream_caseload,
-    resolve_config_specs,
-};
+use extract::extract_stage_assessments;
+#[cfg(test)]
+use prepare::{UpstreamCaseloadInputs, prepare_upstream_caseload};
 pub use render::render_consistency_markdown;
-pub use stats::{TrialRecord, analyze_config_trials};
+use stats::{TrialRecord, analyze_config_trials};
 pub use types::{
     ConfigConsistencyReport, ConsistencyBenchOptions, ConsistencyBenchReport,
     ConsistencyConfigSpec, SubjectConsistency, SubjectObservation, TrialSummary,

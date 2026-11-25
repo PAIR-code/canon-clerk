@@ -15,8 +15,8 @@
 //! Provider-agnostic hexagonal structured-generation port and adapter exports (`docs/architecture/overview.md` §3).
 
 pub mod decision;
-pub mod gemini;
-pub mod gemini_decisions;
+pub(crate) mod gemini;
+pub(crate) mod gemini_decisions;
 mod gemini_wire;
 mod requester;
 mod retry;
@@ -36,16 +36,15 @@ pub use decision::{
     DecisionRequest, DecisionResponse, MultiModelProvider, TypesafeDecisionProvider,
     default_concurrency_for_model,
 };
-pub use gemini::{
-    DEFAULT_GEMINI_BASE_URL, GeminiModelProvider, build_generate_content_url,
+pub use gemini::{DEFAULT_GEMINI_BASE_URL, GeminiModelProvider};
+pub(crate) use gemini::{
     classify_gemini_http_error, extract_gemini_error_detail, strip_provider_prefix,
 };
-pub use gemini_decisions::{
-    GeminiDecisionProvider, build_decisions_url, classify_gemini_decisions_http_error,
-};
+pub use gemini_decisions::GeminiDecisionProvider;
 pub(crate) use gemini_decisions::{
     GeminiDecisionsRequest, GeminiDecisionsResponse, GeminiNoulQuestion,
-    is_decision_context_limit_error, post_gemini_decisions_json,
+    classify_gemini_decisions_http_error, is_decision_context_limit_error,
+    post_gemini_decisions_json,
 };
 pub(crate) use gemini_wire::{GeminiThinkingConfig, build_probe_thinking_config};
 pub use requester::{RetryObserver, SharedHttpRequester};
@@ -53,8 +52,8 @@ pub use retry::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_MAX_RETRIES,
     ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, RetryNotification, RetryPolicy,
 };
+pub use typesafe::DEFAULT_TYPESAFE_BASE_URL;
 pub(crate) use typesafe::post_typesafe_json;
-pub use typesafe::{DEFAULT_TYPESAFE_BASE_URL, build_systemone_url};
 pub(crate) use typesafe_wire::{
     TypesafeNoulQuestion, TypesafeSystemOneRequest, TypesafeSystemOneResponse,
     classify_typesafe_http_error, extract_typesafe_error_detail,

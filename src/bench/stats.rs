@@ -26,15 +26,15 @@ const OMITTED_BELOW_THRESHOLD_SUMMARY: &str = "(omitted below threshold)";
 
 /// Raw outcome and operational telemetry captured from a single trial execution.
 #[derive(Debug, Clone)]
-pub struct TrialRecord {
+pub(crate) struct TrialRecord {
     /// 1-indexed trial number (`1..=N`).
-    pub trial: usize,
+    pub(crate) trial: usize,
     /// Stage wall-clock latency in milliseconds.
-    pub duration_ms: u64,
+    pub(crate) duration_ms: u64,
     /// Aggregated token accounting across all model calls in the trial.
-    pub usage: TokenUsage,
+    pub(crate) usage: TokenUsage,
     /// Deterministic per-subject assessments extracted from the trial's enriched `Caseload`.
-    pub assessments: BTreeMap<SubjectKey, ExtractedAssessment>,
+    pub(crate) assessments: BTreeMap<SubjectKey, ExtractedAssessment>,
 }
 
 /// Computes arithmetic mean of `values` (`0.0` when empty).
@@ -89,7 +89,7 @@ fn normalize_zero(val: f64) -> f64 {
 }
 
 /// Aggregates `records` across `N` trials into a deterministic [`ConfigConsistencyReport`].
-pub fn analyze_config_trials(
+pub(crate) fn analyze_config_trials(
     spec: &ConsistencyConfigSpec,
     stage: BenchmarkStage,
     model: &str,

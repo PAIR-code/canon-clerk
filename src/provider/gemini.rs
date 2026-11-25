@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Strips any canonical `<provider>:` prefix from a normalized model specifier (`<provider>:<model>` -> `<model>`).
-pub fn strip_provider_prefix(model_specifier: &str) -> &str {
+pub(crate) fn strip_provider_prefix(model_specifier: &str) -> &str {
     let trimmed = model_specifier.trim();
     match trimmed.split_once(':') {
         Some((prov, model_id)) if !prov.is_empty() && !model_id.is_empty() => model_id,
@@ -40,14 +40,14 @@ pub fn strip_provider_prefix(model_specifier: &str) -> &str {
 }
 
 /// Constructs the Google Generative Language `POST :generateContent` URL for a model specifier.
-pub fn build_generate_content_url(base_url: &str, model_specifier: &str) -> String {
+fn build_generate_content_url(base_url: &str, model_specifier: &str) -> String {
     let base = base_url.trim_end_matches('/');
     let model_id = strip_provider_prefix(model_specifier);
     format!("{base}/models/{model_id}:generateContent")
 }
 
 /// Extracts a human-readable upstream error detail from a Gemini JSON error body or raw text payload.
-pub fn extract_gemini_error_detail(body: &str) -> String {
+pub(crate) fn extract_gemini_error_detail(body: &str) -> String {
     serde_json::from_str::<GeminiErrorEnvelope>(body)
         .ok()
         .and_then(|env| env.error)
@@ -65,7 +65,11 @@ pub fn extract_gemini_error_detail(body: &str) -> String {
 }
 
 /// Formats an HTTP error status code from the Google Gemini API into an actionable diagnostic with remediation hints.
-pub fn classify_gemini_http_error(status_code: u16, model_specifier: &str, detail: &str) -> String {
+pub(crate) fn classify_gemini_http_error(
+    status_code: u16,
+    model_specifier: &str,
+    detail: &str,
+) -> String {
     match status_code {
         401 | 403 => {
             let key_hint = credential_verification_hint_for_slug(model_provider(model_specifier));

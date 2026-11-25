@@ -49,16 +49,14 @@ pub use audit::{
     resolve_canon_reference_paths,
 };
 pub use bench::{
-    BenchIoStreams, BenchmarkStage, ConfigConsistencyReport, ConfigSweepInputs,
-    ConsistencyBenchCli, ConsistencyBenchError, ConsistencyBenchFormat, ConsistencyBenchOptions,
-    ConsistencyBenchReport, ConsistencyConfigSpec, DEFAULT_BENCHMARK_TRIALS, ENV_BENCH_BATCH_SIZE,
-    ENV_BENCH_CONCURRENCY, ENV_BENCH_FORMAT, ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_MODEL,
-    ENV_BENCH_OUTPUT_JSON, ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS,
-    ExtractedAssessment, HermeticBenchDeps, SubjectConsistency, SubjectKey, SubjectObservation,
-    TrialRecord, TrialSummary, UpstreamCaseloadInputs, analyze_config_trials,
-    execute_consistency_bench, execute_consistency_bench_observed, extract_stage_assessments,
-    parse_batch_tokens, prepare_upstream_caseload, render_consistency_markdown,
-    resolve_config_specs, run_consistency_bench_cli, run_consistency_bench_hermetic,
+    BenchIoStreams, BenchmarkStage, ConfigConsistencyReport, ConsistencyBenchCli,
+    ConsistencyBenchError, ConsistencyBenchFormat, ConsistencyBenchOptions, ConsistencyBenchReport,
+    ConsistencyConfigSpec, DEFAULT_BENCHMARK_TRIALS, ENV_BENCH_BATCH_SIZE, ENV_BENCH_CONCURRENCY,
+    ENV_BENCH_FORMAT, ENV_BENCH_INCLUDE_STABLE, ENV_BENCH_MODEL, ENV_BENCH_OUTPUT_JSON,
+    ENV_BENCH_STAGE, ENV_BENCH_THRESHOLD, ENV_BENCH_TRIALS, HermeticBenchDeps, SubjectConsistency,
+    SubjectObservation, TrialSummary, execute_consistency_bench,
+    execute_consistency_bench_observed, render_consistency_markdown, run_consistency_bench_cli,
+    run_consistency_bench_hermetic,
 };
 pub use builtin::{BUILTIN_CANONS, BuiltinCanon, builtin_canons, find_builtin_canon};
 pub use canon::{
@@ -148,8 +146,7 @@ pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff}
 pub use probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiDecisionsEndpointProber,
     GeminiEndpointProber, MultiProviderEndpointProber, ProbeError, ProbeOptions,
-    TypesafeEndpointProber, decode_gemini_decisions_probe_response, decode_gemini_probe_response,
-    execute_probe,
+    TypesafeEndpointProber, execute_probe,
 };
 pub use provider::{
     DEFAULT_BASE_BACKOFF_MS, DEFAULT_COOLDOWN_SLOT_MS, DEFAULT_GEMINI_BASE_URL,
@@ -159,10 +156,8 @@ pub use provider::{
     DecisionResponse, ENV_MAX_BACKOFF_MS, ENV_MAX_RETRIES, ENV_TIMEOUT_MS, GeminiDecisionProvider,
     GeminiModelProvider, GenerationRequest, GenerationResponse, MultiModelProvider, ProviderError,
     RetryNotification, RetryObserver, RetryPolicy, SharedHttpRequester, StructuredModelProvider,
-    TokenUsage, TypesafeDecisionProvider, build_decisions_url, build_generate_content_url,
-    build_systemone_url, classify_gemini_decisions_http_error, classify_gemini_http_error,
-    default_concurrency_for_model, default_timeout_ms_for_model, extract_gemini_error_detail,
-    strip_provider_prefix,
+    TokenUsage, TypesafeDecisionProvider, default_concurrency_for_model,
+    default_timeout_ms_for_model,
 };
 pub use telemetry::{
     CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,

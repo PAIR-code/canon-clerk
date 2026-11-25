@@ -114,7 +114,7 @@ pub(crate) fn resolve_audit_threshold(
         let parsed = raw_env.parse::<f64>().map_err(|_| {
             CliError::usage(format!(
                 "Invalid threshold `{raw_env}` in `{ENV_AUDIT_THRESHOLD}`: expected a float in `[0.0, 1.0]`.\n  \
-                 Hint: Pass `--audit-threshold <FLOAT>` or set `{ENV_AUDIT_THRESHOLD}=0.5`."
+                 Hint: Pass `--audit-threshold <FLOAT>` or set `{ENV_AUDIT_THRESHOLD}={DEFAULT_AUDIT_THRESHOLD}`."
             ))
         })?;
         return normalize_compliance_score(parsed).map_err(|detail| {

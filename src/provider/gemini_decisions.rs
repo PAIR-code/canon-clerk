@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Constructs the Google Gemini Decisions `POST /v1beta/decisions` URL from a base URL.
-pub fn build_decisions_url(base_url: &str) -> String {
+fn build_decisions_url(base_url: &str) -> String {
     let base = base_url.trim_end_matches('/');
     format!("{base}/decisions")
 }
@@ -116,7 +116,7 @@ pub(crate) struct GeminiDecisionsResponse {
 }
 
 /// Formats an HTTP error status code from `/v1beta/decisions` into an actionable diagnostic with remediation hints.
-pub fn classify_gemini_decisions_http_error(
+pub(crate) fn classify_gemini_decisions_http_error(
     status_code: u16,
     model_specifier: &str,
     detail: &str,

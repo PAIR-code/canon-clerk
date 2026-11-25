@@ -41,27 +41,25 @@ use std::collections::BTreeMap;
 
 /// Input options for resolving one or more [`ConsistencyConfigSpec`] entries in a benchmark run.
 #[derive(Debug, Clone)]
-pub struct ConfigSweepInputs<'a> {
+pub(crate) struct ConfigSweepInputs<'a> {
     /// Target Caseload pipeline stage.
-    pub stage: BenchmarkStage,
+    pub(crate) stage: BenchmarkStage,
     /// Validated score threshold in `[0.0, 1.0]`.
-    pub threshold: f64,
-    /// Optional resolved `<provider>:<model>` specifier for `stage` (selects model-aware default batch sizes).
-    pub stage_model: Option<&'a str>,
+    pub(crate) threshold: f64,
     /// Explicit `--batch-size` tokens (each token may be comma-separated, e.g. `"unbounded,15,25"`).
-    pub raw_batch_specs: &'a [String],
+    pub(crate) raw_batch_specs: &'a [String],
     /// Optional explicit `--concurrency` override (`>= 1`).
-    pub flag_concurrency: Option<usize>,
+    pub(crate) flag_concurrency: Option<usize>,
     /// Ambient environment map for fallback resolution.
-    pub env: &'a BTreeMap<String, String>,
+    pub(crate) env: &'a BTreeMap<String, String>,
     /// Optional user-level stored configuration (`config.json`).
-    pub stored_config: Option<&'a StoredConfig>,
+    pub(crate) stored_config: Option<&'a StoredConfig>,
     /// Per-request generation timeout in milliseconds.
-    pub timeout_ms: u64,
+    pub(crate) timeout_ms: u64,
 }
 
 /// Resolves CLI, environment, and stored configuration inputs into a non-empty list of [`ConsistencyConfigSpec`]s.
-pub fn resolve_config_specs(
+pub(crate) fn resolve_config_specs(
     inputs: &ConfigSweepInputs<'_>,
 ) -> Result<Vec<ConsistencyConfigSpec>, ConsistencyBenchError> {
     check_retired_tuning_env_vars(inputs.env).map_err(|err| ConsistencyBenchError::Setup {
@@ -207,9 +205,7 @@ fn resolve_batch_sweep_values(
 }
 
 /// Parses one or more comma-delimited batch-size specifiers (`"unbounded"`, `"0"`, or positive integers).
-pub fn parse_batch_tokens(
-    raw_specs: &[String],
-) -> Result<Vec<Option<usize>>, ConsistencyBenchError> {
+fn parse_batch_tokens(raw_specs: &[String]) -> Result<Vec<Option<usize>>, ConsistencyBenchError> {
     let mut result = Vec::new();
     for raw in raw_specs {
         for part in raw.split(',') {
@@ -249,24 +245,24 @@ fn non_empty_env(env: &BTreeMap<String, String>, key: &str) -> Option<String> {
 }
 
 /// Upstream Branch A + Branch B inputs used to materialize a benchmark-ready [`Caseload`].
-pub struct UpstreamCaseloadInputs<'a> {
+pub(crate) struct UpstreamCaseloadInputs<'a> {
     /// Target Caseload pipeline stage.
-    pub stage: BenchmarkStage,
+    pub(crate) stage: BenchmarkStage,
     /// Filing options resolved from CLI flags / stdin.
-    pub intake_opts: &'a IntakeOptions,
+    pub(crate) intake_opts: &'a IntakeOptions,
     /// Canon scope selection (`--all-canons`, `--canon`).
-    pub canons: &'a CanonSelectionArgs,
+    pub(crate) canons: &'a CanonSelectionArgs,
     /// Provider and model configuration options.
-    pub configure_opts: &'a ConfigureOptions,
+    pub(crate) configure_opts: &'a ConfigureOptions,
     /// Optional pre-populated upstream `Caseload`.
-    pub incoming: Option<Caseload>,
+    pub(crate) incoming: Option<Caseload>,
     /// Materialized workspace file tree and canon corpus snapshot.
-    pub workspace: &'a WorkspaceSnapshot,
+    pub(crate) workspace: &'a WorkspaceSnapshot,
 }
 
 /// Executes guarded `intake` → `discover` → `validate` + `configure` once to prepare a clean
 /// upstream [`Caseload`] ready for `N` repeated benchmark trials.
-pub fn prepare_upstream_caseload(
+pub(crate) fn prepare_upstream_caseload(
     inputs: &UpstreamCaseloadInputs<'_>,
 ) -> Result<Caseload, ConsistencyBenchError> {
     let stripped = inputs
@@ -498,7 +494,6 @@ mod tests {
             let specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Apprise,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
-                stage_model: None,
                 raw_batch_specs: &raw,
                 flag_concurrency: Some(3),
                 env: &env,
@@ -519,7 +514,6 @@ mod tests {
             let default_apprise_specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Apprise,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
-                stage_model: None,
                 raw_batch_specs: &[],
                 flag_concurrency: None,
                 env: &env,
@@ -534,7 +528,6 @@ mod tests {
             let default_docket_specs = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Docket,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
-                stage_model: None,
                 raw_batch_specs: &[],
                 flag_concurrency: None,
                 env: &env,
@@ -557,7 +550,6 @@ mod tests {
             let zero_conc = resolve_config_specs(&ConfigSweepInputs {
                 stage: BenchmarkStage::Docket,
                 threshold: DEFAULT_APPRISE_THRESHOLD,
-                stage_model: None,
                 raw_batch_specs: &[],
                 flag_concurrency: Some(0),
                 env: &env,

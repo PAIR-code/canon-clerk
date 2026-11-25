@@ -290,14 +290,9 @@ pub fn run_consistency_bench_cli(
     } else {
         DEFAULT_GENERATION_TIMEOUT_MS
     };
-    let stage_model = caseload
-        .config
-        .as_ref()
-        .and_then(|c| c.model_for(resolved.stage.heuristic_node()));
     let specs = resolve_config_specs(&ConfigSweepInputs {
         stage: resolved.stage,
         threshold: resolved.threshold,
-        stage_model,
         raw_batch_specs: &cli.batch_size,
         flag_concurrency: cli.concurrency,
         env: &env_map,
@@ -380,14 +375,9 @@ pub fn run_consistency_bench_hermetic(
     })
     .map_err(map_bench_error)?;
 
-    let stage_model = caseload
-        .config
-        .as_ref()
-        .and_then(|c| c.model_for(resolved.stage.heuristic_node()));
     let specs = resolve_config_specs(&ConfigSweepInputs {
         stage: resolved.stage,
         threshold: resolved.threshold,
-        stage_model,
         raw_batch_specs: &cli.batch_size,
         flag_concurrency: cli.concurrency,
         env: deps.env,
