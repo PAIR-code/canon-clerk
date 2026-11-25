@@ -43,7 +43,7 @@ flowchart LR
 - **Direct Prerequisites:** None (Root node of Branch B).
 - **Transitive Prerequisites:** None.
 - **Independence:** Resolves active provider defaults, per-node model bindings, and credentials with zero dependencies on diffs or canons.
-- **Lazy Evaluation in Cascades:** When executed within a review cascade (`apprise`, `docket`, `admit`, `vet`, `audit`), `configure` is evaluated lazily *after* `discover` confirms matching candidate canons and `validate` confirms valid canon syntax, guaranteeing that un-governed PRs pass cleanly without checking credentials.
+- **Lazy Evaluation in Cascades:** When executed within a [heuristic evaluation cascade](../overview.md#5-the-caseload-pipeline-nodes), `configure` is evaluated lazily *after* `discover` confirms matching candidate canons and `validate` confirms valid canon syntax, guaranteeing that un-governed PRs pass cleanly without checking credentials.
 
 ---
 
@@ -75,7 +75,7 @@ flowchart LR
 
 2. **4-Level Node Model Specificity Cascade (Per Heuristic Node `<node>`):**  
    Each heuristic DAG node (`apprise`, `docket`, `admit`, `vet`, `audit`) resolves its `<provider>:<model>` binding independently along a 4-level specificity cascade:
-   - **Level 1 — Stage CLI Flag:** `--apprise-model`, `--docket-model`, `--admit-model`, `--vet-model`, `--audit-model` (scoped to closure on evaluation subcommands per [`../scheduling.md` §4](../scheduling.md#pattern-c-the-stage-prefixed-flag-scoping-contract); all five accepted on standalone `configure` and `probe`).
+   - **Level 1 — Stage CLI Flag:** `--apprise-model`, `--docket-model`, `--admit-model`, `--vet-model`, `--audit-model` (scoped to closure on evaluation subcommands per [`../scheduling.md` §4](../scheduling.md#pattern-c-the-stage-prefixed-flag-scoping-contract); all heuristic node overrides accepted on standalone `configure` and `probe`).
    - **Level 2 — Stage Environment Variable:** `CANON_CLERK_APPRISE_MODEL`, `CANON_CLERK_DOCKET_MODEL`, `CANON_CLERK_ADMIT_MODEL`, `CANON_CLERK_VET_MODEL`, `CANON_CLERK_AUDIT_MODEL`.
    - **Level 3 — User Configuration File Node Pin:** `nodes.<node>.model` in `~/.config/canon-clerk/config.json`.
    - **Level 4 — Active Provider Capability Default:** Screening and vetting nodes (`apprise`, `docket`, `admit`, `vet`) use the active profile's `defaultDiscriminator` (failing fast with exit code `2` if unpinned on a profile without one), while `audit` uses `defaultGenerator` (remaining unprovisioned on discriminator-only profiles until `audit` is invoked; see [`../providers.md` §2–§3](../providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities)).
@@ -121,7 +121,7 @@ flowchart LR
 4. **Closure-Exact Credential Validation & Partial-Closure `--caseload` Chaining:**
    - **Converged Evaluation Closures (`apprise`, `docket`, `admit`, `vet`, `audit`):** Resolve node bindings and verify provider credentials **strictly for the heuristic nodes executed in that subcommand's closure** (`{apprise}` on `apprise`; `{docket}` on `docket`; `{docket, admit}` on `admit`; `{docket, admit, vet}` on `vet`; `{docket, admit, vet, audit}` on telescoping `audit`).
    - **Partial-Closure Chaining (`--caseload`):** When an upstream command writes a partial `Caseload` that is piped into a downstream command (`canon-clerk vet --output-caseload c.json || canon-clerk audit --caseload c.json`), downstream `audit` preserves pre-populated upstream node bindings in `.config.nodes` without re-verifying credentials for already-completed upstream stages, resolves `audit` JIT, and verifies credentials strictly for the newly executed stage(s)—invalidating pre-populated upstream/downstream stages only when an upstream stage's model is explicitly overridden or `--provider <slug>` selects a provider slug different from the already-recorded `.config.provider` (passing a matching `--provider <slug>` is idempotent and preserves pre-populated upstream `.docket`/`.evidence`/`.vetting` stages).
-   - **Standalone `configure` and `probe`:** Resolve all provisioned heuristic nodes for the active configuration (all 5 nodes on `--provider google`, or the 4 discriminative nodes `apprise`, `docket`, `admit`, `vet` on `--provider typesafe` or `--provider local` when `audit` is unpinned—or all 5 when `audit` is pinned via `--audit-model` / `CANON_CLERK_AUDIT_MODEL` / `nodes.audit.model`) and verify credentials strictly for the providers referenced by those provisioned nodes.
+   - **Standalone `configure` and `probe`:** Resolve all provisioned heuristic nodes for the active configuration (all heuristic nodes on `--provider google`, or the discriminative nodes on `--provider typesafe` or `--provider local` when `audit` is unpinned—or all heuristic nodes when `audit` is pinned via `--audit-model` / `CANON_CLERK_AUDIT_MODEL` / `nodes.audit.model`) and verify credentials strictly for the providers referenced by those provisioned nodes.
 
 5. **Deterministic & Offline:** Executes locally in <5ms without sending network requests or spending tokens.
 
@@ -132,7 +132,7 @@ flowchart LR
 The CLI exposes `configure` as an imperative subcommand:
 
 ```bash
-# 1. Default zero-config Google setup (verifies GEMINI_API_KEY and resolves all 5 nodes):
+# 1. Default zero-config Google setup (verifies GEMINI_API_KEY and resolves all heuristic nodes):
 canon-clerk configure --json
 
 # 2. Sole-provider TypeSafe setup (verifies TYPESAFE_API_KEY across apprise, docket, admit, vet):
@@ -146,7 +146,7 @@ canon-clerk configure --provider local --audit-model google:gemini-4-carbon
 ```
 
 ### CLI Flags & Environment
-- **Shared Provider, Model, Credential, Endpoint & Thinking Controls:** Accepts `--provider`, all five `--<node>-model` overrides, `--thinking-level` / `--reasoning-budget`, and built-in/custom API-key and `baseUrl` overrides as specified in [`../providers.md` §5](../providers.md#5-shared-provider-credential-endpoint--thinking-controls).
+- **Shared Provider, Model, Credential, Endpoint & Thinking Controls:** Accepts `--provider`, all `--<node>-model` overrides, `--thinking-level` / `--reasoning-budget`, and built-in/custom API-key and `baseUrl` overrides as specified in [`../providers.md` §5](../providers.md#5-shared-provider-credential-endpoint--thinking-controls).
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload`.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of `stdout`.

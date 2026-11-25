@@ -56,8 +56,8 @@ flowchart LR
   - **Diagnostic Error (`error`):** Optional actionable error message and remediation hint when `status` is `"error"` (omitted when `"ok"`).
 
 ### Data Plane & Diagnostic Invariants
-1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all evaluation cascades (`apprise`, `docket`, `admit`, `vet`, `audit`), substantive review runs never populate or depend on `.probe`.
-2. **Deduplicated Target Grouping:** Nodes sharing identical `(model, thinking_level, reasoning_budget)` bindings coalesce into a single probe target in canonical stage encounter order—issuing two concurrent probes on the default `google` configuration (`google:gemini-decision-1` for `[apprise, docket, admit, vet]` and `google:gemini-4-carbon` for `[audit]`) and a single probe on `--provider typesafe` (`typesafe:jev-latest` for `[apprise, docket, admit, vet]`) rather than firing five redundant requests at the same endpoint.
+1. **Cascade Isolation:** `.probe` is an auxiliary diagnostic leaf namespace; because `probe` is pruned from all [heuristic evaluation cascades](../overview.md#5-the-caseload-pipeline-nodes), substantive review runs never populate or depend on `.probe`.
+2. **Deduplicated Target Grouping:** Nodes sharing identical `(model, thinking_level, reasoning_budget)` bindings coalesce into a single probe target in canonical stage encounter order—issuing two concurrent probes on the default `google` configuration (one for discriminative nodes and one for `audit`) and a single probe on `--provider typesafe` rather than firing redundant per-node requests at the same endpoint.
 3. **Non-Throwing Diagnostic Capture:** Endpoint timeouts, HTTP 4xx/5xx responses, and authentication rejections are captured inside each target's health record (`status: "error"`, `error: "<reason>"`) on `.probe` and written to `stdout` / `--output-caseload` before the CLI adapter maps any unhealthy target to exit code `2`.
 4. **Single-Shot Diagnostic Isolation:** Unlike heuristic evaluation stages, `probe` executes strictly single-shot (`0` retries), bypasses per-origin rate-limit cooldown gates, and rejects heuristic retry flags (`--max-retries`, `--max-backoff-ms`) with exit code `2` so health checks immediately measure raw single-roundtrip reachability and latency within `--timeout` ([`../transport.md` §5](../transport.md#5-single-shot-diagnostic-probe-isolation)).
 
@@ -93,7 +93,7 @@ canon-clerk probe --json
 
 ### CLI Flags & Options
 - `--timeout <MS>` (fallback env: `CANON_CLERK_PROBE_TIMEOUT_MS`): Per-target request timeout in milliseconds (default: `5000ms`; `0` is rejected with exit code `2`). Isolated from `CANON_CLERK_TIMEOUT_MS` / `defaults.timeoutMs` ([`../transport.md` §6](../transport.md#domain-classified-timeouts--shared-cli-transport-controls)) so long local evaluation timeouts do not stall diagnostic health checks.
-- **Shared Provider, Model, Credential, Endpoint & Thinking Controls:** Accepts `--provider`, all five `--<node>-model` overrides, `--thinking-level` / `--reasoning-budget`, and built-in/custom API-key and `baseUrl` overrides per [`../providers.md` §5](../providers.md#5-shared-provider-credential-endpoint--thinking-controls).
+- **Shared Provider, Model, Credential, Endpoint & Thinking Controls:** Accepts `--provider`, all `--<node>-model` overrides, `--thinking-level` / `--reasoning-budget`, and built-in/custom API-key and `baseUrl` overrides per [`../providers.md` §5](../providers.md#5-shared-provider-credential-endpoint--thinking-controls).
 - `--format <stylish|json|compact>`: Output presentation format (default: `stylish`).
 - `--caseload <PATH|->`: Ingests upstream `Caseload`.
 - `--output-caseload <PATH>`: Writes cumulative `Caseload` JSON to disk independently of `stdout`.

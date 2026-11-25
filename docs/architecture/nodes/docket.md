@@ -117,8 +117,8 @@ Conversely, when an explicitly designated stream yields zero changes or `discove
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
-- `--diff <PATH|->`, `--all-targets`, `--intent <TEXT>`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`, `--linked-issue <PATH|->`, `--commit-message <TEXT>`, `--commit-messages-file <PATH|->`: Shared filing source and metadata flags.
-- `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags (evaluated against the underlying filing).
+- **Shared Filing Source & Metadata Controls:** Accepts the shared filing source and metadata flags defined in [`intake.md` §5](intake.md#5-driving-adapter-cli).
+- **Shared Canon Selection Controls:** Accepts the shared canon selection scope flags defined in [`discover.md` §5](discover.md#5-driving-adapter-cli) (evaluated against the underlying filing).
 - `--docket-threshold <FLOAT>` (fallback env: `CANON_CLERK_DOCKET_THRESHOLD`; config key: `nodes.docket.threshold`): Subject-matter jurisdiction screening threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage flags (`--apprise-*`, `--admit-*`, `--vet-*`, `--audit-*`) are rejected with exit code `2` and guidance pointing to `--docket-*`.
 - `--docket-batch-size <COUNT>` (`CANON_CLERK_DOCKET_BATCH_SIZE`; config key: `nodes.docket.batchSize`): Positive integer (`>= 1`) capping candidate canons evaluated per model call (profile defaults and cascade in [`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults)).
 - `--docket-concurrency <COUNT>` (`CANON_CLERK_DOCKET_CONCURRENCY`; config key: `nodes.docket.concurrency`): Positive integer (`>= 1`) bounding concurrent in-flight batch calls (profile defaults and cascade in [`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults)).

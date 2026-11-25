@@ -49,7 +49,7 @@ flowchart LR
 - **The Intent-Required Invariant & Default `--all-canons` Scope:** Statutory apprisal strictly requires a non-empty prospective design `intent` (`--intent <text>`, `--github-issue [<number>]`, or pre-populated `.intake.intent`); omitting intent or supplying blank whitespace fails fast with exit code `2`. When non-empty design intent is supplied **without** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`), `apprise` defaults discovery to `--all-canons` so contributors and agents do not miss cross-cutting canons before they know every file they will touch. When explicit targets or canon filters *are* supplied, existing scoped discovery behavior is preserved.
 - **Branch Independence & Pruning:**
   - Evaluates without requiring code diffs, patches, or work-in-progress (WIP) exhibits.
-  - Decoupled from the contentious dispute track: completely prunes `docket`, `admit`, and `audit` from execution.
+  - Decoupled from the [Heuristic Cascade](../overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track): prunes all contentious adjudication stages from execution.
   - Diagnostic leaf `probe` is never scheduled.
 
 ---
@@ -132,8 +132,8 @@ When discovery matches zero candidate canons, the command attaches an empty `.ap
 - `--intent <TEXT>`: Inline prospective architectural design intent or plan description (overrides formatted issue text when paired with `--github-issue`).
 - `--github-issue [<NUMBER>]`: Opt-in native GitHub Issue inquiry source populating `.intake.intent` (mutually exclusive with `--github-pr`; does not populate `.intake.linked_issues`; see [`../github.md` §7](../github.md#7-github-issue-inquiry-ingestion---github-issue)). Bare `--github-issue` reads `$GITHUB_EVENT_PATH` with zero API calls; `--github-issue <NUMBER>` fetches `GET /repos/{owner}/{repo}/issues/{number}` using `GITHUB_TOKEN`/`GH_TOKEN`, `--github-repo`/`GITHUB_REPOSITORY`, and `GITHUB_API_URL`.
 - `--github-repo <OWNER/REPO>`: Target GitHub repository slug (fallback env: `GITHUB_REPOSITORY`) used by numbered `--github-issue <NUMBER>` and `--github-pr`.
-- `--diff <PATH|->`, `--all-targets`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
-- `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags.
+- **Shared Filing Source & Metadata Controls:** Accepts the shared filing source and metadata flags defined in [`intake.md` §5](intake.md#5-driving-adapter-cli).
+- **Shared Canon Selection Controls:** Accepts the shared canon selection scope flags defined in [`discover.md` §5](discover.md#5-driving-adapter-cli).
 - `--apprise-threshold <FLOAT>` (fallback env: `CANON_CLERK_APPRISE_THRESHOLD`; config key: `nodes.apprise.threshold`): Prospective applicability threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage flags (`--docket-*`, `--admit-*`, `--vet-*`, `--audit-*`) are rejected with exit code `2` and guidance pointing to `--apprise-*`.
 - `--apprise-batch-size <COUNT>` (`CANON_CLERK_APPRISE_BATCH_SIZE`; config key: `nodes.apprise.batchSize`): Positive integer (`>= 1`) capping candidate canons evaluated per model call (profile defaults and cascade in [`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults)).
 - `--apprise-concurrency <COUNT>` (`CANON_CLERK_APPRISE_CONCURRENCY`; config key: `nodes.apprise.concurrency`): Positive integer (`>= 1`) bounding concurrent in-flight batch calls (profile defaults and cascade in [`../providers.md` §4](../providers.md#4-decisionbudgetprofile--per-profile-execution-defaults)).

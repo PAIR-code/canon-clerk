@@ -66,7 +66,7 @@ When any of these options is enabled, Canon Clerk resolves and validates the req
 
 ## 3. Pull Request Diff & Metadata Ingestion (`--github-pr`)
 
-The CLI driving adapter supports native pull request ingestion via `--github-pr [<NUMBER>]` across `intake` and every cascading stage (`discover`, `validate`, `apprise`, `docket`, `admit`, `vet`, `audit`), while keeping the `intake` core domain engine (`src/intake/`) 100% pure in-memory with zero network or subprocess side effects:
+The CLI driving adapter supports native pull request ingestion via `--github-pr [<NUMBER>]` across `intake` and every downstream filing-closure stage ([`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track), [`scheduling.md` §2](scheduling.md#2-transitive-dependency-closures--pruning)), while keeping the `intake` core domain engine (`src/intake/`) 100% pure in-memory with zero network or subprocess side effects:
 
 1. **Metadata Resolution:**
    - **Bare `--github-pr`:** Reads `pull_request.number`, `pull_request.title`, `pull_request.body`, `pull_request.head.sha`, `pull_request.labels[].name`, and event `sender.login` directly from the JSON file at `$GITHUB_EVENT_PATH`. Unreadable or malformed event payloads, or payloads missing `pull_request.number`, fail fast with exit code `2` and an actionable `Hint:`.
@@ -132,7 +132,7 @@ When `Canon Clerk Audit` is promoted from advisory to an enforcing required stat
 
 ## 7. GitHub Issue Inquiry Ingestion (`--github-issue`)
 
-For the prospective design track (`intake` and `apprise`), the CLI driving adapter supports opt-in GitHub Issue ingestion via `--github-issue [<NUMBER>]` while keeping `src/intake/` 100% pure in-memory with zero network or subprocess side effects:
+For the [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) (`intake` and `apprise`), the CLI driving adapter supports opt-in GitHub Issue ingestion via `--github-issue [<NUMBER>]` while keeping `src/intake/` 100% pure in-memory with zero network or subprocess side effects:
 
 1. **Resolution Modes (Zero-API Event vs. Fail-Fast REST):**
    - **Bare `--github-issue`:** Reads `issue.number`, `issue.title`, `issue.body`, `issue.labels[].name`, `issue.user.login`, and `issue.html_url` directly from the JSON file at `$GITHUB_EVENT_PATH`, enabling zero-API-read GitHub Actions workflows triggered on `issues: [opened, edited, labeled, reopened]` without requiring `GITHUB_TOKEN` or `GITHUB_REPOSITORY`. Fails fast with exit code `2` and an actionable `Hint:` if `$GITHUB_EVENT_PATH` is missing, unreadable, malformed, or lacks a positive integer `issue.number` (`>= 1`).
@@ -144,5 +144,5 @@ For the prospective design track (`intake` and `apprise`), the CLI driving adapt
    - Does **not** populate `.intake.linked_issues`, preserving `SPEC.md` §4.2's PR-linked-issue metadata plane semantics so replaying an issue intake `Caseload` never falsely activates `inspect: [linked_issues]` canons on the contentious track.
 3. **Stage Scoping & Conflict Guards:**
    - **Exposed only on `intake` and `apprise`:** `--github-issue` appears in CLI `--help` strictly on `intake` and `apprise`.
-   - **Self-Correcting Rejection Elsewhere:** Passing `--github-issue` on contentious-track stages (`docket`, `admit`, `vet`, `audit`) fails fast with exit code `2` and a `Hint:` pointing to `--linked-issue <PATH|->` for PR/diff audits (or `canon-clerk apprise --github-issue` for prospective issue screening). Passing `--github-issue` on `discover` or `validate` fails fast with exit code `2` and a `Hint:` pointing to `canon-clerk apprise --github-issue` or piping `canon-clerk intake --github-issue ... --json | canon-clerk <stage> --caseload -`.
+   - **Self-Correcting Rejection Elsewhere:** Passing `--github-issue` on [Heuristic Cascade](overview.md#2-dag-topology-two-feeder-branches--adjudication-spine--apprisal-track) stages fails fast with exit code `2` and a `Hint:` pointing to `--linked-issue <PATH|->` for PR/diff audits (or `canon-clerk apprise --github-issue` for prospective issue screening). Passing `--github-issue` on `discover` or `validate` fails fast with exit code `2` and a `Hint:` pointing to `canon-clerk apprise --github-issue` or piping `canon-clerk intake --github-issue ... --json | canon-clerk <stage> --caseload -`.
    - **Mutually Exclusive with `--github-pr`:** Passing both `--github-issue` and `--github-pr` fails fast with exit code `2`. Composes cleanly with positional `TARGETS`, `--canon`, and `apprise`'s default `--all-canons` fallback.
