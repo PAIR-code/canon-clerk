@@ -7,7 +7,7 @@ inspect:
 tags:
   - documentation
 ---
-Normative specifications for cross-cutting contracts (shared options, default matrices, schemas, or protocols) MUST be single-sourced in an authoritative document and delegated via hyperlink from component specifications rather than duplicated inline.
+Normative specifications for cross-cutting contracts MUST be single-sourced in an authoritative document and delegated via hyperlink from component specifications rather than duplicated inline.
 
 Exception: A component specification MAY include a brief informative mention or component-specific override inline IFF it links to the authoritative document for the normative specification.
 
