@@ -271,7 +271,7 @@ pub(crate) fn prepare_upstream_caseload(
         .map(|c| clear_stage_and_downstream(inputs.stage, c));
 
     let (after_intake, targets_changed) =
-        resolve_upstream_intake(inputs.stage, inputs.intake_opts, inputs.canons, stripped)?;
+        resolve_upstream_intake(inputs.stage, inputs.intake_opts, stripped)?;
     let after_discover = resolve_upstream_discover(
         inputs.stage,
         inputs.canons,
@@ -316,7 +316,6 @@ pub(crate) fn clear_stage_and_downstream(
 fn resolve_upstream_intake(
     stage: BenchmarkStage,
     intake_opts: &IntakeOptions,
-    canons: &CanonSelectionArgs,
     mut incoming: Option<Caseload>,
 ) -> Result<(Caseload, bool), ConsistencyBenchError> {
     if !intake_opts.has_designated_source() {
@@ -357,18 +356,6 @@ fn resolve_upstream_intake(
             .and_then(|i| i.intent.clone());
     }
 
-    if stage == BenchmarkStage::Apprise
-        && !cli_has_targets
-        && canons.is_empty()
-        && incoming.is_none()
-    {
-        return Err(ConsistencyBenchError::Setup {
-            detail: "`apprise` benchmark requires both `--intent <TEXT>` and a target or canon scope.\n  \
-                     Hint: Pass target paths (e.g. `src/cli`), `--all-targets`, `--all-canons`, or `--canon <PATH|GLOB>`."
-                .to_string(),
-        });
-    }
-
     let updated =
         execute_intake(&effective_opts, incoming).map_err(|err| ConsistencyBenchError::Setup {
             detail: err.to_string(),
@@ -398,10 +385,7 @@ fn resolve_upstream_discover(
         i.scope == IntakeScope::AllTargets || !i.target_paths.is_empty() || !i.diffs.is_empty()
     });
     let all_canons = match stage {
-        BenchmarkStage::Apprise => {
-            canons.all_canons
-                || (!intake_has_targets && (!canons.canon.is_empty() || canons.has_inline_canon()))
-        }
+        BenchmarkStage::Apprise => canons.all_canons || !intake_has_targets,
         BenchmarkStage::Docket
         | BenchmarkStage::Admit
         | BenchmarkStage::Vet

@@ -33,7 +33,7 @@ use crate::provider::StructuredModelProvider;
 use crate::telemetry::TelemetrySession;
 use clap::{Args, ValueEnum};
 use guards::{
-    can_fast_forward_completed_apprisal, enforce_dual_input_guard,
+    can_fast_forward_completed_apprisal, enforce_intent_required_guard,
     ensure_stage_prefixed_threshold_flags, resolve_apprise_batch_size, resolve_apprise_concurrency,
     resolve_apprise_threshold,
 };
@@ -45,7 +45,10 @@ use std::io::{Read, Write};
 
 const APPRISE_EXAMPLES: &str = "\
 Examples:
-  # Apprise governing canons for inline design intent and prospective target paths:
+  # Full-corpus apprisal from design intent alone (defaults to --all-canons):
+  canon-clerk apprise --intent \"Refactor auth to round-robin between providers\"
+
+  # Apprise governing canons narrowed to prospective target paths:
   canon-clerk apprise --intent \"Refactor auth to round-robin between providers\" src/auth src/frontend
 
   # Stream newline-delimited prospective target paths via standard input ('-'):
@@ -55,7 +58,7 @@ Examples:
   canon-clerk apprise --intent \"Add CLI output flag\" src/cli --format compact
 
   # Emit enriched Caseload JSON for AI agent prompt injection:
-  canon-clerk apprise --intent \"Add Kafka event bus\" src/events --json";
+  canon-clerk apprise --intent \"Add Kafka event bus\" --json";
 
 /// Output presentation format for `canon-clerk apprise`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -274,7 +277,7 @@ fn run_apprise_core(
         return Ok(completed);
     }
 
-    enforce_dual_input_guard(&intake_opts, &args.canons, incoming.as_ref())?;
+    enforce_intent_required_guard(&intake_opts, incoming.as_ref())?;
 
     let (caseload_after_intake, intake_disp, target_changed) =
         resolve_apprise_intake(&intake_opts, incoming, telemetry)?;
@@ -429,7 +432,7 @@ mod tests {
     use crate::canon::ParseCanonOptions;
     use crate::caseload::{
         ApprisalStatus, CanonApprisalAssessment, CaseloadConfig, CaseloadDiscovery, CaseloadIntake,
-        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+        DEFAULT_GOOGLE_DISCRIMINATOR_MODEL, DiscoveryMode,
     };
     use crate::cli::{Cli, Commands};
     use crate::configure::ENV_GEMINI_API_KEY;
@@ -751,15 +754,15 @@ mod tests {
         }
     }
 
-    mod dual_input_guard_and_lazy_scheduling {
+    mod intent_guard_and_lazy_scheduling {
         use super::*;
 
         #[test]
-        fn test_dual_input_guard_fails_with_exit_2_when_intent_or_scope_missing() {
+        fn test_intent_guard_fails_with_exit_2_when_intent_missing_or_blank() {
             let snapshot = valid_snapshot();
             let provider = StubProvider::succeeding(json!({"assessments": []}));
 
-            // 1. Naked invocation (missing both)
+            // 1. Naked invocation (missing intent and scope)
             let naked_err = run_apprise_with_snapshot_and_provider(
                 &AppriseArgs::default(),
                 &mut Cursor::new(b""),
@@ -770,29 +773,10 @@ mod tests {
             )
             .expect_err("naked apprise must fail");
             assert_eq!(naked_err.exit_code(), 2);
+            assert!(naked_err.to_string().contains("--intent"));
             assert!(naked_err.to_string().contains("Hint:"));
 
-            // 2. Intent WITHOUT target or canon scope (prevents silent 0-target runs!)
-            let intent_only = AppriseArgs {
-                filing: FilingSourceArgs {
-                    intent: Some("Add caching layer".to_string()),
-                    ..FilingSourceArgs::default()
-                },
-                ..AppriseArgs::default()
-            };
-            let scope_err = run_apprise_with_snapshot_and_provider(
-                &intent_only,
-                &mut Cursor::new(b""),
-                &mut Vec::new(),
-                &snapshot,
-                &BTreeMap::new(),
-                &provider,
-            )
-            .expect_err("intent without scope must fail");
-            assert_eq!(scope_err.exit_code(), 2);
-            assert!(scope_err.to_string().contains("target or canon scope"));
-
-            // 3. Target paths WITHOUT intent
+            // 2. Target paths WITHOUT intent
             let targets_only = AppriseArgs {
                 filing: FilingSourceArgs {
                     targets: vec!["src/auth".to_string()],
@@ -812,8 +796,8 @@ mod tests {
             assert_eq!(intent_err.exit_code(), 2);
             assert!(intent_err.to_string().contains("--intent"));
 
-            // 4. Blank whitespace intent with targets
-            let blank_intent = AppriseArgs {
+            // 3. Blank whitespace intent with targets
+            let blank_with_targets = AppriseArgs {
                 filing: FilingSourceArgs {
                     intent: Some("   ".to_string()),
                     targets: vec!["src/auth".to_string()],
@@ -822,16 +806,169 @@ mod tests {
                 ..AppriseArgs::default()
             };
             let blank_err = run_apprise_with_snapshot_and_provider(
-                &blank_intent,
+                &blank_with_targets,
                 &mut Cursor::new(b""),
                 &mut Vec::new(),
                 &snapshot,
                 &BTreeMap::new(),
                 &provider,
             )
-            .expect_err("blank intent must fail");
+            .expect_err("blank intent with targets must fail");
             assert_eq!(blank_err.exit_code(), 2);
+
+            // 4. Blank whitespace intent without targets
+            let blank_only = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("  \t\n ".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+            let blank_only_err = run_apprise_with_snapshot_and_provider(
+                &blank_only,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &snapshot,
+                &BTreeMap::new(),
+                &provider,
+            )
+            .expect_err("blank intent without scope must fail");
+            assert_eq!(blank_only_err.exit_code(), 2);
             assert_eq!(provider.call_count(), 0);
+        }
+
+        #[test]
+        fn test_intent_without_scope_defaults_to_all_canons_and_preserves_explicit_scope() {
+            let snapshot = valid_snapshot();
+            let env = test_env_with_key();
+            let payload = json!({
+                "assessments": [
+                    {
+                        "canon_path": ".canons/auth/auth-caches-must-define-ttl-window.md",
+                        "apprisal_score": 0.88
+                    },
+                    {
+                        "canon_path": ".canons/cli/cli-flags-must-use-positive-polarity.md",
+                        "apprisal_score": 0.22
+                    }
+                ]
+            });
+
+            // 1. Intent alone defaults to all-canons discovery and surfaces mode in stylish & JSON
+            let provider = StubProvider::succeeding(payload);
+            let intent_only = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Add auth token cache".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                format: AppriseFormat::Stylish,
+                ..AppriseArgs::default()
+            };
+            let mut stylish_out = Vec::new();
+            let caseload = run_apprise_with_snapshot_and_provider(
+                &intent_only,
+                &mut Cursor::new(b""),
+                &mut stylish_out,
+                &snapshot,
+                &env,
+                &provider,
+            )
+            .expect("intent without explicit scope must default to all-canons");
+
+            let discovery = caseload.discovery.as_ref().expect("discovery populated");
+            assert_eq!(discovery.mode, DiscoveryMode::AllCanons);
+            assert_eq!(discovery.candidate_canons.len(), 2);
+            assert_eq!(provider.call_count(), 1);
+
+            let stylish_text = String::from_utf8(stylish_out).expect("utf8");
+            assert!(
+                stylish_text.contains("prospective design intent ingested"),
+                "expected intent-only intake provenance, got:\n{stylish_text}"
+            );
+            assert!(
+                stylish_text.contains("2 candidate canon(s) matched (all-canons)"),
+                "expected all-canons discovery provenance, got:\n{stylish_text}"
+            );
+
+            // Verify JSON output carries `.discovery.mode == "all-canons"`
+            let mut json_out = Vec::new();
+            let json_args = AppriseArgs {
+                io: CaseloadIoArgs {
+                    json: true,
+                    ..CaseloadIoArgs::default()
+                },
+                ..intent_only
+            };
+            run_apprise_with_snapshot_and_provider(
+                &json_args,
+                &mut Cursor::new(b""),
+                &mut json_out,
+                &snapshot,
+                &env,
+                &provider,
+            )
+            .expect("json intent-only apprise");
+            let json_val: Value = serde_json::from_slice(&json_out).expect("valid json");
+            assert_eq!(json_val["discovery"]["mode"], json!("all-canons"));
+
+            // 2. Explicit target scope (`src/cli`) preserves triggered scoped discovery
+            let scoped_args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Add CLI flag".to_string()),
+                    targets: vec!["src/cli".to_string()],
+                    ..FilingSourceArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+            let scoped_caseload = run_apprise_with_snapshot_and_provider(
+                &scoped_args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &snapshot,
+                &env,
+                &provider,
+            )
+            .expect("explicit target scope apprise");
+            let scoped_disc = scoped_caseload.discovery.as_ref().expect("discovery");
+            assert_eq!(scoped_disc.mode, DiscoveryMode::Triggered);
+            assert_eq!(
+                scoped_disc.candidate_canons,
+                vec![".canons/cli/cli-flags-must-use-positive-polarity.md".to_string()]
+            );
+
+            // 3. Explicit `--canon <GLOB>` narrows the candidate sweep
+            let canon_glob_args = AppriseArgs {
+                filing: FilingSourceArgs {
+                    intent: Some("Add CLI flag".to_string()),
+                    ..FilingSourceArgs::default()
+                },
+                canons: CanonSelectionArgs {
+                    canon: vec![".canons/cli/**".to_string()],
+                    ..CanonSelectionArgs::default()
+                },
+                ..AppriseArgs::default()
+            };
+            let mut glob_out = Vec::new();
+            let glob_caseload = run_apprise_with_snapshot_and_provider(
+                &canon_glob_args,
+                &mut Cursor::new(b""),
+                &mut glob_out,
+                &snapshot,
+                &env,
+                &provider,
+            )
+            .expect("explicit --canon glob apprise");
+            let glob_disc = glob_caseload.discovery.as_ref().expect("discovery");
+            assert_eq!(glob_disc.mode, DiscoveryMode::AllCanons);
+            assert_eq!(
+                glob_disc.candidate_canons,
+                vec![".canons/cli/cli-flags-must-use-positive-polarity.md".to_string()]
+            );
+            let glob_text = String::from_utf8(glob_out).expect("utf8");
+            assert!(
+                glob_text.contains("1 candidate canon(s) matched (all-canons; 1 excluded)"),
+                "expected filtered all-canons provenance, got:\n{glob_text}"
+            );
         }
 
         #[test]
