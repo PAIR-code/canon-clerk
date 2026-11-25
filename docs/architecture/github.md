@@ -84,7 +84,7 @@ The CLI driving adapter supports native pull request ingestion via `--github-pr 
 5. **Flag Composition & Precedence:**
    - `--github-pr` conflicts with `--diff` (mutually exclusive patch sources).
    - Explicit `--pr-title`, `--pr-body`, `--pr-body-file`, `--linked-issue`, `--commit-message`, and `--commit-messages-file` always override metadata fetched from `$GITHUB_EVENT_PATH` or the GitHub API (`CLI flag > event/API metadata`). When explicit `--linked-issue` flags are supplied, GitHub Issues API fetches are skipped; when explicit `--commit-message` or `--commit-messages-file` flags are supplied, GitHub PR Commits API fetches are skipped.
-   - **Workspace State Heuristic:** When `--github-pr` is active and `--workspace-state` is omitted, `--workspace-state` defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"`; otherwise it preserves the default `head`. An explicit `--workspace-state <head|base>` always overrides.
+   - **Workspace State Heuristic:** When `--github-pr` is active and `--workspace-state` is omitted, `--workspace-state` defaults to `base` **iff** `GITHUB_EVENT_NAME == "pull_request_target"`; otherwise it preserves the default `head`. An explicit `--workspace-state <head|base>` always overrides (see [`exhibits.md` §3](exhibits.md#3-workspace-state--in-memory-patch-overlay) for in-memory patch overlay semantics).
 
 ---
 
