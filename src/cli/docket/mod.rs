@@ -21,7 +21,8 @@ mod stages;
 use crate::caseload::{Caseload, CaseloadDocket};
 use crate::cli::CliError;
 use crate::cli::args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs,
+    ProviderTransportArgs, RejectedGithubIssueArgs,
 };
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::io::ensure_stage_stdin;
@@ -80,6 +81,9 @@ pub enum DocketFormat {
 pub struct DocketArgs {
     #[command(flatten)]
     pub filing: FilingSourceArgs,
+
+    #[command(flatten)]
+    pub rejected_github_issue: RejectedGithubIssueArgs,
 
     #[command(flatten)]
     pub canons: CanonSelectionArgs,

@@ -21,7 +21,8 @@ pub(crate) mod stages;
 use crate::caseload::{Caseload, CaseloadDocket, CaseloadEvidence, CaseloadVetting};
 use crate::cli::CliError;
 use crate::cli::args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs,
+    ProviderTransportArgs, RejectedGithubIssueArgs,
 };
 use crate::cli::closure::{
     ClosureBackend, materialize_closure_snapshot, resolve_cascade_discover, resolve_cascade_intake,
@@ -82,6 +83,9 @@ pub enum VetFormat {
 pub struct VetArgs {
     #[command(flatten)]
     pub filing: FilingSourceArgs,
+
+    #[command(flatten)]
+    pub rejected_github_issue: RejectedGithubIssueArgs,
 
     #[command(flatten)]
     pub canons: CanonSelectionArgs,

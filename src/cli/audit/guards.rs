@@ -63,6 +63,7 @@ pub(super) fn resolve_and_validate_audit_cli_params(
 }
 
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AuditArgs) -> Result<(), CliError> {
+    args.rejected_github_issue.validate_contentious("audit")?;
     args.rejected_unqualified.validate(
         "audit",
         "`--audit-threshold <FLOAT>`, `--vet-threshold <FLOAT>`, `--admit-threshold <FLOAT>`, or `--docket-threshold <FLOAT>`",

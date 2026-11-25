@@ -21,7 +21,8 @@ mod stages;
 use crate::caseload::{Caseload, CaseloadApprisal};
 use crate::cli::CliError;
 use crate::cli::args::{
-    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, ProviderConfigArgs, ProviderTransportArgs,
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, GithubIssueArgs, ProviderConfigArgs,
+    ProviderTransportArgs,
 };
 use crate::cli::closure::{ClosureBackend, materialize_closure_snapshot, resolve_closure_validate};
 use crate::cli::io::ensure_stage_stdin;
@@ -58,7 +59,11 @@ Examples:
   canon-clerk apprise --intent \"Add CLI output flag\" src/cli --format compact
 
   # Emit enriched Caseload JSON for AI agent prompt injection:
-  canon-clerk apprise --intent \"Add Kafka event bus\" --json";
+  canon-clerk apprise --intent \"Add Kafka event bus\" --json
+
+  # Apprise a GitHub Issue directly (Actions `on: issues` or explicit issue number):
+  canon-clerk apprise --github-issue
+  canon-clerk apprise --github-issue 397 --github-repo PAIR-code/canon-clerk";
 
 /// Output presentation format for `canon-clerk apprise`.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -82,6 +87,9 @@ pub enum AppriseFormat {
 pub struct AppriseArgs {
     #[command(flatten)]
     pub filing: FilingSourceArgs,
+
+    #[command(flatten)]
+    pub github_issue: GithubIssueArgs,
 
     #[command(flatten)]
     pub canons: CanonSelectionArgs,
@@ -264,7 +272,7 @@ fn run_apprise_core(
     let incoming = args.io.read_caseload(stdin)?;
     let intake_opts = args
         .filing
-        .resolve_intake_options_with_env(stdin, env)?
+        .resolve_intake_options_with_issue_and_env(args.github_issue.github_issue, stdin, env)?
         .intake;
 
     if can_fast_forward_completed_apprisal(args, &intake_opts, incoming.as_ref())
@@ -1706,6 +1714,121 @@ mod tests {
                 *probe.dec_batch_sizes.lock().expect("lock"),
                 vec![12, 48],
                 "discriminative Jev must preserve its 48-noul batch ceiling across 60 canons"
+            );
+        }
+    }
+
+    mod github_issue_ingestion {
+        use super::*;
+        use crate::caseload::DiscoveryMode;
+        use crate::github::{ENV_GH_TOKEN, ENV_GITHUB_API_URL};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+
+        #[test]
+        fn test_apprise_numbered_github_issue_defaults_all_canons_via_loopback_mock() {
+            let issue_json = r###"{
+                "number": 397,
+                "title": "Ingest GitHub Issues via --github-issue",
+                "body": "## Plan\nWire `--github-issue` into intake and apprise.",
+                "labels": [{"name": "scope: cli"}],
+                "user": {"login": "jimbojw"},
+                "html_url": "https://github.com/PAIR-code/canon-clerk/issues/397"
+            }"###;
+
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+            let captured_server = Arc::clone(&captured);
+
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).expect("read request");
+                captured_server
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buf[..n]).to_string());
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{issue_json}",
+                    issue_json.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+            });
+
+            let cli = Cli::try_parse_from([
+                "canon-clerk",
+                "apprise",
+                "--github-issue",
+                "397",
+                "--github-repo",
+                "PAIR-code/canon-clerk",
+                "--no-builtins",
+                "--json",
+            ])
+            .expect("parse apprise --github-issue 397");
+            let Some(Commands::Apprise(args)) = cli.command else {
+                panic!("expected apprise command");
+            };
+
+            let mut env = test_env_with_key();
+            env.insert(ENV_GH_TOKEN.to_string(), "ghp_test_token".to_string());
+            env.insert(ENV_GITHUB_API_URL.to_string(), format!("http://{addr}"));
+
+            let snapshot = valid_snapshot();
+            let provider = StubProvider::succeeding(json!({
+                "assessments": [{
+                    "canon_path": ".canons/cli/cli-flags-must-use-positive-polarity.md",
+                    "apprisal_score": 0.90
+                }]
+            }));
+            let mut stdout = Vec::new();
+            let caseload = run_apprise_with_snapshot_and_provider(
+                &args,
+                &mut Cursor::new(Vec::<u8>::new()),
+                &mut stdout,
+                &snapshot,
+                &env,
+                &provider,
+            )
+            .expect("apprise --github-issue 397 succeeds");
+
+            server.join().expect("server thread");
+
+            let reqs = captured.lock().unwrap();
+            assert!(
+                reqs[0].starts_with("GET /repos/PAIR-code/canon-clerk/issues/397 HTTP/1.1"),
+                "unexpected request: {}",
+                reqs[0]
+            );
+            assert!(
+                reqs[0]
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer ghp_test_token")
+            );
+
+            let intake = caseload.intake.as_ref().expect("intake present");
+            assert!(
+                intake
+                    .intent
+                    .as_deref()
+                    .unwrap()
+                    .contains("#397: Ingest GitHub Issues via --github-issue")
+            );
+            assert!(intake.linked_issues.is_none());
+            assert_eq!(
+                caseload.discovery.as_ref().unwrap().mode,
+                DiscoveryMode::AllCanons
+            );
+            assert!(
+                caseload
+                    .apprisal
+                    .as_ref()
+                    .unwrap()
+                    .assessments
+                    .contains_key(".canons/cli/cli-flags-must-use-positive-polarity.md")
             );
         }
     }

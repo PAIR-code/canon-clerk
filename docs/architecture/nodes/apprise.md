@@ -46,7 +46,7 @@ flowchart LR
   - `validate` (Branch A: validated candidate canons in `caseload.discovery.candidate_canons` and `caseload.validation`).
   - `configure` (Branch B: resolved `apprise` node model binding in `caseload.config.nodes.apprise` and verified provider credentials).
 - **Transitive Prerequisites:** `intake`, `discover`.
-- **The Intent-Required Invariant & Default `--all-canons` Scope:** Statutory apprisal strictly requires a non-empty prospective design `intent` (`--intent <text>` or pre-populated `.intake.intent`); omitting intent or supplying blank whitespace fails fast with exit code `2`. When non-empty design intent is supplied **without** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`), `apprise` defaults discovery to `--all-canons` so contributors and agents do not miss cross-cutting canons before they know every file they will touch. When explicit targets or canon filters *are* supplied, existing scoped discovery behavior is preserved.
+- **The Intent-Required Invariant & Default `--all-canons` Scope:** Statutory apprisal strictly requires a non-empty prospective design `intent` (`--intent <text>`, `--github-issue [<number>]`, or pre-populated `.intake.intent`); omitting intent or supplying blank whitespace fails fast with exit code `2`. When non-empty design intent is supplied **without** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`), `apprise` defaults discovery to `--all-canons` so contributors and agents do not miss cross-cutting canons before they know every file they will touch. When explicit targets or canon filters *are* supplied, existing scoped discovery behavior is preserved.
 - **Branch Independence & Pruning:**
   - Evaluates without requiring code diffs, patches, or work-in-progress (WIP) exhibits.
   - Decoupled from the contentious dispute track: completely prunes `docket`, `admit`, and `audit` from execution.
@@ -109,10 +109,14 @@ canon-clerk apprise --intent "Add Kafka event bus" --json
 
 # 7. Partition large candidate sets into concurrent batches of 15 canons:
 canon-clerk apprise --intent "Add CLI output flag" src/cli --apprise-batch-size 15 --apprise-concurrency 4
+
+# 8. Ingest a GitHub Issue as prospective inquiry (GitHub Actions `on: issues` or local CLI):
+canon-clerk apprise --github-issue
+canon-clerk apprise --github-issue 397 --github-repo PAIR-code/canon-clerk
 ```
 
 ### Intent-Required Guard & Default `--all-canons` Scope
-`canon-clerk apprise` enforces an **Intent-Required Guard**: invoking `apprise` strictly requires a non-empty prospective design `intent` (`--intent <TEXT>` or pre-populated `.intake.intent`). Naked invocation (`canon-clerk apprise`), supplying target/canon scope without `--intent`, or passing blank/whitespace-only `--intent` fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance:
+`canon-clerk apprise` enforces an **Intent-Required Guard**: invoking `apprise` strictly requires a non-empty prospective design `intent` (`--intent <TEXT>`, `--github-issue [<NUMBER>]`, or pre-populated `.intake.intent`). Naked invocation (`canon-clerk apprise`), supplying target/canon scope without `--intent` or `--github-issue`, or passing blank/whitespace-only `--intent` fails fast with exit code `2` (Usage Error) and prints actionable remediation guidance:
 ```text
 error: Prospective apprisal requires a non-empty design intent (`--intent <TEXT>`).
   Hint: Pass `--intent <TEXT>` describing the planned work (defaults to `--all-canons`, or narrow with
@@ -125,7 +129,9 @@ When discovery matches zero candidate canons, the command attaches an empty `.ap
 
 ### CLI Flags & Environment
 - `TARGETS` / `-` (Positional): Prospective target file paths, directories, globs, or `-` to read newline-delimited target paths from standard input.
-- `--intent <TEXT>`: Inline prospective architectural design intent or plan description.
+- `--intent <TEXT>`: Inline prospective architectural design intent or plan description (overrides formatted issue text when paired with `--github-issue`).
+- `--github-issue [<NUMBER>]`: Opt-in native GitHub Issue inquiry source populating `.intake.intent` (mutually exclusive with `--github-pr`; does not populate `.intake.linked_issues`; see [`../github.md` §7](../github.md#7-github-issue-inquiry-ingestion---github-issue)). Bare `--github-issue` reads `$GITHUB_EVENT_PATH` with zero API calls; `--github-issue <NUMBER>` fetches `GET /repos/{owner}/{repo}/issues/{number}` using `GITHUB_TOKEN`/`GH_TOKEN`, `--github-repo`/`GITHUB_REPOSITORY`, and `GITHUB_API_URL`.
+- `--github-repo <OWNER/REPO>`: Target GitHub repository slug (fallback env: `GITHUB_REPOSITORY`) used by numbered `--github-issue <NUMBER>` and `--github-pr`.
 - `--diff <PATH|->`, `--all-targets`, `--pr-title <TEXT>`, `--pr-body <TEXT>`, `--pr-body-file <PATH>`: Shared filing source and metadata flags.
 - `--all-canons`, `--canon <PATH|GLOB>`: Shared canon selection scope flags.
 - `--apprise-threshold <FLOAT>` (fallback env: `CANON_CLERK_APPRISE_THRESHOLD`; config key: `nodes.apprise.threshold`): Prospective applicability threshold in `[0.0, 1.0]` (default: `0.5`). Ambiguous unqualified `--threshold` and out-of-closure stage flags (`--docket-*`, `--admit-*`, `--vet-*`, `--audit-*`) are rejected with exit code `2` and guidance pointing to `--apprise-*`.
@@ -147,5 +153,5 @@ When discovery matches zero candidate canons, the command attaches an empty `.ap
 ### CLI Exit Codes
 - **0:** Successful statutory apprisal (including clean zero-candidate short-circuits).
 - **1:** Candidate canon validation failure (`validation.has_errors` is `true`, evaluated before checking provider credentials) or local workspace I/O runtime error.
-- **2:** Usage error, intent-required guard violation (missing or blank design intent), invalid or out-of-range `--apprise-threshold`, invalid or zero `--apprise-batch-size` / `--apprise-concurrency`, invalid `--max-retries` / `--max-backoff-ms`, invalid `<provider>:<model>` specifier, rejected unqualified or out-of-closure stage flag, conflicting `stdin` operands, missing API credentials, or model provider error.
+- **2:** Usage error, intent-required guard violation (missing or blank design intent), conflicting `--github-pr` and `--github-issue`, missing/invalid GitHub token, repository, issue number, or `$GITHUB_EVENT_PATH` payload, PR-as-issue rejection, GitHub API fetch failure, invalid or out-of-range `--apprise-threshold`, invalid or zero `--apprise-batch-size` / `--apprise-concurrency`, invalid `--max-retries` / `--max-backoff-ms`, invalid `<provider>:<model>` specifier, rejected unqualified or out-of-closure stage flag, conflicting `stdin` operands, missing API credentials, or model provider error.
 

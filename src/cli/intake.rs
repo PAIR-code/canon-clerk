@@ -16,11 +16,12 @@
 
 use crate::caseload::{Caseload, CaseloadIntake};
 use crate::cli::CliError;
-use crate::cli::args::{CaseloadIoArgs, FilingSourceArgs};
+use crate::cli::args::{CaseloadIoArgs, FilingSourceArgs, GithubIssueArgs};
 use crate::cli::io::ensure_single_stdin_source;
-use crate::cli::runners::run_branch_a_intake;
+use crate::cli::runners::run_branch_a_intake_with_issue_and_env;
 use crate::telemetry::TelemetrySession;
 use clap::Args;
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
 const INTAKE_EXAMPLES: &str = "\
@@ -37,6 +38,10 @@ Examples:
   # Ingest prospective design intent and target scope:
   canon-clerk intake --intent \"Implement round-robin auth rotation\" src/auth
 
+  # Ingest a GitHub Issue as prospective design intent (Actions `on: issues` or explicit number):
+  canon-clerk intake --github-issue
+  canon-clerk intake --github-issue 397 --github-repo PAIR-code/canon-clerk
+
   # Ingest all repository files and archive the cumulative Caseload to disk:
   canon-clerk intake --all-targets --output-caseload caseload.json --json";
 
@@ -52,20 +57,36 @@ pub struct IntakeArgs {
     pub filing: FilingSourceArgs,
 
     #[command(flatten)]
+    pub github_issue: GithubIssueArgs,
+
+    #[command(flatten)]
     pub io: CaseloadIoArgs,
 }
 
-/// Executes the `intake` CLI subcommand with an explicit [`TelemetrySession`].
-pub fn run_intake_with_telemetry(
+/// Executes the `intake` CLI subcommand with an explicit environment map and [`TelemetrySession`].
+///
+/// # Errors
+/// Returns [`CliError`] with usage exit code `2` on conflicting stdin operands, invalid `--caseload`,
+/// missing filing sources, or failed `--github-pr` / `--github-issue` resolution, or runtime exit code
+/// `1` if JSON serialization or writing to `stdout` fails.
+pub fn run_intake_with_env_and_telemetry(
     args: &IntakeArgs,
     stdin: &mut dyn Read,
     stdout: &mut dyn Write,
+    env: &BTreeMap<String, String>,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
     ensure_single_stdin_source(&args.filing, args.io.caseload.as_deref())?;
 
     let incoming_caseload = args.io.read_caseload(stdin)?;
-    let caseload = run_branch_a_intake(&args.filing, incoming_caseload, stdin, telemetry)?;
+    let caseload = run_branch_a_intake_with_issue_and_env(
+        &args.filing,
+        args.github_issue.github_issue,
+        incoming_caseload,
+        stdin,
+        env,
+        telemetry,
+    )?;
     telemetry.finish_pipeline();
 
     args.io.write_output_caseload(&caseload)?;
@@ -84,6 +105,17 @@ pub fn run_intake_with_telemetry(
     }
 
     Ok(caseload)
+}
+
+/// Executes the `intake` CLI subcommand with an explicit [`TelemetrySession`].
+pub fn run_intake_with_telemetry(
+    args: &IntakeArgs,
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    telemetry: &TelemetrySession<'_>,
+) -> Result<Caseload, CliError> {
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    run_intake_with_env_and_telemetry(args, stdin, stdout, &env, telemetry)
 }
 
 /// Executes the `intake` CLI subcommand against the provided `stdin` and `stdout` streams.
@@ -358,6 +390,7 @@ diff --git a/src/lib.rs b/src/lib.rs
                     output_caseload: Some(output_caseload_path.clone()),
                     json: false,
                 },
+                ..IntakeArgs::default()
             };
 
             let mut stdin = Cursor::new(Vec::<u8>::new());
@@ -376,6 +409,222 @@ diff --git a/src/lib.rs b/src/lib.rs
             assert_eq!(saved.intake.unwrap().diffs["src/lib.rs"].lines_added, 1);
 
             let _ = fs::remove_dir_all(&temp_dir);
+        }
+    }
+
+    mod github_issue_ingestion {
+        use super::*;
+        use crate::github::{
+            ENV_GH_TOKEN, ENV_GITHUB_API_URL, ENV_GITHUB_EVENT_PATH, ENV_GITHUB_REPOSITORY,
+        };
+        use std::net::TcpListener;
+        use std::path::PathBuf;
+        use std::thread;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn write_temp_event_file(tag: &str, json: &str) -> PathBuf {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "canon-clerk-intake-gh-issue-{tag}-{}-{stamp}.json",
+                std::process::id()
+            ));
+            fs::write(&path, json).expect("write temp event file");
+            path
+        }
+
+        fn spawn_single_response_server(
+            status_line: &'static str,
+            response_body: &'static str,
+        ) -> (String, thread::JoinHandle<()>) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().expect("local addr");
+            let handle = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                    response_body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+            });
+            (format!("http://{addr}"), handle)
+        }
+
+        #[test]
+        fn test_bare_github_issue_reads_event_path_without_token_or_linked_issues() {
+            let event_path = write_temp_event_file(
+                "bare",
+                r###"{
+                    "action": "opened",
+                    "issue": {
+                        "number": 397,
+                        "title": "feat(intake, apprise): ingest GitHub Issues",
+                        "body": "## Problem\n\nSupport `--github-issue`.",
+                        "labels": [{"name": "type: feat"}, {"name": "scope: cli"}],
+                        "user": {"login": "jimbojw"},
+                        "html_url": "https://github.com/PAIR-code/canon-clerk/issues/397",
+                        "comments": 9,
+                        "reactions": {"total_count": 4}
+                    }
+                }"###,
+            );
+
+            let cli = Cli::try_parse_from(["canon-clerk", "intake", "--github-issue", "--json"])
+                .expect("parse intake --github-issue --json");
+            let Some(Commands::Intake(args)) = cli.command else {
+                panic!("expected intake command");
+            };
+
+            let mut env = BTreeMap::new();
+            env.insert(
+                ENV_GITHUB_EVENT_PATH.to_string(),
+                event_path.to_string_lossy().into_owned(),
+            );
+
+            let mut stdin = Cursor::new(Vec::<u8>::new());
+            let mut stdout = Vec::new();
+            let caseload = run_intake_with_env_and_telemetry(
+                &args,
+                &mut stdin,
+                &mut stdout,
+                &env,
+                &TelemetrySession::noop(),
+            )
+            .expect("bare --github-issue intake succeeds");
+
+            let intake = caseload.intake.expect("intake present");
+            assert_eq!(
+                intake.intent.as_deref(),
+                Some(
+                    "#397: feat(intake, apprise): ingest GitHub Issues\n\
+                     Labels: type: feat, scope: cli\n\n\
+                     ## Problem\n\nSupport `--github-issue`."
+                )
+            );
+            assert!(
+                intake.linked_issues.is_none(),
+                "--github-issue must never populate .intake.linked_issues"
+            );
+
+            let parsed_stdout: Caseload =
+                serde_json::from_slice(&stdout).expect("valid JSON stdout");
+            assert_eq!(parsed_stdout.intake.unwrap().intent, intake.intent);
+
+            let _ = fs::remove_file(&event_path);
+        }
+
+        #[test]
+        fn test_explicit_intent_overrides_github_issue_text() {
+            let event_path = write_temp_event_file(
+                "override",
+                r#"{"issue":{"number":42,"title":"Issue title","body":"Issue body"}}"#,
+            );
+
+            let cli = Cli::try_parse_from([
+                "canon-clerk",
+                "intake",
+                "--github-issue",
+                "--intent",
+                "Explicit CLI intent override",
+            ])
+            .expect("parse intake --github-issue --intent");
+            let Some(Commands::Intake(args)) = cli.command else {
+                panic!("expected intake command");
+            };
+
+            let mut env = BTreeMap::new();
+            env.insert(
+                ENV_GITHUB_EVENT_PATH.to_string(),
+                event_path.to_string_lossy().into_owned(),
+            );
+
+            let caseload = run_intake_with_env_and_telemetry(
+                &args,
+                &mut Cursor::new(Vec::<u8>::new()),
+                &mut Vec::new(),
+                &env,
+                &TelemetrySession::noop(),
+            )
+            .expect("intake with override succeeds");
+
+            assert_eq!(
+                caseload.intake.unwrap().intent.as_deref(),
+                Some("Explicit CLI intent override")
+            );
+            let _ = fs::remove_file(&event_path);
+        }
+
+        #[test]
+        fn test_numbered_github_issue_rejects_pr_404_403_and_missing_token_repo() {
+            let pr_json = r#"{"number":444,"title":"Some PR","pull_request":{"url":"https://api.github.com/repos/o/r/pulls/444"}}"#;
+            let (api_url, server) = spawn_single_response_server("200 OK", pr_json);
+            let cli = Cli::try_parse_from(["canon-clerk", "intake", "--github-issue", "444"])
+                .expect("parse intake --github-issue 444");
+            let Some(Commands::Intake(args)) = cli.command else {
+                panic!("expected intake");
+            };
+            let mut env = BTreeMap::new();
+            env.insert(ENV_GH_TOKEN.to_string(), "tok".to_string());
+            env.insert(ENV_GITHUB_REPOSITORY.to_string(), "o/r".to_string());
+            env.insert(ENV_GITHUB_API_URL.to_string(), api_url);
+
+            let err = run_intake_with_env_and_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &env,
+                &TelemetrySession::noop(),
+            )
+            .expect_err("PR-as-issue must fail fast");
+            server.join().expect("server");
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.to_string().contains("Pull Request"));
+
+            let (api_404, server_404) =
+                spawn_single_response_server("404 Not Found", r#"{"message":"Not Found"}"#);
+            env.insert(ENV_GITHUB_API_URL.to_string(), api_404);
+            let err_404 = run_intake_with_env_and_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &env,
+                &TelemetrySession::noop(),
+            )
+            .expect_err("404 must fail fast");
+            server_404.join().expect("server 404");
+            assert_eq!(err_404.exit_code(), 2);
+            assert!(err_404.to_string().contains("404"));
+
+            let (api_403, server_403) =
+                spawn_single_response_server("403 Forbidden", r#"{"message":"Forbidden"}"#);
+            env.insert(ENV_GITHUB_API_URL.to_string(), api_403);
+            let err_403 = run_intake_with_env_and_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &env,
+                &TelemetrySession::noop(),
+            )
+            .expect_err("403 must fail fast");
+            server_403.join().expect("server 403");
+            assert_eq!(err_403.exit_code(), 2);
+            assert!(err_403.to_string().contains("403"));
+
+            let err_no_tok = run_intake_with_env_and_telemetry(
+                &args,
+                &mut Cursor::new(b""),
+                &mut Vec::new(),
+                &BTreeMap::new(),
+                &TelemetrySession::noop(),
+            )
+            .expect_err("missing token must fail fast");
+            assert_eq!(err_no_tok.exit_code(), 2);
+            assert!(err_no_tok.to_string().contains("GITHUB_TOKEN"));
         }
     }
 }

@@ -23,14 +23,16 @@ use crate::cli::io::{read_operand_source, resolve_target_operands};
 use crate::cli::linked_issues::resolve_linked_issue_operands;
 use crate::github::{
     DEFAULT_GITHUB_BYPASS_LABEL, DEFAULT_GITHUB_CHECK_NAME, ENV_CANON_CLERK_GITHUB_BYPASS_LABEL,
-    GithubCheckTarget, GithubChecksClient, GithubPullRequestFetcher,
+    GithubCheckTarget, GithubChecksClient, GithubIssueFetcher, GithubPullRequestFetcher,
     fetch_linked_issues_for_pr_body, is_pull_request_target_event,
-    resolve_github_check_target_with_fallback_sha, resolve_github_pr_filing,
+    resolve_github_check_target_with_fallback_sha, resolve_github_issue_inquiry,
+    resolve_github_pr_filing,
 };
 use crate::intake::IntakeOptions;
 use clap::Args;
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::num::NonZeroU64;
 
 /// Resolved filing options alongside optional PR metadata fetched via `--github-pr`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,18 +47,80 @@ pub struct ResolvedFilingSource {
     pub fetched_pr_actor: Option<String>,
 }
 
-/// Resolves [`FilingSourceArgs`] into a pure [`IntakeOptions`] descriptor and optional fetched PR head SHA,
-/// executing GitHub REST API calls via `fetcher` strictly at the CLI adapter boundary when `--github-pr` is active.
-pub(crate) fn resolve_filing_source_with_fetcher(
+/// Composable CLI argument group for opt-in GitHub Issue inquiry ingestion (`intake` and `apprise` only).
+#[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
+pub struct GithubIssueArgs {
+    /// Ingest a GitHub Issue as prospective design intent (omit NUMBER to read `$GITHUB_EVENT_PATH`).
+    #[arg(
+        long = "github-issue",
+        value_name = "NUMBER",
+        num_args = 0..=1,
+        conflicts_with = "github_pr",
+        help_heading = "Filing Sources",
+        help = "Ingest a GitHub Issue as prospective design intent (omit NUMBER to read from GITHUB_EVENT_PATH)"
+    )]
+    pub github_issue: Option<Option<NonZeroU64>>,
+}
+
+/// Hidden Clap capture rejecting `--github-issue` on stages outside `intake` and `apprise`.
+#[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
+pub struct RejectedGithubIssueArgs {
+    /// Hidden capture rejecting `--github-issue` with an actionable stage-specific `Hint:`.
+    #[arg(
+        long = "github-issue",
+        hide = true,
+        num_args = 0..=1,
+        allow_hyphen_values = true
+    )]
+    pub rejected_github_issue: Option<Option<String>>,
+}
+
+impl RejectedGithubIssueArgs {
+    /// Rejects `--github-issue` on contentious-track stages (`docket`, `admit`, `vet`, `audit`) with exit code `2`.
+    pub fn validate_contentious(&self, stage: &str) -> Result<(), CliError> {
+        if self.rejected_github_issue.is_some() {
+            return Err(CliError::usage(format!(
+                "Flag `--github-issue` is not supported on `canon-clerk {stage}` (contentious track).\n  \
+                 Hint: Pass `--linked-issue <PATH|->` (or `--github-pr [<NUMBER>]`) to attach linked issue context to a PR/diff audit, \
+                 or use `canon-clerk apprise --github-issue [<NUMBER>]` for prospective issue screening."
+            )));
+        }
+        Ok(())
+    }
+
+    /// Rejects `--github-issue` on intermediate stages (`discover`, `validate`) with exit code `2`.
+    pub fn validate_intermediate(&self, stage: &str) -> Result<(), CliError> {
+        if self.rejected_github_issue.is_some() {
+            return Err(CliError::usage(format!(
+                "Flag `--github-issue` is scoped to `intake` and `apprise`, not `canon-clerk {stage}`.\n  \
+                 Hint: Run `canon-clerk apprise --github-issue [<NUMBER>]` for prospective issue screening, \
+                 or pipe `canon-clerk intake --github-issue [<NUMBER>] --json | canon-clerk {stage} --caseload -`."
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Resolves [`FilingSourceArgs`] and optional `--github-issue` into a pure [`IntakeOptions`] descriptor
+/// and optional fetched PR head SHA, executing GitHub REST API calls strictly at the CLI adapter boundary.
+pub(crate) fn resolve_filing_source_with_issue_and_fetchers(
     args: &FilingSourceArgs,
+    github_issue: Option<Option<NonZeroU64>>,
     stdin: &mut dyn Read,
     env: &BTreeMap<String, String>,
-    fetcher: &dyn GithubPullRequestFetcher,
+    pr_fetcher: &dyn GithubPullRequestFetcher,
+    issue_fetcher: &dyn GithubIssueFetcher,
 ) -> Result<ResolvedFilingSource, CliError> {
     if args.diff.is_some() && args.github_pr.is_some() {
         return Err(CliError::usage(
             "Flags `--diff` and `--github-pr` are mutually exclusive.\n  \
              Hint: Pass either `--diff <PATH|->` for a local patch or `--github-pr [<NUMBER>]` to fetch the PR diff from GitHub.",
+        ));
+    }
+    if args.github_pr.is_some() && github_issue.is_some() {
+        return Err(CliError::usage(
+            "Flags `--github-pr` and `--github-issue` are mutually exclusive.\n  \
+             Hint: Pass `--github-pr [<NUMBER>]` for pull request audits or `--github-issue [<NUMBER>]` for prospective issue inquiry.",
         ));
     }
 
@@ -74,58 +138,32 @@ pub(crate) fn resolve_filing_source_with_fetcher(
         resolve_commit_message_operands(&args.commit_messages, &args.commit_messages_files, stdin)?;
 
     if let Some(pr_number_override) = args.github_pr {
-        let resolved = resolve_github_pr_filing(
+        return resolve_github_pr_source(
+            args,
             pr_number_override,
+            explicit_pr_body,
+            target_paths,
+            explicit_linked_issues,
+            explicit_commit_messages,
+            env,
+            pr_fetcher,
+        );
+    }
+
+    let intent = if let Some(issue_number_override) = github_issue {
+        let resolved_issue = resolve_github_issue_inquiry(
+            issue_number_override,
             args.github_repo.as_deref(),
             env,
-            fetcher,
+            issue_fetcher,
         )
         .map_err(|err| CliError::usage(err.to_string()))?;
-
-        let pr_title = args.pr_title.clone().or(resolved.metadata.title);
-        let pr_body = explicit_pr_body.or(resolved.metadata.body);
-        let linked_issues = match explicit_linked_issues {
-            Some(explicit) => Some(explicit).filter(|v| !v.is_empty()),
-            None => {
-                let fetched =
-                    fetch_linked_issues_for_pr_body(&resolved.target, pr_body.as_deref(), fetcher);
-                Some(fetched).filter(|v| !v.is_empty())
-            }
-        };
-        let commit_messages = match explicit_commit_messages {
-            Some(explicit) => Some(explicit).filter(|v| !v.is_empty()),
-            None => {
-                let fetched = fetcher
-                    .fetch_pull_request_commits(&resolved.target)
-                    .map_err(|err| CliError::usage(err.to_string()))?;
-                Some(fetched).filter(|v| !v.is_empty())
-            }
-        };
-        let workspace_state = args.workspace_state.map(WorkspaceState::from).or_else(|| {
-            if is_pull_request_target_event(env) {
-                Some(WorkspaceState::Base)
-            } else {
-                None
-            }
-        });
-
-        return Ok(ResolvedFilingSource {
-            intake: IntakeOptions {
-                pr_title,
-                pr_body,
-                intent: args.intent.clone(),
-                target_paths,
-                patch_content: Some(resolved.diff),
-                all_targets: args.all_targets,
-                workspace_state,
-                linked_issues,
-                commit_messages,
-            },
-            fetched_pr_head_sha: resolved.metadata.head_sha,
-            fetched_pr_labels: Some(resolved.metadata.labels),
-            fetched_pr_actor: resolved.metadata.actor,
-        });
-    }
+        args.intent
+            .clone()
+            .or_else(|| Some(resolved_issue.format_as_intent()))
+    } else {
+        args.intent.clone()
+    };
 
     let patch_content = match &args.diff {
         Some(source) => Some(read_operand_source(source, "--diff", stdin)?),
@@ -136,7 +174,7 @@ pub(crate) fn resolve_filing_source_with_fetcher(
         intake: IntakeOptions {
             pr_title: args.pr_title.clone(),
             pr_body: explicit_pr_body,
-            intent: args.intent.clone(),
+            intent,
             target_paths,
             patch_content,
             all_targets: args.all_targets,
@@ -150,14 +188,103 @@ pub(crate) fn resolve_filing_source_with_fetcher(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Internal filing resolver helper separating --github-pr resolution from local/issue sources"
+)]
+fn resolve_github_pr_source(
+    args: &FilingSourceArgs,
+    pr_number_override: Option<u64>,
+    explicit_pr_body: Option<String>,
+    target_paths: Option<Vec<String>>,
+    explicit_linked_issues: Option<Vec<crate::caseload::LinkedIssueContext>>,
+    explicit_commit_messages: Option<Vec<crate::caseload::CommitMessageContext>>,
+    env: &BTreeMap<String, String>,
+    pr_fetcher: &dyn GithubPullRequestFetcher,
+) -> Result<ResolvedFilingSource, CliError> {
+    let resolved = resolve_github_pr_filing(
+        pr_number_override,
+        args.github_repo.as_deref(),
+        env,
+        pr_fetcher,
+    )
+    .map_err(|err| CliError::usage(err.to_string()))?;
+
+    let pr_title = args.pr_title.clone().or(resolved.metadata.title);
+    let pr_body = explicit_pr_body.or(resolved.metadata.body);
+    let linked_issues = match explicit_linked_issues {
+        Some(explicit) => Some(explicit).filter(|v| !v.is_empty()),
+        None => {
+            let fetched =
+                fetch_linked_issues_for_pr_body(&resolved.target, pr_body.as_deref(), pr_fetcher);
+            Some(fetched).filter(|v| !v.is_empty())
+        }
+    };
+    let commit_messages = match explicit_commit_messages {
+        Some(explicit) => Some(explicit).filter(|v| !v.is_empty()),
+        None => {
+            let fetched = pr_fetcher
+                .fetch_pull_request_commits(&resolved.target)
+                .map_err(|err| CliError::usage(err.to_string()))?;
+            Some(fetched).filter(|v| !v.is_empty())
+        }
+    };
+    let workspace_state = args.workspace_state.map(WorkspaceState::from).or_else(|| {
+        if is_pull_request_target_event(env) {
+            Some(WorkspaceState::Base)
+        } else {
+            None
+        }
+    });
+
+    Ok(ResolvedFilingSource {
+        intake: IntakeOptions {
+            pr_title,
+            pr_body,
+            intent: args.intent.clone(),
+            target_paths,
+            patch_content: Some(resolved.diff),
+            all_targets: args.all_targets,
+            workspace_state,
+            linked_issues,
+            commit_messages,
+        },
+        fetched_pr_head_sha: resolved.metadata.head_sha,
+        fetched_pr_labels: Some(resolved.metadata.labels),
+        fetched_pr_actor: resolved.metadata.actor,
+    })
+}
+
+/// Resolves [`FilingSourceArgs`] into a pure [`IntakeOptions`] descriptor and optional fetched PR head SHA,
+/// executing GitHub REST API calls via `fetcher` strictly at the CLI adapter boundary when `--github-pr` is active.
+pub(crate) fn resolve_filing_source_with_fetcher(
+    args: &FilingSourceArgs,
+    stdin: &mut dyn Read,
+    env: &BTreeMap<String, String>,
+    fetcher: &dyn GithubPullRequestFetcher,
+) -> Result<ResolvedFilingSource, CliError> {
+    let client = GithubChecksClient::new();
+    resolve_filing_source_with_issue_and_fetchers(args, None, stdin, env, fetcher, &client)
+}
+
+/// Resolves [`FilingSourceArgs`] and optional `--github-issue` using the live [`GithubChecksClient`].
+pub(crate) fn resolve_filing_source_with_issue(
+    args: &FilingSourceArgs,
+    github_issue: Option<Option<NonZeroU64>>,
+    stdin: &mut dyn Read,
+    env: &BTreeMap<String, String>,
+) -> Result<ResolvedFilingSource, CliError> {
+    let client = GithubChecksClient::new();
+    resolve_filing_source_with_issue_and_fetchers(args, github_issue, stdin, env, &client, &client)
+}
+
 /// Resolves [`FilingSourceArgs`] using the live [`GithubChecksClient`] when `--github-pr` is active.
 pub(crate) fn resolve_filing_source(
     args: &FilingSourceArgs,
     stdin: &mut dyn Read,
     env: &BTreeMap<String, String>,
 ) -> Result<ResolvedFilingSource, CliError> {
-    let client = GithubChecksClient::new();
-    resolve_filing_source_with_fetcher(args, stdin, env, &client)
+    resolve_filing_source_with_issue(args, None, stdin, env)
 }
 
 /// Composable CLI argument group for opt-in GitHub Checks REST API publication.

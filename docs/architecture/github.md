@@ -1,7 +1,7 @@
-# GitHub Platform Adapter: PR Ingestion & Checks Publication
+# GitHub Platform Adapter: PR & Issue Ingestion & Checks Publication
 
 **Status:** Authoritative Architectural Standard  
-**Domain Concept:** Stage-Agnostic Pull Request Ingestion, Outbound Checks Publication, Target Context Resolution & CI Forensics Durability
+**Domain Concept:** Stage-Agnostic Pull Request & Issue Inquiry Ingestion, Outbound Checks Publication, Target Context Resolution & CI Forensics Durability
 
 ---
 
@@ -47,15 +47,16 @@ flowchart LR
 
 ## 2. Target Context Resolution & Pre-Flight Fail-Fast
 
-Both GitHub PR ingestion (`--github-pr [<NUMBER>]`) and GitHub Checks publication (`--publish-github-check`) are strictly **opt-in** and never fire implicitly—even when `GITHUB_ACTIONS=true`.
+GitHub PR ingestion (`--github-pr [<NUMBER>]`), GitHub Issue inquiry ingestion (`--github-issue [<NUMBER>]`), and GitHub Checks publication (`--publish-github-check`) are strictly **opt-in** and never fire implicitly—even when `GITHUB_ACTIONS=true`.
 
-When either option is enabled, Canon Clerk resolves and validates the required GitHub context **up front before any model spend occurs**, failing fast with exit code `2` and an actionable remediation `Hint:` if any required input is missing or malformed. Target resolution executes independently of Branch B `configure` so that zero-candidate short-circuits, static validation failures, credential-skip exits (`--on-missing-credentials skip`), and offline `--caseload` replays all validate and publish consistently.
+When any of these options is enabled, Canon Clerk resolves and validates the required GitHub context **up front before any model spend occurs**, failing fast with exit code `2` and an actionable remediation `Hint:` if any required input is missing or malformed. Target resolution executes independently of Branch B `configure` so that zero-candidate short-circuits, static validation failures, credential-skip exits (`--on-missing-credentials skip`), and offline `--caseload` replays all validate and publish consistently.
 
 | Parameter | Resolution Precedence | Validation & Security Constraints |
 | :--- | :--- | :--- |
-| **Auth Token** | `GITHUB_TOKEN` $\to$ `GH_TOKEN` | Read strictly from environment variables; **never** accepted as a CLI flag and redacted from debug/diagnostic output. Requires `pull-requests: read` for PR ingestion, `issues: read` for linked-issue fetching on private/restricted repos, and `checks: write` for Check Run publication. |
-| **Repository** | `--github-repo <OWNER/REPO>` $\to$ `GITHUB_REPOSITORY` | Shared across filing ingestion (`FilingSourceArgs`) and Check Run publication without flag collisions. Must be a valid `<owner>/<repo>` slug (two non-empty path segments, no whitespace or traversal). |
+| **Auth Token** | `GITHUB_TOKEN` $\to$ `GH_TOKEN` | Read strictly from environment variables; **never** accepted as a CLI flag and redacted from debug/diagnostic output. Requires `pull-requests: read` for PR ingestion, `issues: read` for numbered `--github-issue <NUMBER>` or linked-issue fetching on private/restricted repos, and `checks: write` for Check Run publication. Not required for bare `--github-issue` (zero-API-read from `$GITHUB_EVENT_PATH`). |
+| **Repository** | `--github-repo <OWNER/REPO>` $\to$ `GITHUB_REPOSITORY` | Shared across filing ingestion (`FilingSourceArgs`) and Check Run publication without flag collisions. Must be a valid `<owner>/<repo>` slug (two non-empty path segments, no whitespace or traversal). Not required for bare `--github-issue`. |
 | **Pull Request Number** | `--github-pr <NUMBER>` $\to$ `pull_request.number` in `GITHUB_EVENT_PATH` | Required when `--github-pr` is active; must be a positive integer (`>= 1`). |
+| **Issue Number** | `--github-issue <NUMBER>` $\to$ `issue.number` in `GITHUB_EVENT_PATH` | Required when `--github-issue` is active (scoped to `intake` and `apprise`); must be a positive integer (`>= 1`). |
 | **Head Commit SHA** | `--github-head-sha <SHA>` $\to$ `pull_request.head.sha` in `GITHUB_EVENT_PATH` $\to$ fetched PR API `head.sha` (when `--github-pr` is active) $\to$ `GITHUB_SHA` | Preferring `pull_request.head.sha` over `GITHUB_SHA` ensures triangular fork PRs running under `pull_request_target` annotate the pull request's head commit rather than the base branch; falling back to the fetched PR API `head.sha` enables `--github-pr <NUMBER> --publish-github-check` outside GitHub Actions. |
 | **API Base URL** | `GITHUB_API_URL` $\to$ `https://api.github.com` | Supports GitHub Enterprise Server deployments and hermetic loopback mock servers. |
 | **Check Run Name** | `--github-check-name <NAME>` $\to$ `"Canon Clerk Audit"` | Distinct from the Actions job name to avoid Check Run collisions. |
@@ -126,3 +127,22 @@ When `Canon Clerk Audit` is promoted from advisory to an enforcing required stat
    When the configured bypass label is present on the pull request, `audit` short-circuits immediately after pre-flight target validation—before `discover`, `validate`, `configure`, and any model calls (0 tokens, 0 provider requests, and independent of provider API credentials). Canon Clerk flushes `--output-caseload` (when configured), writes an explicit bypass notice to stdout and `$GITHUB_STEP_SUMMARY`, publishes a GitHub Check Run with `conclusion: "skipped"` (which GitHub treats as non-blocking for required status checks) recording the matched bypass label and triggering actor (`GITHUB_ACTOR` or event `sender.login`) in `output.summary`, and exits with code `0`.
 3. **Collaborator-Only Security Boundary & Workflow Lifecycle:**  
    On GitHub, external fork contributors cannot apply or remove pull request labels; only repository collaborators with `triage` or `write`+ permissions can trigger the bypass, and GitHub's pull request timeline permanently audits who applied the label. Workflows enabling `--github-bypass-label` SHOULD subscribe to both `labeled` and `unlabeled` pull request event types so removing the bypass label immediately re-runs the audit and replaces the `skipped` Check Run on the head commit.
+
+---
+
+## 7. GitHub Issue Inquiry Ingestion (`--github-issue`)
+
+For the prospective design track (`intake` and `apprise`), the CLI driving adapter supports opt-in GitHub Issue ingestion via `--github-issue [<NUMBER>]` while keeping `src/intake/` 100% pure in-memory with zero network or subprocess side effects:
+
+1. **Resolution Modes (Zero-API Event vs. Fail-Fast REST):**
+   - **Bare `--github-issue`:** Reads `issue.number`, `issue.title`, `issue.body`, `issue.labels[].name`, `issue.user.login`, and `issue.html_url` directly from the JSON file at `$GITHUB_EVENT_PATH`, enabling zero-API-read GitHub Actions workflows triggered on `issues: [opened, edited, labeled, reopened]` without requiring `GITHUB_TOKEN` or `GITHUB_REPOSITORY`. Fails fast with exit code `2` and an actionable `Hint:` if `$GITHUB_EVENT_PATH` is missing, unreadable, malformed, or lacks a positive integer `issue.number` (`>= 1`).
+   - **Numbered `--github-issue <NUMBER>`:** Validates `<NUMBER>` as a positive integer (`>= 1`), requires `GITHUB_TOKEN` / `GH_TOKEN` and `--github-repo <OWNER/REPO>` / `GITHUB_REPOSITORY`, and fetches `GET /repos/{owner}/{repo}/issues/{number}` with `Accept: application/vnd.github+json` over the persistent HTTP reactor (`GITHUB_API_URL` override supported). Unlike linked-issue discovery's graceful degradation on `--github-pr`, numbered `--github-issue <NUMBER>` **fails fast with exit code `2`** and an actionable `Hint:` on HTTP `404`, `403`, any other non-2xx status, transport/protocol failures, or when the returned JSON contains a non-null `"pull_request"` key (rejecting pull requests passed as issues).
+   - **Comments & Reactions Excluded:** Consistent with `SPEC.md` §4.2's noise and trust boundary, issue comments and reaction trails are never ingested.
+2. **Caseload Mapping & Precedence:**
+   - Formats the resolved issue deterministically into `.intake.intent`: `#<number>: <title>` (falling back to `#<number>` if title is absent), followed by `Labels: <label1>, <label2>` when non-empty, followed by a blank line and the Markdown `body` when non-empty.
+   - Explicit `--intent <TEXT>` always overrides the formatted issue text (`CLI flag > event/API metadata`, matching `--pr-title`/`--pr-body` precedence on `--github-pr`).
+   - Does **not** populate `.intake.linked_issues`, preserving `SPEC.md` §4.2's PR-linked-issue metadata plane semantics so replaying an issue intake `Caseload` never falsely activates `inspect: [linked_issues]` canons on the contentious track.
+3. **Stage Scoping & Conflict Guards:**
+   - **Exposed only on `intake` and `apprise`:** `--github-issue` appears in CLI `--help` strictly on `intake` and `apprise`.
+   - **Self-Correcting Rejection Elsewhere:** Passing `--github-issue` on contentious-track stages (`docket`, `admit`, `vet`, `audit`) fails fast with exit code `2` and a `Hint:` pointing to `--linked-issue <PATH|->` for PR/diff audits (or `canon-clerk apprise --github-issue` for prospective issue screening). Passing `--github-issue` on `discover` or `validate` fails fast with exit code `2` and a `Hint:` pointing to `canon-clerk apprise --github-issue` or piping `canon-clerk intake --github-issue ... --json | canon-clerk <stage> --caseload -`.
+   - **Mutually Exclusive with `--github-pr`:** Passing both `--github-issue` and `--github-pr` fails fast with exit code `2`. Composes cleanly with positional `TARGETS`, `--canon`, and `apprise`'s default `--all-canons` fallback.

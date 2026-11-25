@@ -16,7 +16,9 @@
 
 use crate::caseload::{Caseload, CaseloadDiscovery};
 use crate::cli::CliError;
-use crate::cli::args::{CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs};
+use crate::cli::args::{
+    CanonSelectionArgs, CaseloadIoArgs, FilingSourceArgs, RejectedGithubIssueArgs,
+};
 use crate::cli::io::ensure_single_stdin_source_with_canons;
 use crate::cli::runners::run_branch_a_discover;
 use crate::telemetry::TelemetrySession;
@@ -66,6 +68,9 @@ pub struct DiscoverArgs {
     pub filing: FilingSourceArgs,
 
     #[command(flatten)]
+    pub rejected_github_issue: RejectedGithubIssueArgs,
+
+    #[command(flatten)]
     pub canons: CanonSelectionArgs,
 
     /// Predicate mode: suppress stdout and indicate candidate canon match presence via exit code (`0` or `1`).
@@ -99,6 +104,8 @@ pub fn run_discover_with_telemetry(
     workspace_root: &Path,
     telemetry: &TelemetrySession<'_>,
 ) -> Result<Caseload, CliError> {
+    args.rejected_github_issue
+        .validate_intermediate("discover")?;
     ensure_single_stdin_source_with_canons(
         &args.filing,
         Some(&args.canons),

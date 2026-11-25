@@ -30,6 +30,7 @@ use crate::intake::IntakeOptions;
 use std::collections::BTreeMap;
 
 pub(super) fn ensure_stage_prefixed_threshold_flags(args: &AdmitArgs) -> Result<(), CliError> {
+    args.rejected_github_issue.validate_contentious("admit")?;
     args.rejected_unqualified.validate(
         "admit",
         "`--admit-threshold <FLOAT>` (or `--docket-threshold <FLOAT>` for upstream macro triage)",
