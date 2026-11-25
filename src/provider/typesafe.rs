@@ -37,7 +37,7 @@ use std::fmt;
 /// - Bare origins (`http://127.0.0.1:8080` or `http://127.0.0.1:8080/`) normalize to `{origin}/v1/systemone`.
 /// - Explicit paths (`https://api.typesafe.ai/v1` or `http://127.0.0.1:8080/v1`) normalize to `{base}/systemone`.
 /// - URLs already ending in `/systemone` are preserved as-is.
-pub fn build_systemone_url(base_url: &str) -> String {
+fn build_systemone_url(base_url: &str) -> String {
     let base = base_url.trim().trim_end_matches('/');
     let is_bare_origin = match base.split_once("://") {
         Some((_, rest)) => !rest.contains('/'),

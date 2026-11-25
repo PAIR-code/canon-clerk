@@ -92,7 +92,7 @@ pub(crate) fn resolve_docket_threshold(
         let parsed = raw_env.parse::<f64>().map_err(|_| {
             CliError::usage(format!(
                 "Invalid threshold `{raw_env}` in `{ENV_DOCKET_THRESHOLD}`: expected a float in `[0.0, 1.0]`.\n  \
-                 Hint: Pass `--docket-threshold <FLOAT>` or set `{ENV_DOCKET_THRESHOLD}=0.5`."
+                 Hint: Pass `--docket-threshold <FLOAT>` or set `{ENV_DOCKET_THRESHOLD}={DEFAULT_DOCKET_THRESHOLD}`."
             ))
         })?;
         return normalize_colorability_score(parsed).map_err(|detail| {

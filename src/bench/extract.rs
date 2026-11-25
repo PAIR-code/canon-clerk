@@ -26,17 +26,17 @@ use std::fmt;
 /// Composite subject identifier supporting both 1D per-canon stages (`apprise`, `docket`, `audit`)
 /// and 2D `(canon_path, file_path)` exhibit assessments (`admit`).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SubjectKey {
+pub(crate) struct SubjectKey {
     /// Repository-relative canon path or identifier.
-    pub canon_path: String,
+    pub(crate) canon_path: String,
     /// Optional exhibit path or plane identifier for micro evidentiary stages (`admit`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exhibit_path: Option<String>,
+    pub(crate) exhibit_path: Option<String>,
 }
 
 impl SubjectKey {
     /// Constructs a 1D canon-scoped subject key (`exhibit_path: None`).
-    pub fn canon(canon_path: impl Into<String>) -> Self {
+    pub(crate) fn canon(canon_path: impl Into<String>) -> Self {
         Self {
             canon_path: canon_path.into(),
             exhibit_path: None,
@@ -44,7 +44,7 @@ impl SubjectKey {
     }
 
     /// Constructs a 2D `(canon_path, exhibit_path)` subject key for `admit` exhibit assessments.
-    pub fn exhibit(canon_path: impl Into<String>, exhibit_path: impl Into<String>) -> Self {
+    pub(crate) fn exhibit(canon_path: impl Into<String>, exhibit_path: impl Into<String>) -> Self {
         Self {
             canon_path: canon_path.into(),
             exhibit_path: Some(exhibit_path.into()),
@@ -52,7 +52,7 @@ impl SubjectKey {
     }
 
     /// Formats a human-readable identifier (`"<canon_path>"` or `"<canon_path> :: <exhibit_path>"`).
-    pub fn display_id(&self) -> String {
+    pub(crate) fn display_id(&self) -> String {
         match &self.exhibit_path {
             Some(exhibit) => format!("{} :: {exhibit}", self.canon_path),
             None => self.canon_path.clone(),
@@ -68,19 +68,19 @@ impl fmt::Display for SubjectKey {
 
 /// Normalized single-trial assessment extracted from a completed `Caseload` stage namespace.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ExtractedAssessment {
+pub(crate) struct ExtractedAssessment {
     /// Stage-specific status label (`"applicable"`, `"docketed"`, `"admitted"`, `"pass"`, etc.).
-    pub status: String,
+    pub(crate) status: String,
     /// Whether the subject crossed the affirmative stage gate (`score >= threshold`).
-    pub is_positive: bool,
+    pub(crate) is_positive: bool,
     /// Normalized continuous heuristic score in `[0.0, 1.0]`.
-    pub score: f64,
+    pub(crate) score: f64,
     /// Model rationale summary justifying the assessment.
-    pub summary: String,
+    pub(crate) summary: String,
 }
 
 /// Extracts deterministic per-subject assessments from `caseload` for `stage`.
-pub fn extract_stage_assessments(
+pub(crate) fn extract_stage_assessments(
     stage: BenchmarkStage,
     caseload: &Caseload,
     threshold: f64,

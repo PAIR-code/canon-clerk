@@ -24,7 +24,7 @@ use crate::provider::{
 use std::collections::BTreeMap;
 
 /// Decodes and classifies an HTTP status code and response payload from a Gemini `/v1beta/decisions` probe.
-pub fn decode_gemini_decisions_probe_response(
+pub(crate) fn decode_gemini_decisions_probe_response(
     status_code: u16,
     body: &str,
     model_specifier: &str,

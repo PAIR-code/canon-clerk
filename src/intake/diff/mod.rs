@@ -17,10 +17,11 @@
 mod ast;
 mod lexer;
 
-pub use ast::assemble_diff_artifacts;
-pub use lexer::{
-    DiffParseError, DiffToken, DiffTokenKind, normalize_diff_path, tokenize_diff, unquote_git_path,
-};
+use ast::assemble_diff_artifacts;
+pub use lexer::DiffParseError;
+use lexer::tokenize_diff;
+#[cfg(test)]
+use lexer::{DiffToken, DiffTokenKind, normalize_diff_path};
 
 use crate::caseload::FileArtifact;
 use std::collections::BTreeMap;

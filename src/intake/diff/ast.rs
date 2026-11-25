@@ -205,7 +205,7 @@ fn apply_hunk_token(
 }
 
 /// Stage 2 Semantic AST Builder: Assembles [`FileArtifact`] records from a [`DiffToken`] slice.
-pub fn assemble_diff_artifacts(
+pub(super) fn assemble_diff_artifacts(
     tokens: &[DiffToken],
 ) -> Result<BTreeMap<String, FileArtifact>, DiffParseError> {
     if tokens.is_empty() {

@@ -17,7 +17,6 @@
 use super::{
     DEFAULT_GEMINI_BASE_URL, DEFAULT_TYPESAFE_BASE_URL, EndpointProber,
     GeminiDecisionsEndpointProber, ProbeEndpointResult, TypesafeEndpointProber,
-    strip_provider_prefix,
 };
 use crate::caseload::{DEFAULT_PROVIDER, ProbeStatus, TYPESAFE_PROVIDER, ThinkingLevel};
 use crate::configure::{
@@ -26,7 +25,7 @@ use crate::configure::{
 use crate::provider::gemini::post_gemini_json;
 use crate::provider::{
     GeminiThinkingConfig, build_pooled_http_client, build_probe_thinking_config,
-    classify_gemini_http_error, extract_gemini_error_detail,
+    classify_gemini_http_error, extract_gemini_error_detail, strip_provider_prefix,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -64,7 +63,7 @@ struct GeminiGenerateContentResponse {
 }
 
 /// Decodes and classifies an HTTP status code and response payload from a Gemini `:generateContent` probe.
-pub fn decode_gemini_probe_response(
+pub(crate) fn decode_gemini_probe_response(
     status_code: u16,
     body: &str,
     model_specifier: &str,

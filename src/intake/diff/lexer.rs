@@ -18,16 +18,16 @@ use std::fmt;
 
 /// Typed lexical token emitted by Stage 1 scanning of a unified diff stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiffToken {
+pub(super) struct DiffToken {
     /// 1-based line number in the input patch stream.
-    pub line_number: usize,
+    pub(super) line_number: usize,
     /// Classified token payload.
-    pub kind: DiffTokenKind,
+    pub(super) kind: DiffTokenKind,
 }
 
 /// Lexical classification of a single line in a Git or POSIX unified diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DiffTokenKind {
+pub(super) enum DiffTokenKind {
     /// `diff --git a/<old> b/<new>` demarcation header.
     DiffGitHeader { old_path: String, new_path: String },
     /// `new file mode <mode>` extended header.
@@ -98,7 +98,7 @@ impl fmt::Display for DiffParseError {
 impl std::error::Error for DiffParseError {}
 
 /// Unquotes a Git path token, decoding C-style escape sequences if enclosed in double quotes.
-pub fn unquote_git_path(raw: &str) -> String {
+fn unquote_git_path(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
         let inner = &trimmed[1..trimmed.len() - 1];
@@ -160,7 +160,7 @@ pub fn unquote_git_path(raw: &str) -> String {
 }
 
 /// Strips standard Git `a/` or `b/` diff prefixes and normalizes path separators to POSIX `/`.
-pub fn normalize_diff_path(raw: &str) -> String {
+pub(super) fn normalize_diff_path(raw: &str) -> String {
     let unquoted = unquote_git_path(raw).replace('\\', "/");
     if unquoted == "/dev/null" {
         return unquoted;
@@ -331,7 +331,7 @@ fn classify_hunk_line(line_number: usize, line: &str) -> Result<DiffTokenKind, D
 }
 
 /// Stage 1 Lexical Scanner: Tokenizes a unified diff string into an ordered stream of [`DiffToken`]s.
-pub fn tokenize_diff(input: &str) -> Result<Vec<DiffToken>, DiffParseError> {
+pub(super) fn tokenize_diff(input: &str) -> Result<Vec<DiffToken>, DiffParseError> {
     if input.trim().is_empty() {
         return Ok(Vec::new());
     }
