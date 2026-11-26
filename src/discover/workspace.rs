@@ -41,7 +41,7 @@ pub struct WorkspaceSnapshot {
     /// Optional materialized UTF-8 file contents keyed by workspace-relative POSIX path (populated JIT for target-path sweeps).
     pub file_contents: BTreeMap<String, String>,
     /// Raw UTF-8 contents of discovered `<scope>/.canons/policy-chains.yaml` policy files keyed by workspace-relative POSIX path.
-    pub policy_configs: BTreeMap<String, String>,
+    pub policy_files: BTreeMap<String, String>,
     /// Workspace-relative POSIX paths whose `--workspace-state base` diff overlay has already been applied (ensuring idempotency).
     pub applied_base_diffs: BTreeSet<String>,
 }
@@ -78,7 +78,7 @@ impl WorkspaceSnapshot {
     }
 
     /// Inserts a `<scope>/.canons/policy-chains.yaml` policy file and its raw UTF-8 YAML content into the snapshot.
-    pub fn with_policy_config(
+    pub fn with_policy_file(
         mut self,
         path: impl Into<String>,
         raw_yaml: impl Into<String>,
@@ -88,7 +88,7 @@ impl WorkspaceSnapshot {
         {
             self.existing_files.insert(normalized.clone());
             if is_direct_policy_file_path(&normalized) {
-                self.policy_configs.insert(normalized, raw_yaml.into());
+                self.policy_files.insert(normalized, raw_yaml.into());
             }
         }
         self
@@ -232,7 +232,7 @@ impl WorkspaceSnapshot {
         walk_workspace_files(workspace_root, workspace_root, &mut existing_files)?;
 
         let mut canons = BTreeMap::new();
-        let mut policy_configs = BTreeMap::new();
+        let mut policy_files = BTreeMap::new();
         for rel_path in &existing_files {
             if is_direct_policy_file_path(rel_path) {
                 let full_path = workspace_root.join(rel_path);
@@ -240,7 +240,7 @@ impl WorkspaceSnapshot {
                     path: rel_path.clone(),
                     message: err.to_string(),
                 })?;
-                policy_configs.insert(rel_path.clone(), raw_yaml);
+                policy_files.insert(rel_path.clone(), raw_yaml);
                 continue;
             }
             if !rel_path.ends_with(CANON_FILE_EXT) {
@@ -283,7 +283,7 @@ impl WorkspaceSnapshot {
             existing_files,
             canons,
             file_contents: BTreeMap::new(),
-            policy_configs,
+            policy_files,
             applied_base_diffs: BTreeSet::new(),
         })
     }

@@ -139,6 +139,11 @@ pub struct DiscoveredPolicyFiles {
 
 /// Discovers and reads all direct `<scope>/.canons/policy-chains.yaml` files strictly within `workspace_root`
 /// on disk (trusted-checkout boundary; never ascends above `workspace_root`).
+///
+/// # Errors
+///
+/// Returns [`PolicyError::Io`] if `workspace_root` cannot be read or if reading any discovered
+/// direct `<scope>/.canons/policy-chains.yaml` file as UTF-8 fails.
 pub fn discover_policy_files_on_disk(
     workspace_root: &Path,
 ) -> Result<DiscoveredPolicyFiles, PolicyError> {

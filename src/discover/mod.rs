@@ -77,7 +77,7 @@ pub enum DiscoverError {
     /// Target or canon path attempts directory traversal (`..`) escaping the workspace root.
     PathEscapesWorkspace { path: String },
     /// Malformed or schema-invalid `<scope>/.canons/policy-chains.yaml` policy file (`SPEC.md` §7.2).
-    InvalidPolicyConfig { path: String, message: String },
+    InvalidPolicyFile { path: String, message: String },
     /// Workspace filesystem traversal or file read error.
     Io { path: String, message: String },
 }
@@ -102,7 +102,7 @@ impl fmt::Display for DiscoverError {
                 "Path `{path}` escapes the workspace root directory.\n  \
                  Hint: All target and canon paths must reside within the repository workspace."
             ),
-            Self::InvalidPolicyConfig { path, message } => write!(
+            Self::InvalidPolicyFile { path, message } => write!(
                 f,
                 "Invalid workspace policy file `{path}`: {message}\n  \
                  Hint: Define a top-level `canon-policy-chain:` list of `allow:`/`deny:` entries \
@@ -126,7 +126,7 @@ impl From<PolicyError> for DiscoverError {
     fn from(err: PolicyError) -> Self {
         match err {
             PolicyError::InvalidPolicyFile { path, message } => {
-                Self::InvalidPolicyConfig { path, message }
+                Self::InvalidPolicyFile { path, message }
             }
             PolicyError::Io { path, message } => Self::Io { path, message },
         }
@@ -159,7 +159,7 @@ pub fn execute_discover(
         );
     }
 
-    let policy_set = WorkspacePolicySet::compile(&workspace.policy_configs)?;
+    let policy_set = WorkspacePolicySet::compile(&workspace.policy_files)?;
     let policy_files = policy_set.policy_files().to_vec();
     let active_policy = options.canon_patterns.is_empty().then_some(&policy_set);
 
@@ -967,7 +967,7 @@ mod tests {
 
         #[test]
         fn test_ordered_first_match_wins_and_default_allow() {
-            let ws = monorepo_workspace().with_policy_config(
+            let ws = monorepo_workspace().with_policy_file(
                 ".canons/policy-chains.yaml",
                 "canon-policy-chain:\n  - allow: \"architecture/foo\"\n  - deny: \"architecture/**\"\n",
             );
@@ -1003,15 +1003,15 @@ mod tests {
         #[test]
         fn test_nearest_scope_cascade_fallthrough_and_subtree_isolation() {
             let ws = monorepo_workspace()
-                .with_policy_config(
+                .with_policy_file(
                     ".canons/policy-chains.yaml",
                     "canon-policy-chain:\n  - deny: \"style/bar\"\n",
                 )
-                .with_policy_config(
+                .with_policy_file(
                     "packages/ui/.canons/policy-chains.yaml",
                     "canon-policy-chain:\n  - allow: \"parents:style/bar\"\n  - deny: \"parents:architecture/foo\"\n",
                 )
-                .with_policy_config(
+                .with_policy_file(
                     "packages/ui/vendor/.canons/policy-chains.yaml",
                     "canon-policy-chain:\n  - deny: all\n",
                 );
@@ -1069,12 +1069,12 @@ mod tests {
         #[test]
         fn test_parents_selector_multilevel_and_root_noop() {
             let ws = monorepo_workspace()
-                .with_policy_config(
+                .with_policy_file(
                     ".canons/policy-chains.yaml",
                     // `parents:` in root policy matches zero canons
                     "canon-policy-chain:\n  - deny: \"parents:**\"\n",
                 )
-                .with_policy_config(
+                .with_policy_file(
                     "packages/ui/nested/.canons/policy-chains.yaml",
                     // Disables both root `architecture/foo` and intermediate `ui/tokens`
                     "canon-policy-chain:\n  - deny: \"parents:architecture/foo\"\n  - deny: \"parents:ui/*\"\n",
@@ -1128,7 +1128,7 @@ mod tests {
 
         #[test]
         fn test_canon_md_extension_normalization_and_exhibits_filtering() {
-            let ws = monorepo_workspace().with_policy_config(
+            let ws = monorepo_workspace().with_policy_file(
                 ".canons/policy-chains.yaml",
                 "canon-policy-chain:\n  - deny: \"architecture/foo.canon.md\"\n    exhibits: \"src/legacy/**\"\n  - deny: \"style/*.canon.md\"\n    exhibits: [\"src/legacy/**\", \"src/lib.rs\"]\n",
             );
@@ -1164,11 +1164,11 @@ mod tests {
         #[test]
         fn test_all_canons_and_metadata_only_respect_unconditional_rules_only() {
             let ws = monorepo_workspace()
-                .with_policy_config(
+                .with_policy_file(
                     ".canons/policy-chains.yaml",
                     "canon-policy-chain:\n  - deny: \"architecture/foo\"\n    exhibits: \"src/**\"\n  - deny: \"style/bar\"\n  - deny: \"git/pr-title\"\n    exhibits: \"src/**\"\n",
                 )
-                .with_policy_config(
+                .with_policy_file(
                     "packages/ui/.canons/policy-chains.yaml",
                     "canon-policy-chain:\n  - deny: \"ui/tokens\"\n",
                 );
@@ -1216,7 +1216,7 @@ mod tests {
             );
 
             // Unconditional deny drops metadata-only canon
-            let ws_denied_meta = monorepo_workspace().with_policy_config(
+            let ws_denied_meta = monorepo_workspace().with_policy_file(
                 ".canons/policy-chains.yaml",
                 "canon-policy-chain:\n  - deny: \"git/pr-title\"\n",
             );
@@ -1239,7 +1239,7 @@ mod tests {
 
         #[test]
         fn test_cli_precedence_canon_no_builtins_and_builtins() {
-            let ws = monorepo_workspace().with_builtins().with_policy_config(
+            let ws = monorepo_workspace().with_builtins().with_policy_file(
                 ".canons/policy-chains.yaml",
                 "canon-policy-chain:\n  - allow: \"builtin:cli/**\"\n  - deny: \"builtin:**\"\n  - deny: \"architecture/foo\"\n",
             );
@@ -1326,7 +1326,7 @@ mod tests {
         fn test_nested_policy_ignored_and_workspace_state_base_ignores_diff_policy_injection() {
             let ws = monorepo_workspace()
                 .with_file(".canons/security/policy-chains.yaml")
-                .with_policy_config(".canons/policy-chains.yaml", "canon-policy-chain: []\n");
+                .with_policy_file(".canons/policy-chains.yaml", "canon-policy-chain: []\n");
 
             // Untrusted PR diff attempts to inject `- deny: all` into `.canons/policy-chains.yaml` under `--workspace-state base`
             let mut diffs = BTreeMap::new();
@@ -1452,7 +1452,7 @@ mod tests {
             let ws = WorkspaceSnapshot::new()
                 .with_file("src/lib.rs")
                 .with_file("scripts/run.py")
-                .with_policy_config(
+                .with_policy_file(
                     ".canons/policy-chains.yaml",
                     "canon-policy-chain:\n  - deny: all\n",
                 )
