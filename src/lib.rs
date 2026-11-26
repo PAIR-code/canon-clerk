@@ -148,8 +148,7 @@ pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff}
 pub use policy::{
     DiscoveredPolicyFiles, POLICY_CHAINS_FILENAME, PolicyAction, PolicyError, PolicyFilePathKind,
     WorkspacePolicySet, classify_policy_file_path, detect_nested_policy_files,
-    discover_policy_files_on_disk, evaluate_scope_cascade, file_scope_chain,
-    is_direct_policy_file_path, scope_ancestor_chain, validate_no_traversal_or_absolute,
+    discover_policy_files_on_disk, is_direct_policy_file_path,
 };
 pub use probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiDecisionsEndpointProber,

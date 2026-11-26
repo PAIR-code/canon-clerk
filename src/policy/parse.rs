@@ -338,7 +338,7 @@ fn parse_exhibits(path: &str, idx: usize, value: &Value) -> Result<Vec<GlobPatte
 ///
 /// Returns [`PolicyError::InvalidPolicyFile`] when `raw_pattern` begins with `/` or contains
 /// `..` directory traversal segments.
-pub fn validate_no_traversal_or_absolute(
+pub(super) fn validate_no_traversal_or_absolute(
     path: &str,
     context: &str,
     raw_pattern: &str,

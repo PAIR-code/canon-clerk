@@ -23,7 +23,6 @@ use crate::discover::glob_matcher::{
     GlobPattern, is_ignored_path, normalize_workspace_path, scope_relative_path,
 };
 use parse::parse_policy_file;
-pub use parse::validate_no_traversal_or_absolute;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -220,7 +219,7 @@ pub enum PolicyAction {
 
 /// Evaluates a nearest-scope-first lexical cascade across `scopes`, stopping at the first
 /// scope whose evaluator returns `Some(PolicyAction)`.
-pub fn evaluate_scope_cascade<C, F>(
+fn evaluate_scope_cascade<C, F>(
     configs_by_scope: &BTreeMap<Option<String>, C>,
     scopes: &[Option<String>],
     mut evaluate_scope: F,
@@ -241,7 +240,7 @@ where
 
 /// Returns the ordered nearest-scope-first ancestor scope chain for a workspace-relative file path:
 /// `[deepest_dir, parent_dir, ..., None (repo root)]`.
-pub fn file_scope_chain(file_path: &str) -> Vec<Option<String>> {
+fn file_scope_chain(file_path: &str) -> Vec<Option<String>> {
     let clean = file_path.trim().replace('\\', "/");
     let trimmed = clean.trim_start_matches("./").trim_matches('/');
     let parent = trimmed.rsplit_once('/').map(|(dir, _)| dir);
@@ -250,7 +249,7 @@ pub fn file_scope_chain(file_path: &str) -> Vec<Option<String>> {
 
 /// Returns the ordered nearest-scope-first ancestor scope chain starting at `start_scope`
 /// and terminating at `None` (repository root).
-pub fn scope_ancestor_chain(start_scope: Option<&str>) -> Vec<Option<String>> {
+fn scope_ancestor_chain(start_scope: Option<&str>) -> Vec<Option<String>> {
     let mut chain = Vec::new();
     let mut current = start_scope
         .map(|s| s.trim_matches('/'))
