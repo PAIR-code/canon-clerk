@@ -16,9 +16,9 @@
 //! and bipartite `inspect:` plane evaluation for `discover`.
 
 use super::glob_matcher::{GlobPattern, scope_relative_path};
-use super::policy::WorkspacePolicySet;
 use crate::canon::{Canon, CanonScope, InspectToken};
 use crate::caseload::CaseloadIntake;
+use crate::policy::WorkspacePolicySet;
 use std::collections::BTreeSet;
 
 pub(super) struct EvaluatedCanonMatch {

@@ -80,7 +80,7 @@ Within the local workspace, discovery locates repository canons:
   ```text
   **/.canons/**/*.canon.md
   ```
-  Non-canon files (such as `.canons/README.md`, `.canons/AGENTS.md`, and declarative policy configs `.canons/config.yaml` governed by [Section 7](#7-workspace-policy-configuration-canonsconfigyaml)) MUST be ignored by default canon discovery.
+  Non-canon files (such as `.canons/README.md`, `.canons/AGENTS.md`, and declarative policy chain files `.canons/policy-chains.yaml` governed by [Section 7](#7-workspace-policy-chains-canonspolicy-chainsyaml)) MUST be ignored by default canon discovery.
   Implementations MAY allow or use a different pattern, for example to accommodate project-specific configuration.
 * **Global Canons:** Canons residing in the workspace root's `.canons/` directory are **global** and apply across the entire repository.
 * **Scoped Canons (Monorepo Packages):** Canons MAY reside within subdirectories, such as monorepo packages or services:
@@ -348,25 +348,25 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
 
 ---
 
-## 7. Workspace Policy Configuration (`.canons/config.yaml`)
+## 7. Workspace Policy Chains (`.canons/policy-chains.yaml`)
 
-Workspace policy configuration provides a declarative, version-controlled mechanism for repositories and monorepo packages to toggle canons on or off and carve out exempted path globs from `<scope>/` downward—without forking rule packs or authoring custom `.canon.md` files.
+Workspace policy chain files provide a declarative, version-controlled mechanism for repositories and monorepo packages to toggle canons on or off and carve out exempted path globs from `<scope>/` downward—without forking rule packs or authoring custom `.canon.md` files.
 
 ### 7.1 File Location, Scope Boundary & Trust Boundary
 
-* **Canonical Path:** Policy configuration files MUST reside at `<scope>/.canons/config.yaml` as a direct child of a `.canons/` directory. Alternate filenames (such as `config.yml`, `.canon-clerk.yaml`, or root-level config files) MUST NOT be loaded.
-* **Unified Jurisdiction:** `<scope>/.canons/config.yaml` governs `<scope>/**`, sharing the exact same scope boundary and subordination rules ([Section 3.2](#32-workspace-discovery--scoping)—no `../` traversal outside `<scope>/`) as `<scope>/.canons/**/*.canon.md`.
-* **No Nesting Inside `.canons/`:** Config files placed in topical subdirectories inside `.canons/` (e.g., `.canons/security/config.yaml`) MUST be ignored and SHOULD emit a non-fatal diagnostic warning.
+* **Canonical Path:** Policy chain files MUST reside at `<scope>/.canons/policy-chains.yaml` as a direct child of a `.canons/` directory. Alternate filenames (such as `.canons/config.yaml`, `config.yml`, `policy-chains.yml`, `.canon-clerk.yaml`, or root-level config files) MUST NOT be loaded.
+* **Unified Jurisdiction:** `<scope>/.canons/policy-chains.yaml` governs `<scope>/**`, sharing the exact same scope boundary and subordination rules ([Section 3.2](#32-workspace-discovery--scoping)—no `../` traversal outside `<scope>/`) as `<scope>/.canons/**/*.canon.md`.
+* **No Nesting Inside `.canons/`:** Policy files placed in topical subdirectories inside `.canons/` (e.g., `.canons/security/policy-chains.yaml`) MUST be ignored and SHOULD emit a non-fatal diagnostic warning.
 * **Workspace Root Boundary:** Discovery MUST be bounded by the workspace / Git repository root and MUST NOT traverse above it.
-* **Security Boundary (`--workspace-state base`):** When evaluating untrusted changes against a trusted base checkout (e.g., GitHub Actions `pull_request_target` with `--workspace-state base`), `.canons/config.yaml` MUST always be read from the trusted checkout on disk and MUST NOT be patched from in-flight diff streams, preventing untrusted PRs from injecting `- deny: all` to bypass CI.
-* **Credential Isolation:** `.canons/config.yaml` strictly governs declarative canon and exhibit policy. Runtime provider credentials, endpoint URLs, and model bindings MUST remain outside the workspace (`~/.config/canon-clerk/config.json`) and MUST be rejected if present in `.canons/config.yaml`.
+* **Security Boundary (`--workspace-state base`):** When evaluating untrusted changes against a trusted base checkout (e.g., GitHub Actions `pull_request_target` with `--workspace-state base`), `.canons/policy-chains.yaml` MUST always be read from the trusted checkout on disk and MUST NOT be patched from in-flight diff streams, preventing untrusted PRs from injecting `- deny: all` to bypass CI.
+* **Repo-Policy vs. Clerk-Runtime Isolation:** `.canons/policy-chains.yaml` strictly governs declarative workspace policy chains (such as `canon-policy-chain:`). Clerk runtime knobs—provider credentials, endpoint URLs, model bindings, and execution/character/token budgets—MUST remain outside the workspace (`~/.config/canon-clerk/config.json`, environment variables, and CLI flags) and MUST be rejected if present in `.canons/policy-chains.yaml`.
 
 ### 7.2 Schema & Validation Contract
 
-A `.canons/config.yaml` file MUST be a valid UTF-8 YAML mapping. An empty file or `canon-policy-chain: []` is a valid no-op that falls through to the default **`allow`** policy.
+A `.canons/policy-chains.yaml` file MUST be a valid UTF-8 YAML mapping. An empty file or `canon-policy-chain: []` is a valid no-op that falls through to the default **`allow`** policy.
 
 ```yaml
-# <scope>/.canons/config.yaml
+# <scope>/.canons/policy-chains.yaml
 # Evaluated top-to-bottom; first match wins (default: allow).
 canon-policy-chain:
   # Deny all builtins on third-party and generated files
@@ -377,7 +377,7 @@ canon-policy-chain:
   - deny: "builtin:api-design/**"
     exhibits: "src/legacy/**"
 
-  # In a child scope (e.g. packages/ui/.canons/config.yaml), disable an
+  # In a child scope (e.g. packages/ui/.canons/policy-chains.yaml), disable an
   # inherited repo/ancestor canon without breaking subordination (no ../)
   - deny: "parents:architecture/foo"
 
@@ -392,7 +392,7 @@ canon-policy-chain:
   * **Action & Canon Selector (REQUIRED):** Exactly one action key—`allow` or `deny`—whose value is a non-empty `<canon-selector>` string:
     * `all` — matches every canon in scope.
     * `builtin:<path-or-glob>` — matches embedded built-in standard canons (e.g., `builtin:**`, `builtin:api-design/**`, `builtin:canon-authoring/*`).
-    * `parents:<path-or-glob>` — pseudo-realm matching local canons residing in any strictly enclosing ancestor `<ancestor>/.canons/` scope by their `.canons/`-relative diagnostic path ([Section 4.2](#42-deterministic-derivation-rules)), allowing child scopes to selectively override inherited canons without `../` traversal or hardcoded repo-root paths. In root `.canons/config.yaml`, `parents:` selectors match zero canons.
+    * `parents:<path-or-glob>` — pseudo-realm matching local canons residing in any strictly enclosing ancestor `<ancestor>/.canons/` scope by their `.canons/`-relative diagnostic path ([Section 4.2](#42-deterministic-derivation-rules)), allowing child scopes to selectively override inherited canons without `../` traversal or hardcoded repo-root paths. In root `.canons/policy-chains.yaml`, `parents:` selectors match zero canons.
     * `<path-or-glob>` — matches local canons residing inside `<scope>/.canons/` (evaluated relative to `<scope>/.canons/`).
     * **Extension Normalization:** The canonical selector form is extensionless (matching [Section 4.2](#42-deterministic-derivation-rules) diagnostic paths and `builtin:`/`<pack>:` references). An optional trailing `.canon.md` suffix MUST be accepted and stripped during normalization for both exact references and globs.
     * **Glob Matching:** Selectors support standard glob syntax (`*`, `**`, `{alt1,alt2}`) without implicit directory-prefix expansion; subtrees MUST be matched explicitly using `/*` or `/**`.
@@ -400,9 +400,9 @@ canon-policy-chain:
     * **Omitted `exhibits:`** matches unconditionally across all exhibit planes (including metadata-only filings and plenary `--all-canons` discovery).
     * **Present `exhibits:`** filters matching file exhibits only. A canon is dropped only if zero triggered exhibits survive policy filtering.
 * **Additive Exclusions:** Path exclusions declared via `exhibits:` MUST remain additive on top of built-in default noise exclusions (e.g., `.git`, `node_modules`, build outputs).
-* **Fail-Fast Schema Validation:** Implementations MUST fail fast (CLI exit code `2`) if any discovered `.canons/config.yaml` contains:
+* **Fail-Fast Schema Validation:** Implementations MUST fail fast (CLI exit code `2`) if any discovered `.canons/policy-chains.yaml` contains:
   * Malformed YAML or a non-mapping root document.
-  * Unrecognized top-level or rule keys, including runtime credential/provider keys (`providers`, `defaults`, `nodes`, `apiKey`, etc.).
+  * Unrecognized top-level or rule keys, including clerk runtime credential/provider/budget keys (`providers`, `defaults`, `nodes`, `apiKey`, `reasoning_budget`, etc.).
   * Rule entries missing both `allow` and `deny`, or combining both `allow` and `deny` in the same entry.
   * Empty or syntactically invalid glob patterns in canon selectors or `exhibits:`.
   * Directory traversal (`../`) in canon selectors or `exhibits:`.
@@ -411,19 +411,19 @@ canon-policy-chain:
 
 * **Ordered First-Match-Wins Chain:** Policy rules evaluate in declaration order over `(canon, exhibit)` pairs, stopping at the **first matching rule** and defaulting to **`allow`** if no rule matches.
 * **Implicit Lexical Cascade (Nearest-Scope-First):**
-  * For any target file exhibit under `<scope>/`, rules evaluate in order `[child <scope>/.canons/config.yaml -> parent ... -> root .canons/config.yaml -> implicit allow]`, stopping at the first match.
-  * When no file exhibit anchors evaluation (metadata-only filings or `--all-canons`), rules anchor at the canon's own scope (`[<canon-scope>/.canons/config.yaml -> ancestor ... -> root .canons/config.yaml -> implicit allow]`, where global and `builtin:*` canons have `<canon-scope>` equal to the repository root).
+  * For any target file exhibit under `<scope>/`, rules evaluate in order `[child <scope>/.canons/policy-chains.yaml -> parent ... -> root .canons/policy-chains.yaml -> implicit allow]`, stopping at the first match.
+  * When no file exhibit anchors evaluation (metadata-only filings or `--all-canons`), rules anchor at the canon's own scope (`[<canon-scope>/.canons/policy-chains.yaml -> ancestor ... -> root .canons/policy-chains.yaml -> implicit allow]`, where global and `builtin:*` canons have `<canon-scope>` equal to the repository root).
 * **Fall-Through & Subtree Isolation Without `root: true`:**
-  * A child config with targeted rules overrides matching `(canon, exhibit)` pairs and falls through to ancestor configs for everything else.
-  * A child config ending with `- deny: all` halts fall-through completely, isolating vendored or transplanted subtrees.
+  * A child policy file with targeted rules overrides matching `(canon, exhibit)` pairs and falls through to ancestor policy files for everything else.
+  * A child policy file ending with `- deny: all` halts fall-through completely, isolating vendored or transplanted subtrees.
 
 ### 7.4 CLI Precedence
 
-Explicit CLI flags MUST take precedence over workspace `.canons/config.yaml`:
+Explicit CLI flags MUST take precedence over workspace `.canons/policy-chains.yaml`:
 
-* `--canon <selector>` explicitly overrides `config.yaml` `deny` rules for the targeted canon(s).
-* `--no-builtins` excludes built-in canons regardless of `allow: "builtin:..."` rules in `config.yaml`.
-* `--builtins` remains the positive-polarity corpus-loading toggle (default-on) and does NOT bypass `config.yaml` `deny` rules.
+* `--canon <selector>` explicitly overrides `policy-chains.yaml` `deny` rules for the targeted canon(s).
+* `--no-builtins` excludes built-in canons regardless of `allow: "builtin:..."` rules in `policy-chains.yaml`.
+* `--builtins` remains the positive-polarity corpus-loading toggle (default-on) and does NOT bypass `policy-chains.yaml` `deny` rules.
 
 ### 7.5 Extensibility (Informative)
 

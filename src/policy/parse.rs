@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fail-fast YAML schema parser and validator for `<scope>/.canons/config.yaml` (`SPEC.md` §7.2).
+//! Fail-fast YAML schema parser and validator for `<scope>/.canons/policy-chains.yaml` (`SPEC.md` §7.2).
 
-use super::{CompiledPolicyConfig, CompiledPolicyRule, PolicyAction, PolicyCanonSelector};
+use super::{
+    CompiledCanonPolicyRule, CompiledPolicyFile, PolicyAction, PolicyCanonSelector, PolicyError,
+};
 use crate::canon::CANON_FILE_EXT;
-use crate::discover::DiscoverError;
 use crate::discover::glob_matcher::GlobPattern;
 use serde_yaml::Value;
 
-const POLICY_CHAIN_KEY: &str = "canon-policy-chain";
+const CANON_POLICY_CHAIN_KEY: &str = "canon-policy-chain";
 
-const RUNTIME_CREDENTIAL_KEYS: &[&str] = &[
+const RUNTIME_ISOLATION_KEYS: &[&str] = &[
     "providers",
     "defaults",
     "nodes",
@@ -37,27 +38,37 @@ const RUNTIME_CREDENTIAL_KEYS: &[&str] = &[
     "credentials",
     "thinking_level",
     "reasoning_budget",
+    "diff_head_lines",
+    "diffHeadLines",
+    "max_file_chars",
+    "maxFileChars",
+    "max_total_chars",
+    "maxTotalChars",
 ];
 
 const DEFERRED_TOP_LEVEL_KEYS: &[&str] = &["validate", "packs"];
 
-pub(super) fn parse_policy_config(
+pub(super) fn parse_policy_file(
     path: &str,
     raw_yaml: &str,
-) -> Result<CompiledPolicyConfig, DiscoverError> {
+) -> Result<CompiledPolicyFile, PolicyError> {
     if raw_yaml.trim().is_empty() {
-        return Ok(CompiledPolicyConfig { rules: Vec::new() });
+        return Ok(CompiledPolicyFile {
+            canon_policy_chain: Vec::new(),
+        });
     }
 
     let value: Value = serde_yaml::from_str(raw_yaml)
-        .map_err(|err| invalid_config(path, format!("Malformed YAML: {err}")))?;
+        .map_err(|err| invalid_policy(path, format!("Malformed YAML: {err}")))?;
 
     if value.is_null() {
-        return Ok(CompiledPolicyConfig { rules: Vec::new() });
+        return Ok(CompiledPolicyFile {
+            canon_policy_chain: Vec::new(),
+        });
     }
 
     let Some(root) = value.as_mapping() else {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             "Root YAML document must be a mapping (e.g., `canon-policy-chain: [...]`).",
         ));
@@ -65,26 +76,30 @@ pub(super) fn parse_policy_config(
 
     for key in root.keys() {
         let Some(key_str) = key.as_str() else {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
-                "Top-level keys in `.canons/config.yaml` must be strings.",
+                "Top-level keys in `.canons/policy-chains.yaml` must be strings.",
             ));
         };
-        if key_str != POLICY_CHAIN_KEY {
+        if key_str != CANON_POLICY_CHAIN_KEY {
             return Err(unknown_key_error(path, key_str, "top-level"));
         }
     }
 
-    let Some(rules_val) = root.get(Value::String(POLICY_CHAIN_KEY.to_string())) else {
-        return Ok(CompiledPolicyConfig { rules: Vec::new() });
+    let Some(rules_val) = root.get(Value::String(CANON_POLICY_CHAIN_KEY.to_string())) else {
+        return Ok(CompiledPolicyFile {
+            canon_policy_chain: Vec::new(),
+        });
     };
 
     if rules_val.is_null() {
-        return Ok(CompiledPolicyConfig { rules: Vec::new() });
+        return Ok(CompiledPolicyFile {
+            canon_policy_chain: Vec::new(),
+        });
     }
 
     let Some(rules_seq) = rules_val.as_sequence() else {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             "`canon-policy-chain` must be a YAML sequence of policy entry mappings.",
         ));
@@ -92,38 +107,40 @@ pub(super) fn parse_policy_config(
 
     let mut rules = Vec::with_capacity(rules_seq.len());
     for (idx, item) in rules_seq.iter().enumerate() {
-        rules.push(parse_policy_rule(path, idx, item)?);
+        rules.push(parse_canon_policy_rule(path, idx, item)?);
     }
 
-    Ok(CompiledPolicyConfig { rules })
+    Ok(CompiledPolicyFile {
+        canon_policy_chain: rules,
+    })
 }
 
-fn parse_policy_rule(
+fn parse_canon_policy_rule(
     path: &str,
     idx: usize,
     item: &Value,
-) -> Result<CompiledPolicyRule, DiscoverError> {
+) -> Result<CompiledCanonPolicyRule, PolicyError> {
     let Some(mapping) = item.as_mapping() else {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             format!(
-                "`{POLICY_CHAIN_KEY}[{idx}]` must be a YAML mapping specifying `allow` or `deny`."
+                "`{CANON_POLICY_CHAIN_KEY}[{idx}]` must be a YAML mapping specifying `allow` or `deny`."
             ),
         ));
     };
 
     for key in mapping.keys() {
         let Some(key_str) = key.as_str() else {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
-                format!("`{POLICY_CHAIN_KEY}[{idx}]` keys must be strings."),
+                format!("`{CANON_POLICY_CHAIN_KEY}[{idx}]` keys must be strings."),
             ));
         };
         if !matches!(key_str, "allow" | "deny" | "exhibits") {
             return Err(unknown_key_error(
                 path,
                 key_str,
-                &format!("`{POLICY_CHAIN_KEY}[{idx}]`"),
+                &format!("`{CANON_POLICY_CHAIN_KEY}[{idx}]`"),
             ));
         }
     }
@@ -135,23 +152,27 @@ fn parse_policy_rule(
         (Some(v), None) => (PolicyAction::Allow, v),
         (None, Some(v)) => (PolicyAction::Deny, v),
         (Some(_), Some(_)) => {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
-                format!("`{POLICY_CHAIN_KEY}[{idx}]` cannot specify both `allow` and `deny`."),
+                format!(
+                    "`{CANON_POLICY_CHAIN_KEY}[{idx}]` cannot specify both `allow` and `deny`."
+                ),
             ));
         }
         (None, None) => {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
-                format!("`{POLICY_CHAIN_KEY}[{idx}]` must specify either `allow` or `deny`."),
+                format!("`{CANON_POLICY_CHAIN_KEY}[{idx}]` must specify either `allow` or `deny`."),
             ));
         }
     };
 
     let Some(selector_str) = selector_val.as_str() else {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
-            format!("`{POLICY_CHAIN_KEY}[{idx}]` action selector must be a non-empty string."),
+            format!(
+                "`{CANON_POLICY_CHAIN_KEY}[{idx}]` action selector must be a non-empty string."
+            ),
         ));
     };
     let selector = parse_canon_selector(path, idx, selector_str)?;
@@ -161,7 +182,7 @@ fn parse_policy_rule(
         Some(ex_val) => Some(parse_exhibits(path, idx, ex_val)?),
     };
 
-    Ok(CompiledPolicyRule {
+    Ok(CompiledCanonPolicyRule {
         action,
         selector,
         exhibits,
@@ -172,12 +193,12 @@ fn parse_canon_selector(
     path: &str,
     idx: usize,
     raw: &str,
-) -> Result<PolicyCanonSelector, DiscoverError> {
+) -> Result<PolicyCanonSelector, PolicyError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
-            format!("`{POLICY_CHAIN_KEY}[{idx}]` canon selector must not be empty."),
+            format!("`{CANON_POLICY_CHAIN_KEY}[{idx}]` canon selector must not be empty."),
         ));
     }
 
@@ -196,10 +217,10 @@ fn parse_canon_selector(
     }
 
     if trimmed.starts_with("tag:") || trimmed.starts_with("inspect:") {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             format!(
-                "`{POLICY_CHAIN_KEY}[{idx}]` selector `{trimmed}` uses a deferred v1 prefix (`tag:`/`inspect:` are not supported in v1)."
+                "`{CANON_POLICY_CHAIN_KEY}[{idx}]` selector `{trimmed}` uses a deferred v1 prefix (`tag:`/`inspect:` are not supported in v1)."
             ),
         ));
     }
@@ -213,55 +234,51 @@ fn parse_selector_glob(
     idx: usize,
     prefix: &str,
     raw_pattern: &str,
-) -> Result<GlobPattern, DiscoverError> {
+) -> Result<GlobPattern, PolicyError> {
     let trimmed = raw_pattern.trim();
     if trimmed.is_empty() {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             format!(
-                "`{POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}` must not be empty."
+                "`{CANON_POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}` must not be empty."
             ),
         ));
     }
     validate_no_traversal_or_absolute(
         path,
-        &format!("`{POLICY_CHAIN_KEY}[{idx}]` selector"),
+        &format!("`{CANON_POLICY_CHAIN_KEY}[{idx}]` selector"),
         trimmed,
     )?;
 
     let stripped = strip_trailing_canon_ext(trimmed);
     if stripped.trim().is_empty() {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             format!(
-                "`{POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}` is empty after extension normalization."
+                "`{CANON_POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}` is empty after extension normalization."
             ),
         ));
     }
 
     GlobPattern::parse(stripped).map_err(|err| {
-        invalid_config(
+        invalid_policy(
             path,
-            format!("`{POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}`: {err}"),
+            format!("`{CANON_POLICY_CHAIN_KEY}[{idx}]` selector `{prefix}{raw_pattern}`: {err}"),
         )
     })
 }
 
-fn parse_exhibits(
-    path: &str,
-    idx: usize,
-    value: &Value,
-) -> Result<Vec<GlobPattern>, DiscoverError> {
+fn parse_exhibits(path: &str, idx: usize, value: &Value) -> Result<Vec<GlobPattern>, PolicyError> {
     let raw_items: Vec<&str> = match value {
         Value::String(s) => vec![s.as_str()],
         Value::Sequence(seq) => {
             let mut items = Vec::with_capacity(seq.len());
             for (item_idx, elem) in seq.iter().enumerate() {
                 let Some(s) = elem.as_str() else {
-                    return Err(invalid_config(
+                    return Err(invalid_policy(
                         path,
                         format!(
-                            "`{POLICY_CHAIN_KEY}[{idx}].exhibits[{item_idx}]` must be a glob string."
+                            "`{CANON_POLICY_CHAIN_KEY}[{idx}].exhibits[{item_idx}]` must be a glob string."
                         ),
                     ));
                 };
@@ -270,10 +287,10 @@ fn parse_exhibits(
             items
         }
         _ => {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
                 format!(
-                    "`{POLICY_CHAIN_KEY}[{idx}].exhibits` must be a glob string or list of glob strings."
+                    "`{CANON_POLICY_CHAIN_KEY}[{idx}].exhibits` must be a glob string or list of glob strings."
                 ),
             ));
         }
@@ -283,28 +300,30 @@ fn parse_exhibits(
     for raw in raw_items {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
-                format!("`{POLICY_CHAIN_KEY}[{idx}].exhibits` contains an empty glob pattern."),
+                format!(
+                    "`{CANON_POLICY_CHAIN_KEY}[{idx}].exhibits` contains an empty glob pattern."
+                ),
             ));
         }
         if trimmed.starts_with("plane=") {
-            return Err(invalid_config(
+            return Err(invalid_policy(
                 path,
                 format!(
-                    "`{POLICY_CHAIN_KEY}[{idx}].exhibits` entry `{trimmed}` uses a deferred fielded exhibit query (not supported in v1)."
+                    "`{CANON_POLICY_CHAIN_KEY}[{idx}].exhibits` entry `{trimmed}` uses a deferred fielded exhibit query (not supported in v1)."
                 ),
             ));
         }
         validate_no_traversal_or_absolute(
             path,
-            &format!("`{POLICY_CHAIN_KEY}[{idx}].exhibits`"),
+            &format!("`{CANON_POLICY_CHAIN_KEY}[{idx}].exhibits`"),
             trimmed,
         )?;
         let glob = GlobPattern::parse(trimmed).map_err(|err| {
-            invalid_config(
+            invalid_policy(
                 path,
-                format!("`{POLICY_CHAIN_KEY}[{idx}].exhibits` pattern `{raw}`: {err}"),
+                format!("`{CANON_POLICY_CHAIN_KEY}[{idx}].exhibits` pattern `{raw}`: {err}"),
             )
         })?;
         globs.push(glob);
@@ -313,14 +332,20 @@ fn parse_exhibits(
     Ok(globs)
 }
 
-fn validate_no_traversal_or_absolute(
+/// Validates that `raw_pattern` is scope-relative (no leading `/` and no `..` traversal segments).
+///
+/// # Errors
+///
+/// Returns [`PolicyError::InvalidPolicyFile`] when `raw_pattern` begins with `/` or contains
+/// `..` directory traversal segments.
+pub(super) fn validate_no_traversal_or_absolute(
     path: &str,
     context: &str,
     raw_pattern: &str,
-) -> Result<(), DiscoverError> {
+) -> Result<(), PolicyError> {
     let posix = raw_pattern.replace('\\', "/");
     if posix.starts_with('/') {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             format!(
                 "{context} `{raw_pattern}` must be relative to its enclosing scope (leading `/` is forbidden)."
@@ -328,7 +353,7 @@ fn validate_no_traversal_or_absolute(
         ));
     }
     if posix.split('/').any(|seg| seg == "..") {
-        return Err(invalid_config(
+        return Err(invalid_policy(
             path,
             format!("{context} `{raw_pattern}` must not contain directory traversal (`../`)."),
         ));
@@ -346,33 +371,33 @@ fn strip_trailing_canon_ext(pattern: &str) -> &str {
     }
 }
 
-fn unknown_key_error(path: &str, key: &str, location: &str) -> DiscoverError {
-    if RUNTIME_CREDENTIAL_KEYS.contains(&key) {
-        invalid_config(
+fn unknown_key_error(path: &str, key: &str, location: &str) -> PolicyError {
+    if RUNTIME_ISOLATION_KEYS.contains(&key) {
+        invalid_policy(
             path,
             format!(
-                "Forbidden runtime credential/provider key `{key}` in {location}. \
-                 Runtime provider bindings and API keys must reside outside the workspace \
-                 in `~/.config/canon-clerk/config.json`."
+                "Forbidden clerk runtime/credential/budget key `{key}` in {location}. \
+                 Runtime provider bindings, API keys, and budgets must reside outside the workspace \
+                 in `~/.config/canon-clerk/config.json`, environment variables, or CLI flags."
             ),
         )
     } else if DEFERRED_TOP_LEVEL_KEYS.contains(&key) {
-        invalid_config(
+        invalid_policy(
             path,
             format!(
-                "Unsupported {location} key `{key}` (`{key}:` is deferred beyond v1 and cannot be used in `.canons/config.yaml`)."
+                "Unsupported {location} key `{key}` (`{key}:` is deferred beyond v1 and cannot be used in `.canons/policy-chains.yaml`)."
             ),
         )
     } else {
-        invalid_config(
+        invalid_policy(
             path,
-            format!("Unrecognized {location} key `{key}` in `.canons/config.yaml`."),
+            format!("Unrecognized {location} key `{key}` in `.canons/policy-chains.yaml`."),
         )
     }
 }
 
-fn invalid_config(path: &str, message: impl Into<String>) -> DiscoverError {
-    DiscoverError::InvalidPolicyConfig {
+fn invalid_policy(path: &str, message: impl Into<String>) -> PolicyError {
+    PolicyError::InvalidPolicyFile {
         path: path.to_string(),
         message: message.into(),
     }
