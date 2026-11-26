@@ -15,4 +15,6 @@ tags:
 ---
 Hermetic integration tests verifying package entrypoints, binary CLI routers, or distribution bundling MUST remain colocated within that package's test suite rather than relocated to external test workspaces.
 
-Rationale: Citing the Principle of Cohesion (Yourdon & Constantine) and Colocation, tests verifying package packaging, argument dispatch, and process exit codes must reside with the code they verify so that localized changes can be validated independently without cross-package test orchestration.
+Precedent: Principle of Cohesion (Yourdon & Constantine); Colocation.
+
+Rationale: Colocating tests that verify packaging, argument dispatch, and process exit codes allows localized changes to be validated independently without cross-package test orchestration.

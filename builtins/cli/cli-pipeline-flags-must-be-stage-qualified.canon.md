@@ -4,6 +4,8 @@ inspect:
 tags:
   - cli
 ---
-CLI commands that execute multi-stage pipelines MUST prefix stage-specific flags with the target stage name (e.g. `--<stage>-<option>`) rather than exposing unqualified flags or cross-stage group names.
+Stage-specific CLI flags in multi-stage pipelines MUST be prefixed with the target stage name rather than exposed as unqualified flags or cross-stage group names.
 
-Rationale: Following GNU long-option conventions and clig.dev, stage-prefixed flags prevent parameter collisions across composed stages and preserve CLI stability when pipeline stages are added or reordered.
+Precedent: GNU long-option conventions; Command Line Interface Guidelines (clig.dev).
+
+Rationale: Stage-prefixed flags prevent parameter collisions across composed stages and preserve CLI stability when pipeline stages are added or reordered.

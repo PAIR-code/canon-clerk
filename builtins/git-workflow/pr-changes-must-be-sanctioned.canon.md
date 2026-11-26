@@ -12,6 +12,8 @@ Pull request diffs MUST only implement changes sanctioned by their motivating is
 
 Exception: A pull request MAY introduce or update project canons not explicitly enumerated in the motivating issue IFF the canons codify invariants directly governing the files, subsystems, or specifications modified in the pull request, and are documented in the pull request summary.
 
-Rationale: In line with Git atomic commit practices and standard change isolation, bundling out-of-band changes discards situational discovery context, complicates code review, breaks Git bisectability, and distorts squash-merge changelogs.
+Precedent: Git atomic commit practices; change isolation principles.
+
+Rationale: Bundling out-of-band changes discards situational discovery context, complicates code review, breaks Git bisectability, and distorts squash-merge changelogs.
 
 **Remediation:** Shunt unrelated work to a new tracking issue (recommended) OR execute an upstream chase to expand the motivating issue scope.

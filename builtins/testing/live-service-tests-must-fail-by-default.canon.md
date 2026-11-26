@@ -16,4 +16,6 @@ Live service integration tests MUST fail by default when required external crede
 
 Exception: Tests MAY skip execution cleanly IFF an explicit bypass mechanism (such as an opt-out environment variable or runner filter flag) is enabled.
 
-Rationale: Citing Google Testing Blog (*Silent Failures and Anti-Patterns*), silently skipping unconfigured tests creates false confidence in continuous integration environments by passing green when functionality was never exercised; failing by default ensures missing prerequisites are detected immediately.
+Precedent: Google Testing Blog ("Silent Failures and Anti-Patterns").
+
+Rationale: Silently skipping unconfigured tests creates false confidence in continuous integration environments by passing green when functionality was never exercised; failing by default ensures missing prerequisites are detected immediately.

@@ -11,6 +11,8 @@ tags:
   - openspec
   - architecture
 ---
-OpenSpec design documents (`design.md`) and specifications (`spec.md`) MUST focus on architectural decisions, conceptual models, and system trade-offs, and MUST NOT specify low-level implementation mechanics or language-specific code structures.
+OpenSpec design documents (`design.md`) and specifications (`spec.md`) MUST capture architectural decisions, conceptual models, and system trade-offs rather than specifying low-level implementation mechanics or language-specific code structures.
 
-Rationale: Grounded in Architecture Decision Record (ADR) conventions (Nygard) and the ANSI/SPARC conceptual-physical schema separation, design documents must capture architectural decisions and data models conceptually; overspecifying code mechanics couples design rationale to implementation syntax and guarantees documentation drift.
+Precedent: Architecture Decision Record (ADR) conventions (Nygard); ANSI/SPARC conceptual-physical schema separation.
+
+Rationale: Overspecifying code mechanics couples design rationale to implementation syntax and guarantees documentation drift.
