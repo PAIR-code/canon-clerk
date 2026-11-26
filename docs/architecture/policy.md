@@ -16,8 +16,9 @@ This document is the single authoritative architectural contract for how `<scope
 - **Ordered ACL / packet-filter chain precedent** (such as `iptables`/netfilter first-match-wins `allow`/`deny` evaluation with scope fall-through) and **`.gitignore` / POSIX glob** precedent for nearest-scope-first path filtering.
 
 Related internal contracts reside in:
-- **[`SPEC.md` §7](../../SPEC.md#7-workspace-policy-chains-canonspolicy-chainsyaml):** Normative file format, `canon-policy-chain:` selector grammar, validation rules, and CLI precedence.
+- **[`SPEC.md` §7](../../SPEC.md#7-workspace-policy-chains-canonspolicy-chainsyaml):** Normative file format, `canon-policy-chain:` and `survey-context-chain:` selector grammars, validation rules, and CLI precedence.
 - **[`nodes/discover.md`](nodes/discover.md):** Branch A `discover` consumption of `canon-policy-chain:` and `.discovery.policy_files` provenance.
+- **[`nodes/survey.md`](nodes/survey.md):** Branch C `survey` consumption of `survey-context-chain:`, built-in root default allowlist fall-through, and `.survey.policy_files` provenance.
 - **[`nodes/configure.md`](nodes/configure.md):** Branch B `configure` user-level runtime configuration (`~/.config/canon-clerk/config.json`) and workspace-external credential isolation.
 - **[`nodes/validate.md`](nodes/validate.md):** Branch A `validate` directory hygiene (`no-non-canon-files`) permitting direct `<scope>/.canons/policy-chains.yaml` files while flagging stray or nested non-`.md` files under `.canons/`.
 - **[`exhibits.md`](exhibits.md):** `--workspace-state base` in-memory patch overlay and the policy trust boundary.
@@ -31,7 +32,7 @@ A strict architectural boundary separates workspace-resident declarative policy 
 | Dimension | Workspace Policy Chains (`<scope>/.canons/policy-chains.yaml`) | Clerk Runtime Configuration (`~/.config/canon-clerk/config.json`, Env, CLI) |
 | :--- | :--- | :--- |
 | **Location** | Inside the repository at `<scope>/.canons/policy-chains.yaml` (version-controlled). | Strictly outside the repository workspace (`$XDG_CONFIG_HOME/canon-clerk/config.json` / `~/.config/canon-clerk/config.json`, environment variables, CLI flags). |
-| **Authority** | Declarative repository-content policy chains (such as `canon-policy-chain:`) scoping canons and workspace exhibits. | Operational clerk knobs: provider profiles, API keys, endpoint `baseUrl`s, model bindings, reasoning controls, retry/concurrency limits, and character/line budgets. |
+| **Authority** | Declarative repository-content policy chains (`canon-policy-chain:` and `survey-context-chain:`) scoping canons, workspace exhibits, and repository-identity survey files. | Operational clerk knobs: provider profiles, API keys, endpoint `baseUrl`s, model bindings, reasoning controls, retry/concurrency limits, and character/line budgets (`max_file_chars`, `max_total_chars`). |
 | **Trust Model** | Read strictly from the trusted checkout on disk; never patched from untrusted diff streams under `--workspace-state base`. | Owner-only (`0600`/`0400` on POSIX) local host secrets; never serialized into `Caseload` artifacts or read from inside the repository. |
 | **Cross-Contamination** | Runtime credential, provider, model, or budget keys in `policy-chains.yaml` fail fast with exit code `2`. | Workspace `config.json` files inside the repository fail fast with exit code `2`. |
 
@@ -82,4 +83,4 @@ flowchart LR
    - For non-file-anchored evaluations (such as metadata-only filings or plenary `--all-canons`), evaluation anchors at the subject's own scope (`[<subject-scope> -> <ancestor> -> ... -> root -> chain default]`, with global and `builtin:*` canons anchored at repository root).
 3. **Fall-Through & Subtree Isolation:** A child scope with targeted rules overrides matching items and falls through to ancestor scopes for everything else. Placing a terminal `- deny: all` entry in a child scope halts fall-through completely, isolating vendored or transplanted subtrees without requiring a separate sentinel flag.
 4. **Scope-Relative Matching:** Path patterns in a `<scope>/.canons/policy-chains.yaml` file (such as `exhibits:` globs) are evaluated strictly relative to `<scope>/` and remain additive on top of built-in default noise exclusions.
-5. **CLI Override Precedence:** Explicit CLI selection and exclusion flags (such as `--canon <selector>` and `--no-builtins` for `canon-policy-chain:`) take precedence over workspace `policy-chains.yaml` rules per [`SPEC.md` §7.4](../../SPEC.md#74-cli-precedence).
+5. **CLI Override Precedence:** Explicit CLI selection and exclusion flags (such as `--canon <selector>` and `--no-builtins` for `canon-policy-chain:`, and `--survey-context <glob>` and `--no-survey-context` for `survey-context-chain:`) take precedence over workspace `policy-chains.yaml` rules per [`SPEC.md` §7.4](../../SPEC.md#74-cli-precedence).

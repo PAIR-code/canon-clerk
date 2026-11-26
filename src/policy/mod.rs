@@ -17,6 +17,10 @@
 //! (`SPEC.md` §7, `docs/architecture/policy.md`).
 
 mod parse;
+mod survey;
+
+use survey::CompiledSurveyContextRule;
+pub use survey::DEFAULT_SURVEY_CONTEXT_PATHS;
 
 use crate::canon::{Canon, CanonScope, CanonSourceKind, resolve_source_info};
 use crate::discover::glob_matcher::{
@@ -313,9 +317,10 @@ pub(crate) struct CompiledCanonPolicyRule {
     pub(crate) exhibits: Option<Vec<GlobPattern>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CompiledPolicyFile {
     pub(crate) canon_policy_chain: Vec<CompiledCanonPolicyRule>,
+    pub(crate) survey_context_chain: Vec<CompiledSurveyContextRule>,
 }
 
 /// Compiled set of all discovered `<scope>/.canons/policy-chains.yaml` policy files in a workspace.
@@ -403,6 +408,34 @@ impl WorkspacePolicySet {
             None
         })
         .is_none_or(|action| action == PolicyAction::Allow)
+    }
+    /// Evaluates whether a workspace-relative `file_path` is included by `survey-context-chain:`
+    /// under the nearest-scope-first lexical cascade:
+    /// `[child <scope>/.canons/policy-chains.yaml -> parent ... -> root .canons/policy-chains.yaml -> built-in root default allowlist -> implicit deny]`
+    /// (`SPEC.md` §7.3).
+    pub fn allows_survey_file(&self, file_path: impl AsRef<Path>) -> bool {
+        let raw_path = file_path.as_ref().to_string_lossy();
+        let Ok(normalized) = normalize_workspace_path(&raw_path) else {
+            return false;
+        };
+        if normalized == "." {
+            return false;
+        }
+        let scopes = file_scope_chain(&normalized);
+        match evaluate_scope_cascade(&self.files_by_scope, &scopes, |scope, compiled| {
+            let canon_scope_obj = scope.map(|s| CanonScope(s.to_string()));
+            let rel_file = scope_relative_path(&normalized, canon_scope_obj.as_ref())?;
+            for rule in &compiled.survey_context_chain {
+                if rule.selector.matches(&rel_file) {
+                    return Some(rule.action);
+                }
+            }
+            None
+        }) {
+            Some(PolicyAction::Allow) => true,
+            Some(PolicyAction::Deny) => false,
+            None => DEFAULT_SURVEY_CONTEXT_PATHS.contains(&normalized.as_str()),
+        }
     }
 }
 
@@ -654,5 +687,96 @@ mod tests {
             discovered.nested_paths,
             vec![".canons/security/policy-chains.yaml".to_string()]
         );
+    }
+
+    #[test]
+    fn test_survey_context_chain_defaults_and_nested_cascading() {
+        let empty = WorkspacePolicySet::default();
+        assert!(empty.allows_survey_file("README.md"));
+        assert!(empty.allows_survey_file("Cargo.toml"));
+        assert!(empty.allows_survey_file("llms.txt"));
+        assert!(!empty.allows_survey_file("src/lib.rs"));
+        assert!(!empty.allows_survey_file("packages/ui/README.md"));
+
+        let mut raw = BTreeMap::new();
+        raw.insert(
+            ".canons/policy-chains.yaml".to_string(),
+            r#"
+survey-context-chain:
+  - deny: "Cargo.toml"
+  - allow: "docs/architecture.md"
+  - allow: "packages/*/README.md"
+"#
+            .to_string(),
+        );
+        raw.insert(
+            "packages/vendored/.canons/policy-chains.yaml".to_string(),
+            r#"
+survey-context-chain:
+  - deny: all
+"#
+            .to_string(),
+        );
+        raw.insert(
+            "packages/ui/.canons/policy-chains.yaml".to_string(),
+            r#"
+survey-context-chain:
+  - allow: "DESIGN.md"
+"#
+            .to_string(),
+        );
+
+        let policy = WorkspacePolicySet::compile(&raw).expect("compile survey policy");
+        // Root defaults fall through when not matched
+        assert!(policy.allows_survey_file("README.md"));
+        // Root deny overrides built-in default
+        assert!(!policy.allows_survey_file("Cargo.toml"));
+        // Root allow adds custom paths
+        assert!(policy.allows_survey_file("docs/architecture.md"));
+        assert!(policy.allows_survey_file("packages/ui/README.md"));
+        // Child allow adds scope-relative path and falls through to root for others
+        assert!(policy.allows_survey_file("packages/ui/DESIGN.md"));
+        // Child `- deny: all` isolates subtree from parent allow
+        assert!(!policy.allows_survey_file("packages/vendored/README.md"));
+    }
+
+    #[test]
+    fn test_survey_context_chain_validation_rejects_invalid_rules() {
+        let invalid_cases = [
+            ("non-sequence", "survey-context-chain: true"),
+            ("missing action", "survey-context-chain:\n  - {}"),
+            (
+                "conflicting allow and deny",
+                "survey-context-chain:\n  - allow: all\n    deny: all",
+            ),
+            (
+                "disallowed exhibits key",
+                "survey-context-chain:\n  - allow: 'README.md'\n    exhibits: 'src/**'",
+            ),
+            ("empty selector", "survey-context-chain:\n  - allow: ''"),
+            (
+                "traversal selector",
+                "survey-context-chain:\n  - allow: '../README.md'",
+            ),
+            (
+                "absolute selector",
+                "survey-context-chain:\n  - allow: '/etc/passwd'",
+            ),
+            (
+                "invalid glob",
+                "survey-context-chain:\n  - allow: 'docs/[bad'",
+            ),
+        ];
+
+        for (label, raw) in invalid_cases {
+            let mut files = BTreeMap::new();
+            files.insert(".canons/policy-chains.yaml".to_string(), raw.to_string());
+            let err = WorkspacePolicySet::compile(&files)
+                .expect_err(&format!("case `{label}` must fail"));
+            assert!(
+                matches!(err, PolicyError::InvalidPolicyFile { .. }),
+                "case `{label}` produced unexpected error: {err:?}"
+            );
+        }
     }
 }

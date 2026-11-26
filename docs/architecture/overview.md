@@ -24,6 +24,7 @@ $$
 \begin{aligned}
 \text{Branch A (Filing Track):}\quad & \text{intake} \longrightarrow \text{discover} \longrightarrow \text{validate} \\
 \text{Branch B (Environment Track):}\quad & \text{configure} \quad (\longrightarrow \text{probe}) \\
+\text{Branch C (Repository Context Track):}\quad & \text{survey} \\
 \text{Adjudication Track:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{docket} \longrightarrow \text{admit} \longrightarrow \text{vet} \longrightarrow \text{audit} \\
 \text{Apprisal Track:}\quad & \{\text{validate}, \text{configure}\} \longrightarrow \text{apprise}
 \end{aligned}
@@ -33,19 +34,21 @@ When invoked, a subcommand executes only the **transitive dependency closure** r
 
 ---
 
-## 2. DAG Topology: Two Feeder Branches $\to$ Adjudication Track & Apprisal Track
+## 2. DAG Topology: Feeder Branches $\to$ Adjudication Track & Apprisal Track
 
-The DAG consists of **Two Feeder Branches** that converge at `docket` (for dispute adjudication) and `apprise` (for prospective statutory notice), followed by the **Adjudication Track**, with an auxiliary diagnostic leaf for provider health:
+The DAG consists of independent **Feeder Branches**—where Branch A and Branch B converge at `docket` (for dispute adjudication) and `apprise` (for prospective statutory notice), while Branch C (`survey`) operates as an independent repository-context feeder—followed by the **Adjudication Track**, with an auxiliary diagnostic leaf for provider health:
 
 1. **Branch A: The Filing Track (`intake` $\longrightarrow$ `discover` $\longrightarrow$ `validate`):**  
    Ingests in-flight diffs, target paths, or prospective design intent, verifies state preconditions (`exists:`), matches candidate canon triggers, and validates candidate canon ASTs and schemas. Completely local, deterministic, and requires 0 tokens and zero API credentials.
 2. **Branch B: The Environment Track (`configure`):**  
    Resolves the active default provider profile (`--provider <slug>`), per-node `<provider>:<model>` bindings across the invoked heuristic closure, extended thinking controls, endpoint `baseUrl` overrides, and required provider credentials across built-in and custom provider profiles (see [`providers.md`](providers.md) and [`nodes/configure.md`](nodes/configure.md)). Completely offline, deterministic, with 0 tokens and zero network calls.
-3. **Diagnostic Leaf (`probe`):**  
+3. **Branch C: The Repository Context Track (`survey`):**  
+   Catalogs a bounded, deterministic representation of repository identity (top-level docs, manifests, and `<scope>/.canons/policy-chains.yaml` `survey-context-chain:` files) onto `.survey` (see [`nodes/survey.md`](nodes/survey.md)). Completely local, deterministic, independent of `intake`, `.canon.md` rule packs, and `configure`, with 0 tokens and zero credentials.
+4. **Diagnostic Leaf (`probe`):**  
    An auxiliary termination node depending strictly on `configure`. Concurrently probes deduplicated configured model targets for live reachability and roundtrip latency without triggering an evaluation run.
-4. **The Adjudication Track (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`):**  
+5. **The Adjudication Track (`docket` $\longrightarrow$ `admit` $\longrightarrow$ `vet` $\longrightarrow$ `audit`):**  
    Converges at `docket` (requiring both validated candidate canons and active node configuration) as a heuristic cascade, followed by exhibit admissibility screening (`admit`), prima facie compliance vetting on the papers (`vet`), and isolated generative adjudication of contested cases (`audit`).
-5. **The Apprisal Track (`apprise`):**  
+6. **The Apprisal Track (`apprise`):**  
    Converges at `apprise` (requiring validated candidate canons and `apprise` node configuration) to evaluate prospective design intent before implementation, completely bypassing diff parsing, `docket`, `admit`, `vet`, and `audit`.
 
 ```mermaid
@@ -193,6 +196,7 @@ All heuristic metrics share an identical polarity convention: **a higher score r
 | `discover` | Branch A (Filing Track) | Deterministic | 0 tokens, local | Matches > 0; verifies `exists:` & `triggers:`; short-circuits (exit 0) on 0 candidates |
 | `validate` | Branch A (Filing Track) | Deterministic | 0 tokens, local | 0 syntax errors; fails fast (code 1) on lint error |
 | `configure` | Branch B (Environment Track) | Deterministic | 0 tokens, local | Valid node config & closure keys; fails fast (code 2) on invalid flags or missing keys |
+| `survey` | Branch C (Repository Context Track) | Deterministic | 0 tokens, local | Bounded `.survey` payload via `survey-context-chain:` / defaults; exits 0 (including 0 matches) |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, single-shot ping | Deduplicated targets reachable; fails fast (code 2) on failure |
 | `apprise` | Apprisal Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `apprisal_score >= 0.5`; exits 0 if candidates empty |
 | `docket` | Adjudication Track | [`Discriminator`](providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `colorability_score >= 0.5`; exits 0 if docket empty |
@@ -260,7 +264,7 @@ The formal Caseload domain models and granular payload schemas are specified in 
 ### Top-Level Envelope Constraints
 
 1. **Schema Versioning (`version`):** Every serialized `Caseload` envelope carries a top-level `version` identifier (currently `"1.0"`) establishing wire-format compatibility across piped CLI invocations and archived CI artifacts.
-2. **Stage Namespace Isolation:** Each pipeline stage owns a dedicated, non-overlapping top-level optional namespace on the `Caseload` envelope (`.intake`, `.discovery`, `.validation`, `.config`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.vetting`, `.verdict`). Unexecuted or pruned stages are omitted from serialized JSON rather than emitted as null placeholders.
+2. **Stage Namespace Isolation:** Each pipeline stage owns a dedicated, non-overlapping top-level optional namespace on the `Caseload` envelope (`.intake`, `.discovery`, `.validation`, `.config`, `.survey`, `.probe`, `.apprisal`, `.docket`, `.evidence`, `.vetting`, `.verdict`). Unexecuted or pruned stages are omitted from serialized JSON rather than emitted as null placeholders.
 3. **Additive Immutability:** Stages enrich only their designated namespace while preserving pre-existing upstream namespaces bit-for-bit (and when chaining partial closures via `--caseload`, `configure` additively resolves unpopulated downstream node bindings onto `.config.nodes` while preserving un-overridden upstream node bindings).
 4. **Three-Tier Determinism & Stability Contract:**
    - **Engine & Wire Determinism (Bit-for-Bit):** Heuristic node collections serialize in canonical DAG stage order (`apprise`, `docket`, `admit`, `vet`, `audit`), while all canon/file map keys, entity collections, per-case adjudications, and line annotations across stage payloads serialize in canonical lexicographical order so identical model responses, `--caseload` fast-forwards, and concurrent fold completion orders produce byte-for-byte identical JSON envelopes.
@@ -277,6 +281,7 @@ Each pipeline stage owns a dedicated, non-overlapping field on the cumulative `C
 | `.discovery` | `discover` | Branch A (Filing Track) | Candidate canons matching path triggers & target file intersections | [`nodes/discover.md`](nodes/discover.md#caseload-delta) |
 | `.validation` | `validate` | Branch A (Filing Track) | Deterministic AST linting and frontmatter schema validation results | [`nodes/validate.md`](nodes/validate.md#caseload-delta) |
 | `.config` | `configure` | Branch B (Environment Track) | Resolved default `provider` slug and per-node `<provider>:<model>` + optional thinking bindings | [`nodes/configure.md`](nodes/configure.md#caseload-delta) |
+| `.survey` | `survey` | Branch C (Repository Context Track) | Bounded repository-identity context files, character ceilings, policy provenance, and omissions | [`nodes/survey.md`](nodes/survey.md#caseload-delta) |
 | `.probe` | `probe` | Diagnostic Leaf | Deduplicated target endpoint reachability, bound nodes, roundtrip latency (ms), and resolved models | [`nodes/probe.md`](nodes/probe.md#caseload-delta) |
 | `.apprisal` | `apprise` | Apprisal Track | Prospective statutory jurisdiction assessments (`apprisal_score`, `apprisal_summary`) | [`nodes/apprise.md`](nodes/apprise.md#caseload-delta) |
 | `.docket` | `docket` | Adjudication Track | Macro triage colorability assessments and list of opened active cases | [`nodes/docket.md`](nodes/docket.md#caseload-delta) |

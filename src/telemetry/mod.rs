@@ -42,6 +42,8 @@ pub enum PipelineStage {
     Validate,
     /// Branch B: Resolve provider credentials, model specifiers, and reasoning budgets.
     Configure,
+    /// Branch C: Catalog bounded repository-identity context onto `.survey`.
+    Survey,
     /// Diagnostic Leaf: Live provider connectivity and roundtrip latency check.
     Probe,
     /// Apprisal Track: Prospective statutory applicability screening against design intent.
@@ -64,6 +66,7 @@ impl PipelineStage {
             Self::Discover => "discover",
             Self::Validate => "validate",
             Self::Configure => "configure",
+            Self::Survey => "survey",
             Self::Probe => "probe",
             Self::Apprise => "apprise",
             Self::Docket => "docket",
@@ -313,6 +316,7 @@ mod tests {
                 (PipelineStage::Discover, "discover"),
                 (PipelineStage::Validate, "validate"),
                 (PipelineStage::Configure, "configure"),
+                (PipelineStage::Survey, "survey"),
                 (PipelineStage::Probe, "probe"),
                 (PipelineStage::Apprise, "apprise"),
                 (PipelineStage::Docket, "docket"),

@@ -350,7 +350,7 @@ Unlike static linters, canon evaluators do not employ a deterministic pre-parser
 
 ## 7. Workspace Policy Chains (`.canons/policy-chains.yaml`)
 
-Workspace policy chain files provide a declarative, version-controlled mechanism for repositories and monorepo packages to toggle canons on or off and carve out exempted path globs from `<scope>/` downward—without forking rule packs or authoring custom `.canon.md` files.
+Workspace policy chain files provide a declarative, version-controlled mechanism for repositories and monorepo packages to govern both canon enforcement (`canon-policy-chain:`) and repository-identity survey context (`survey-context-chain:`) from `<scope>/` downward—without forking rule packs or authoring custom `.canon.md` files.
 
 ### 7.1 File Location, Scope Boundary & Trust Boundary
 
@@ -359,15 +359,15 @@ Workspace policy chain files provide a declarative, version-controlled mechanism
 * **No Nesting Inside `.canons/`:** Policy files placed in topical subdirectories inside `.canons/` (e.g., `.canons/security/policy-chains.yaml`) MUST be ignored and SHOULD emit a non-fatal diagnostic warning.
 * **Workspace Root Boundary:** Discovery MUST be bounded by the workspace / Git repository root and MUST NOT traverse above it.
 * **Security Boundary (`--workspace-state base`):** When evaluating untrusted changes against a trusted base checkout (e.g., GitHub Actions `pull_request_target` with `--workspace-state base`), `.canons/policy-chains.yaml` MUST always be read from the trusted checkout on disk and MUST NOT be patched from in-flight diff streams, preventing untrusted PRs from injecting `- deny: all` to bypass CI.
-* **Repo-Policy vs. Clerk-Runtime Isolation:** `.canons/policy-chains.yaml` strictly governs declarative workspace policy chains (such as `canon-policy-chain:`). Clerk runtime knobs—provider credentials, endpoint URLs, model bindings, and execution/character/token budgets—MUST remain outside the workspace (`~/.config/canon-clerk/config.json`, environment variables, and CLI flags) and MUST be rejected if present in `.canons/policy-chains.yaml`.
+* **Repo-Policy vs. Clerk-Runtime Isolation:** `.canons/policy-chains.yaml` strictly governs declarative workspace policy chains (`canon-policy-chain:` and `survey-context-chain:`). Clerk runtime knobs—provider credentials, endpoint URLs, model bindings, and execution/character/token budgets (`max_file_chars`, `max_total_chars`, etc.)—MUST remain outside the workspace (`~/.config/canon-clerk/config.json`, environment variables, and CLI flags) and MUST be rejected if present in `.canons/policy-chains.yaml`.
 
 ### 7.2 Schema & Validation Contract
 
-A `.canons/policy-chains.yaml` file MUST be a valid UTF-8 YAML mapping. An empty file or `canon-policy-chain: []` is a valid no-op that falls through to the default **`allow`** policy.
+A `.canons/policy-chains.yaml` file MUST be a valid UTF-8 YAML mapping. An empty file or empty chain lists (`canon-policy-chain: []`, `survey-context-chain: []`) are valid no-ops that fall through to their enclosing scopes and built-in defaults.
 
 ```yaml
 # <scope>/.canons/policy-chains.yaml
-# Evaluated top-to-bottom; first match wins (default: allow).
+# Evaluated top-to-bottom; first match wins.
 canon-policy-chain:
   # Deny all builtins on third-party and generated files
   - deny: "builtin:**"
@@ -386,9 +386,17 @@ canon-policy-chain:
 
   # Catch-all: deny anything unmatched from here down
   - deny: all
+
+survey-context-chain:
+  # Exclude generated or noisy manifests from repository-identity survey
+  - deny: "docs/generated/**"
+
+  # Include architecture overview docs alongside built-in root defaults
+  - allow: "docs/architecture.md"
+  - allow: "README.md"
 ```
 
-* **`canon-policy-chain:`** Ordered list of policy chain entries evaluated top-to-bottom (first match wins). Each entry MUST be a mapping specifying:
+* **`canon-policy-chain:`** Ordered list of policy chain entries evaluated top-to-bottom (first match wins, default: `allow`). Each entry MUST be a mapping specifying:
   * **Action & Canon Selector (REQUIRED):** Exactly one action key—`allow` or `deny`—whose value is a non-empty `<canon-selector>` string:
     * `all` — matches every canon in scope.
     * `builtin:<path-or-glob>` — matches embedded built-in standard canons (e.g., `builtin:**`, `builtin:api-design/**`, `builtin:canon-authoring/*`).
@@ -399,31 +407,39 @@ canon-policy-chain:
   * **`exhibits:` (OPTIONAL):** A single path glob string (coerced to a 1-element list) or list of path globs relative to `<scope>/`, evaluated as logical OR:
     * **Omitted `exhibits:`** matches unconditionally across all exhibit planes (including metadata-only filings and plenary `--all-canons` discovery).
     * **Present `exhibits:`** filters matching file exhibits only. A canon is dropped only if zero triggered exhibits survive policy filtering.
-* **Additive Exclusions:** Path exclusions declared via `exhibits:` MUST remain additive on top of built-in default noise exclusions (e.g., `.git`, `node_modules`, build outputs).
+* **`survey-context-chain:`** Ordered list of repository-identity context entries evaluated top-to-bottom (first match wins) for the `survey` stage. Each entry MUST be a mapping specifying:
+  * **Action & Path Selector (REQUIRED):** Exactly one action key—`allow` or `deny`—whose value is a non-empty `<scope>/`-relative path glob string or the sentinel `all` (matching every file under `<scope>/`).
+  * **No Auxiliary Keys:** `survey-context-chain:` entries MUST NOT declare `exhibits:` or other auxiliary keys.
+  * **Built-In Root Default Stack:** When a candidate file falls through all enclosing `survey-context-chain:` scopes without matching, it falls through to the built-in root default allowlist (`README.md`, `README.txt`, `README`, `llms.txt`, `Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`) and defaults to `deny` otherwise.
+* **Additive Exclusions:** Path exclusions declared via `exhibits:` or `survey-context-chain:` MUST remain additive on top of built-in default noise exclusions (e.g., `.git`, `node_modules`, build outputs).
 * **Fail-Fast Schema Validation:** Implementations MUST fail fast (CLI exit code `2`) if any discovered `.canons/policy-chains.yaml` contains:
   * Malformed YAML or a non-mapping root document.
-  * Unrecognized top-level or rule keys, including clerk runtime credential/provider/budget keys (`providers`, `defaults`, `nodes`, `apiKey`, `reasoning_budget`, etc.).
+  * Unrecognized top-level or rule keys, including clerk runtime credential/provider/budget keys (`providers`, `defaults`, `nodes`, `apiKey`, `reasoning_budget`, `max_file_chars`, `max_total_chars`, etc.).
   * Rule entries missing both `allow` and `deny`, or combining both `allow` and `deny` in the same entry.
-  * Empty or syntactically invalid glob patterns in canon selectors or `exhibits:`.
-  * Directory traversal (`../`) in canon selectors or `exhibits:`.
+  * Empty or syntactically invalid glob patterns in canon selectors, `exhibits:`, or `survey-context-chain:`.
+  * Leading `/` absolute paths or directory traversal (`../`) in canon selectors, `exhibits:`, or `survey-context-chain:`.
 
 ### 7.3 Evaluation Semantics & Monorepo Cascading
 
-* **Ordered First-Match-Wins Chain:** Policy rules evaluate in declaration order over `(canon, exhibit)` pairs, stopping at the **first matching rule** and defaulting to **`allow`** if no rule matches.
+* **Ordered First-Match-Wins Chain:**
+  * `canon-policy-chain:` rules evaluate in declaration order over `(canon, exhibit)` pairs, stopping at the **first matching rule** and defaulting to **`allow`** if no rule matches.
+  * `survey-context-chain:` rules evaluate in declaration order over candidate workspace files, stopping at the **first matching rule**, falling through to the built-in root default allowlist (`README.md`, `README.txt`, `README`, `llms.txt`, `Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`), and defaulting to **`deny`** otherwise.
 * **Implicit Lexical Cascade (Nearest-Scope-First):**
-  * For any target file exhibit under `<scope>/`, rules evaluate in order `[child <scope>/.canons/policy-chains.yaml -> parent ... -> root .canons/policy-chains.yaml -> implicit allow]`, stopping at the first match.
-  * When no file exhibit anchors evaluation (metadata-only filings or `--all-canons`), rules anchor at the canon's own scope (`[<canon-scope>/.canons/policy-chains.yaml -> ancestor ... -> root .canons/policy-chains.yaml -> implicit allow]`, where global and `builtin:*` canons have `<canon-scope>` equal to the repository root).
+  * For any target file exhibit or candidate survey file under `<scope>/`, rules evaluate in order `[child <scope>/.canons/policy-chains.yaml -> parent ... -> root .canons/policy-chains.yaml -> chain default]`, stopping at the first match.
+  * When no file exhibit anchors `canon-policy-chain:` evaluation (metadata-only filings or `--all-canons`), rules anchor at the canon's own scope (`[<canon-scope>/.canons/policy-chains.yaml -> ancestor ... -> root .canons/policy-chains.yaml -> implicit allow]`, where global and `builtin:*` canons have `<canon-scope>` equal to the repository root).
 * **Fall-Through & Subtree Isolation Without `root: true`:**
-  * A child policy file with targeted rules overrides matching `(canon, exhibit)` pairs and falls through to ancestor policy files for everything else.
-  * A child policy file ending with `- deny: all` halts fall-through completely, isolating vendored or transplanted subtrees.
+  * A child policy file with targeted rules overrides matching items and falls through to ancestor policy files for everything else.
+  * A child policy file ending with `- deny: all` halts fall-through completely, isolating vendored or transplanted subtrees (or disabling `survey` cleanly when placed in root `.canons/policy-chains.yaml`).
 
 ### 7.4 CLI Precedence
 
 Explicit CLI flags MUST take precedence over workspace `.canons/policy-chains.yaml`:
 
-* `--canon <selector>` explicitly overrides `policy-chains.yaml` `deny` rules for the targeted canon(s).
-* `--no-builtins` excludes built-in canons regardless of `allow: "builtin:..."` rules in `policy-chains.yaml`.
-* `--builtins` remains the positive-polarity corpus-loading toggle (default-on) and does NOT bypass `policy-chains.yaml` `deny` rules.
+* `--canon <selector>` explicitly overrides `canon-policy-chain:` `deny` rules for the targeted canon(s).
+* `--no-builtins` excludes built-in canons regardless of `allow: "builtin:..."` rules in `canon-policy-chain:`.
+* `--builtins` remains the positive-polarity corpus-loading toggle (default-on) and does NOT bypass `canon-policy-chain:` `deny` rules.
+* `--survey-context <glob>` explicitly replaces `survey-context-chain:` rules and the built-in root default stack for the active invocation.
+* `--no-survey-context` explicitly disables repository-identity context collection (producing an empty `.survey` record) regardless of `survey-context-chain:` rules or built-in defaults.
 
 ### 7.5 Extensibility (Informative)
 

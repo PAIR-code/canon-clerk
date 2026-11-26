@@ -14,6 +14,7 @@
 
 //! Fail-fast YAML schema parser and validator for `<scope>/.canons/policy-chains.yaml` (`SPEC.md` §7.2).
 
+use super::survey::{SURVEY_CONTEXT_CHAIN_KEY, parse_survey_context_chain};
 use super::{
     CompiledCanonPolicyRule, CompiledPolicyFile, PolicyAction, PolicyCanonSelector, PolicyError,
 };
@@ -53,24 +54,20 @@ pub(super) fn parse_policy_file(
     raw_yaml: &str,
 ) -> Result<CompiledPolicyFile, PolicyError> {
     if raw_yaml.trim().is_empty() {
-        return Ok(CompiledPolicyFile {
-            canon_policy_chain: Vec::new(),
-        });
+        return Ok(CompiledPolicyFile::default());
     }
 
     let value: Value = serde_yaml::from_str(raw_yaml)
         .map_err(|err| invalid_policy(path, format!("Malformed YAML: {err}")))?;
 
     if value.is_null() {
-        return Ok(CompiledPolicyFile {
-            canon_policy_chain: Vec::new(),
-        });
+        return Ok(CompiledPolicyFile::default());
     }
 
     let Some(root) = value.as_mapping() else {
         return Err(invalid_policy(
             path,
-            "Root YAML document must be a mapping (e.g., `canon-policy-chain: [...]`).",
+            "Root YAML document must be a mapping (e.g., `canon-policy-chain: [...]` or `survey-context-chain: [...]`).",
         ));
     };
 
@@ -81,37 +78,37 @@ pub(super) fn parse_policy_file(
                 "Top-level keys in `.canons/policy-chains.yaml` must be strings.",
             ));
         };
-        if key_str != CANON_POLICY_CHAIN_KEY {
+        if !matches!(key_str, CANON_POLICY_CHAIN_KEY | SURVEY_CONTEXT_CHAIN_KEY) {
             return Err(unknown_key_error(path, key_str, "top-level"));
         }
     }
 
-    let Some(rules_val) = root.get(Value::String(CANON_POLICY_CHAIN_KEY.to_string())) else {
-        return Ok(CompiledPolicyFile {
-            canon_policy_chain: Vec::new(),
-        });
+    let canon_policy_chain = match root.get(Value::String(CANON_POLICY_CHAIN_KEY.to_string())) {
+        None => Vec::new(),
+        Some(rules_val) if rules_val.is_null() => Vec::new(),
+        Some(rules_val) => {
+            let Some(rules_seq) = rules_val.as_sequence() else {
+                return Err(invalid_policy(
+                    path,
+                    "`canon-policy-chain` must be a YAML sequence of policy entry mappings.",
+                ));
+            };
+            let mut rules = Vec::with_capacity(rules_seq.len());
+            for (idx, item) in rules_seq.iter().enumerate() {
+                rules.push(parse_canon_policy_rule(path, idx, item)?);
+            }
+            rules
+        }
     };
 
-    if rules_val.is_null() {
-        return Ok(CompiledPolicyFile {
-            canon_policy_chain: Vec::new(),
-        });
-    }
-
-    let Some(rules_seq) = rules_val.as_sequence() else {
-        return Err(invalid_policy(
-            path,
-            "`canon-policy-chain` must be a YAML sequence of policy entry mappings.",
-        ));
-    };
-
-    let mut rules = Vec::with_capacity(rules_seq.len());
-    for (idx, item) in rules_seq.iter().enumerate() {
-        rules.push(parse_canon_policy_rule(path, idx, item)?);
-    }
+    let survey_context_chain = parse_survey_context_chain(
+        path,
+        root.get(Value::String(SURVEY_CONTEXT_CHAIN_KEY.to_string())),
+    )?;
 
     Ok(CompiledPolicyFile {
-        canon_policy_chain: rules,
+        canon_policy_chain,
+        survey_context_chain,
     })
 }
 
@@ -371,7 +368,7 @@ fn strip_trailing_canon_ext(pattern: &str) -> &str {
     }
 }
 
-fn unknown_key_error(path: &str, key: &str, location: &str) -> PolicyError {
+pub(super) fn unknown_key_error(path: &str, key: &str, location: &str) -> PolicyError {
     if RUNTIME_ISOLATION_KEYS.contains(&key) {
         invalid_policy(
             path,
@@ -396,7 +393,7 @@ fn unknown_key_error(path: &str, key: &str, location: &str) -> PolicyError {
     }
 }
 
-fn invalid_policy(path: &str, message: impl Into<String>) -> PolicyError {
+pub(super) fn invalid_policy(path: &str, message: impl Into<String>) -> PolicyError {
     PolicyError::InvalidPolicyFile {
         path: path.to_string(),
         message: message.into(),

@@ -16,8 +16,8 @@
 
 use crate::caseload::{
     Caseload, CaseloadConfig, CaseloadDiscovery, CaseloadDocket, CaseloadEvidence, CaseloadIntake,
-    CaseloadValidation, CaseloadVerdict, CaseloadVetting, DiscoveryMode, HeuristicNode,
-    IntakeScope,
+    CaseloadSurvey, CaseloadValidation, CaseloadVerdict, CaseloadVetting, DiscoveryMode,
+    HeuristicNode, IntakeScope,
 };
 use std::io::Write;
 
@@ -66,6 +66,40 @@ pub(crate) fn fast_forward_suffix(disp: StageDisposition) -> &'static str {
         StageDisposition::PrePopulated => " (fast-forward: pre-populated)",
         _ => "",
     }
+}
+
+/// Formats a non-negative integer with comma thousands separators (e.g., `3820` -> `"3,820"`).
+pub(crate) fn format_thousands(n: usize) -> String {
+    let raw = n.to_string();
+    let len = raw.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (idx, ch) in raw.chars().enumerate() {
+        if idx > 0 && (len - idx).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Writes the `survey` provenance line for Branch C (`survey`) closures (`docs/architecture/nodes/survey.md` §5).
+pub(crate) fn write_survey_provenance(
+    survey: Option<&CaseloadSurvey>,
+    disp: StageDisposition,
+    stdout: &mut dyn Write,
+) -> std::io::Result<()> {
+    let suffix = fast_forward_suffix(disp);
+    let (file_count, total_chars) = survey.map_or((0, 0), |s| (s.files.len(), s.total_chars));
+    if file_count == 0 && disp == StageDisposition::Executed {
+        return writeln!(stdout, "  ⊘ survey    : 0 context files matched");
+    }
+    let glyph = glyph_for(disp);
+    let noun = if file_count == 1 { "file" } else { "files" };
+    writeln!(
+        stdout,
+        "  {glyph} survey    : {file_count} context {noun} ({} chars){suffix}",
+        format_thousands(total_chars)
+    )
 }
 
 /// Writes the `intake` provenance line for prospective statutory apprisal (`apprise`).
