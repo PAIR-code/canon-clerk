@@ -9,7 +9,13 @@
 
 Canon Clerk separates **declarative repository policy** (version-controlled rules governing which canons or workspace context artifacts apply to a repository or monorepo subtree) from **clerk runtime configuration** (user-level provider credentials, endpoint URLs, model bindings, and execution budgets).
 
-This document is the single authoritative architectural contract for how `<scope>/.canons/policy-chains.yaml` files are discovered, isolated from untrusted inputs and runtime secrets, validated fail-fast, and evaluated via ordered `allow`/`deny` chains across independent DAG feeder branches. Related contracts reside in:
+This document is the single authoritative architectural contract for how `<scope>/.canons/policy-chains.yaml` files are discovered, isolated from untrusted inputs and runtime secrets, validated fail-fast, and evaluated via ordered `allow`/`deny` chains across independent DAG feeder branches. Its wire formats and conventions anchor to established external standards and precedents:
+- **YAML 1.2** for declarative `<scope>/.canons/policy-chains.yaml` policy files.
+- **XDG Base Directory Specification** (`$XDG_CONFIG_HOME`) and **RFC 8259 (JSON)** for workspace-external runtime configuration (`~/.config/canon-clerk/config.json`).
+- **POSIX.1** (and GNU/BSD CLI exit-status conventions) for workspace-relative POSIX paths, owner-only `0600`/`0400` secret file permissions, and exit code `2` usage/schema validation failures.
+- **Ordered ACL / packet-filter chain precedent** (such as `iptables`/netfilter first-match-wins `allow`/`deny` evaluation with scope fall-through) and **`.gitignore` / POSIX glob** precedent for nearest-scope-first path filtering.
+
+Related internal contracts reside in:
 - **[`SPEC.md` §7](../../SPEC.md#7-workspace-policy-chains-canonspolicy-chainsyaml):** Normative file format, `canon-policy-chain:` selector grammar, validation rules, and CLI precedence.
 - **[`nodes/discover.md`](nodes/discover.md):** Branch A `discover` consumption of `canon-policy-chain:` and `.discovery.policy_files` provenance.
 - **[`nodes/configure.md`](nodes/configure.md):** Branch B `configure` user-level runtime configuration (`~/.config/canon-clerk/config.json`) and workspace-external credential isolation.

@@ -134,6 +134,14 @@ impl From<PolicyError> for DiscoverError {
 }
 
 /// Executes the pure `discover` domain stage against an in-memory [`WorkspaceSnapshot`].
+///
+/// # Errors
+///
+/// Returns [`DiscoverError::MissingInputSource`] when invoked without `caseload.intake` and
+/// `options.all_canons == false`, [`DiscoverError::InvalidPolicyFile`] when any discovered
+/// `<scope>/.canons/policy-chains.yaml` fails schema or runtime-isolation validation,
+/// [`DiscoverError::InvalidGlob`] on syntactically invalid `--canon` or target glob patterns,
+/// or [`DiscoverError::PathEscapesWorkspace`] when a target or canon path escapes the workspace root.
 pub fn execute_discover(
     options: &DiscoverOptions,
     caseload: Caseload,
@@ -242,6 +250,12 @@ pub fn execute_discover(
 }
 
 /// Materializes a [`WorkspaceSnapshot`] from `workspace_root` on disk and executes [`execute_discover`].
+///
+/// # Errors
+///
+/// Returns [`DiscoverError::Io`] on workspace traversal or file-read failures, in addition to any
+/// [`DiscoverError`] condition raised by [`execute_discover`] (`MissingInputSource`,
+/// `InvalidPolicyFile`, `InvalidGlob`, or `PathEscapesWorkspace`).
 pub fn execute_discover_on_disk(
     options: &DiscoverOptions,
     caseload: Caseload,
