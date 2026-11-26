@@ -69,9 +69,9 @@ pub struct CaseloadDiscovery {
     /// Stably sorted repository-relative POSIX target file paths materialized from `.intake` directives and diffs.
     #[serde(default)]
     pub target_files: Vec<String>,
-    /// Stably sorted workspace-relative POSIX paths of discovered `<scope>/.canons/config.yaml` policy files.
+    /// Stably sorted workspace-relative POSIX paths of discovered `<scope>/.canons/policy-chains.yaml` policy files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub config_files: Vec<String>,
+    pub policy_files: Vec<String>,
     /// Stably sorted discovered canon file paths or qualified realm references matching the filing (or full corpus).
     #[serde(default)]
     pub candidate_canons: Vec<String>,
@@ -106,7 +106,7 @@ mod tests {
         let discovery = CaseloadDiscovery {
             mode: DiscoveryMode::Triggered,
             target_files: vec!["src/caseload/mod.rs".to_string(), "src/lib.rs".to_string()],
-            config_files: Vec::new(),
+            policy_files: Vec::new(),
             candidate_canons: vec![
                 ".canons/api-design/no-dup-literals.md".to_string(),
                 ".canons/git-workflow/precursor-contracts.md".to_string(),
@@ -126,7 +126,7 @@ mod tests {
         let encoded = serde_json::to_string(&caseload).expect("serialize discovery caseload");
         assert!(encoded.contains(r#""mode":"triggered""#));
         assert!(encoded.contains(r#""pr_title":true"#));
-        assert!(!encoded.contains("config_files"));
+        assert!(!encoded.contains("policy_files"));
         assert!(!encoded.contains("pr_body"));
         assert!(!encoded.contains("commit_messages"));
         assert!(!encoded.contains("linked_issues"));
@@ -135,22 +135,25 @@ mod tests {
             serde_json::from_str(&encoded).expect("deserialize discovery caseload");
         assert_eq!(decoded, caseload);
 
-        let mut with_configs = decoded.discovery.expect("discovery present");
-        with_configs.config_files = vec![
-            ".canons/config.yaml".to_string(),
-            "packages/ui/.canons/config.yaml".to_string(),
+        let mut with_policies = decoded.discovery.expect("discovery present");
+        with_policies.policy_files = vec![
+            ".canons/policy-chains.yaml".to_string(),
+            "packages/ui/.canons/policy-chains.yaml".to_string(),
         ];
-        let encoded_with_configs =
-            serde_json::to_string(&with_configs).expect("serialize config_files");
-        assert!(encoded_with_configs.contains(
-            r#""config_files":[".canons/config.yaml","packages/ui/.canons/config.yaml"]"#
+        let encoded_with_policies =
+            serde_json::to_string(&with_policies).expect("serialize policy_files");
+        assert!(encoded_with_policies.contains(
+            r#""policy_files":[".canons/policy-chains.yaml","packages/ui/.canons/policy-chains.yaml"]"#
         ));
-        let decoded_with_configs: CaseloadDiscovery =
-            serde_json::from_str(&encoded_with_configs).expect("deserialize config_files");
-        assert_eq!(decoded_with_configs.config_files, with_configs.config_files);
+        let decoded_with_policies: CaseloadDiscovery =
+            serde_json::from_str(&encoded_with_policies).expect("deserialize policy_files");
+        assert_eq!(
+            decoded_with_policies.policy_files,
+            with_policies.policy_files
+        );
         assert!(!encoded.contains("inline_canons"));
 
-        let mut with_inline = decoded_with_configs;
+        let mut with_inline = decoded_with_policies;
         with_inline.inline_canons.insert(
             "inline:no-eval".to_string(),
             "Code MUST avoid dynamic eval().".to_string(),

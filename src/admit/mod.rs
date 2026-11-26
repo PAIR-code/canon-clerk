@@ -420,7 +420,7 @@ mod tests {
             .with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::Triggered,
                 target_files: vec!["src/cli/admit.rs".to_string()],
-                config_files: Vec::new(),
+                policy_files: Vec::new(),
                 candidate_canons: vec![
                     ".canons/cli/cli-flags-kebab-case.md".to_string(),
                     ".canons/readme/feat-updates-readme.md".to_string(),

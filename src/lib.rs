@@ -28,6 +28,7 @@ pub mod discover;
 pub mod docket;
 pub mod github;
 pub mod intake;
+pub mod policy;
 pub mod probe;
 pub mod provider;
 pub(crate) mod spans;
@@ -144,6 +145,12 @@ pub use github::{
     resolve_github_check_target_with_fallback_sha, resolve_github_pr_filing,
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
+pub use policy::{
+    DiscoveredPolicyFiles, POLICY_CHAINS_FILENAME, PolicyAction, PolicyError, PolicyFilePathKind,
+    WorkspacePolicySet, classify_policy_file_path, detect_nested_policy_files,
+    discover_policy_files_on_disk, evaluate_scope_cascade, file_scope_chain,
+    is_direct_policy_file_path, scope_ancestor_chain, validate_no_traversal_or_absolute,
+};
 pub use probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiDecisionsEndpointProber,
     GeminiEndpointProber, MultiProviderEndpointProber, ProbeError, ProbeOptions,

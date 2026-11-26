@@ -18,13 +18,13 @@ use super::DiscoverError;
 use super::glob_matcher::{
     DEFAULT_CANON_GLOB, GlobPattern, is_ignored_path, is_wildcard_pattern, normalize_workspace_path,
 };
-use super::policy::{PolicyConfigPathKind, classify_policy_config_path};
 use crate::builtin::{builtin_canons, find_builtin_canon};
 use crate::canon::{
     CANON_FILE_EXT, Canon, CanonSourceKind, DEFAULT_GLOBAL_TRIGGER_PATTERN, DEFAULT_INSPECT_PLANES,
     ParseCanonOptions, derive_id, derive_triggers, id_to_title_case, parse_canon,
     resolve_source_info,
 };
+use crate::policy::is_direct_policy_file_path;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
@@ -40,7 +40,7 @@ pub struct WorkspaceSnapshot {
     pub canons: BTreeMap<String, Canon>,
     /// Optional materialized UTF-8 file contents keyed by workspace-relative POSIX path (populated JIT for target-path sweeps).
     pub file_contents: BTreeMap<String, String>,
-    /// Raw UTF-8 contents of discovered `<scope>/.canons/config.yaml` policy files keyed by workspace-relative POSIX path.
+    /// Raw UTF-8 contents of discovered `<scope>/.canons/policy-chains.yaml` policy files keyed by workspace-relative POSIX path.
     pub policy_configs: BTreeMap<String, String>,
     /// Workspace-relative POSIX paths whose `--workspace-state base` diff overlay has already been applied (ensuring idempotency).
     pub applied_base_diffs: BTreeSet<String>,
@@ -77,7 +77,7 @@ impl WorkspaceSnapshot {
         self
     }
 
-    /// Inserts a `<scope>/.canons/config.yaml` policy file and its raw UTF-8 YAML content into the snapshot.
+    /// Inserts a `<scope>/.canons/policy-chains.yaml` policy file and its raw UTF-8 YAML content into the snapshot.
     pub fn with_policy_config(
         mut self,
         path: impl Into<String>,
@@ -87,10 +87,7 @@ impl WorkspaceSnapshot {
             && normalized != "."
         {
             self.existing_files.insert(normalized.clone());
-            if matches!(
-                classify_policy_config_path(&normalized),
-                PolicyConfigPathKind::Direct { .. }
-            ) {
+            if is_direct_policy_file_path(&normalized) {
                 self.policy_configs.insert(normalized, raw_yaml.into());
             }
         }
@@ -237,10 +234,7 @@ impl WorkspaceSnapshot {
         let mut canons = BTreeMap::new();
         let mut policy_configs = BTreeMap::new();
         for rel_path in &existing_files {
-            if matches!(
-                classify_policy_config_path(rel_path),
-                PolicyConfigPathKind::Direct { .. }
-            ) {
+            if is_direct_policy_file_path(rel_path) {
                 let full_path = workspace_root.join(rel_path);
                 let raw_yaml = fs::read_to_string(&full_path).map_err(|err| DiscoverError::Io {
                     path: rel_path.clone(),

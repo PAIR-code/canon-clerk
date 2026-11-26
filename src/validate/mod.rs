@@ -382,7 +382,7 @@ fn check_no_non_canon_files(
         if rel_path.to_ascii_lowercase().ends_with(".md") {
             continue;
         }
-        if rel_path == ".canons/config.yaml" || rel_path.ends_with("/.canons/config.yaml") {
+        if crate::policy::is_direct_policy_file_path(rel_path) {
             continue;
         }
         let should_report = discovery.mode == DiscoveryMode::AllCanons
@@ -399,7 +399,7 @@ fn check_no_non_canon_files(
             end_column: Some(1),
             annotation_level: AnnotationLevel::Warning,
             message: format!(
-                "Non-canon file '{rel_path}' resides under '.canons/'. Remove it or move it outside '.canons/' (only '.md' files and direct '.canons/config.yaml' policy files are permitted)."
+                "Non-canon file '{rel_path}' resides under '.canons/'. Remove it or move it outside '.canons/' (only '.md' files and direct '.canons/policy-chains.yaml' policy files are permitted)."
             ),
             title: Some("no-non-canon-files".to_string()),
         };
@@ -953,7 +953,7 @@ See also [external](https://example.com), [anchor](#local), and `[inline](docs/i
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
-                config_files: Vec::new(),
+                policy_files: Vec::new(),
                 candidate_canons: vec![
                     ".canons/a/first-must-hold.md".to_string(),
                     ".canons/b/second-must-hold.md".to_string(),
@@ -986,7 +986,7 @@ See also [external](https://example.com), [anchor](#local), and `[inline](docs/i
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
-                config_files: Vec::new(),
+                policy_files: Vec::new(),
                 candidate_canons: vec![".canons/rule-must-hold.md".to_string()],
                 active_exhibits: ActiveExhibits::default(),
                 triggers_join: BTreeMap::new(),
@@ -1037,7 +1037,7 @@ See also [external](https://example.com), [anchor](#local), and `[inline](docs/i
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
-                config_files: Vec::new(),
+                policy_files: Vec::new(),
                 candidate_canons: vec![
                     ".canons/cli-flags-must-use-positive-polarity.md".to_string(),
                     "builtin:cli/cli-flags-must-use-positive-polarity".to_string(),
@@ -1063,10 +1063,11 @@ See also [external](https://example.com), [anchor](#local), and `[inline](docs/i
             let ws = WorkspaceSnapshot::new()
                 .with_file("SPEC.md")
                 .with_file("packages/ui/README.md")
-                .with_file(".canons/config.yaml")
+                .with_file(".canons/policy-chains.yaml")
                 .with_file(".canons/README.md")
                 .with_file(".canons/stray-notes.txt")
-                .with_file(".canons/nested/config.yaml")
+                .with_file(".canons/config.yaml")
+                .with_file(".canons/nested/policy-chains.yaml")
                 .with_canon_markdown(
                     "---\nreferences:\n  - \"SPEC.md\"\n  - \"docs/missing.md\"\n---\nItems MUST stay grounded.",
                     &ParseCanonOptions::with_source_ref(".canons/items-must-stay-grounded.canon.md"),
@@ -1081,7 +1082,7 @@ See also [external](https://example.com), [anchor](#local), and `[inline](docs/i
             let caseload = Caseload::new().with_discovery(CaseloadDiscovery {
                 mode: DiscoveryMode::AllCanons,
                 target_files: Vec::new(),
-                config_files: vec![".canons/config.yaml".to_string()],
+                policy_files: vec![".canons/policy-chains.yaml".to_string()],
                 candidate_canons: vec![
                     ".canons/items-must-stay-grounded.canon.md".to_string(),
                     "packages/ui/.canons/ui-items-must-stay-grounded.canon.md".to_string(),
@@ -1095,10 +1096,15 @@ See also [external](https://example.com), [anchor](#local), and `[inline](docs/i
                 execute_validate(&ValidateOptions::default(), caseload, &ws).expect("validate");
             let val = validated.validation.expect("validation");
 
-            // Stray non-.md file and nested config.yaml are flagged; direct config.yaml and README.md are allowed
+            // Stray non-.md file, legacy config.yaml, and nested policy-chains.yaml are flagged;
+            // direct policy-chains.yaml and README.md are allowed
             assert!(val.results.contains_key(".canons/stray-notes.txt"));
-            assert!(val.results.contains_key(".canons/nested/config.yaml"));
-            assert!(!val.results.contains_key(".canons/config.yaml"));
+            assert!(val.results.contains_key(".canons/config.yaml"));
+            assert!(
+                val.results
+                    .contains_key(".canons/nested/policy-chains.yaml")
+            );
+            assert!(!val.results.contains_key(".canons/policy-chains.yaml"));
             assert!(!val.results.contains_key(".canons/README.md"));
 
             let root_ref_diags: Vec<&CodeAnnotation> = val

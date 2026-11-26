@@ -439,20 +439,20 @@ mod tests {
         }
 
         #[test]
-        fn test_policy_config_on_disk_exit_code_2_on_invalid_and_nested_warning_ignored() {
-            let ws = TempDiscoverWorkspace::new("policy-config-cli");
-            // Create a valid root config and an ignored nested config inside `.canons/security/`
+        fn test_policy_file_on_disk_exit_code_2_on_invalid_and_nested_warning_ignored() {
+            let ws = TempDiscoverWorkspace::new("policy-file-cli");
+            // Create a valid root policy file and an ignored nested policy file inside `.canons/security/`
             std::fs::write(
-                ws.path.join(".canons/config.yaml"),
+                ws.path.join(".canons/policy-chains.yaml"),
                 "canon-policy-chain:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
             )
-            .expect("write root config");
+            .expect("write root policy file");
             std::fs::create_dir_all(ws.path.join(".canons/security")).expect("mkdir security");
             std::fs::write(
-                ws.path.join(".canons/security/config.yaml"),
+                ws.path.join(".canons/security/policy-chains.yaml"),
                 "this is invalid yaml: [unclosed",
             )
-            .expect("write nested config");
+            .expect("write nested policy file");
 
             let args = DiscoverArgs {
                 canons: CanonSelectionArgs {
@@ -465,36 +465,39 @@ mod tests {
             let mut stdin = Cursor::new(b"");
             let mut stdout = Vec::new();
             let caseload = run_discover_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
-                .expect("valid root config with ignored nested config must succeed");
+                .expect("valid root policy file with ignored nested policy file must succeed");
             let disc = caseload.discovery.expect("discovery");
-            assert_eq!(disc.config_files, vec![".canons/config.yaml".to_string()]);
+            assert_eq!(
+                disc.policy_files,
+                vec![".canons/policy-chains.yaml".to_string()]
+            );
             assert_eq!(
                 disc.candidate_canons,
                 vec![".canons/rust-modules-must-compile.canon.md".to_string()]
             );
 
-            // Now write a forbidden credential key in root `.canons/config.yaml` -> exit code 2
+            // Now write a forbidden credential key in root `.canons/policy-chains.yaml` -> exit code 2
             std::fs::write(
-                ws.path.join(".canons/config.yaml"),
+                ws.path.join(".canons/policy-chains.yaml"),
                 "providers:\n  gemini:\n    apiKey: secret\n",
             )
-            .expect("write invalid root config");
+            .expect("write invalid root policy file");
             let mut stdin2 = Cursor::new(b"");
             let mut stdout2 = Vec::new();
             let err = run_discover_in_workspace(&args, &mut stdin2, &mut stdout2, &ws.path)
-                .expect_err("credential key in .canons/config.yaml must fail fast");
+                .expect_err("credential key in .canons/policy-chains.yaml must fail fast");
             assert_eq!(err.exit_code(), 2);
             assert!(err.to_string().contains("config.json"));
         }
 
         #[test]
-        fn test_validate_all_canons_respects_unconditional_policy_config() {
+        fn test_validate_all_canons_respects_unconditional_policy_file() {
             let ws = TempDiscoverWorkspace::new("policy-validate-all-canons");
             std::fs::write(
-                ws.path.join(".canons/config.yaml"),
+                ws.path.join(".canons/policy-chains.yaml"),
                 "canon-policy-chain:\n  - deny: \"builtin:**\"\n  - deny: \"readme-must-be-concise\"\n",
             )
-            .expect("write config");
+            .expect("write policy file");
 
             let args = crate::cli::ValidateArgs {
                 canons: CanonSelectionArgs {
@@ -509,7 +512,10 @@ mod tests {
                 crate::cli::run_validate_in_workspace(&args, &mut stdin, &mut stdout, &ws.path)
                     .expect("validate --all-canons");
             let disc = caseload.discovery.expect("discovery");
-            assert_eq!(disc.config_files, vec![".canons/config.yaml".to_string()]);
+            assert_eq!(
+                disc.policy_files,
+                vec![".canons/policy-chains.yaml".to_string()]
+            );
             assert_eq!(
                 disc.candidate_canons,
                 vec![".canons/rust-modules-must-compile.canon.md".to_string()]
