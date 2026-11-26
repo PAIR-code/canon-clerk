@@ -1,13 +1,17 @@
 ---
 triggers:
   - "package.json"
-  - "**/tsup.config.*"
+  - "Makefile"
 inspect:
   - diff
 tags:
   - build-systems
   - monorepo
 ---
-Monorepo root build scripts MUST NOT chain serial workspace invocations (such as sequential `npm run build -w` commands). Root builds MUST consolidate compilation through a unified multi-entry bundler configuration or orchestrate package builds concurrently along the dependency graph.
+Monorepo root build scripts MUST consolidate compilation through a unified multi-entry bundler configuration rather than chaining serial workspace invocations.
 
-Rationale: In accordance with Peter Miller's *Recursive Make Considered Harmful* (1997) and *Software Engineering at Google* (Ch. 18, *Build Systems*), partitioning monorepo builds into recursive workspace sub-processes blinds the toolchain to the whole dependency graph, forfeiting worker-pool reuse and graph-level concurrency.
+Exception: Monorepo root builds MAY invoke per-package build targets IFF a dependency-graph task orchestrator executes independent packages concurrently.
+
+Precedent: Peter Miller (*Recursive Make Considered Harmful*, 1997); *Software Engineering at Google* (Ch. 18, "Build Systems").
+
+Rationale: Partitioning monorepo builds into recursive workspace sub-processes blinds the toolchain to the whole dependency graph, forfeiting worker-pool reuse and graph-level concurrency.
