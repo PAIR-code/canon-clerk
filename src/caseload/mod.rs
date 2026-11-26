@@ -21,6 +21,7 @@ mod docket;
 mod evidence;
 mod intake;
 mod probe;
+mod survey;
 mod validation;
 mod verdict;
 mod vetting;
@@ -47,6 +48,10 @@ pub use intake::{
     normalize_commit_messages,
 };
 pub use probe::{CaseloadProbe, ProbeStatus, ProbeTargetResult};
+pub use survey::{
+    CaseloadSurvey, DEFAULT_SURVEY_MAX_FILE_CHARS, DEFAULT_SURVEY_MAX_TOTAL_CHARS, SurveyFile,
+    SurveyOmissionReason,
+};
 pub use validation::{
     AnnotationLevel, CaseloadValidation, CodeAnnotation, ValidatedCanonMetadata, ValidationOutcome,
 };
@@ -85,6 +90,9 @@ pub struct Caseload {
     /// Configuration: Resolved default provider and per-node `<provider>:<model>` runtime bindings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<CaseloadConfig>,
+    /// Survey: Bounded deterministic repository-identity context files and policy provenance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub survey: Option<CaseloadSurvey>,
     /// Probe: Live deduplicated provider connectivity and endpoint latency diagnostics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe: Option<CaseloadProbe>,
@@ -120,6 +128,7 @@ impl Caseload {
             discovery: None,
             validation: None,
             config: None,
+            survey: None,
             probe: None,
             apprisal: None,
             docket: None,
@@ -150,6 +159,12 @@ impl Caseload {
     /// Returns a new `Caseload` with the `.config` namespace populated, preserving all other stage fields.
     pub fn with_config(mut self, config: CaseloadConfig) -> Self {
         self.config = Some(config);
+        self
+    }
+
+    /// Returns a new `Caseload` with the `.survey` namespace populated, preserving all other stage fields.
+    pub fn with_survey(mut self, survey: CaseloadSurvey) -> Self {
+        self.survey = Some(survey);
         self
     }
 

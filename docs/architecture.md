@@ -17,6 +17,7 @@ Rather than disjoint subcommands producing disparate outputs, Canon Clerk treats
 flowchart TD
     intake --> discover --> validate
     configure -.-> probe["probe (diagnostic)"]
+    survey["survey (repo context)"]
 
     validate --> docket
     configure --> docket
@@ -33,7 +34,7 @@ flowchart TD
 The complete architectural specification is partitioned across the following dedicated documents:
 
 ### Core Framework & Execution Model
-- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Hexagonal Architecture (Ports & Adapters with the CLI binary as the driving adapter), Two Feeder Branches $\to$ Adjudication Track & Apprisal Track, the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, `Caseload` schema, and telemetry event stream.
+- **[Caseload DAG Overview](architecture/overview.md):** The Caseload paradigm, Hexagonal Architecture (Ports & Adapters with the CLI binary as the driving adapter), Feeder Branches $\to$ Adjudication Track & Apprisal Track, the Architectural Triad (Colorability $\to$ Admissibility $\to$ Compliance), Token & Latency Sieve funnel, `Caseload` schema, and telemetry event stream.
 - **[DAG Scheduling & Semantics](architecture/scheduling.md):** Transitive dependency closure calculation, branch pruning, the Guarded/Lazy Scheduling Invariant (zero-credential short-circuits for un-governed changes), telescoping backfill mode, and the static schedule lookup table.
 - **[Provider Profiles, Capabilities & Decision Budgets](architecture/providers.md):** Built-in and custom provider profiles (`google`, `typesafe`, `local`, custom `<slug>`), canonical `<provider>:<model>` grammar, `Discriminator` vs. `Generator` capabilities, `DecisionBudgetProfile` context/batching matrices, per-profile defaults, and shared provider/credential/endpoint/thinking CLI & environment cascades.
 - **[Provider Transport & Rate-Limit Scheduling](architecture/transport.md):** Shared pooled HTTPS connection lifecycle on the persistent background reactor, per-origin `429`/`503` cooldown gating with monotonic coalescing and staggered release, multi-source retry-delay precedence, bounded transient retry (`--max-retries`, `--max-backoff-ms`), and single-shot `probe` isolation.
@@ -49,6 +50,7 @@ Comprehensive specifications for each imperative verb stage:
 - **[discover](architecture/nodes/discover.md):** Path filter evaluating `triggers:` globs and declarative `<scope>/.canons/policy-chains.yaml` allow/deny policy against modified files, short-circuiting on zero matches, or compiling the full corpus via `--all-canons` (Branch A).
 - **[validate](architecture/nodes/validate.md):** Deterministic AST and YAML schema pre-flight linter for candidate canons or full corpus (Branch A).
 - **[configure](architecture/nodes/configure.md):** Local environment and provider credential normalizer (Branch B).
+- **[survey](architecture/nodes/survey.md):** Independent deterministic repository-identity contextualizer cataloging bounded workspace manifests and top-level docs via `survey-context-chain:` policy into `.survey` (Branch C; standalone `{survey}` closure).
 - **[probe](architecture/nodes/probe.md):** Diagnostic leaf measuring live provider reachability and roundtrip endpoint latency.
 - **[docket](architecture/nodes/docket.md):** Macro triage establishing subject-matter jurisdiction (`colorability_score >= 0.5`) over in-flight changes (Adjudication Track).
 - **[admit](architecture/nodes/admit.md):** Micro triage establishing evidentiary admissibility (`admissibility_score >= 0.5`) per active case (Adjudication Track).
@@ -66,6 +68,7 @@ Comprehensive specifications for each imperative verb stage:
 | `discover` | Branch A (Filing Track) | Path matcher | 0 tokens, local | Matches > 0; short-circuits (exit 0) on 0 candidates |
 | `validate` | Branch A (Filing Track) | AST linter | 0 tokens, local | 0 syntax errors; fails fast (exit 1) on error |
 | `configure` | Branch B (Environment Track) | Config resolver | 0 tokens, local | Valid config; fails fast (exit 2) on missing keys |
+| `survey` | Branch C (Repository Context Track) | Policy & file cataloger | 0 tokens, local | Bounded `.survey` payload; exits 0 (including 0 matches) |
 | `probe` | Diagnostic Leaf | Network probe | 0 tokens, single-shot ping | Reachable; fails fast (exit 2) on unreachable |
 | `docket` | Adjudication Track | [`Discriminator`](architecture/providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `colorability_score >= 0.5`; exits 0 if empty |
 | `admit` | Adjudication Track | [`Discriminator`](architecture/providers.md#2-canonical-providermodel-grammar--protocol-bound-capabilities) | 0 output tokens | `admissibility_score >= 0.5`; exits 0 if no exhibits |

@@ -49,7 +49,7 @@ flowchart LR
 - **The Intent-Required Invariant & Default `--all-canons` Scope:** Statutory apprisal strictly requires a non-empty prospective design `intent` (`--intent <text>`, `--github-issue [<number>]`, or pre-populated `.intake.intent`); omitting intent or supplying blank whitespace fails fast with exit code `2`. When non-empty design intent is supplied **without** an explicit target or canon scope (`TARGETS`, `-`, `--diff`, `--all-targets`, `--all-canons`, `--canon`, or pre-populated upstream `.discovery`), `apprise` defaults discovery to `--all-canons` so contributors and agents do not miss cross-cutting canons before they know every file they will touch. When explicit targets or canon filters *are* supplied, existing scoped discovery behavior is preserved.
 - **Branch Independence & Pruning:**
   - Evaluates without requiring code diffs, patches, or work-in-progress (WIP) exhibits.
-  - Decoupled from the [Adjudication Track](../overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track): prunes all contentious adjudication stages from execution.
+  - Decoupled from the [Adjudication Track](../overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track): prunes all contentious adjudication stages from execution.
   - Diagnostic leaf `probe` is never scheduled.
 
 ---

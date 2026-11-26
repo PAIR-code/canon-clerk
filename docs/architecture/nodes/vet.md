@@ -46,7 +46,7 @@ flowchart LR
   - `admit` (admitted exhibits and trial-ready active cases in `caseload.evidence`).
   - `configure` (Branch B: resolved closure node bindings in `caseload.config.nodes` and verified provider credentials, evaluated JIT only when active cases with admitted exhibits require vetting).
 - **Transitive Prerequisites:** `intake`, `discover`, `validate`, `docket`.
-- **The Case or Controversy Invariant:** As an [Adjudication Track](../overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) stage, `vet` evaluates compliance *as applied to a concrete filing*. Naked invocations or canon-only invocations lacking an underlying filing (`caseload.intake`) fail fast with exit code `2`.
+- **The Case or Controversy Invariant:** As an [Adjudication Track](../overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) stage, `vet` evaluates compliance *as applied to a concrete filing*. Naked invocations or canon-only invocations lacking an underlying filing (`caseload.intake`) fail fast with exit code `2`.
 - **Pruned from Execution:** `probe`, `apprise`, downstream judicial adjudication (`audit`).
 
 ---

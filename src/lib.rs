@@ -32,6 +32,7 @@ pub mod policy;
 pub mod probe;
 pub mod provider;
 pub(crate) mod spans;
+pub mod survey;
 pub mod telemetry;
 pub mod validate;
 pub mod vet;
@@ -76,14 +77,15 @@ pub use caseload::{
     ActiveExhibits, AdmissibilityStatus, AnnotationLevel, ApprisalStatus, CASELOAD_SCHEMA_VERSION,
     CanonAdjudication, CanonApprisalAssessment, CanonDocketAssessment, CanonVettingAssessment,
     Caseload, CaseloadApprisal, CaseloadConfig, CaseloadDiscovery, CaseloadDocket,
-    CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadValidation, CaseloadVerdict,
-    CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason, ContestedSpan,
-    DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
+    CaseloadEvidence, CaseloadIntake, CaseloadProbe, CaseloadSurvey, CaseloadValidation,
+    CaseloadVerdict, CaseloadVetting, CodeAnnotation, ColorabilityStatus, ContentOmissionReason,
+    ContestedSpan, DEFAULT_AUDIT_THINKING_LEVEL, DEFAULT_GOOGLE_DISCRIMINATOR_MODEL,
     DEFAULT_GOOGLE_GENERATOR_MODEL, DEFAULT_LOCAL_DISCRIMINATOR_MODEL,
-    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL,
-    DiscoveryMode, ExhibitAssessment, FileArtifact, FileChangeStatus, HeuristicNode, IntakeScope,
-    LOCAL_PROVIDER, LinkedIssueContext, PatchOmissionReason, ProbeStatus, ProbeTargetResult,
-    ResolvedNodeConfig, TYPESAFE_PROVIDER, ThinkingLevel, ValidatedCanonMetadata,
+    DEFAULT_PROBE_THINKING_LEVEL, DEFAULT_PROVIDER, DEFAULT_SURVEY_MAX_FILE_CHARS,
+    DEFAULT_SURVEY_MAX_TOTAL_CHARS, DEFAULT_TYPESAFE_DISCRIMINATOR_MODEL, DiscoveryMode,
+    ExhibitAssessment, FileArtifact, FileChangeStatus, HeuristicNode, IntakeScope, LOCAL_PROVIDER,
+    LinkedIssueContext, PatchOmissionReason, ProbeStatus, ProbeTargetResult, ResolvedNodeConfig,
+    SurveyFile, SurveyOmissionReason, TYPESAFE_PROVIDER, ThinkingLevel, ValidatedCanonMetadata,
     ValidationOutcome, VerdictStatus, VettingStatus, WorkspaceState, canonicalize_contested_spans,
     normalize_admissibility_score, normalize_colorability_score, normalize_compliance_score,
     normalize_unit_score, normalize_vetting_score, sort_annotations,
@@ -95,19 +97,20 @@ pub use cli::{
     DiscoverArgs, DiscoverFormat, DocketArgs, DocketFormat, DocketNodeModelArgs, ENV_LOG_FILE,
     ENV_VERBOSE, FilingSourceArgs, GithubCheckArgs, IntakeArgs, OnMissingCredentials, ProbeArgs,
     ProbeFormat, ProviderConfigArgs, ProviderTransportArgs, RejectedUnqualifiedTuningArgs,
-    ResolvedFilingSource, StageDisposition, StderrProgressSink, StderrTelemetryOptions,
-    ValidateArgs, ValidateFormat, VetArgs, VetFormat, VetNodeModelArgs, WorkspaceStateArg,
-    build_cli_telemetry_sink, init_logging, open_jsonl_log_sink, resolve_log_file_path,
-    resolve_verbose_flag, run, run_admit, run_admit_live_with_telemetry,
-    run_admit_with_snapshot_and_provider, run_admit_with_telemetry, run_apprise,
-    run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
+    ResolvedFilingSource, StageDisposition, StderrProgressSink, StderrTelemetryOptions, SurveyArgs,
+    SurveyFormat, ValidateArgs, ValidateFormat, VetArgs, VetFormat, VetNodeModelArgs,
+    WorkspaceStateArg, build_cli_telemetry_sink, init_logging, map_survey_error,
+    open_jsonl_log_sink, resolve_log_file_path, resolve_verbose_flag, run, run_admit,
+    run_admit_live_with_telemetry, run_admit_with_snapshot_and_provider, run_admit_with_telemetry,
+    run_apprise, run_apprise_live_with_telemetry, run_apprise_with_snapshot_and_provider,
     run_apprise_with_telemetry, run_audit, run_audit_live_with_telemetry,
     run_audit_with_snapshot_and_provider, run_audit_with_telemetry, run_configure,
     run_configure_with_env, run_configure_with_telemetry, run_discover, run_discover_in_workspace,
     run_discover_with_telemetry, run_docket, run_docket_live_with_telemetry,
     run_docket_with_snapshot_and_provider, run_docket_with_telemetry, run_intake,
     run_intake_with_telemetry, run_probe, run_probe_live_with_telemetry,
-    run_probe_with_env_and_prober, run_probe_with_telemetry, run_validate,
+    run_probe_with_env_and_prober, run_probe_with_telemetry, run_survey, run_survey_in_workspace,
+    run_survey_with_env_and_telemetry, run_survey_with_telemetry, run_validate,
     run_validate_in_workspace, run_validate_with_telemetry, run_vet, run_vet_live_with_telemetry,
     run_vet_with_snapshot_and_provider, run_vet_with_telemetry,
 };
@@ -146,9 +149,9 @@ pub use github::{
 };
 pub use intake::{IntakeError, IntakeOptions, execute_intake, parse_unified_diff};
 pub use policy::{
-    DiscoveredPolicyFiles, POLICY_CHAINS_FILENAME, PolicyAction, PolicyError, PolicyFilePathKind,
-    WorkspacePolicySet, classify_policy_file_path, detect_nested_policy_files,
-    discover_policy_files_on_disk, is_direct_policy_file_path,
+    DEFAULT_SURVEY_CONTEXT_PATHS, DiscoveredPolicyFiles, POLICY_CHAINS_FILENAME, PolicyAction,
+    PolicyError, PolicyFilePathKind, WorkspacePolicySet, classify_policy_file_path,
+    detect_nested_policy_files, discover_policy_files_on_disk, is_direct_policy_file_path,
 };
 pub use probe::{
     DEFAULT_PROBE_TIMEOUT_MS, ENV_PROBE_TIMEOUT_MS, EndpointProber, GeminiDecisionsEndpointProber,
@@ -167,6 +170,11 @@ pub use provider::{
     default_timeout_ms_for_model,
 };
 pub use spans::{DEFAULT_DIFF_HEAD_LINES, ENV_DIFF_HEAD_LINES, MAX_HEAD_CONTEXT_CHARS};
+pub use survey::{
+    DEFAULT_SURVEY_MAX_FILE_CHARS_NONZERO, DEFAULT_SURVEY_MAX_TOTAL_CHARS_NONZERO,
+    ENV_SURVEY_MAX_FILE_CHARS, ENV_SURVEY_MAX_TOTAL_CHARS, SurveyCeilingKind, SurveyError,
+    SurveyOptions, execute_survey_on_disk, resolve_survey_ceiling,
+};
 pub use telemetry::{
     CompositeTelemetrySink, InstrumentedModelProvider, JsonlWriterSink, NoopTelemetryClock,
     NoopTelemetrySink, PipelineStage, RecordingTelemetrySink, StageScope, SteppingTelemetryClock,

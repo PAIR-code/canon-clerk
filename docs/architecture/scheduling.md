@@ -17,12 +17,13 @@ Instead of running a monolithic pipeline that redundantly requires network conne
 
 ## 2. Transitive Dependency Closures & Pruning
 
-Operating over the canonical DAG topology defined in [`overview.md` §2](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) (**Branch A: Filing Track**, **Branch B: Environment Track**, **Diagnostic Leaf**, **Adjudication Track**, and **Apprisal Track**), the scheduler computes minimal ancestor subgraphs per terminal stop point:
+Operating over the canonical DAG topology defined in [`overview.md` §2](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track), the scheduler computes minimal ancestor subgraphs per terminal stop point:
 
 ```mermaid
 flowchart TD
     intake --> discover --> validate
     configure -.-> probe["probe (diagnostic)"]
+    survey["survey (repo context)"]
 
     validate --> docket
     configure --> docket
@@ -37,28 +38,29 @@ When an operator or CI workflow executes a subcommand $T$, the runner constructs
 
 | Terminus Node ($T$) | Transitive Dependency Closure $\text{Closure}(T)$ | Pruned Branches & Nodes |
 | :--- | :--- | :--- |
-| `intake` | $\{\text{intake}\}$ | Branch B (`configure`), `probe`, downstream nodes (`discover`, `validate`, `docket`, `admit`, `vet`, `audit`, `apprise`) |
-| `discover` | $\{\text{intake}, \text{discover}\}$ | Branch B (`configure`), `probe`, downstream nodes (`validate`, `docket`, `admit`, `vet`, `audit`, `apprise`) |
-| `validate` | $\{\text{intake}, \text{discover}, \text{validate}\}$ | Branch B (`configure`), `probe`, downstream nodes (`docket`, `admit`, `vet`, `audit`, `apprise`) |
-| `configure` | $\{\text{configure}\}$ | Branch A (`intake`, `discover`, `validate`), `probe`, Adjudication and Apprisal Tracks (`docket`, `admit`, `vet`, `audit`, `apprise`) |
-| `probe` | $\{\text{configure}, \text{probe}\}$ | Branch A (`intake`, `discover`, `validate`), Adjudication and Apprisal Tracks (`docket`, `admit`, `vet`, `audit`, `apprise`) |
-| `docket` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}\}$ | `probe`, `apprise`, downstream adjudication nodes (`admit`, `vet`, `audit`) |
-| `admit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}\}$ | `probe`, `apprise`, `vet`, `audit` |
-| `vet` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{vet}\}$ | `probe`, `apprise`, `audit` |
-| `audit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{vet}, \text{audit}\}$ | `probe`, `apprise` |
-| `apprise` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{apprise}\}$ | `probe`, Adjudication Track (`docket`, `admit`, `vet`, `audit`) |
+| `intake` | $\{\text{intake}\}$ | Branch B, Branch C, Diagnostic Leaf, downstream Branch A (`discover`, `validate`), Adjudication Track, Apprisal Track |
+| `discover` | $\{\text{intake}, \text{discover}\}$ | Branch B, Branch C, Diagnostic Leaf, `validate`, Adjudication Track, Apprisal Track |
+| `validate` | $\{\text{intake}, \text{discover}, \text{validate}\}$ | Branch B, Branch C, Diagnostic Leaf, Adjudication Track, Apprisal Track |
+| `configure` | $\{\text{configure}\}$ | Branch A, Branch C, Diagnostic Leaf, Adjudication Track, Apprisal Track |
+| `survey` | $\{\text{survey}\}$ | Branch A, Branch B, Diagnostic Leaf, Adjudication Track, Apprisal Track |
+| `probe` | $\{\text{configure}, \text{probe}\}$ | Branch A, Branch C, Adjudication Track, Apprisal Track |
+| `docket` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}\}$ | Branch C, Diagnostic Leaf, Apprisal Track, downstream Adjudication Track (`admit`, `vet`, `audit`) |
+| `admit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}\}$ | Branch C, Diagnostic Leaf, Apprisal Track, downstream Adjudication Track (`vet`, `audit`) |
+| `vet` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{vet}\}$ | Branch C, Diagnostic Leaf, Apprisal Track, `audit` |
+| `audit` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{docket}, \text{admit}, \text{vet}, \text{audit}\}$ | Branch C, Diagnostic Leaf, Apprisal Track |
+| `apprise` | $\{\text{intake}, \text{discover}, \text{validate}, \text{configure}, \text{apprise}\}$ | Branch C, Diagnostic Leaf, Adjudication Track |
 
 ### Transitive Closure Pruning Rules
 1. **Branch A Independence:** `configure` and `probe` execute with zero knowledge of Git diffs, modified files, or repository canons.
 2. **Branch B Independence:** `intake`, `discover`, and `validate` execute with zero knowledge of AI providers, model configurations, or API credentials.
-3. **Diagnostic Isolation:** `probe` is never scheduled during [Adjudication Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) or [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) runs, eliminating unnecessary health-check latency prior to screening.
+3. **Diagnostic Isolation:** `probe` is never scheduled during [Adjudication Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) or [Apprisal Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) runs, eliminating unnecessary health-check latency prior to screening.
 4. **Plenary Corpus Validation (`--all-canons`):** When `validate` is invoked with `--all-canons`, Branch A executes with full corpus scope: `intake` establishes plenary scope, `discover` promotes all discoverable workspace canons to `candidate_canons`, and `validate` verifies the entire statutory corpus without requiring diffs or code changes.
 
 ---
 
 ## 3. The Guarded / Lazy Scheduling Invariant
 
-When executing toward a converged [Adjudication Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) or [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) target, both Branch A (`validate`) and Branch B (`configure`) are required ancestors. However, running `configure` unconditionally at startup would break a critical engineering invariant: **PRs touching un-governed files must pass in CI without requiring API credentials or external secret provisioning.**
+When executing toward a converged [Adjudication Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) or [Apprisal Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) target, both Branch A (`validate`) and Branch B (`configure`) are required ancestors. However, running `configure` unconditionally at startup would break a critical engineering invariant: **PRs touching un-governed files must pass in CI without requiring API credentials or external secret provisioning.**
 
 To uphold this guarantee, the scheduler enforces the **Guarded / Lazy Scheduling Invariant**:
 
@@ -127,6 +129,7 @@ To prevent cross-stage parameter leakage in telescoping cascades, all stage-spec
 - **Per-Node Threshold (`--<node>-threshold <float>`):** `--docket-threshold` (`0.5`), `--admit-threshold` (`0.5`), `--vet-threshold` (`0.8`), `--audit-threshold` (`0.5`), `--apprise-threshold` (`0.5`)
 - **Per-Node Batch Size (`--<node>-batch-size <count>`):** `--apprise-batch-size`, `--docket-batch-size`
 - **Per-Node Concurrency (`--<node>-concurrency <count>`):** `--apprise-concurrency`, `--docket-concurrency`, `--admit-concurrency`, `--vet-concurrency`, `--audit-concurrency`
+- **Repository Survey Controls (`--survey-*` / `--no-survey-context`):** `--survey-context <glob>`, `--no-survey-context`, `--survey-max-file-chars <count>`, `--survey-max-total-chars <count>` (accepted strictly on closures containing `survey`; rejected with exit code `2` on all out-of-closure commands).
 
 #### Scoping & Validation Invariants:
 1. **Transitive Acceptance on Evaluation Closures:** An evaluation subcommand accepts a stage-prefixed flag if and only if that stage exists within its transitive dependency closure (while standalone `configure` and `probe` accept all heuristic `--<node>-model` flags to inspect and probe full bench configurations):
@@ -152,6 +155,7 @@ The scheduler determines the node sequence using a deterministic static table. F
 | `canon-clerk discover` | `[intake, discover]` | Skips `intake` if `caseload.intake` present;<br>Skips `discover` if `caseload.discovery` present |
 | `canon-clerk validate` | `[intake, discover, validate]` | Skips `intake` if `caseload.intake` present;<br>Skips `discover` if `caseload.discovery` present;<br>Skips `validate` if `caseload.validation` present |
 | `canon-clerk configure` | `[configure]` | Skips `configure` if `caseload.config` present |
+| `canon-clerk survey` | `[survey]` | Skips `survey` if `caseload.survey` present (unless overridden via `--survey-*` / `--no-survey-context`) |
 | `canon-clerk probe` | `[configure, probe]` | Skips `configure` if `caseload.config` present;<br>Skips `probe` if `caseload.probe` present |
 | `canon-clerk docket` | `[intake, discover, validate, configure, docket]` | Skips any node whose corresponding field (`.intake`, `.discovery`, `.validation`, `.config`, `.docket`) is already present |
 | `canon-clerk admit` | `[intake, discover, validate, configure, docket, admit]` | Skips any node whose corresponding field is already populated |
@@ -163,7 +167,7 @@ The scheduler determines the node sequence using a deterministic static table. F
 The scheduler and CLI enforce strict input handling to distinguish operator error from legitimate no-ops:
 
 1. **Missing Source Guard (Naked Invocation $\implies$ Exit 2):**  
-   When a subcommand requiring filing context or explicit scope (any [Filing Track, Adjudication Track, or Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) subcommand) is invoked without file arguments, diff flags (`--diff`), intent flags (`--intent`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
+   When a subcommand requiring filing context or explicit scope (any [Filing Track, Adjudication Track, or Apprisal Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) subcommand) is invoked without file arguments, diff flags (`--diff`), intent flags (`--intent`), stream tokens (`-`), an incoming `--caseload`, or an explicit scope flag (`--all-canons`, `--all-targets`), execution immediately terminates with **exit code 2** (Usage Error) and prints actionable guidance. The CLI never silently hangs waiting for input on a TTY.
 
 2. **Empty Stream Short-Circuit (Legitimate No-op $\implies$ Exit 0):**  
    When an operator explicitly designates an input source (e.g. `git diff origin/main | canon-clerk audit --diff -`) and that source produces zero changes:
@@ -172,7 +176,7 @@ The scheduler and CLI enforce strict input handling to distinguish operator erro
    - The runner logs `0 modified files; 0 candidate canons matched` and short-circuits cleanly with **exit code 0**.
 
 3. **The Case or Controversy Invariant:**  
-   The [Adjudication Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the [Apprisal Track](overview.md#2-dag-topology-two-feeder-branches--adjudication-track--apprisal-track) (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries—optionally narrowed to prospective target paths or defaulting to `--all-canons`—to determine governing statutes.
+   The [Adjudication Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) evaluates the application of canons *as applied to a concrete change*. While statutory linting can operate in the abstract (`validate --all-canons`), running adjudication on a null intake (e.g. `canon-clerk docket --all-canons` without target files) is rejected with **exit code 2**: a court cannot open an active docket or hold a trial without an underlying complaint or controversy. In contrast, the [Apprisal Track](overview.md#2-dag-topology-feeder-branches--adjudication-track--apprisal-track) (`apprise`) operates under **Statutory Apprisal Authority**, taking prospective design intent queries—optionally narrowed to prospective target paths or defaulting to `--all-canons`—to determine governing statutes.
 
 ### Short-Circuit Fast Exit Conditions
 Across the pipeline, the following deterministic short-circuit conditions trigger early termination:

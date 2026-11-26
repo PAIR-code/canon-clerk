@@ -34,6 +34,7 @@ pub mod node_args;
 pub mod probe;
 mod provenance;
 pub mod runners;
+pub mod survey;
 pub mod telemetry;
 mod transport_args;
 pub mod validate;
@@ -85,6 +86,10 @@ pub(crate) use runners::build_live_model_provider;
 pub use runners::{
     map_discover_error, resolve_branch_b_options, resolve_gemini_api_key, run_branch_a_discover,
     run_branch_a_intake, run_branch_a_validate, run_branch_b_configure,
+};
+pub use survey::{
+    SurveyArgs, SurveyFormat, map_survey_error, run_survey, run_survey_in_workspace,
+    run_survey_with_env_and_telemetry, run_survey_with_telemetry,
 };
 pub use telemetry::{
     DEFAULT_VERBOSE_LOG_FILTER, ENV_LOG_FILE, ENV_VERBOSE, StderrProgressSink,
@@ -176,6 +181,8 @@ pub enum Commands {
     Validate(ValidateArgs),
     /// Operational environment normalizer: verify credentials and normalize model specifiers.
     Configure(ConfigureArgs),
+    /// Repository identity cataloger: deterministically collect bounded repo-identity context onto `.survey`.
+    Survey(SurveyArgs),
     /// Diagnostic network health check: verify live connectivity and latency of configured endpoints.
     Probe(ProbeArgs),
     /// Prospective statutory notice: determine governing canons for planned design intent and target scope.
@@ -197,6 +204,7 @@ impl Commands {
             Self::Validate(args) => args.quiet,
             Self::Intake(_)
             | Self::Configure(_)
+            | Self::Survey(_)
             | Self::Probe(_)
             | Self::Apprise(_)
             | Self::Docket(_)
@@ -214,6 +222,7 @@ impl Commands {
             Self::Intake(_)
             | Self::Discover(_)
             | Self::Configure(_)
+            | Self::Survey(_)
             | Self::Probe(_)
             | Self::Apprise(_)
             | Self::Docket(_)
@@ -381,6 +390,10 @@ fn dispatch_subcommand(
         Commands::Configure(args) => {
             run_configure_with_telemetry(args, stdin, stdout, env_map, session)?;
         }
+        Commands::Survey(args) => {
+            let cwd = current_workspace_dir()?;
+            run_survey_with_env_and_telemetry(args, stdin, stdout, &cwd, env_map, session)?;
+        }
         Commands::Probe(args) => {
             run_probe_live_with_telemetry(args, stdin, stdout, env_map, session)?;
         }
@@ -478,6 +491,7 @@ mod tests {
                     Commands::Discover(_)
                     | Commands::Validate(_)
                     | Commands::Configure(_)
+                    | Commands::Survey(_)
                     | Commands::Probe(_)
                     | Commands::Apprise(_)
                     | Commands::Docket(_)
@@ -525,7 +539,14 @@ mod tests {
 
         #[test]
         fn test_non_heuristic_subcommands_reject_retry_flags_as_unknown_arguments() {
-            for sub in ["probe", "configure", "intake", "discover", "validate"] {
+            for sub in [
+                "probe",
+                "configure",
+                "survey",
+                "intake",
+                "discover",
+                "validate",
+            ] {
                 for flag in ["--max-retries", "--max-backoff-ms"] {
                     let err = Cli::try_parse_from(["canon-clerk", sub, flag, "1"])
                         .expect_err("non-heuristic subcommand must reject retry flags");
